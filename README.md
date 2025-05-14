@@ -69,7 +69,7 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote s
     ```bash
     python -m venv .venv
     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-    pip install -r requirements.txt
+    pip install .
     ```
 
 2.  **(Optional) Create `.env` file:**
@@ -78,13 +78,13 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote s
     # Example .env content
     # OPENAI_API_KEY="sk-yourkeyhere"
     # OLLAMA_ENABLED=true
-    # OLLAMA_MODEL="mistral"
+    # OLLAMA_MODEL="deepseek-r1:1.5B"
     ```
 
 3.  **Initialize Database & Build Index (Recommended First Step):**
     This script populates the SQLite database from `data/faq.csv` and builds vector indexes if dense retrieval is configured.
     ```bash
-    python scripts/build_index.py
+    python -m scripts.build_index
     ```
     *Note: The application will attempt to create DB tables on startup if they don't exist and populate from `data/faq.csv` if the `documents` table is empty (for sparse mode). However, running `build_index.py` is recommended, especially for dense mode.*
 
@@ -92,6 +92,7 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote s
     ```bash
     uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
     ```
+    *   Wait some seconds, till the CLI logs output: "Application startup complete."
     *   Access the web UI at: `http://localhost:8000/`
     *   API (Swagger) docs at: `http://localhost:8000/docs`
 

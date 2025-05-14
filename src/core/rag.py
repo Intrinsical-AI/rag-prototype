@@ -68,3 +68,5 @@ class RagService:
         except Exception as e_gen:
             logger.error(f"Unexpected error while saving Q&A to history. Q: '{question[:50]}...'. Error: {e_gen}", exc_info=True)
             # No re-levantar
+
+        return {"answer": answer, "source_ids": ids}
