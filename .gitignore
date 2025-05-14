@@ -1,0 +1,318 @@
+# --- Gitignore Mejorado para Proyectos Python de Data Science, ML y Análisis ---
+# Basado en el estándar de GitHub y ampliado para necesidades específicas.
+# Fuente original: https://github.com/github/gitignore/blob/main/Python.gitignore
+
+# ___ Archivos de Bytecode y Optimizados ___
+# Evita commitear código compilado o intermedio de Python.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ___ Extensiones C ___
+# Ignora binarios compilados de extensiones C.
+*.so
+
+# ___ Distribución / Empaquetado ___
+# Archivos generados al construir o distribuir paquetes Python.
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ___ PyInstaller ___
+# Archivos generados por PyInstaller para crear ejecutables.
+*.manifest
+*.spec
+
+# ___ Logs de Instalador y Dependencias ___
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ___ Reportes de Tests y Cobertura ___
+# Archivos generados por herramientas de testing y cobertura.
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+cover/
+pytestdebug.log
+
+# ___ Archivos de Traducción ___
+*.mo
+*.pot
+
+# ___ Específicos de Frameworks (Ejemplos) ___
+# Django:
+*.log       # Logs generales (también útil fuera de Django)
+local_settings.py # Configuraciones locales sensibles
+db.sqlite3
+db.sqlite3-journal
+# Flask:
+instance/   # Configuraciones de instancia sensibles
+.webassets-cache
+# Scrapy:
+.scrapy
+
+# ___ Documentación Generada ___
+# Archivos generados por Sphinx, MkDocs, etc.
+docs/_build/
+docs/build/
+docs/dist/
+site/ # Común para MkDocs
+
+# ___ PyBuilder ___
+.pybuilder/
+target/
+
+# ___ Jupyter Notebook / IPython ___
+# Checkpoints autogenerados y configuraciones locales.
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# ___ Gestores de Entornos y Dependencias (Archivos de Bloqueo Opcionales) ___
+# Los archivos de bloqueo (Pipfile.lock, poetry.lock, etc.) *generalmente* se recomiendan
+# en el control de versiones para aplicaciones (asegura builds reproducibles),
+# pero a veces se ignoran para librerías (para permitir más flexibilidad).
+# Descomenta si decides ignorarlos en tu caso específico.
+# Pipfile.lock
+# poetry.lock
+# pdm.lock
+# uv.lock
+
+# Archivos de configuración local de gestores de dependencias.
+# (PEP 582 / pdm / pyflow)
+__pypackages__/
+.pdm.toml
+.pdm-python
+.pdm-build/
+
+# ___ Celery ___
+# Archivos de estado y PID de Celery.
+celerybeat-schedule
+celerybeat.pid
+
+# ___ SageMath ___
+*.sage.py
+
+# ___ ENTORNO VIRTUALES (¡MUY IMPORTANTE!) ___
+# Ignora siempre las carpetas de entornos virtuales.
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+ENV.bak/
+VENV/
+
+# ___ Configuraciones de IDEs y Editores ___
+# Spyder:
+.spyderproject
+.spyproject
+# Rope:
+.ropeproject
+# VSCode:
+.vscode/
+
+.idea/ 
+
+*~
+#*#
+/.#*
+.#*
+# Vim:
+*.swp
+*.swo
+*.swn
+*~
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ___ Herramientas de Calidad de Código / Linters / Tipado ___
+# mypy:
+.mypy_cache/
+.dmypy.json
+dmypy.json
+# Pyre:
+.pyre/
+# pytype:
+.pytype/
+# Ruff:
+.ruff_cache/
+# Cython debug:
+cython_debug/
+
+# ___ Archivos del Sistema Operativo ___
+# macOS:
+.DS_Store
+.AppleDouble
+.LSOverride
+# Windows:
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# -----------------------------------------------------------------------------
+# --- AMPLIACIONES ESPECÍFICAS PARA DATA SCIENCE / ML / ANÁLISIS / PROYECTOS ---
+# -----------------------------------------------------------------------------
+
+# ___ DATOS CRUDOS Y PROCESADOS (¡ADAPTAR SEGÚN NECESIDAD!) ___
+# REGLA GENERAL: Evita commitear datasets grandes o que cambian frecuentemente.
+# Considera usar DVC (dvc.org) o Git LFS para versionar datos grandes si es necesario.
+
+# Archivos de datos crudos específicos (ajusta rutas y extensiones):
+# Si son pequeños y necesarios para reproducir, podrías *no* ignorarlos.
+# Si son grandes o descargables, ignóralos.
+/resources/raw/*.csv
+/resources/raw/*.json
+/resources/raw/*.jsonl
+/resources/raw/*.zip
+/resources/raw/*.txt
+/resources/raw/energy/ # Ejemplo de ignorar una carpeta entera si es necesario
+**/data/raw/
+
+# Archivos de datos intermedios o procesados:
+# Generalmente generados por scripts/notebooks, por lo que se pueden ignorar.
+# Podrías commitear ejemplos pequeños si son útiles.
+/resources/energy/spain/*.csv
+/resources/ioda/*.csv
+/rag-openai-chats/data/interim/messages.jsonl
+/rag-openai-chats/data/processed/chunks.parquet
+/rag-openai-chats/data/processed/messages_raw.parquet # Si generas este backup
+**/data/interim/
+**/data/processed/
+
+# EMBEDDINGS (¡SIEMPRE IGNORAR!)
+# Suelen ser muy grandes y se generan a partir de los datos procesados.
+/rag-openai-chats/data/processed/embeddings_batches/
+**/embeddings_batches/
+*.emb 
+
+# BASES DE DATOS LOCALES
+# Ignora archivos de bases de datos locales como SQLite.
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlitedb
+
+# MODELOS DE MACHINE LEARNING Y CACHES
+# Ignora modelos descargados, entrenados localmente o caches de librerías.
+models/
+downloaded_models/
+*.pt
+*.pth
+*.h5
+*.keras
+*.pb
+*.onnx
+*.bin
+*.joblib
+*.pkl
+*.model
+# Cache específico de librerías (puede estar en ~/.cache, pero por si acaso)
+.cache/
+hf_cache/
+torch_cache/
+
+# CREDENCIALES Y ARCHIVOS SENSIBLES (¡MUY IMPORTANTE!)
+# NUNCA commitear claves de API, contraseñas, tokens, etc.
+# .env ya está cubierto arriba, pero añadir patrones comunes explícitamente.
+credentials.*
+secrets.*
+config.py
+*.pem
+*.key
+*.p12
+*.pfx
+.pypirc
+
+# LOGS GENERADOS POR TUS SCRIPTS
+# *.log ya está cubierto, pero añadir explícitamente y carpeta común.
+*.log
+logs/
+*.log.*
+
+# VISUALIZACIONES Y REPORTES GENERADOS
+# Ignora plots, HTMLs, PDFs generados si son numerosos o fácilmente reproducibles.
+# Ajusta las rutas si es necesario. Podrías commitear *algunos* ejemplos clave.
+**/plots/
+**/reports/
+**/figures/
+*.png # Ignorar solo si están en carpetas de salida específicas
+*.jpg
+*.jpeg
+*.svg
+*.html # Ignorar solo si son reportes generados
+*.pdf  # Ignorar solo si son reportes generados
+
+
+sql/
+
+# Ignorar TODOS los datos crudos (exportaciones completas)
+/rag-openai-chats/data/raw/
+/rag-openai-chats/data/interim/
+/rag-openai-chats/data/processed/
+**/data/raw/
+**/data/interim/
+**/data/processed/
+
+# Embeddings (siempre ignorar)
+/rag-openai-chats/data/processed/embeddings_batches/
+**/embeddings_batches/
+*.emb
+
+# Bases de datos locales y temporales (binarios)
+/rag-openai-chats/sql/*.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlitedb
+
+# Logs y salidas manuales
+*.log
+logs/
+t
+tree*.txt
+
+# Visualizaciones y reportes generados (en carpetas específicas)
+**/plots/
+**/reports/
+**/figures/
+**/output/
+**/visuals/
+**/plots/*
+**/reports/*
+**/figures/*
+**/output/*
+**/visuals/*
+
+# Otros archivos sensibles y temporales
+vectordb/
+local-docs/

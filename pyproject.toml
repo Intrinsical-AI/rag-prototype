@@ -1,0 +1,43 @@
+[project]
+name            = "local-rag-backend"
+version         = "0.1.0"
+description     = "Minimal RAG Q&A backend with FastAPI + FAISS/BM25"
+readme          = "README.md"
+requires-python = ">=3.11"
+authors         = [{ name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }]
+
+dependencies = [
+  "fastapi>=0.111,<1.0",
+  "uvicorn[standard]>=0.29",
+  "sentence-transformers>=2.7",
+  "faiss-cpu>=1.8.0,<2.0",
+  "rank-bm25>=0.2",
+  "numpy>=1.26",
+  "openai>=1.24",
+  "requests>=2.31",
+  "sqlalchemy>=2.0",
+  "pydantic-settings>=2.2",
+  "python-dotenv>=1.0",
+  "pytest>=8.2",
+  "pytest-cov>=6.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+fix = true
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit   = ["tests/*", "*/__init__.py"]

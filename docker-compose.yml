@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: rag-backend
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
+    volumes:
+      - ./data:/app/data        # persiste SQLite + FAISS
+    ports:
+      - "8000:8000"
+    profiles: ["default"]
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama-cache:/root/.ollama
+    ports:
+      - "11434:11434"
+    profiles: ["with-ollama"]
+
+volumes:
+  ollama-cache:

@@ -1,0 +1,11 @@
+question;answer
+"What is Legal Engine Search?";"Legal Engine Search is a platform that combines semantic search, legal document processing, and knowledge-based response generation."
+"Where can I find LES?";"You can find the whitepaper on the Polytechnical University of Madrid repository, or in the author's amazing page, Python-Lair! (https://python-lair.space)"
+"What file types are supported?";"The system currently supports PDF, DOCX, and TXT files, which are automatically converted to plain text."
+"Can I ask questions in natural language?";"Yes, the system is designed to interpret natural language queries and generate context-aware answers."
+"Does the system understand synonyms and related terms?";"Yes, it uses embedding models that capture contextual meaning, allowing it to recognize synonyms and semantic variations."
+"Where are the document vectors stored?";"All document embeddings are stored in a vector database such as Qdrant or Elasticsearch, optimized for similarity search."
+"Can I filter search results?";"Yes, you can filter results by metadata such as date, jurisdiction, document type, and custom tags."
+"How are embeddings generated?";"We use pretrained models from the Sentence-Transformers family, and fine-tuning is possible for domain-specific accuracy."
+"Can I export the answers and documents?";"Yes, answers and related documents can be exported as PDF or JSON via both the UI and API."
+"Are source citations included in the answers?";"Yes, the system can include source snippets and document references to support transparency and traceability."

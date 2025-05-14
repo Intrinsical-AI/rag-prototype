@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simple Q&A AI Bot</title>
+  <style>
+    :root {
+      --bg: #f7f7f7;
+      --panel: #ffffff;
+      --border: #dddddd;
+      --accent: #2962ff;
+      --text: #222222;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      display: flex;
+      justify-content: center;
+      padding: 2rem;
+      color: var(--text);
+    }
+
+    .qa-container {
+      width: 100%;
+      max-width: 640px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 5px rgba(0,0,0,.05);
+    }
+
+    h1 {
+      margin-top: 0;
+      text-align: center;
+      font-size: 1.6rem;
+    }
+
+    label {
+      font-weight: 600;
+      display: block;
+      margin-bottom: .5rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 60px;
+      resize: vertical;
+      padding: .6rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font: inherit;
+    }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      padding: .6rem 1.2rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      margin-top: .75rem;
+    }
+    button:disabled { opacity: .6; cursor: default; }
+
+    .answer-box, .history-box {
+      margin-top: 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #fafafa;
+      padding: 1rem;
+      white-space: pre-wrap;
+    }
+
+    .history-item { margin-bottom: .8rem; }
+    .history-item:last-child { margin-bottom: 0; }
+
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--accent);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      vertical-align: text-bottom;
+      margin-left: .4rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main class="qa-container">
+    <h1>Simple Q&amp;A AI Bot</h1>
+    <label for="questionInput">Escribe tu pregunta:</label>
+    <textarea id="questionInput" placeholder="¿Cuál es la política de reembolso?"></textarea>
+    <button id="askBtn">Preguntar</button>
+    <div id="status" style="display:none; margin-top:.5rem;">
+      Procesando<span class="spinner"></span>
+    </div>
+    <div id="answerBox" class="answer-box" aria-live="polite">
+      La respuesta aparecerá aquí...
+    </div>
+    <div id="historyBox" class="history-box" style="display:none;">
+    </div>
+  </main>
+
+  <script>
+    const askBtn        = document.getElementById('askBtn');
+    const questionInput = document.getElementById('questionInput');
+    const answerBox     = document.getElementById('answerBox');
+    const statusDiv     = document.getElementById('status');
+    const historyBox    = document.getElementById('historyBox');
+
+    const API_URL = '/api/ask'; 
+    
+    askBtn.addEventListener('click', async () => {
+      const question = questionInput.value.trim();
+      if (!question) return;
+
+      // UI: block button nd show spinner
+      askBtn.disabled = true;
+      statusDiv.style.display = 'block';
+      answerBox.textContent = '';
+
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question })
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const data = await response.json();
+        answerBox.textContent = data.answer ?? '(sin respuesta)';
+
+        // add to history
+        appendHistory(question, data.answer);
+
+      } catch (err) {
+        answerBox.textContent = 'Error al obtener respuesta: ' + err.message;
+      } finally {
+        askBtn.disabled = false;
+        statusDiv.style.display = 'none';
+        questionInput.value = '';
+      }
+    });
+
+    function appendHistory(question, answer) {
+      historyBox.style.display = 'block';
+      const item        = document.createElement('div');
+      item.className    = 'history-item';
+      item.innerHTML    =
+        `<p><strong>Q:</strong> ${question}</p>` +
+        `<p><strong>A:</strong> ${answer}</p>`;
+      historyBox.prepend(item);
+    }
+  </script>
+</body>
+</html>
