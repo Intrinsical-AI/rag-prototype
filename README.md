@@ -192,8 +192,7 @@ pytest --cov=src --cov-report=html
 # Open htmlcov/index.html to view the detailed HTML report.
 # Alternatively, for a quick summary in the console:
 # pytest --cov=src
-
----
+```
 
 ## 8. API Endpoints
 

@@ -55,7 +55,7 @@ def test_build_index_sparse(tmp_path, monkeypatch):
     with SessionLocal() as db:
         count_db = db.query(Document).count()
 
-    expected = _count_csv_rows(Path(st.faq_csv))
+    expected = _count_csv_rows(Path(st.faq_csv)) - 1 # header
     assert count_db == expected, f"Número de filas en DB ({count_db}) debe coincidir con CSV ({expected})"
     assert not (tmp_path / "index.faiss").exists(), "En modo sparse no se genera FAISS" 
     
@@ -88,7 +88,7 @@ def test_build_index_dense(tmp_path, monkeypatch): # Eliminar ', k'
 
     with SessionLocal() as db:
         count_db = db.query(Document).count()
-    expected_rows = _count_csv_rows(Path(st.faq_csv)) # LLAMADA A LA FUNCIÓN HELPER
+    expected_rows = _count_csv_rows(Path(st.faq_csv)) - 1 # header
     assert count_db == expected_rows, f"Número de filas en DB ({count_db}) debe coincidir con CSV ({expected_rows})"
 
     assert index_path.exists() and id_map_path.exists(), "FAISS files missing" # Usar variables de path
