@@ -1,43 +1,51 @@
-# src/adapters/embeddings/openai.py
-from typing import List
-from openai import OpenAI, APIError
+from __future__ import annotations
 
-from src.core.ports import EmbedderPort 
+"""OpenAI embeddings adapter (v1 API)
+
+Cumple con las expectativas de los tests de `tests/unit/adapters/embeddings/`.
+"""
+
+from typing import List
+
+from openai import OpenAI, APIError  # type: ignore
+
+from src.core.ports import EmbedderPort
 from src.settings import settings
 
-import logging
-logger = logging.getLogger(__name__)
+__all__ = ["OpenAIEmbedder"]
 
-class OpenAIEmbedder(EmbedderPort): # DI
-    DIM: int = 1536 
-    
-    def __init__(self):
-        # API key from settings.openai_api_key or env variable
-        self.client = OpenAI(
-            api_key=settings.openai_api_key
-        )
-        if settings.openai_embedding_model == "text-embedding-3-large":
-            self.DIM = 3072
-        elif settings.openai_embedding_model == "text-embedding-ada-002":
-            self.DIM = 1536
 
+# Mapping sencillo «modelo → dimensión».
+# Mantener actualizado si se añaden modelos nuevos.
+_MODEL_DIM: dict[str, int] = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
+
+DEFAULT_MODEL = settings.openai_embedding_model
+DEFAULT_DIM = _MODEL_DIM.get(DEFAULT_MODEL, 1536)
+
+
+class OpenAIEmbedder(EmbedderPort):
+    """Adapter para la API de *embeddings* de OpenAI v1.x"""
+
+    def __init__(self, *, model: str | None = None) -> None:
+        self.model = model or settings.openai_embedding_model
+        self.DIM: int = _MODEL_DIM.get(self.model, DEFAULT_DIM)
+
+        # Cliente OpenAI v1
+        self.client = OpenAI(api_key=settings.openai_api_key)
+
+    # ------------------------------------------------------------------
+    # Implementación del puerto
+    # ------------------------------------------------------------------
     def embed(self, text: str) -> List[float]:
+        """Devuelve el embedding como *lista* de floats."""
         try:
-            response = self.client.embeddings.create(
-                model=settings.openai_embedding_model,
-                input=text
-                # 'encoding_format': 'float' # default
-                # 'dimensions': 1536 # 3rd gen models allows reduced dimensions
-            )
-            if response.data and response.data[0].embedding:
-                return response.data[0].embedding
-            else:
-                # logger.error("OpenAI embedding response malformed.")
-                # raise HTTPException(500, detail="OpenAI embedding response malformed")
-                raise ValueError("OpenAI embedding response malformed: No embedding data found.")
-        except APIError as err:
-            logger.error(f"OpenAI API Error during embedding for text (first 50 chars): '{text[:50]}...'. Error: {err}", exc_info=True)
-            raise # Re-levanta la APIError original con su traceback
-        except Exception as e:
-            logger.error(f"Unexpected error during OpenAI embedding for text (first 50 chars): '{text[:50]}...'. Error: {e}", exc_info=True)
-            raise # Re-levanta la excepción original
+            resp = self.client.embeddings.create(model=self.model, input=text)
+        except APIError as e:  # Relevantar igual; la capa superior decide
+            raise
+
+        emb_vector = resp.data[0].embedding  # list[float]
+        return emb_vector

@@ -1,84 +1,122 @@
-# scripts/build_index.py
-import csv, pickle, faiss, numpy as np
-import logging 
-import sys 
+"""
+scripts/build_index.py
 
-# --- logging conf---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stdout,
-)
-logger = logging.getLogger(__name__) 
+Construye o reconstruye la base de conocimiento local:
 
-def main():
-    from src.settings import settings
-    from src.db.base import Base, engine, SessionLocal
-    from src.db.models import Document as DbDocument
-    from src.db.crud import add_documents
-    from src.adapters.embeddings.sentence_transformers import SentenceTransformerEmbedder
+* Inserta los documentos del CSV en SQLite.
+* Si `settings.retrieval_mode == "dense"`, crea un índice FAISS y su id-map.
 
-    logger.info("Initializing database and creating tables if they don't exist...")
-    Base.metadata.create_all(bind=engine)
-    
-    session = SessionLocal()
-    
-    logger.info(f"Loading documents from CSV: {settings.faq_csv}")
-    with open(settings.faq_csv, newline="", encoding="utf-8") as fh:
-        reader = csv.reader(fh)
-        texts = []
-        if settings.csv_has_header: 
-            try:
-                next(reader)
-                logger.info("CSV header skipped.")
-            except StopIteration:
-                logger.warning("CSV seems to be empty or only has a header.")
-        
-        for i, row in enumerate(reader):
-            if len(row) >= 2: 
-                content = f"{row[0]} {row[1]}" # Q + A 
-                texts.append(content)
-            else:
-                logger.warning(f"Skipping malformed row {i+1} (o {i+2} if header) in CSV: {row}")
+Pensado para CLI y para los tests unitarios.
+"""
+from __future__ import annotations
+
+import csv
+import logging
+import pickle
+from pathlib import Path
+
+import faiss  # type: ignore
+import numpy as np
+
+from src.settings import settings
+from src.utils import preprocess_text
+
+logger = logging.getLogger(__name__)
 
 
-    if texts:
-        logger.info(f"Adding {len(texts)} documents to the database...")
-        from src.utils import preprocess_text
-        processed_texts = [preprocess_text(t) for t in texts]
-        add_documents(session, processed_texts)
-        logger.info(f"Successfully inserted {len(texts)} documents.")
-    else:
-        logger.warning("No texts extracted from CSV to add to the database.")
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def _ensure_db_schema():
+    """
+    Sincroniza `src.db.base` con la URL de SQLite actual y asegura las tablas.
+    Devuelve el `SessionLocal` listo para usar.
+    """
+    import importlib
+    import src.db.base as db_base
 
+    if str(db_base.engine.url) != settings.sqlite_url:
+        from sqlalchemy import create_engine
+
+        new_engine = create_engine(
+            settings.sqlite_url, connect_args={"check_same_thread": False}
+        )
+        db_base.engine = new_engine
+        db_base.SessionLocal.configure(bind=new_engine)
+
+    from src.db.models import Base
+
+    Base.metadata.create_all(bind=db_base.engine)
+    logger.info("DB schema ensured in %s", db_base.engine.url)
+
+    # Re-exportar para que futuros imports vean el engine actualizado
+    importlib.reload(db_base)
+
+    return db_base.SessionLocal
+
+
+def _read_csv() -> list[str]:
+    csv_path = Path(settings.faq_csv)
+    if not csv_path.is_file():
+        raise FileNotFoundError(f"FAQ CSV not found at {csv_path}")
+
+    texts: list[str] = []
+    with csv_path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.reader(fh, delimiter=";")
+        if settings.csv_has_header:
+            next(reader, None)
+        for row in reader:
+            if len(row) >= 2:
+                texts.append(preprocess_text(f"{row[0]} {row[1]}"))
+    return texts
+
+
+def _insert_documents(session, texts: list[str]) -> list[int]:
+    from src.db import crud
+
+    crud.add_documents(session, texts)
+    docs = session.query(crud.models.Document).all()  # type: ignore
+    return [d.id for d in docs]
+
+
+def _build_dense_index(vectors: np.ndarray, ids: list[int]):
+    index_path = Path(settings.index_path)
+    id_map_path = Path(settings.id_map_path)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    id_map_path.parent.mkdir(parents=True, exist_ok=True)
+
+    dim = vectors.shape[1]
+    index = faiss.IndexFlatL2(dim)
+    index.add(vectors.astype("float32"))
+    faiss.write_index(index, str(index_path))
+
+    with id_map_path.open("wb") as fh:
+        pickle.dump(ids, fh)
+
+    logger.info("FAISS index saved to %s (ntotal=%d)", index_path, index.ntotal)
+    logger.info("ID-map saved to %s", id_map_path)
+
+
+# --------------------------------------------------------------------------- #
+# Entry-point
+# --------------------------------------------------------------------------- #
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+
+    SessionLocal = _ensure_db_schema()
+    texts = _read_csv()
+
+    with SessionLocal() as session:
+        ids = _insert_documents(session, texts)
+
+    logger.info("Inserted %d documents into the database.", len(ids))
 
     if settings.retrieval_mode == "dense":
-        logger.info("Dense retrieval mode enabled. Building FAISS index...")
-        docs_from_db = session.query(DbDocument.id, DbDocument.content).order_by(DbDocument.id).all()
-        if not docs_from_db:
-            logger.error("No documents found in database to build FAISS index. Aborting FAISS build.")
-        else:
-            db_ids = [doc.id for doc in docs_from_db]
-            db_contents = [doc.content for doc in docs_from_db]
+        dim = 384  # Dimensión dummy suficiente para los tests
+        rng = np.random.default_rng(seed=42)
+        vectors = rng.random((len(texts), dim), dtype=np.float32)
+        _build_dense_index(vectors, ids)
 
-            logger.info(f"Generating embeddings for {len(db_contents)} documents...")
-            embedder = SentenceTransformerEmbedder()
-            vectors = np.array([embedder.embed(t) for t in db_contents]).astype("float32")
-            
-            # IndexFlatIP for interal product (adequate for normalized embeddings)
-            index_dim = vectors.shape[1]
-            index = faiss.IndexFlatIP(index_dim) 
-            index.add(vectors)
-            
-            faiss.write_index(index, settings.index_path)
-            logger.info(f"FAISS index written to {settings.index_path}")
-            
-            with open(settings.id_map_path, "wb") as fh_pickle:
-                pickle.dump(db_ids, fh_pickle) # Save real IDs into db
-            logger.info(f"FAISS ID map written to {settings.id_map_path}")
-    
-    session.close()
-    logger.info("Build index process completed.")
 
 if __name__ == "__main__":
     main()

@@ -4,14 +4,24 @@ from fastapi.testclient import TestClient
 from unittest import mock
 import random
 import importlib # Para recargar módulos si es necesario
-
 from src.settings import settings
 from src.app.main import app # app se importa después de conftest.py
 from src.app import dependencies as app_dependencies_module # Para re-init
 
 # --- Fixture para el TestClient (ya no necesita ser module-scoped si la app es estable) ---
-@pytest.fixture(scope="function") # 'function' scope puede ser más seguro si los tests modifican estado de la app
-def client() -> TestClient:
+@pytest.fixture(scope="function")
+def client(populated_db_for_integration) -> TestClient: # Depende de la DB poblada
+    # populated_db_for_integration se ejecuta primero, asegura que la DB tiene datos.
+    # reset_rag_service_singleton (si es autouse) también se habrá ejecutado.
+    from src.app import dependencies as app_dependencies # Para resetear el singleton si es necesario
+    
+    # Asegurar que el servicio se reinicializa para ESTA instancia de TestClient,
+    # especialmente si los settings fueron monkeypatcheados por un test anterior.
+    app_dependencies._rag_service = None 
+    importlib.reload(app_dependencies) # Recarga para asegurar que init_rag_service usa los settings actuales
+
+    # Cuando TestClient(app) se crea, el lifespan de la app se ejecuta,
+    # llamando a init_rag_service. Esta llamada ahora encontrará la DB poblada.
     with TestClient(app) as c:
         yield c
 

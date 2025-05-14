@@ -1,103 +1,121 @@
-# tests/conftest.py (o tests/integration/conftest.py si solo aplica a integración)
+# tests/conftest.py
 import sys
 from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool # MUY IMPORTANTE para SQLite en memoria con FastAPI/multithreading
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+import importlib
 
 # --- 1. Add src to PYTHONPATH ---
-# Assurs'from src...' working on tests/app when imported
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
-if SRC_PATH.is_dir():
-    sys.path.insert(0, str(PROJECT_ROOT)) # Añadir el directorio PADRE de src
-else:
-    pass 
+if SRC_PATH.is_dir() and str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# --- 2. Parchear Settings Globalmente para la Sesión de Test ANTES de importar la app o dependencias ---
-from src.settings import settings
+# --- 2. Parchear Settings Globalmente para la Sesión de Test ---
+from src.settings import settings as global_app_settings # Renombrar
 
-# Memmory BD, default sparse mode, dummy API keys
-settings.sqlite_url = "sqlite:///:memory:"      # memory db for all the tests
-settings.retrieval_mode = "sparse"              # default for tests
-settings.openai_api_key = "sk-dummy-test-key"   # avoid silly errores when OpenAI()
-settings.ollama_enabled = False                 # Default para tests
+global_app_settings.retrieval_mode = "sparse"
+global_app_settings.openai_api_key = "sk-dummy-conftest-key"
+global_app_settings.ollama_enabled = False
+global_app_settings.sqlite_url = "sqlite:///:memory:"
+global_app_settings.faq_csv = "/tmp/non_existent_default_faq_for_tests.csv" # O un path a un CSV vacío de test
 
-# --- 3. Reconfigurar el Engine y SessionLocal de src.db.base para usar la BD en memoria ---
-# Importa db_base AFTER settings.sqlite_url being patched
+# --- 3. Reconfigurar el Engine y SessionLocal de src.db.base ---
 import src.db.base as db_base_module
+import src.db.models as db_models_module # Importar para Base
 
-# Crear un nuevo engine que apunte a la BD en memoria con StaticPool
-# StaticPool es crucial para SQLite en memoria en contextos multi-hilo/async como FastAPI.
-# Mantiene una única conexión subyacente por "hilo" (o en este caso, para el pool).
-test_engine = create_engine(
-    settings.sqlite_url, # Ya es "sqlite:///:memory:"
-    connect_args={"check_same_thread": False}, # Necesario para SQLite
-    poolclass=StaticPool, # Usar StaticPool
+# Forzar recarga para asegurar que usan settings parcheados
+importlib.reload(db_base_module)
+importlib.reload(db_models_module) # Si Base se define aquí y usa engine
+
+_test_engine = create_engine(
+    global_app_settings.sqlite_url,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 
-# Sobrescribir el engine global en el módulo db_base
-db_base_module.engine = test_engine
-# Reconfigurar la SessionLocal global para que use el nuevo test_engine
-db_base_module.SessionLocal.configure(bind=test_engine)
+db_base_module.engine = _test_engine
+db_base_module.SessionLocal.configure(bind=_test_engine) # Reconfigura la SessionLocal existente
 
+# --- 4. Fixture para crear el esquema de BD una vez por sesión ---
+@pytest.fixture(scope="session", autouse=True)
+def create_db_tables():
+    """Crea todas las tablas de la BD una vez por sesión de test."""
+    # AppDeclarativeBase es el Base de tus modelos SQLAlchemy
+    db_models_module.Base.metadata.create_all(bind=_test_engine)
+    yield
+    # Opcional: db_models_module.Base.metadata.drop_all(bind=_test_engine)
 
-# --- 4. Crear Esquema de BD y Poblar con Datos de Prueba Conocidos ---
-# Importar Base y modelos DESPUÉS de reconfigurar db_base_module.engine
-from src.db.models import Base as AppDeclarativeBase # El Base de tus modelos
-from src.db.models import Document as DbDocument     # Tu modelo Document
+# --- 5. Fixture para una sesión de BD limpia por CADA TEST ---
+@pytest.fixture(scope="function")
+def db_session() -> sessionmaker:
+    session = db_base_module.SessionLocal()
+    for table in reversed(db_models_module.Base.metadata.sorted_tables):
+        session.execute(table.delete()) # LIMPIA TABLAS
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
 
-# Crear todas las tablas definidas en AppDeclarativeBase (Document, QaHistory)
-AppDeclarativeBase.metadata.create_all(bind=test_engine)
+# --- 6. ELIMINA LA SIGUIENTE FIXTURE COMPLETAMENTE ---
+# @pytest.fixture(scope="session", autouse=True)
+# def initialize_rag_service_for_session():
+#    ... ESTO ESTABA CAUSANDO PROBLEMAS ...
 
-# Poblar la tabla Document con datos conocidos para los tests de integración
-# Estos datos deben ser consistentes con lo que los tests esperan recuperar.
-# Los IDs aquí son explícitos. Si build_index.py se usara, los IDs serían autoincrementales.
-# Para tests de integración donde NO probamos build_index.py, es mejor setear datos explícitos.
-with db_base_module.SessionLocal() as db:
-    # Limpiar datos de ejecuciones anteriores si la BD no fuera puramente en memoria
-    # (StaticPool con :memory: debería ser limpia cada vez, pero por si acaso)
-    db.query(DbDocument).delete()
-    db.commit()
+# --- 7. (OPCIONAL PERO RECOMENDADO) Fixture para tests de integración que necesitan el servicio listo ---
+@pytest.fixture(scope="function")
+def populated_db_session(db_session: sessionmaker): # Depende de la sesión limpia
+    """Puebla la DB con datos de prueba comunes para integración."""
+    from src.db.models import Document as DbDocument # Import local para evitar problemas de import circular
 
-    # Datos de prueba consistentes con las aserciones en test_api_ask.py
     test_docs_data = [
         {"id": 1, "content": "The refund policy states you can request a refund within 14 days."},
         {"id": 2, "content": "To contact support, please email support@example.com."},
         {"id": 3, "content": "Available features include semantic search and document processing."},
-        # Añade más si es necesario para tus tests de retrieval
     ]
     for doc_data in test_docs_data:
-        db.add(DbDocument(**doc_data))
-    db.commit()
+        db_session.add(DbDocument(**doc_data))
+    db_session.commit()
+    return db_session # Devuelve la sesión ya poblada
 
-# --- 5. Fixture para Inicializar RagService una vez por sesión con la config de test ---
-@pytest.fixture(scope="session", autouse=True)
-def initialize_rag_service_for_session():
-    """
-    Esta fixture se ejecuta una vez por sesión de test, automáticamente.
-    Llama a init_rag_service DESPUÉS de que todos los settings y la BD
-    hayan sido configurados para el entorno de test.
-    """
-    # Importar el módulo de dependencias y llamar a init_rag_service
-    # Esto asegura que el _rag_service singleton se crea usando los settings parcheados
-    # y la BD en memoria ya poblada.
+@pytest.fixture(scope="function")
+def initialized_rag_service_for_integration(populated_db_session, monkeypatch): # Depende de la DB poblada
+    """Inicializa RagService para tests de integración. La DB ya está poblada."""
     from src.app import dependencies as app_dependencies
+
+    # Asegurar que _rag_service esté limpio antes de esta inicialización específica
+    app_dependencies._rag_service = None
     
-    # Es importante que init_rag_service() use el SessionLocal y Document
-    # que ahora están vinculados al test_engine y la BD en memoria.
-    # El reload de app_dependencies podría ser necesario si este importa settings
-    # o db_base a nivel de módulo y queremos que relea los valores parcheados.
-    # Sin embargo, como los settings y db_base.engine/SessionLocal se parchean
-    # *antes* de esta fixture (a nivel de módulo de conftest), la primera importación
-    # de app_dependencies ya debería ver los valores correctos.
-    # Si init_rag_service en sí mismo importa settings o db_base directamente, también está bien.
+    # Aplicar cualquier monkeypatch a settings específico para la integración aquí si es necesario
+    # monkeypatch.setattr(global_app_settings, "retrieval_mode", "sparse") # Ejemplo
+
+    # Recargar el módulo de dependencias para que tome los settings correctos
+    # y para asegurar que init_rag_service opera en un estado limpio del singleton _rag_service
+    importlib.reload(app_dependencies)
     
-    # importlib.reload(app_dependencies) # Opcional, probar sin él primero.
-                                       # Podría ser necesario si app_dependencies
-                                       # captura settings en el momento de su primera importación.
+    app_dependencies.init_rag_service() # Esto usará la DB poblada por populated_db_session
+    service = app_dependencies.get_rag_service()
     
-    app_dependencies.init_rag_service() # Esto creará el _rag_service global
-    yield
-    # No se necesita limpieza aquí si el _rag_service no mantiene recursos abiertos
-    # que necesiten cierre explícito al final de la sesión.
+    yield service # El test de integración usa este servicio
+
+    # Limpieza del singleton después del test
+    app_dependencies._rag_service = None
+
+@pytest.fixture(scope="function")
+def populated_db_for_integration(db_session: sessionmaker): # db_session ya limpió
+    """Puebla la DB con datos para tests de integración (IDs 1, 2, 3)."""
+    from src.db.models import Document as DbDocument
+    test_docs_data = [
+        {"id": 1, "content": "The refund policy states you can request a refund within 14 days."},
+        {"id": 2, "content": "To contact support, please email support@example.com."},
+        {"id": 3, "content": "Available features include semantic search and document processing."},
+    ]
+    for doc_data in test_docs_data:
+        db_session.add(DbDocument(**doc_data))
+    db_session.commit()
+    # En este punto, la DB tiene 3 documentos.
+    # El lifespan de la app ahora llamará a init_rag_service y encontrará estos documentos.
+    yield db_session # Opcional, si el test necesita la sesión
