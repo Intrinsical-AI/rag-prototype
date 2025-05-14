@@ -21,7 +21,7 @@ class DenseFaissRetriever(RetrieverPort):
         vec = np.array(self.embedder.embed(query), dtype="float32").reshape(1, -1)
         distances, indices = self.index.search(vec, k)
         # ids   = [self.id_map[i] for i in I[0]]
-        ids = [self.id_map[idx] for idx in indices[0]]
+        ids = [self.id_map[idx] for idx in indices[0] if idx != -1]
         # dists = D[0].tolist()
         dists = distances[0].tolist()
         # Convert distance to similarity (better for retrieval) --> simil = 1 / (1 + dist) (the bigger the better)

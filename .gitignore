@@ -7,6 +7,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+build/
+htmlcov/
 
 # ___ Extensiones C ___
 # Ignora binarios compilados de extensiones C.
