@@ -55,7 +55,7 @@ A brief overview of the main directories:
 
 The application follows a Ports & Adapters (Hexagonal) architecture to promote separation of concerns and testability.
 
-![Arch-Mermaid-Diagram](resources/arch-diagram.png)
+![Arch-Mermaid-Diagram](docs/arch-diagram.png)
 
 **Dependency Rule:** Arrows of `import` statements primarily point inwards, towards the `src/core` components. This adheres to the Dependency Inversion Principle.
 
