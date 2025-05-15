@@ -35,10 +35,8 @@ jobs:
         run: |
           . .venv/bin/activate
           python -m pip install --upgrade pip
-          # instala paquete + extras dev definidos en [project.optional-dependencies].dev
+          # install package + dev extras ([project.optional-dependencies].dev)
           pip install -e ".[dev]"
-          # --- extra: si mantienes un requirements.txt suelto, descomenta:
-          # pip install -r requirements.txt
 
       # Exportamos ruta del venv al resto de pasos
       - name: Export VIRTUAL_ENV
