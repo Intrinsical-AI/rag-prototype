@@ -4,14 +4,24 @@ from fastapi.testclient import TestClient
 from unittest import mock
 import random
 import importlib # Para recargar módulos si es necesario
-
 from src.settings import settings
 from src.app.main import app # app se importa después de conftest.py
 from src.app import dependencies as app_dependencies_module # Para re-init
 
 # --- Fixture para el TestClient (ya no necesita ser module-scoped si la app es estable) ---
-@pytest.fixture(scope="function") # 'function' scope puede ser más seguro si los tests modifican estado de la app
-def client() -> TestClient:
+@pytest.fixture(scope="function")
+def client(populated_db_for_integration) -> TestClient: # Depende de la DB poblada
+    # populated_db_for_integration se ejecuta primero, asegura que la DB tiene datos.
+    # reset_rag_service_singleton (si es autouse) también se habrá ejecutado.
+    from src.app import dependencies as app_dependencies # Para resetear el singleton si es necesario
+    
+    # Asegurar que el servicio se reinicializa para ESTA instancia de TestClient,
+    # especialmente si los settings fueron monkeypatcheados por un test anterior.
+    app_dependencies._rag_service = None 
+    importlib.reload(app_dependencies) # Recarga para asegurar que init_rag_service usa los settings actuales
+
+    # Cuando TestClient(app) se crea, el lifespan de la app se ejecuta,
+    # llamando a init_rag_service. Esta llamada ahora encontrará la DB poblada.
     with TestClient(app) as c:
         yield c
 
@@ -70,7 +80,7 @@ def test_api_ask_with_openai_retrieves_and_generates(
     body = response.json()
     assert body["answer"] == expected_answer
     assert isinstance(body["source_ids"], list)
-    assert 1 in body["source_ids"] # Basado en datos de prueba en conftest.py
+    assert 101 in body["source_ids"] # Basado en datos de prueba en conftest.py
 
     mock_openai_client_instance.chat.completions.create.assert_called_once()
     args, kwargs = mock_openai_client_instance.chat.completions.create.call_args
@@ -116,8 +126,7 @@ def test_api_ask_with_ollama_retrieves_and_generates(
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == expected_answer
-    assert 2 in body["source_ids"] # Basado en datos de prueba en conftest.py
-
+    assert 102 in body["source_ids"]
     mock_requests_post.assert_called_once()
     args, kwargs = mock_requests_post.call_args
     sent_payload = kwargs["json"]

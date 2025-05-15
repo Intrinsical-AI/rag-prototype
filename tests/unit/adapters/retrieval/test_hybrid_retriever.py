@@ -35,7 +35,7 @@ def test_hybrid_dense_only(mock_dense_retriever: Mock, mock_sparse_retriever: Mo
     assert retrieved_ids == [1, 2]
     # Scores should be (1-alpha) * original dense scores
     expected_scores = [s * (1 - alpha) for s in dense_scores]
-    assertpytest.approx(retrieved_scores, rel=1e-9) == expected_scores
+    assert retrieved_scores == pytest.approx(expected_scores, rel=1e-9) # CORRECTO
 
 def test_hybrid_sparse_only(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
     # Arrange

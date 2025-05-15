@@ -31,3 +31,10 @@ def get_history(db: Session, limit: int = 10, offset: int = 0):
         .limit(limit)
         .all()
     )
+
+
+
+def save_qa_history(db: Session, question: str, answer: str):
+
+    models.Base.metadata.create_all(bind=db.get_bind())
+    add_history(db, question, answer)

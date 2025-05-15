@@ -1,123 +1,148 @@
-"""
-File: src/app/dependencies.py
-Path: src/app/dependencies.py
-Dependency injection providers for the FastAPI application.
-"""
+from __future__ import annotations
 
-from src.core.rag import RagService
+import logging
+import sys
+import csv
+from pathlib import Path
+
+import requests
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
 from src.settings import settings
-from src.adapters.embeddings.sentence_transformers import SentenceTransformerEmbedder
+from src.core.rag import RagService
+from src.utils import preprocess_text
 from src.adapters.retrieval.sparse_bm25 import SparseBM25Retriever
 from src.adapters.retrieval.dense_faiss import DenseFaissRetriever
+from src.adapters.embeddings.sentence_transformers import SentenceTransformerEmbedder
 from src.adapters.generation.openai_chat import OpenAIGenerator
 from src.adapters.generation.ollama_chat import OllamaGenerator
-from src.core.ports import GeneratorPort
-from src.db.base import SessionLocal
-import requests
-import logging
 
-# ---------- RagService ----------
+import src.db.base as db_base
+from src.db.models import Base as AppDeclarativeBase, Document as DbDocument
+from src.db.crud import add_documents as crud_add_documents
+
+
+# --------------------------------------------------------------------------- #
+# Logging Configuration
+# --------------------------------------------------------------------------- #
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        stream=sys.stdout,
+    )
+logger = logging.getLogger(__name__)
+
 _rag_service: RagService | None = None
 
-def _choose_generator() -> GeneratorPort:
-    ollama_is_usable = False
+
+# --------------------------------------------------------------------------- #
+# LLM Generator Selection
+# --------------------------------------------------------------------------- #
+def _choose_generator():
+    """Select and return an appropriate LLM generator based on configuration."""
+    ollama_tags_url = f"{settings.ollama_base_url.rstrip('/')}/api/tags"
+
     if settings.ollama_enabled:
         try:
-             # Lista models as health check
-            response = requests.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags", timeout=2)
-            if response.status_code == 200:
-                logging.info("Ollama server detected and explicitly enabled. Using Ollama generator.")
-                ollama_is_usable = True
+            if requests.get(ollama_tags_url, timeout=2).status_code == 200:
+                logger.info("Using OllamaGenerator (primary).")
                 return OllamaGenerator()
-            else:
-                logging.warning(f"OLLAMA_ENABLED=true but could not confirm Ollama server status (tags endpoint status: {response.status_code}).")
-        except requests.exceptions.RequestException as e:
-            logging.warning(f"OLLAMA_ENABLED=true but server not reachable at {settings.ollama_base_url}: {e}")
-    
+        except requests.RequestException:
+            logger.warning("Primary Ollama health-check failed.")
+
     if settings.openai_api_key:
-        logging.info("OpenAI API key found. Using OpenAI generator.")
+        logger.info("Using OpenAIGenerator.")
         return OpenAIGenerator()
-    
-    # if not OpenAI API key and Ollama it's disabled 
-    # Opción A: Try force using Ollama 
-    if not ollama_is_usable:
-        logging.info("OpenAI API key not found. Attempting to use Ollama as a fallback...")
+
+    if settings.ollama_enabled:  # Fallback
         try:
-            response = requests.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags", timeout=2)
-            if response.status_code == 200:
-                logging.info("Ollama server detected and usable as fallback. Using Ollama generator.")
+            if requests.get(ollama_tags_url, timeout=2).status_code == 200:
+                logger.info("Using OllamaGenerator (fallback).")
                 return OllamaGenerator()
-            else:
-                logging.warning(f"Fallback to Ollama failed: Could not confirm Ollama server status (tags endpoint status: {response.status_code}).")
-        except requests.exceptions.RequestException as e:
-            logging.warning(f"Fallback to Ollama failed: Server not reachable at {settings.ollama_base_url}: {e}")
+        except requests.RequestException:
+            logger.warning("Fallback Ollama health-check failed.")
 
-    # Everything failed - Error msg + raise error
-    error_msg = (
-        "LLM Generator could not be initialized. "
-        "Please set OPENAI_API_KEY in your environment/`.env` file, "
-        "or ensure Ollama is running and `ollama_enabled=True` (or accessible as fallback)."
-    )
-    logging.error(error_msg)
-    # stop app init good if no generator available.
-    raise RuntimeError(error_msg) 
+    raise RuntimeError("LLM Generator could not be initialized: no OpenAI key and Ollama unreachable.")
 
+
+# --------------------------------------------------------------------------- #
+# RagService Initialization
+# --------------------------------------------------------------------------- #
 def init_rag_service():
+    """Initialize the singleton `RagService`."""
     global _rag_service
+    logger.info("Initializing RagService...")
 
-    # --- Problems with initial empty DB ---
-    from src.db.crud import add_documents as crud_add_documents
-    from src.db.models import Document as DbDocumentModel
-    from src.utils import preprocess_text
-    import csv
-    from pathlib import Path
+    is_in_memory_db = "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
 
-    with SessionLocal() as db_check:
-        doc_count = db_check.query(DbDocumentModel).count()
-        if doc_count == 0 and Path(settings.faq_csv).is_file():
-            logging.info(f"Database is empty. Populating from {settings.faq_csv}...")
-            texts_to_add = []
+    if not db_base.engine or str(db_base.engine.url) != settings.sqlite_url or (
+        is_in_memory_db and not isinstance(db_base.engine.pool, StaticPool)
+    ):
+        logger.warning("Engine mismatch or missing. Reconfiguring engine.")
+        pool_kwargs = {"poolclass": StaticPool} if is_in_memory_db else {}
+        new_engine = create_engine(
+            settings.sqlite_url,
+            connect_args={"check_same_thread": False},
+            **pool_kwargs,
+        )
+        db_base.engine = new_engine
+        db_base.SessionLocal.configure(bind=new_engine)
+        logger.info("Engine reconfigured to %s", new_engine.url)
+
+    logger.info("Ensuring tables exist at %s", db_base.engine.url)
+    AppDeclarativeBase.metadata.create_all(bind=db_base.engine)
+
+    with db_base.SessionLocal() as db:
+        doc_count = db.query(DbDocument).count()
+        faq_csv_path = Path(settings.faq_csv)
+
+        if doc_count == 0 and faq_csv_path.is_file():
+            logger.info("Database empty. Populating from CSV: %s", faq_csv_path)
+            texts = []
             try:
-                with open(settings.faq_csv, newline="", encoding="utf-8") as fh:
-                    reader = csv.reader(fh)
-                    if settings.csv_has_header: 
+                with faq_csv_path.open(newline="", encoding="utf-8") as fh:
+                    reader = csv.reader(fh, delimiter=";")
+                    if settings.csv_has_header:
                         next(reader, None)
-                    for row in reader:
-                        if row: 
-                            content = f"{row[0]} {row[1]}" # Q + A                            
-                            texts_to_add.append(preprocess_text(content))
-                if texts_to_add:
-                    crud_add_documents(db_check, texts_to_add)
-                    logging.info(f"Populated database with {len(texts_to_add)} documents from CSV.")
-                else:
-                    logging.warning("faq.csv was empty or could not be read properly.")
+                    for i, row in enumerate(reader):
+                        if len(row) >= 2:
+                            texts.append(preprocess_text(f"{row[0]} {row[1]}"))
+                        else:
+                            logger.warning("Row %d malformed: %s", i+1, row)
             except Exception as e:
-                logging.error(f"Failed to populate database from CSV: {e}", exc_info=True) 
-                
-    # 1) Prepare Embedder
-    embedder = SentenceTransformerEmbedder()
-    # 2) Retriever (based on settings)
-    with SessionLocal() as db: # new sesion
-        docs_orm = db.query(DbDocumentModel).all()
-        contents = [d.content for d in docs_orm]
-        ids = [d.id for d in docs_orm]
+                logger.error("Error reading CSV: %s", e, exc_info=True)
+
+            if texts:
+                crud_add_documents(db, texts)
+                db.commit()
+                logger.info("Committed %d documents to DB.", len(texts))
+
+    with db_base.SessionLocal() as db:
+        docs = db.query(DbDocument).all()
+        corpus = [doc.content for doc in docs]
+        ids = [doc.id for doc in docs]
 
     if settings.retrieval_mode == "dense":
-        # ASSUMING  build_index.py have been already EXECUTED!!
-        if not Path(settings.index_path).is_file() or not Path(settings.id_map_path).is_file():
-            logging.warning(f"Dense retrieval mode selected, but FAISS index ({settings.index_path}) or id_map ({settings.id_map_path}) not found.")
-            logging.warning("Please run 'python scripts/build_index.py' with dense mode enabled.")
-            logging.warning("Falling back to sparse retrieval for this session.")
-            retriever = SparseBM25Retriever(contents, ids) # Fallback
+        index_path = Path(settings.index_path)
+        id_map_path = Path(settings.id_map_path)
+        if not index_path.is_file() or not id_map_path.is_file():
+            logger.warning("Falling back to sparse retrieval: dense artifacts missing.")
+            retriever = SparseBM25Retriever(corpus, ids)
         else:
-            retriever = DenseFaissRetriever(embedder)
-
-    else: # sparse
-        retriever = SparseBM25Retriever(contents, ids)
+            logger.info("Using DenseFaissRetriever.")
+            retriever = DenseFaissRetriever(embedder=SentenceTransformerEmbedder())
+    else:
+        logger.info("Using SparseBM25Retriever.")
+        retriever = SparseBM25Retriever(corpus, ids)
 
     generator = _choose_generator()
     _rag_service = RagService(retriever, generator)
+    logger.info("RagService initialized successfully.")
+
 
 def get_rag_service() -> RagService:
-    assert _rag_service, "RagService not initialised"
+    """FastAPI dependency providing the initialized RagService singleton."""
+    assert _rag_service is not None, "RagService has not been initialized."
     return _rag_service

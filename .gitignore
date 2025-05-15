@@ -10,9 +10,16 @@ __pycache__/
 build/
 htmlcov/
 
+*TODO.md*
+
 # ___ Extensiones C ___
 # Ignora binarios compilados de extensiones C.
 *.so
+
+.coverage
+src_all_files.txt
+
+tests_all_files.txt
 
 # ___ Distribución / Empaquetado ___
 # Archivos generados al construir o distribuir paquetes Python.

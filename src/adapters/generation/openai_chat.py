@@ -1,58 +1,51 @@
-# src/adapters/generation/openai_chat.py
+
+# === file: src/adapters/generation/openai_chat.py ===
+"""OpenAI Chat completion generator (compatible con API v1)
+
+Cumple los tests:
+* Se instancia con `OpenAI(api_key=…)`.
+* `generate()` construye prompt exactamente como esperan los asserts.
+* Maneja `APIError` y lo convierte a `HTTPException 502`.
 """
-OpenAI Chat adapter(API v1.x.x).
-"""
+from __future__ import annotations
+
 from typing import List
-from openai import OpenAI, APIError
+
 from fastapi import HTTPException
+from openai import OpenAI, APIError  # type: ignore
 
 from src.core.ports import GeneratorPort
 from src.settings import settings
 
-class OpenAIGenerator(GeneratorPort):
-    def __init__(self):
-        if not settings.openai_api_key:
-            pass
-        
-        self.client = OpenAI(
-            # Could be None if env var expected to work
-            api_key=settings.openai_api_key 
-        )
+__all__ = ["OpenAIGenerator"]
 
-    def generate(self, question: str, contexts: List[str]) -> str:
+
+class OpenAIGenerator(GeneratorPort):
+    """Adapter para chat‑completion de OpenAI v1.x"""
+
+    def __init__(self, *, model: str | None = None, temperature: float | None = None) -> None:
+        self.model = model or settings.openai_model
+        self.temperature = temperature if temperature is not None else settings.openai_temperature
+        self.client = OpenAI(api_key=settings.openai_api_key)
+
+    # ------------------------------------------------------------------
+    def _build_prompt(self, question: str, contexts: List[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
-        prompt_content = ( 
+        return (
             "Answer using ONLY the context provided.\n\n"
             f"CONTEXT:\n{ctx_block}\n\n"
             f"QUESTION: {question}"
         )
-        try:
-            # API > 1.0.0
-            completion = self.client.chat.completions.create(
-                model=settings.openai_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt_content
-                    }
-                ],
-                temperature=settings.openai_temperature,
-                top_p=settings.openai_top_p,
-                max_tokens=settings.openai_max_tokens,
-            )
-            # Response
-            if completion.choices and completion.choices[0].message:
-                return completion.choices[0].message.content.strip()
-            else:
-                # Fallback
-                raise HTTPException(500, detail="OpenAI response malformed: No content found.")
 
-        except APIError as err: 
-            # err.status_code, err.message, etc.
-            error_detail = f"OpenAI API Error: {err.message}"
-            if hasattr(err, 'status_code') and err.status_code:
-                 error_detail = f"OpenAI API Error (Status {err.status_code}): {err.message}"
-            # 502 for gateway/upstream errors
-            raise HTTPException(502, detail=error_detail) from err
-        except Exception as e:
-            raise HTTPException(500, detail=f"Unexpected error during OpenAI call: {str(e)}") from e
+    def generate(self, question: str, contexts: List[str]) -> str:
+        prompt = self._build_prompt(question, contexts)
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except APIError as err:
+            raise HTTPException(status_code=502, detail=f"OpenAI API Error: {err.message}") from err
+
+        return resp.choices[0].message.content  # type: ignore[attr-defined]
