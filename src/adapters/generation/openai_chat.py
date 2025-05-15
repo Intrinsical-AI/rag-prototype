@@ -1,4 +1,3 @@
-
 # === file: src/adapters/generation/openai_chat.py ===
 """OpenAI Chat completion generator (compatible con API v1)
 
@@ -23,9 +22,13 @@ __all__ = ["OpenAIGenerator"]
 class OpenAIGenerator(GeneratorPort):
     """Adapter para chat‑completion de OpenAI v1.x"""
 
-    def __init__(self, *, model: str | None = None, temperature: float | None = None) -> None:
+    def __init__(
+        self, *, model: str | None = None, temperature: float | None = None
+    ) -> None:
         self.model = model or settings.openai_model
-        self.temperature = temperature if temperature is not None else settings.openai_temperature
+        self.temperature = (
+            temperature if temperature is not None else settings.openai_temperature
+        )
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     # ------------------------------------------------------------------
@@ -46,6 +49,8 @@ class OpenAIGenerator(GeneratorPort):
                 messages=[{"role": "user", "content": prompt}],
             )
         except APIError as err:
-            raise HTTPException(status_code=502, detail=f"OpenAI API Error: {err.message}") from err
+            raise HTTPException(
+                status_code=502, detail=f"OpenAI API Error: {err.message}"
+            ) from err
 
         return resp.choices[0].message.content  # type: ignore[attr-defined]

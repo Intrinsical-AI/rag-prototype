@@ -10,26 +10,33 @@ from src.settings import settings as global_settings
 from src.adapters.retrieval.dense_faiss import DenseFaissRetriever
 from src.core.ports import EmbedderPort
 
+
 # --- Dummy Embedder for controlled testing ---
 class DummyEmbedder(EmbedderPort):
     """A dummy embedder returning pre-defined vectors for given texts."""
+
     DIM: int
 
     def __init__(self, dim: int, predefined_embeddings: dict[str, list[float]] = None):
         self.DIM = dim
-        self.predefined_embeddings = predefined_embeddings if predefined_embeddings else {}
+        self.predefined_embeddings = (
+            predefined_embeddings if predefined_embeddings else {}
+        )
         self.default_vector = [0.0] * self.DIM
 
     def embed(self, text: str) -> list[float]:
         return self.predefined_embeddings.get(text, self.default_vector)
 
+
 # --- FAISS index and id-map artifact fixture ---
 @pytest.fixture
-def faiss_test_artifacts(tmp_path: Path) -> tuple[Path, Path, dict[str, list[float]], int]:
+def faiss_test_artifacts(
+    tmp_path: Path,
+) -> tuple[Path, Path, dict[str, list[float]], int]:
     """Creates a minimal FAISS index and ID map for dense retrieval tests."""
     dim = 4
     doc_embeddings = {
-        "doc1_text": [1.0, 0.1, 0.2, 0.3],   # Closest to query_target_doc1
+        "doc1_text": [1.0, 0.1, 0.2, 0.3],  # Closest to query_target_doc1
         "doc2_text": [0.2, 1.0, 0.3, 0.4],
         "doc3_text": [0.3, 0.2, 1.0, 0.5],
     }
@@ -38,7 +45,7 @@ def faiss_test_artifacts(tmp_path: Path) -> tuple[Path, Path, dict[str, list[flo
     query_embeddings = {
         "query_target_doc1": [0.9, 0.15, 0.25, 0.35],  # Closest to doc1_text
         "query_target_doc2": [0.25, 0.9, 0.35, 0.45],  # Closest to doc2_text
-        "query_no_match":    [0.0, 0.0, 0.0, 0.0],     # Not close to any doc
+        "query_no_match": [0.0, 0.0, 0.0, 0.0],  # Not close to any doc
     }
 
     all_predefined_embeddings = {**doc_embeddings, **query_embeddings}
@@ -57,7 +64,9 @@ def faiss_test_artifacts(tmp_path: Path) -> tuple[Path, Path, dict[str, list[flo
 
     return index_path, id_map_path, all_predefined_embeddings, dim
 
+
 # --- Tests ---
+
 
 def test_faiss_retrieves_closest_doc(faiss_test_artifacts, monkeypatch):
     """
@@ -79,6 +88,7 @@ def test_faiss_retrieves_closest_doc(faiss_test_artifacts, monkeypatch):
     assert isinstance(retrieved_scores[0], float)
     assert retrieved_scores[0] < 0.1  # Should be a small L2 distance
 
+
 def test_faiss_respects_k(faiss_test_artifacts, monkeypatch):
     """
     DenseFaissRetriever returns exactly k results, including the most relevant.
@@ -97,6 +107,7 @@ def test_faiss_respects_k(faiss_test_artifacts, monkeypatch):
     assert len(retrieved_ids) == k_val
     assert len(retrieved_scores) == k_val
     assert 101 in retrieved_ids  # Closest doc should always be present
+
 
 def test_faiss_no_match_returns_something(faiss_test_artifacts, monkeypatch):
     """
@@ -117,7 +128,10 @@ def test_faiss_no_match_returns_something(faiss_test_artifacts, monkeypatch):
     assert len(retrieved_ids) == len(retrieved_scores)
     if retrieved_ids:
         assert len(retrieved_ids) == 1
-        assert retrieved_scores[0] > 0.5  # Arbitrary: Should be greater than "close match" threshold
+        assert (
+            retrieved_scores[0] > 0.5
+        )  # Arbitrary: Should be greater than "close match" threshold
+
 
 def test_faiss_k_larger_than_docs(faiss_test_artifacts, monkeypatch):
     """
@@ -137,6 +151,7 @@ def test_faiss_k_larger_than_docs(faiss_test_artifacts, monkeypatch):
     assert len(retrieved_ids) == 3  # Should return all docs present
     assert len(retrieved_scores) == 3
 
+
 def test_faiss_empty_query_returns_default(faiss_test_artifacts, monkeypatch):
     """
     If the query is empty, uses the embedder's default vector and returns k results.
@@ -155,4 +170,3 @@ def test_faiss_empty_query_returns_default(faiss_test_artifacts, monkeypatch):
     assert len(retrieved_ids) == k_val
     assert len(retrieved_scores) == k_val
     # All returned scores should be the L2 distance to [0, 0, 0, 0] (can assert actual values if desired)
-

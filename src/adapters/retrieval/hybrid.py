@@ -30,7 +30,9 @@ class HybridRetriever(RetrieverPort):
         Interpolation parameter (0 ≤ alpha ≤ 1). Higher alpha emphasizes sparse retrieval.
     """
 
-    def __init__(self, *, dense: RetrieverPort, sparse: RetrieverPort, alpha: float = 0.5):
+    def __init__(
+        self, *, dense: RetrieverPort, sparse: RetrieverPort, alpha: float = 0.5
+    ):
         if not 0.0 <= alpha <= 1.0:
             raise ValueError("Parameter 'alpha' must be in [0, 1].")
         self.dense = dense
@@ -69,7 +71,9 @@ class HybridRetriever(RetrieverPort):
             combined_scores[doc_id] = combined_scores.get(doc_id, 0.0) + score
 
         # Sort by combined score (descending)
-        sorted_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)[:k]
+        sorted_results = sorted(
+            combined_scores.items(), key=lambda x: x[1], reverse=True
+        )[:k]
 
         ids, scores = zip(*sorted_results) if sorted_results else ([], [])
 

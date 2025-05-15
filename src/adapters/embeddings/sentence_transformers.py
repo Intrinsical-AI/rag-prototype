@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer
 
 from src.core.ports import EmbedderPort
 
+
 class SentenceTransformerEmbedder(EmbedderPort):
     DIM = 384
 

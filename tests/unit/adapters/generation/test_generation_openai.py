@@ -8,6 +8,7 @@ from openai import APIError
 from src.adapters.generation.openai_chat import OpenAIGenerator
 from src.settings import settings
 
+
 @pytest.fixture
 def openai_generator_instance(monkeypatch):
     """
@@ -18,6 +19,7 @@ def openai_generator_instance(monkeypatch):
     generator = OpenAIGenerator()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     return generator
+
 
 @mock.patch("src.adapters.generation.openai_chat.OpenAI")
 def test_openai_generator_happy_path(MockOpenAI):
@@ -67,6 +69,7 @@ def test_openai_generator_happy_path(MockOpenAI):
     )
     assert messages[0]["content"] == prompt_content_expected
 
+
 @mock.patch("src.adapters.generation.openai_chat.OpenAI")
 def test_openai_generator_handles_api_error(MockOpenAI):
     """
@@ -79,9 +82,7 @@ def test_openai_generator_handles_api_error(MockOpenAI):
     # Configure the mock to raise APIError on completion call
     mock_client_instance = MockOpenAI.return_value
     mock_client_instance.chat.completions.create.side_effect = APIError(
-        message="Mock API Error from v1",
-        request=None,
-        body=None
+        message="Mock API Error from v1", request=None, body=None
     )
 
     generator = OpenAIGenerator()

@@ -7,7 +7,4 @@ Generation adapters for LLM text generation.
 from .ollama_chat import OllamaGenerator
 from .openai_chat import OpenAIGenerator
 
-__all__ = [
-    "OllamaGenerator",
-    "OpenAIGenerator"
-] 
+__all__ = ["OllamaGenerator", "OpenAIGenerator"]

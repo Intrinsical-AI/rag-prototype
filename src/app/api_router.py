@@ -20,20 +20,24 @@ router = APIRouter()
 
 # ------------------- Pydantic Schemas ------------------- #
 
+
 class AskRequest(BaseModel):
     """Request schema for the `/ask` endpoint."""
+
     question: str = Field(..., description="User's question")
     k: int = Field(3, ge=1, le=10, description="Number of documents to retrieve")
 
 
 class AskResponse(BaseModel):
     """Response schema for the `/ask` endpoint."""
+
     answer: str
     source_ids: List[int]
 
 
 class HistoryItem(BaseModel):
     """Schema representing a single history item."""
+
     id: int
     question: str
     answer: str
@@ -41,6 +45,7 @@ class HistoryItem(BaseModel):
 
 
 # ---------------------- API Endpoints ---------------------- #
+
 
 @router.post("/ask", response_model=AskResponse)
 def ask(
@@ -64,8 +69,12 @@ def ask(
 
 @router.get("/history", response_model=List[HistoryItem])
 def history(
-    limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
-    offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
+    limit: int = Query(
+        10, ge=1, le=100, description="Max number of history items to retrieve"
+    ),
+    offset: int = Query(
+        0, ge=0, description="Number of items to skip (useful for pagination)"
+    ),
     db: Session = Depends(get_db),
 ) -> List[HistoryItem]:
     """

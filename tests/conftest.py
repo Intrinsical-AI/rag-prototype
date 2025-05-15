@@ -35,8 +35,9 @@ global_app_settings.csv_has_header = True
 empty_faq_path.parent.mkdir(parents=True, exist_ok=True)
 if not empty_faq_path.exists():
     import csv
+
     with open(empty_faq_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f, delimiter=';')
+        writer = csv.writer(f, delimiter=";")
         writer.writerow(["question", "answer"])  # Only header
 
 # 3. Patch DB engine and SessionLocal for src.db.base
@@ -53,6 +54,7 @@ _test_engine = create_engine(
 db_base_module.engine = _test_engine
 db_base_module.SessionLocal.configure(bind=_test_engine)
 
+
 # 4. Session-scoped fixture to create all DB tables once
 @pytest.fixture(scope="session", autouse=True)
 def create_db_tables_session_scoped():
@@ -63,6 +65,7 @@ def create_db_tables_session_scoped():
     yield
     db_models_module.Base.metadata.drop_all(bind=_test_engine)
     _test_engine.dispose()
+
 
 # 5. Function-scoped fixture: yields a clean session and wipes tables
 @pytest.fixture(scope="function")
@@ -79,6 +82,7 @@ def db_session() -> SQLAlchemySession:
     finally:
         session.close()
 
+
 # 6. Function-scoped fixture: resets the RAG service singleton before each test
 @pytest.fixture(scope="function", autouse=True)
 def reset_rag_service_singleton():
@@ -89,10 +93,12 @@ def reset_rag_service_singleton():
     yield
     # Optionally re-clear again after test if paranoid
 
+
 # 7. SessionLocal fixture for direct usage (if needed)
 @pytest.fixture(scope="function")
 def AppSessionLocal() -> sessionmaker:
     return db_base_module.SessionLocal
+
 
 # 8. Fixture: Populates DB with test data (for integration tests)
 @pytest.fixture(scope="function")
@@ -101,16 +107,24 @@ def populated_db_session(db_session: SQLAlchemySession):
     Populates the DB with a standard set of documents for integration tests.
     """
     from src.db.models import Document as DbDocument
+
     test_docs_data = [
-        {"id": 101, "content": "The refund policy states you can request a refund within 14 days."},
+        {
+            "id": 101,
+            "content": "The refund policy states you can request a refund within 14 days.",
+        },
         {"id": 102, "content": "To contact support, please email support@example.com."},
-        {"id": 103, "content": "Available features include semantic search and document processing."},
+        {
+            "id": 103,
+            "content": "Available features include semantic search and document processing.",
+        },
     ]
     for doc_data in test_docs_data:
         if not db_session.get(DbDocument, doc_data["id"]):
             db_session.add(DbDocument(**doc_data))
     db_session.commit()
     return db_session
+
 
 # 9. Fixture: Initializes the RAG service (after DB is populated)
 @pytest.fixture(scope="function")
@@ -123,7 +137,8 @@ def initialized_rag_service(populated_db_session, monkeypatch):
     dummy_faq_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(dummy_faq_csv, "w", newline="", encoding="utf-8") as f:
         import csv
-        writer = csv.writer(f, delimiter=';')
+
+        writer = csv.writer(f, delimiter=";")
         writer.writerow(["question", "answer"])
         writer.writerow(["Q_init1", "A_init1"])
 
@@ -133,10 +148,12 @@ def initialized_rag_service(populated_db_session, monkeypatch):
     yield service
     app_dependencies_module._rag_service = None
 
+
 # 10. Aliases for integration tests if needed
 @pytest.fixture(scope="function")
 def initialized_rag_service_for_integration(initialized_rag_service):
     return initialized_rag_service
+
 
 @pytest.fixture(scope="function")
 def populated_db_for_integration(populated_db_session):

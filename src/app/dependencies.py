@@ -64,7 +64,9 @@ def _choose_generator():
         except requests.RequestException:
             logger.warning("Fallback Ollama health-check failed.")
 
-    raise RuntimeError("LLM Generator could not be initialized: no OpenAI key and Ollama unreachable.")
+    raise RuntimeError(
+        "LLM Generator could not be initialized: no OpenAI key and Ollama unreachable."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -75,10 +77,14 @@ def init_rag_service():
     global _rag_service
     logger.info("Initializing RagService...")
 
-    is_in_memory_db = "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
+    is_in_memory_db = (
+        "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
+    )
 
-    if not db_base.engine or str(db_base.engine.url) != settings.sqlite_url or (
-        is_in_memory_db and not isinstance(db_base.engine.pool, StaticPool)
+    if (
+        not db_base.engine
+        or str(db_base.engine.url) != settings.sqlite_url
+        or (is_in_memory_db and not isinstance(db_base.engine.pool, StaticPool))
     ):
         logger.warning("Engine mismatch or missing. Reconfiguring engine.")
         pool_kwargs = {"poolclass": StaticPool} if is_in_memory_db else {}
@@ -110,7 +116,7 @@ def init_rag_service():
                         if len(row) >= 2:
                             texts.append(preprocess_text(f"{row[0]} {row[1]}"))
                         else:
-                            logger.warning("Row %d malformed: %s", i+1, row)
+                            logger.warning("Row %d malformed: %s", i + 1, row)
             except Exception as e:
                 logger.error("Error reading CSV: %s", e, exc_info=True)
 

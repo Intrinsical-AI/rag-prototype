@@ -8,6 +8,7 @@ __all__ = ["preprocess_text"]
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
+
 def preprocess_text(text: str) -> str:
     """
     Normalize texts texto:

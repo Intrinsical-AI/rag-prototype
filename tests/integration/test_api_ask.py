@@ -10,6 +10,7 @@ from src.settings import settings
 from src.app.main import app  # arranca la app con Lifespan
 from src.app import dependencies as app_dependencies_module
 
+
 # --- Fixture para TestClient limpio en cada test ---
 @pytest.fixture(scope="function")
 def client(populated_db_for_integration) -> TestClient:
@@ -19,6 +20,7 @@ def client(populated_db_for_integration) -> TestClient:
 
     with TestClient(app) as c:
         yield c
+
 
 # --- Fixture para limpiar historial ---
 @pytest.fixture(scope="function")
@@ -31,6 +33,7 @@ def clean_history_table():
         db.commit()
     yield
 
+
 # --- Helper para mock de OpenAI API v1.x ---
 def _make_openai_v1_mock(answer_text: str):
     mock_completion = mock.MagicMock()
@@ -39,13 +42,13 @@ def _make_openai_v1_mock(answer_text: str):
     mock_completion.choices = [mock_choice]
     return mock_completion
 
+
 # --- Tests ---
+
 
 @mock.patch("src.adapters.generation.openai_chat.OpenAI")
 def test_api_ask_with_openai_retrieves_and_generates(
-    MockOpenAIClass,
-    client: TestClient,
-    monkeypatch
+    MockOpenAIClass, client: TestClient, monkeypatch
 ):
     # Forzar uso de OpenAI
     monkeypatch.setattr(settings, "ollama_enabled", False)
@@ -83,10 +86,7 @@ def test_api_ask_with_openai_retrieves_and_generates(
 @mock.patch("requests.post")
 @mock.patch("requests.get")
 def test_api_ask_with_ollama_retrieves_and_generates(
-    mock_requests_get,
-    mock_requests_post,
-    client: TestClient,
-    monkeypatch
+    mock_requests_get, mock_requests_post, client: TestClient, monkeypatch
 ):
     # Forzar uso de Ollama
     monkeypatch.setattr(settings, "ollama_enabled", True)
@@ -140,12 +140,10 @@ def test_api_ask_validation_error_wrong_type(client: TestClient):
     errors = resp.json()["detail"]
     assert any("string" in err.get("msg", "") for err in errors)
 
+
 @mock.patch("src.adapters.generation.openai_chat.OpenAI")
 def test_history_endpoint_records_and_retrieves_qa(
-    MockOpenAIClass,
-    client: TestClient,
-    monkeypatch,
-    clean_history_table
+    MockOpenAIClass, client: TestClient, monkeypatch, clean_history_table
 ):
     # Forzar OpenAI
     monkeypatch.setattr(settings, "ollama_enabled", False)

@@ -7,7 +7,4 @@ Embedding adapters for text embedding generation.
 from .openai import OpenAIEmbedder
 from .sentence_transformers import SentenceTransformerEmbedder
 
-__all__ = [
-    "OpenAIEmbedder",
-    "SentenceTransformerEmbedder"
-] 
+__all__ = ["OpenAIEmbedder", "SentenceTransformerEmbedder"]

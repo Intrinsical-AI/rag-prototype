@@ -17,7 +17,9 @@ def test_sentence_transformer_embedder_happy_path(MockSentenceTransformer):
     # Setup mock for SentenceTransformer instance and encode method
     mock_model_instance = MockSentenceTransformer.return_value
 
-    expected_embedding_array = np.array([i * 0.01 for i in range(384)], dtype=np.float32)
+    expected_embedding_array = np.array(
+        [i * 0.01 for i in range(384)], dtype=np.float32
+    )
     expected_embedding_list = expected_embedding_array.tolist()
 
     mock_model_instance.encode.return_value = [expected_embedding_array]
@@ -48,7 +50,9 @@ def test_sentence_transformer_embedder_custom_model(MockSentenceTransformer):
 
     mock_model_instance = MockSentenceTransformer.return_value
 
-    expected_embedding_array = np.array([i * 0.02 for i in range(384)], dtype=np.float32)
+    expected_embedding_array = np.array(
+        [i * 0.02 for i in range(384)], dtype=np.float32
+    )
     expected_embedding_list = expected_embedding_array.tolist()
 
     mock_model_instance.encode.return_value = [expected_embedding_array]

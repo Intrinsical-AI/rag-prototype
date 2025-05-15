@@ -6,7 +6,6 @@ src package initialization
 __version__ = "0.1.0"
 
 
-
 # # Core settings
 # from src.settings import settings
 
@@ -18,7 +17,7 @@ __version__ = "0.1.0"
 
 # __all__ = [
 #     "settings",
-#     "Base", 
+#     "Base",
 #     "get_db",
 #     "SessionLocal",
 #     "engine",
@@ -27,4 +26,4 @@ __version__ = "0.1.0"
 #     "add_documents",
 #     "OpenAIEmbedder",
 #     "SentenceTransformerEmbedder"
-# ] 
+# ]
