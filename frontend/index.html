@@ -1,163 +1,475 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
-  <title>Simple Q&A AI Bot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Q&A AI Bot</title>
   <style>
     :root {
-      --bg: #f7f7f7;
-      --panel: #ffffff;
-      --border: #dddddd;
-      --accent: #2962ff;
-      --text: #222222;
+      --bg-light:           #f4f8fb;
+      --panel-light:        #fff;
+      --border-light:       #e3e7ef;
+      --text-light:         #24292f;
+      --accent-light:       #2563eb;
+      --accent-light-soft:  #e0e7ff;
+      --secondary-light:    #f2f6fa;
+      --subtle-text-light:  #6b7280;
+
+      --bg-dark:            #191c20;
+      --panel-dark:         #23272f;
+      --border-dark:        #2c313a;
+      --text-dark:          #f8fafc;
+      --accent-dark:        #60a5fa;
+      --accent-dark-soft:   #1e293b;
+      --secondary-dark:     #242731;
+      --subtle-text-dark:   #98a1b3;
+
+      --radius: 1.25rem;
+      --shadow: 0 4px 32px rgba(60,70,120,0.09);
+      --shadow-glow: 0 4px 40px 0 rgba(70,150,255,0.10);
+      --duration: .22s;
+      --accent:      var(--accent-light);
+      --accent-soft: var(--accent-light-soft);
+      --bg:          var(--bg-light);
+      --panel:       var(--panel-light);
+      --border:      var(--border-light);
+      --text:        var(--text-light);
+      --secondary:   var(--secondary-light);
+      --subtle-text: var(--subtle-text-light);
+    }
+    [data-theme="dark"] {
+      --bg:          var(--bg-dark);
+      --panel:       var(--panel-dark);
+      --border:      var(--border-dark);
+      --text:        var(--text-dark);
+      --accent:      var(--accent-dark);
+      --accent-soft: var(--accent-dark-soft);
+      --secondary:   var(--secondary-dark);
+      --subtle-text: var(--subtle-text-dark);
     }
 
     body {
-      margin: 0;
-      font-family: system-ui, sans-serif;
+      min-height: 100vh;
+      margin:0; padding:0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: var(--bg);
-      display: flex;
-      justify-content: center;
-      padding: 2rem;
       color: var(--text);
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center;
+      transition: background var(--duration), color var(--duration);
     }
 
-    .qa-container {
-      width: 100%;
-      max-width: 640px;
+    .theme-btn {
+      position:fixed; top:1.5rem; right:1.5rem;
       background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 1.5rem;
-      box-shadow: 0 2px 5px rgba(0,0,0,.05);
+      color: var(--accent);
+      border: none;
+      border-radius: 50%;
+      box-shadow: 0 2px 16px rgba(40,80,180,0.08);
+      width: 2.8rem; height: 2.8rem;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+      cursor: pointer;
+      z-index: 10;
+      transition: background var(--duration), color var(--duration), box-shadow var(--duration);
+      outline: none;
     }
+    .theme-btn:active { box-shadow: 0 1px 2px var(--accent); }
+    .theme-btn:focus-visible { outline: 2px solid var(--accent); }
 
+    .card {
+      margin-top: 3.5rem;
+      width: 95%; max-width: 480px;
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow), var(--shadow-glow);
+      border: 1.5px solid var(--border);
+      padding: 2.5rem 1.5rem 2.2rem 1.5rem;
+      display: flex; flex-direction: column; gap: 1.1rem;
+      align-items: stretch;
+      transition: background var(--duration), border-color var(--duration);
+      position: relative;
+    }
     h1 {
-      margin-top: 0;
-      text-align: center;
-      font-size: 1.6rem;
+      margin:0 0 0.7rem; text-align:center; color:var(--accent);
+      font-size: 2.1rem; font-weight: 800; letter-spacing: -.03em;
+      text-shadow: 0 2px 12px var(--accent-soft);
+      filter: drop-shadow(0 2px 8px var(--accent-soft));
     }
+    label {font-weight:600; font-size:.95rem; margin-bottom:.4rem;}
 
-    label {
-      font-weight: 600;
-      display: block;
-      margin-bottom: .5rem;
+    .floating-label-input {
+      position: relative;
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
     }
-
     textarea {
-      width: 100%;
-      min-height: 60px;
-      resize: vertical;
-      padding: .6rem;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      font: inherit;
+      font-family: inherit;
+      font-size: 1.07rem;
+      border-radius: .9rem;
+      padding: 1.1rem 1.1rem .8rem 1.1rem;
+      border: 1.8px solid var(--border);
+      background: var(--secondary);
+      color: var(--text);
+      outline: none;
+      transition: border-color var(--duration), background var(--duration);
+      min-height: 3.8rem; max-height: 10rem; resize: vertical;
+      box-shadow: 0 1px 10px var(--accent-soft);
+      margin-bottom: 0;
+    }
+    textarea:focus {
+      border-color: var(--accent);
+      background: var(--panel);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+    .floating-label {
+      position: absolute;
+      left: 1.25rem;
+      top: 1.15rem;
+      font-size: 1.05rem;
+      color: var(--subtle-text);
+      pointer-events: none;
+      opacity: .86;
+      transition: top .17s, left .18s, font-size .14s, color .2s;
+      background: none;
+    }
+    textarea:focus + .floating-label,
+    textarea:not(:placeholder-shown) + .floating-label {
+      top: -.82rem;
+      left: .8rem;
+      font-size: 0.90rem;
+      background: var(--panel);
+      padding: 0 .4em;
+      color: var(--accent);
+      opacity: 1;
     }
 
-    button {
+    .example-questions {
+      margin: 0.35rem 0 0.3rem 0;
+      font-size: .98rem; color: var(--subtle-text);
+      user-select: none;
+    }
+    .example-questions ul {
+      padding: 0; margin: 0.15rem 0 0 0;
+      display: flex; flex-wrap: wrap; gap: .6rem .8rem;
+      list-style: none;
+    }
+    .example-questions li {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 0.7rem;
+      padding: .3rem .95rem;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(80,90,110,0.06);
+      transition: background .16s, color .13s, transform .09s;
+      display: inline-block;
+      font-weight: 500;
+    }
+    .example-questions li:hover {
       background: var(--accent);
       color: #fff;
-      border: 0;
-      padding: .6rem 1.2rem;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 1rem;
-      margin-top: .75rem;
-    }
-    button:disabled { opacity: .6; cursor: default; }
-
-    .answer-box, .history-box {
-      margin-top: 1.25rem;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: #fafafa;
-      padding: 1rem;
-      white-space: pre-wrap;
+      transform: scale(1.06);
     }
 
-    .history-item { margin-bottom: .8rem; }
-    .history-item:last-child { margin-bottom: 0; }
-
-    .spinner {
-      display: inline-block;
-      width: 16px; height: 16px;
-      border: 2px solid var(--accent);
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: spin .8s linear infinite;
-      vertical-align: text-bottom;
-      margin-left: .4rem;
+    .row {
+      display: flex; gap:.8rem; flex-wrap:wrap; align-items:center; margin-top:0.3rem
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .row > * { flex: none; }
+    .row input[type="number"] {
+      width:3.6rem;
+      border-radius: 0.55rem;
+      padding: .35rem .7rem;
+      border: 1.3px solid var(--border);
+      background: var(--secondary);
+      color: var(--text);
+      margin-left:.12rem;
+      font-size: 1.01rem;
+      transition: border-color var(--duration);
+    }
+    .row input[type="number"]:focus { border-color: var(--accent); }
+    button {
+        font-family: inherit;
+        font-size: 1.03rem;
+        border: none; border-radius: .8rem;
+        padding:.7rem 1.4rem; font-weight:700; cursor:pointer;
+        transition: background-color var(--duration), color var(--duration), transform .09s;
+        line-height: 1.2;
+        box-shadow: 0 2px 8px var(--accent-soft);
+    }
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+    }
+    button.primary:hover:not(:disabled){ filter: brightness(1.08); transform: scale(1.03);}
+    button.secondary {
+      background:var(--secondary); color:var(--accent);
+      border: 1.1px solid var(--accent);
+    }
+    button.secondary:hover:not(:disabled){
+      background-color: var(--accent-soft);
+      color: var(--accent);
+      border-color: var(--accent);
+      transform: scale(1.04);
+    }
+    button:disabled{opacity:.6; cursor:not-allowed;}
+    button:active:not(:disabled) { transform: scale(.98);}
+    .box {
+      margin-top:1.2rem; padding:1.2rem 1.2rem;
+      border:1.3px solid var(--border); border-radius:1rem;
+      background:var(--panel);
+      line-height:1.6;
+      min-height:2.3rem;
+      font-size: 1.13rem;
+      box-shadow: 0 2px 16px var(--accent-soft);
+      word-break: break-word;
+    }
+    .box[aria-live] {
+      min-height: 2.4rem;
+      font-style: italic;
+      color: var(--subtle-text);
+      font-size: 1.09rem;
+    }
+    .history {
+      max-height:280px; overflow-y:auto;
+      background: var(--secondary);
+      border-radius: .7rem;
+      box-shadow: 0 1px 5px var(--accent-soft);
+      font-size: 1.02rem;
+      margin-top:.8rem;
+    }
+    .history-item{
+      border-bottom:1px dashed var(--border);
+      padding-bottom:.8rem; margin-bottom:.8rem;
+      padding-left: .1rem;
+    }
+    .history-item:last-child{border-bottom:0; margin-bottom:0; padding-bottom:0;}
+    .history-item strong { color: var(--accent); }
+    .source-ids {
+      font-size:.95rem; color:var(--subtle-text);
+      margin-top:.39rem;
+    }
+    .source-ids code {
+      background-color: var(--accent-soft);
+      color: var(--accent);
+      padding: 0.1em 0.4em;
+      border-radius: .5rem;
+      font-size:.95em;
+      margin-right: .15em;
+    }
+    .status-message {
+      font-size: 1.07rem; color:var(--subtle-text);
+      display: flex; align-items: center;
+      gap: .45rem;
+      font-weight: 500;
+    }
+    .spinner{
+      width:17px;height:17px;
+      border:2.8px solid var(--accent);
+      border-top-color:transparent;
+      border-radius:50%;
+      animation:spin .68s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .info-note {
+      font-size: 0.98rem;
+      color: var(--subtle-text);
+      margin-top:.65rem;
+      text-align: left;
+      padding-left: .1rem;
+    }
+    @media (max-width: 600px) {
+      .card {max-width: 99vw; padding: 1.4rem .45rem 1.4rem .45rem;}
+      .floating-label { left: .92rem;}
+    }
   </style>
 </head>
 <body>
-  <main class="qa-container">
-    <h1>Simple Q&amp;A AI Bot</h1>
-    <label for="questionInput">Escribe tu pregunta:</label>
-    <textarea id="questionInput" placeholder="¿Cuál es la política de reembolso?"></textarea>
-    <button id="askBtn">Preguntar</button>
-    <div id="status" style="display:none; margin-top:.5rem;">
-      Procesando<span class="spinner"></span>
+  <button id="themeBtn" class="theme-btn" aria-label="Switch theme" title="Switch theme">🌙</button>
+  <section class="card">
+    <h1>Q&A AI Bot</h1>
+    <div class="floating-label-input">
+      <textarea id="question" placeholder=" " required></textarea>
+      <span class="floating-label">Type your question here…</span>
     </div>
-    <div id="answerBox" class="answer-box" aria-live="polite">
-      La respuesta aparecerá aquí...
+    <div class="example-questions">
+      <span>Try asking:</span>
+      <ul id="exampleList">
+        <li>What is Legal Engine Search?</li>
+        <li>How does LES work?</li>
+        <li>Which file types are supported?</li>
+      </ul>
     </div>
-    <div id="historyBox" class="history-box" style="display:none;">
+    <div class="row">
+      <button id="askBtn" class="primary">Ask</button>
+      <div id="statusEl" class="status-message" hidden>
+        <span>Processing</span>
+        <span class="spinner" role="status" aria-live="polite" aria-label="Loading"></span>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:.3rem">
+        <label for="kValue" style="margin-bottom:0;font-weight:600;">k:</label>
+        <input type="number" id="kValue" value="3" min="1" max="10" title="Number of documents to retrieve">
+      </div>
     </div>
-  </main>
-
+    <div class="info-note">
+      <b>k</b>: Number of documents/answers to retrieve (not pagination).<br>
+      <span style="font-size:.96em;">History is local and cleared when the page reloads.</span>
+    </div>
+    <div id="answerBox" class="box" style="margin-top:1.25rem" aria-live="polite">The answer will appear here…</div>
+    <div id="answerMeta" style="margin-top:0.3rem;"></div>
+    <div class="row" style="justify-content:flex-end; margin-top:1rem" id="historyTools" hidden>
+      <button id="clearHistoryBtn" class="secondary">Clear History</button>
+    </div>
+    <div id="historyBox" class="box history" hidden></div>
+  </section>
   <script>
-    const askBtn        = document.getElementById('askBtn');
-    const questionInput = document.getElementById('questionInput');
-    const answerBox     = document.getElementById('answerBox');
-    const statusDiv     = document.getElementById('status');
-    const historyBox    = document.getElementById('historyBox');
-
-    const API_URL = '/api/ask'; 
-    
+    const qs = (selector) => document.querySelector(selector);
+    const API_URL = '/api/ask';
+    // --- DOM Elements ---
+    const themeBtn = qs('#themeBtn');
+    const askBtn = qs('#askBtn');
+    const questionEl = qs('#question');
+    const kEl = qs('#kValue');
+    const statusEl = qs('#statusEl');
+    const answerBox = qs('#answerBox');
+    const answerMeta = qs('#answerMeta');
+    const historyBox = qs('#historyBox');
+    const historyTools = qs('#historyTools');
+    const clearHistoryBtn = qs('#clearHistoryBtn');
+    const exampleListEl = qs('#exampleList');
+    // --- Theme Management ---
+    const applyTheme = (theme) => {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem('theme', theme);
+      themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+      themeBtn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+    };
+    const storedTheme = localStorage.getItem('theme');
+    const preferredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    applyTheme(storedTheme || preferredTheme);
+    themeBtn.addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+    // --- Example Questions ---
+    exampleListEl.addEventListener('click', (e) => {
+        if (e.target.tagName === 'LI') {
+            questionEl.value = e.target.textContent;
+            questionEl.focus();
+        }
+    });
+    // --- Floating label for textarea ---
+    questionEl.addEventListener('input', () => {
+      questionEl.setAttribute('data-has-content', questionEl.value.trim() ? "1" : "");
+    });
+    // --- Event Listeners ---
+    questionEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        askBtn.click();
+      }
+    });
     askBtn.addEventListener('click', async () => {
-      const question = questionInput.value.trim();
+      const question = questionEl.value.trim();
       if (!question) return;
+      const k = parseInt(kEl.value) || 3;
 
-      // UI: block button nd show spinner
       askBtn.disabled = true;
-      statusDiv.style.display = 'block';
-      answerBox.textContent = '';
+      statusEl.hidden = false;
+      answerBox.textContent = 'Asking the oracle...';
+      answerMeta.innerHTML = '';
+
+      let answer = '';
+      let source_ids = [];
+      let errorMsg = '';
 
       try {
         const response = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question })
+          body: JSON.stringify({ question, k })
         });
 
         if (!response.ok) {
-          throw new Error(await response.text());
+          let errorData;
+          try { errorData = await response.json(); } catch (e) { errorData = { detail: await response.text() || `HTTP error ${response.status}`}; }
+          const message = errorData.detail || (typeof errorData === 'string' ? errorData : 'Unknown error');
+          throw new Error(message, {cause: response.status});
         }
-        const data = await response.json();
-        answerBox.textContent = data.answer ?? '(sin respuesta)';
 
-        // add to history
-        appendHistory(question, data.answer);
-
+        const json = await response.json();
+        answer = json.answer || '(No answer received)';
+        source_ids = json.source_ids || [];
       } catch (err) {
-        answerBox.textContent = 'Error al obtener respuesta: ' + err.message;
+        errorMsg = `Error: ${err.message}`;
       } finally {
+        statusEl.hidden = true;  // OCULTAR SPINNER antes de mostrar el resultado
         askBtn.disabled = false;
-        statusDiv.style.display = 'none';
-        questionInput.value = '';
+
+        if (errorMsg) {
+          answerBox.textContent = errorMsg;
+        } else {
+          answerBox.textContent = answer;
+          renderAnswerMeta(answer, source_ids);
+          pushToHistory(question, answer, source_ids);
+          questionEl.value = '';
+          questionEl.focus();
+        }
       }
     });
-
-    function appendHistory(question, answer) {
-      historyBox.style.display = 'block';
-      const item        = document.createElement('div');
-      item.className    = 'history-item';
-      item.innerHTML    =
-        `<p><strong>Q:</strong> ${question}</p>` +
-        `<p><strong>A:</strong> ${answer}</p>`;
-      historyBox.prepend(item);
+    clearHistoryBtn.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear the history?')) {
+        historyBox.innerHTML = '';
+        historyBox.hidden = true;
+        historyTools.hidden = true;
+        answerBox.textContent = 'The answer will appear here…';   // ← add this
+        answerMeta.innerHTML = '';                                // ← add this
+      }
+    });
+    // --- Helper Functions ---
+    function renderAnswerMeta(answerText, sourceIds) {
+        answerMeta.innerHTML = '';
+        if (sourceIds.length > 0) {
+            const sourcesDiv = document.createElement('div');
+            sourcesDiv.className = 'source-ids';
+            sourcesDiv.innerHTML = 'Sources: ';
+            sourceIds.forEach((id, i) => {
+                const codeEl = document.createElement('code');
+                codeEl.textContent = id;
+                sourcesDiv.appendChild(codeEl);
+                if (i < sourceIds.length - 1) sourcesDiv.append(', ');
+            });
+            answerMeta.appendChild(sourcesDiv);
+        }
+    }
+    function pushToHistory(question, answer, sourceIds) {
+      historyTools.hidden = false;
+      historyBox.hidden = false;
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'history-item';
+      const qPara = document.createElement('p');
+      qPara.innerHTML = `<strong>Q:</strong> ${escapeHTML(question)}`;
+      itemDiv.appendChild(qPara);
+      const aPara = document.createElement('p');
+      aPara.innerHTML = `<strong>A:</strong> ${escapeHTML(answer)}`;
+      itemDiv.appendChild(aPara);
+      if (sourceIds.length > 0) {
+        const sourcesDiv = document.createElement('div');
+        sourcesDiv.className = 'source-ids';
+        sourcesDiv.innerHTML = 'Sources: ';
+        sourceIds.forEach((id, i) => {
+            const codeEl = document.createElement('code');
+            codeEl.textContent = id;
+            sourcesDiv.appendChild(codeEl);
+            if (i < sourceIds.length - 1) sourcesDiv.append(', ');
+        });
+        itemDiv.appendChild(sourcesDiv);
+      }
+      historyBox.prepend(itemDiv);
+      historyBox.scrollTop = 0;
+    }
+    function escapeHTML(str) {
+      const p = document.createElement('p');
+      p.textContent = str;
+      return p.innerHTML;
     }
   </script>
 </body>

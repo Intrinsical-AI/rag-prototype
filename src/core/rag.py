@@ -20,7 +20,7 @@ class RagService:
         self.generator = generator
 
     # k default 3 como requieren los tests
-    def ask(self, db: Session, question: str, *, k: int = 3) -> Dict[str, Any]:
+    def ask(self, db: Session, question: str, k: int = 3) -> Dict[str, Any]:
         doc_ids, _ = self.retriever.retrieve(question, k)
         documents = crud.get_documents(db, doc_ids) if doc_ids else []
         contexts = [d.content for d in documents]

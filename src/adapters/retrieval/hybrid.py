@@ -1,10 +1,14 @@
-
-# === file: src/adapters/retrieval/hybrid.py ===
-"""Híbrido denso + BM25 con suma ponderada.
-
-Default `k=5` (coincide con tests).
-"""
 from __future__ import annotations
+
+"""Hybrid Retriever: Combines Dense and Sparse (BM25) Retrievers.
+
+Uses linear interpolation to combine results:
+
+- final_score = (1 - alpha) * dense_score + alpha * sparse_score
+```
+
+```
+"""
 
 from typing import List, Tuple
 
@@ -14,34 +18,59 @@ __all__ = ["HybridRetriever"]
 
 
 class HybridRetriever(RetrieverPort):
-    """Combina un retriever denso y uno sparse mediante interpolación lineal.
+    """Hybrid retrieval combining dense and sparse retrievers.
 
-    score_final = (1‑alpha)·score_dense + alpha·score_sparse
+    Parameters
+    ----------
+    dense : RetrieverPort
+        Retriever using dense vector embeddings.
+    sparse : RetrieverPort
+        Retriever using sparse (BM25) scores.
+    alpha : float, default 0.5
+        Interpolation parameter (0 ≤ alpha ≤ 1). Higher alpha emphasizes sparse retrieval.
     """
 
     def __init__(self, *, dense: RetrieverPort, sparse: RetrieverPort, alpha: float = 0.5):
         if not 0.0 <= alpha <= 1.0:
-            raise ValueError("alpha must be in [0,1]")
+            raise ValueError("Parameter 'alpha' must be in [0, 1].")
         self.dense = dense
         self.sparse = sparse
         self.alpha = alpha
 
-    # --------------------------------------------------------------
     def retrieve(self, query: str, k: int = 5) -> Tuple[List[int], List[float]]:
-        d_ids, d_scores = self.dense.retrieve(query, k)
-        s_ids, s_scores = self.sparse.retrieve(query, k)
+        """Retrieve the top-k documents by combining dense and sparse scores.
 
-        # Re‑ponderar
-        d_scores = [s * (1 - self.alpha) for s in d_scores]
-        s_scores = [s * self.alpha for s in s_scores]
+        Parameters
+        ----------
+        query : str
+            Query string.
+        k : int, default 5
+            Number of top documents to retrieve.
 
-        merged: dict[int, float] = {}
-        for doc_id, score in zip(d_ids, d_scores):
-            merged[doc_id] = merged.get(doc_id, 0.0) + score
-        for doc_id, score in zip(s_ids, s_scores):
-            merged[doc_id] = merged.get(doc_id, 0.0) + score
+        Returns
+        -------
+        Tuple[List[int], List[float]]
+            Parallel lists containing document IDs and combined scores.
+        """
+        dense_ids, dense_scores = self.dense.retrieve(query, k)
+        sparse_ids, sparse_scores = self.sparse.retrieve(query, k)
 
-        # Orden descendente por score
-        sorted_pairs = sorted(merged.items(), key=lambda t: t[1], reverse=True)[:k]
-        ids, scores = zip(*sorted_pairs) if sorted_pairs else ([], [])
+        # Weight scores
+        dense_scores = [score * (1 - self.alpha) for score in dense_scores]
+        sparse_scores = [score * self.alpha for score in sparse_scores]
+
+        # Merge scores
+        combined_scores: dict[int, float] = {}
+
+        for doc_id, score in zip(dense_ids, dense_scores):
+            combined_scores[doc_id] = combined_scores.get(doc_id, 0.0) + score
+
+        for doc_id, score in zip(sparse_ids, sparse_scores):
+            combined_scores[doc_id] = combined_scores.get(doc_id, 0.0) + score
+
+        # Sort by combined score (descending)
+        sorted_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)[:k]
+
+        ids, scores = zip(*sorted_results) if sorted_results else ([], [])
+
         return list(ids), list(scores)

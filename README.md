@@ -1,6 +1,6 @@
 # 🧠 Local-RAG Backend & Frontend
 
-> **Goal**: A minimalist Q&A prototype with Retrieval-Augmented Generation (RAG), showcasing design thinking and implementation capabilities under time constraints. This project includes a full-stack web application with a simple user interface.
+> **Goal**: Minimalist Retrieval-Augmented Generation Q&A prototype showcasing good design, implementation, testing, documentation, and scalability practices. Ready to RAG!
 
 ---
 
@@ -35,14 +35,12 @@ A brief overview of the main directories:
 *   `tests/`: Automated tests.
     *   `unit/`: Unit tests for individual components, with subdirectories fatores/adapters`.
     *   `integration/`: Integration tests palavras-chave API endpoints.
-*   `notebooks/`: (Optional) Jupyter notebooks for experimentation or demos.
-*   `bonus/`: (Optional) Skeleton code for more advanced integrations.
 
 ---
 
 ## 2. Why This Design?
 
-| Need (from task)        | My Reasoning                                     | Implementation Choice                                     |
+| Need (from task)        | Our Reasoning                                     | Implementation Choice                                     |
 | :---------------------- | :----------------------------------------------- | :-------------------------------------------------------- |
 | *Rapid Prototyping*     | Zero external infra; minimal pure-Python deps.   | SQLite + BM25 (default), FastAPI + Vanilla JS Frontend. |
 | *Scalable Path*         | Ability to swap components without major refactor. | Ports & Adapters (Hexagonal Architecture).              |
@@ -61,6 +59,7 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote s
 
 **Dependency Rule:** Arrows of `import` statements primarily point inwards, towards the `src/core` components. This adheres to the Dependency Inversion Principle.
 
+*   `(Optional)`  – A more detailed  [explanation](docs/architecture.md) of the Ports & Adapters architecture used.
 ---
 
 ## 4. Quick Start
@@ -108,12 +107,12 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote s
     docker build -t local-rag .
     docker run -p 8000:8000 -e OPENAI_API_KEY=<key> local-rag
 
-    # 2) stack con Ollama:
+    # 2) stack with Ollama:
     docker compose --profile with-ollama up --build
-    # (primer arranque descarga el modelo indicado en settings.ollama_model)
 
     ```
-    La UI estará disponible en http://localhost:8000/.
+
+UI will be available on  http://localhost:8000/.
 
 
 ---
@@ -122,30 +121,31 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote s
 
 The application is configured via environment variables (loaded from an `.env` file if present) managed by `src/settings.py`.
 
-| Env Var                     | Default                        | Description                                                                 |
-| :-------------------------- | :----------------------------- | :-------------------------------------------------------------------------- |
-| `SQLITE_URL`                | `sqlite:///./data/app.db`      | Database connection string.                                                 |
-| `FAQ_CSV`                   | `data/faq.csv`                 | Path to the FAQ CSV file for `build_index.py` and initial data load.      |
-| `RETRIEVAL_MODE`            | `sparse`                       | Retrieval strategy: `sparse` (BM25) or `dense` (FAISS).                     |
-| `INDEX_PATH`                | `data/index.faiss`             | Path for FAISS index file (if `dense` mode).                                |
-| `ID_MAP_PATH`               | `data/id_map.pkl`              | Path for FAISS ID map file (if `dense` mode).                               |
-| `OPENAI_API_KEY`            | `None`                         | Your OpenAI API key. Required if not using Ollama.                          |
-| `OPENAI_MODEL`              | `gpt-3.5-turbo`                | OpenAI model for chat completion.                                           |
-| `OPENAI_EMBEDDING_MODEL`    | `text-embedding-3-small`       | OpenAI model for embeddings.                                                |
-| `OPENAI_TEMPERATURE`        | `0.2`                          | OpenAI sampling temperature.                                                |
-| `OPENAI_TOP_P`              | `1.0`                          | OpenAI nucleus sampling (top_p).                                              |
-| `OPENAI_MAX_TOKENS`         | `256`                          | Max tokens for OpenAI generated answer.                                     |
-| `OLLAMA_ENABLED`            | `false`                        | Set to `true` to use local Ollama server.                                   |
-| `OLLAMA_MODEL`              | `mistral`                      | Default Ollama model to use (ensure it's pulled: `ollama pull mistral`).    |
-| `OLLAMA_BASE_URL`           | `http://localhost:11434`       | Base URL for your Ollama instance.                                          |
-| `OLLAMA_REQUEST_TIMEOUT`    | `90`                           | Timeout in seconds for requests to Ollama.                                  |
+| Env Var                  | Default                        | Customize?     | Description                                              |
+| ------------------------ | ------------------------------ | -------------- | -------------------------------------------------------- |
+| `APP_HOST`               | `0.0.0.0`                      | 🔵 Default     | Host IP for FastAPI server.                              |
+| `APP_PORT`               | `8000`                         | 🔵 Default     | Port for FastAPI server.                                 |
+| `RETRIEVAL_MODE`         | `sparse` (`sparse` or `dense`) | 🔵 Default     | Retrieval mode (`sparse`: BM25, `dense`: FAISS vectors). |
+| `SQLITE_URL`             | `sqlite:///./data/app.db`      | 🔵 Default     | SQLite database connection URL.                          |
+| `FAQ_CSV`                | `data/faq.csv`                 | 🔵 Default     | Path to FAQ CSV file (used by `build_index.py`).         |
+| `CSV_HAS_HEADER`         | `True`                         | 🔵 Default     | Indicates if CSV has a header row.                       |
+| `INDEX_PATH`             | `data/index.faiss`             | 🔵 Default     | Path to FAISS index file (used in dense mode).           |
+| `ID_MAP_PATH`            | `data/id_map.pkl`              | 🔵 Default     | Path to FAISS ID map file.                               |
+| `OPENAI_API_KEY`         | `None`                         | 🟢 Recommended | Your OpenAI API key (required if using OpenAI).          |
+| `OPENAI_MODEL`           | `gpt-3.5-turbo`                | 🔵 Default     | Model for OpenAI chat completions.                       |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small`       | 🔵 Default     | Model for OpenAI embeddings.                             |
+| `OPENAI_TEMPERATURE`     | `0.2`                          | 🔵 Default     | Sampling temperature for OpenAI responses.               |
+| `OPENAI_TOP_P`           | `1.0`                          | 🔵 Default     | Nucleus sampling (`top_p`) for OpenAI.                   |
+| `OPENAI_MAX_TOKENS`      | `256`                          | 🔵 Default     | Max tokens for OpenAI responses.                         |
+| `OLLAMA_ENABLED`         | `True`                         | ⚪ Optional     | Enable usage of local Ollama LLM server.                 |
+| `OLLAMA_MODEL`           | `gemma3:4b`                    | ⚪ Optional     | Ollama model to use locally.                             |
+| `OLLAMA_BASE_URL`        | `http://localhost:11434`       | 🔵 Default     | Base URL for local Ollama instance.                      |
+| `OLLAMA_REQUEST_TIMEOUT` | `90`                           | 🔵 Default     | Request timeout in seconds for Ollama calls.             |
 
 ---
 
 ## 6. Running the Application
-
-1.  **Ensure all dependencies are installed** (see Quick Start).
-2.  **Set up your `.env` file** with necessary configurations (e.g., `OPENAI_API_KEY` or `OLLAMA_ENABLED=true`).
+1.  **Set up your `.env` file** with necessary configurations (e.g., `OPENAI_API_KEY` or `OLLAMA_ENABLED=true`) and **ensure all dependencies are installed** (see Quick Start).
 3.  **(Recommended) Run the `build_index.py` script** to populate the database and create vector indexes:
     ```bash
     python scripts/build_index.py
@@ -157,7 +157,6 @@ The application is configured via environment variables (loaded from an `.env` f
 5.  **Access the application:**
     *   **Web Interface:** Open your browser to `http://localhost:8000/`
     *   **API Documentation (Swagger UI):** `http://localhost:8000/docs`
-    *   **Alternative API Documentation (ReDoc):** `http://localhost:8000/redoc`
 
 ---
 
@@ -166,16 +165,7 @@ The application is configured via environment variables (loaded from an `.env` f
 Ensure you are in the project root directory with your virtual environment activated.
 
 ```bash
-pytest
-```
-Or for a quieter output:
-```bash
-pytest -q
-```
-To run tests for a specific file or directory:
-```bash
-pytest tests/unit/
-pytest tests/integration/test_api_ask.py
+make test
 ```
 
 The test suite includes:
@@ -188,10 +178,8 @@ The `conftest.py` file in the `tests/` directory handles the setup of the test e
 Test coverage is measured using `pytest-cov`. To generate a report:
 
 ```bash
-pytest --cov=src --cov-report=html
-# Open htmlcov/index.html to view the detailed HTML report.
-# Alternatively, for a quick summary in the console:
-# pytest --cov=src
+pytest --cov=src --cov-report=html # Open htmlcov/index.html to view the detailed HTML report.
+# pytest --cov=src for a quick summary in the console:
 ```
 
 ## 8. API Endpoints
@@ -201,10 +189,10 @@ The primary API endpoints are exposed under the `/api` prefix.
 | Method | Path           | Request Body (JSON)   | Response Body (JSON)                                 | Description                                     |
 | :----- | :------------- | :-------------------- | :--------------------------------------------------- | :---------------------------------------------- |
 | `GET`  | `/`            | N/A                   | HTML                                                 | Serves the frontend user interface.             |
-| `POST` | `/api/ask`     | `{"question": "str"}` | `{"answer": "str", "source_ids": ["list_of_int"]}` | Accepts a question, returns an AI-generated answer and source document IDs. |
+| `POST` | `/api/ask`     | `{"question": "str", "k": "int"}` | `{"answer": "str", "source_ids": ["list_of_k_ints"]}` | Accepts (question,k), returns an AI-generated answer and source document IDs. |
 | `GET`  | `/api/history` | Query Params: `limit`, `offset` | `[{"id": int, "question": "str", ...}]`        | Retrieves a list of past Q&A pairs.             |
 
-Full interactive API documentation is available via Swagger UI at `/docs` and ReDoc at `/redoc` when the server is running.
+Full interactive API documentation is available via Swagger UI at `/docs` when the server is running.
 
 ---
 
@@ -221,6 +209,8 @@ Full interactive API documentation is available via Swagger UI at `/docs` and Re
 | **LLM Interface**  | `GeneratorPort` with `OpenAIGenerator`, `OllamaGenerator` | Direct SDK calls in service  | Abstraction allows easy switching between local (Ollama) and cloud (OpenAI) LLMs. |
 | **Testing**        | Pytest, `TestClient`, `unittest.mock`                 | `unittest`                   | Pytest for cleaner syntax, powerful fixtures. `TestClient` for API integration.    |
 
+- **FAISS index type**: `IndexFlatL2` (fastest to set up, recommended for prototypes and small corpora; even `IndexFlatIP` it's supposed to work well with normalized embeddings). Consider IVF or HNSW for larger-scale deployments).
+
 ---
 
 ## 10. Known Limitations
@@ -231,13 +221,7 @@ Full interactive API documentation is available via Swagger UI at `/docs` and Re
 *   **Security:** No authentication or rate-limiting is implemented on the API endpoints. Not suitable for public production deployment.
 *   **`created_at` Timestamps:** Currently stored as timezone-aware datetimes in the DB (SQLite default behavior might vary). Pydantic serializes them to ISO 8601 strings for the API. UI might need timezone conversion if specific local times are required.
 *   **FAISS Index Management:** The `build_index.py` script creates the FAISS index. For dynamic data, a more robust index update/management strategy would be needed.
-*   **UI Testing:** Frontend functionality has been verified manually. Automated UI tests (e.g., Playwright, Selenium) are not included but would be a valuable addition.
-
----
-
-## 11. Further Reading / Bonus
-
-*   `(Optional) docs/architecture.md` – A more detailed explanation of the Ports & Adapters architecture used.
+*   **UI Testing:** Frontend functionality has been verified manually. Automated UI tests (e.g., Playwright, Selenium) are not included.
 
 ---
 

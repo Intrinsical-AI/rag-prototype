@@ -1,81 +1,85 @@
 # tests/unit/test_retrieval_bm25.py
-import pytest
-from src.adapters.retrieval.sparse_bm25 import SparseBM25Retriever # o el path correcto
 
-# --- Fixtures (si son necesarias) ---
+import pytest
+from src.adapters.retrieval.sparse_bm25 import SparseBM25Retriever
+
 @pytest.fixture
 def sample_documents_data() -> tuple[list[str], list[int]]:
+    """Provides a set of example documents and their IDs for BM25 retrieval tests."""
     documents = [
-        "El perro marrón rápido salta sobre el zorro perezoso.",
-        "Nunca la lluvia en España cae principalmente en la llanura.",
-        "El perro es el mejor amigo del hombre.",
-        "Los zorros son ágiles y los perros también.",
+        "The quick brown dog jumps over the lazy fox.",
+        "The rain in Spain falls mainly in the plain.",
+        "A dog is man's best friend.",
+        "Foxes are agile, and dogs are too.",
     ]
-    doc_ids = [10, 20, 30, 40] # IDs arbitrarios para los documentos
+    doc_ids = [10, 20, 30, 40]  # Arbitrary document IDs
     return documents, doc_ids
 
-# --- Tests ---
 def test_bm25_retrieves_relevant_doc(sample_documents_data):
+    """BM25 retrieves the most relevant document for a simple query."""
     documents, doc_ids = sample_documents_data
     retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
-    
-    query = "perro amigo"
-    # Asumimos que `retrieve` ahora devuelve (ids, scores)
+
+    query = "dog friend"
     retrieved_ids, retrieved_scores = retriever.retrieve(query, k=1)
-    
+
     assert len(retrieved_ids) == 1
-    assert retrieved_ids[0] == 30 # "El perro es el mejor amigo del hombre."
+    # "A dog is man's best friend." should be the best match
+    assert retrieved_ids[0] == 30
     assert len(retrieved_scores) == 1
-    assert isinstance(retrieved_scores[0], float) # O el tipo que esperes
+    assert isinstance(retrieved_scores[0], float)
 
 def test_bm25_respects_k(sample_documents_data):
+    """BM25 returns the correct number of results as specified by k."""
     documents, doc_ids = sample_documents_data
     retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
-    
-    query = "LES"
+
+    query = "LES"  # Query not present, should fallback to order/score
     k_val = 2
     retrieved_ids, retrieved_scores = retriever.retrieve(query, k=k_val)
-    
+
     assert len(retrieved_ids) == k_val
     assert len(retrieved_scores) == k_val
-    # Podrías hacer aserciones más específicas sobre los IDs esperados si el orden es predecible
+    # Optionally: Check IDs are among provided doc_ids
+    for doc_id in retrieved_ids:
+        assert doc_id in doc_ids
 
 def test_bm25_no_match(sample_documents_data):
+    """BM25 handles queries with no matching terms gracefully."""
     documents, doc_ids = sample_documents_data
     retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
-    
-    query = "gato unicornio inexistente"
+
+    query = "unicorn cat nonexistent"
     retrieved_ids, retrieved_scores = retriever.retrieve(query, k=1)
-    
-    # BM25 aún podría devolver algo si hay solapamiento de tokens comunes
-    # o podría devolver una lista vacía si los scores son muy bajos o cero.
-    # Esto depende de la implementación de rank_bm25 y cómo manejas scores cero.
-    # Si se esperan resultados (incluso con scores bajos):
-    # assert len(retrieved_ids) > 0 # o un número específico
-    # Si se espera una lista vacía para no coincidencias fuertes:
-    # assert len(retrieved_ids) == 0
-    # assert len(retrieved_scores) == 0
-    # Por ahora, seamos flexibles y solo verifiquemos la estructura:
+
+    # Depending on implementation, BM25 may still return results with zero score
     assert isinstance(retrieved_ids, list)
     assert isinstance(retrieved_scores, list)
     assert len(retrieved_ids) == len(retrieved_scores)
-
+    if retrieved_scores:
+        assert all(isinstance(score, float) for score in retrieved_scores)
 
 def test_bm25_empty_query(sample_documents_data):
+    """BM25 returns k documents with zero scores for an empty query."""
     documents, doc_ids = sample_documents_data
     retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
-    
+
     query = ""
     retrieved_ids, retrieved_scores = retriever.retrieve(query, k=1)
 
-    # rank_bm25 con query vacía usualmente da scores de 0 para todos los docs.
-    # Devolvería todos los documentos con score 0 si k es lo suficientemente grande,
-    # o los primeros k documentos con score 0.
-    assert len(retrieved_ids) <= 1 # Debería devolver k documentos o menos
+    assert len(retrieved_ids) <= 1
     assert len(retrieved_scores) <= 1
-    if retrieved_scores: # Si devuelve algo
+    if retrieved_scores:
         assert all(score == 0.0 for score in retrieved_scores)
 
-# Podrías añadir más tests:
-# - Con documentos vacíos
-# - Verificando el orden de los scores (el primer score debe ser >= al segundo, etc.)
+def test_bm25_returns_sorted_scores(sample_documents_data):
+    """BM25 returns results sorted by score in descending order."""
+    documents, doc_ids = sample_documents_data
+    retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
+
+    query = "dog fox"
+    k_val = 4
+    retrieved_ids, retrieved_scores = retriever.retrieve(query, k=k_val)
+
+    # Scores should be in non-increasing order
+    assert all(retrieved_scores[i] >= retrieved_scores[i+1] for i in range(len(retrieved_scores)-1))

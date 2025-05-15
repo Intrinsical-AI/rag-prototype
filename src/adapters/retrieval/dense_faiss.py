@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-"""Dense FAISS retriever
+"""Dense FAISS Retriever.
 
-Refactor 2025‑05‑15
--------------------
+++ 
 
-* Acepta un `embedder` inyectable para evitar descargas en tests.
-* Tolera ambos formatos de `id_map` (lista o dict) para back‑compat.
-* Comprueba la consistencia de la dimensión entre índice y embedder.
-* API pública: ``retrieve(query: str, k: int = 5)`` → (ids, scores).
+* Accept injectable `embedder` to avoid downloads during tests.
+* Support both list and dict formats for `id_map` for backward compatibility.
+* Ensure dimension consistency between FAISS index and embedder.
+* Public API: `retrieve(query: str, k: int = 5)` → `(ids, scores)`.
 """
 
-from pathlib import Path
 import pickle
+from pathlib import Path
 from typing import List, Tuple, Sequence
 
 import faiss  # type: ignore
@@ -28,15 +27,17 @@ __all__ = ["DenseFaissRetriever"]
 
 
 class DenseFaissRetriever(RetrieverPort):
-    """Busca por similitud densa usando un índice FAISS.
+    """Embedding-based search using FAISS.
 
     Parameters
     ----------
-    embedder:
-        Implementación de :class:`EmbedderPort` para transformar texto→vector.
-        Si es *None*, se usa :class:`SentenceTransformerEmbedder` por defecto.
-    index_path / id_map_path:
-        Ubicaciones de los artefactos. Por defecto se leen de ``settings``.
+    embedder : EmbedderPort, optional
+        Implementation of `EmbedderPort` to convert text into embeddings.
+        Defaults to `SentenceTransformerEmbedder` if None.
+    index_path : str | Path, optional
+        Path to the FAISS index file. Default obtained from `settings`.
+    id_map_path : str | Path, optional
+        Path to the ID mapping file. Default obtained from `settings`.
     """
 
     def __init__(
@@ -46,74 +47,83 @@ class DenseFaissRetriever(RetrieverPort):
         index_path: str | Path | None = None,
         id_map_path: str | Path | None = None,
     ) -> None:
-        # --- Embedder -----------------------------------------------------
+        # Embedder initialization
         self.embedder: EmbedderPort = embedder or SentenceTransformerEmbedder()
 
-        # --- Rutas de artefactos -----------------------------------------
+        # Artifact paths
         self.index_path = Path(index_path or settings.index_path)
         self.id_map_path = Path(id_map_path or settings.id_map_path)
 
         if not self.index_path.is_file():
             raise FileNotFoundError(f"FAISS index not found: {self.index_path}")
         if not self.id_map_path.is_file():
-            raise FileNotFoundError(f"ID‑map file not found: {self.id_map_path}")
+            raise FileNotFoundError(f"ID map file not found: {self.id_map_path}")
 
-        # --- Cargar índice FAISS -----------------------------------------
+        # Load FAISS index
         self.index: faiss.Index = faiss.read_index(str(self.index_path))
 
-        # --- Cargar mapa de IDs ------------------------------------------
-        with self.id_map_path.open("rb") as fh:
-            raw_id_map = pickle.load(fh)
+        # Load ID map with backward compatibility
+        with self.id_map_path.open("rb") as file:
+            raw_id_map = pickle.load(file)
 
-        # Permitimos lista o dict para compatibilidad hacia atrás
+        # Allow list or dict for backward compatibility
         if isinstance(raw_id_map, dict):
             max_idx = max(raw_id_map.keys(), default=-1)
-            id_map: list[int | None] = [None] * (max_idx + 1)
-            for k, v in raw_id_map.items():
-                id_map[k] = v
-            self._id_map: list[int | None] = id_map
+            self._id_map: List[int | None] = [None] * (max_idx + 1)
+            for idx, doc_id in raw_id_map.items():
+                self._id_map[idx] = doc_id
         elif isinstance(raw_id_map, Sequence):
-            self._id_map = list(raw_id_map)  # shallow copy por seguridad
+            self._id_map = list(raw_id_map)  # shallow copy for safety
         else:
             raise TypeError(
-                "id_map must be a list or dict mapping faiss_idx→doc_id"
+                "id_map must be either a list or dict mapping FAISS indices to document IDs"
             )
 
-        # --- Validaciones -------------------------------------------------
+        # Validation
         if self.index.d != self.embedder.DIM:
             raise ValueError(
-                "Dimension mismatch: index «%d» vs embedder «%d»"
-                % (self.index.d, self.embedder.DIM)
+                f"Dimension mismatch: FAISS index ({self.index.d}) vs embedder ({self.embedder.DIM})"
             )
 
-    # ---------------------------------------------------------------------
-    # API pública
-    # ---------------------------------------------------------------------
     def retrieve(self, query: str, k: int = 5) -> Tuple[List[int], List[float]]:
-        """Devuelve los *k* documentos más similares.
+        """Retrieve the top-k most similar documents.
 
-        Retorna dos listas paralelas (ids, scores). Si ``k<=0`` se devuelven
-        listas vacías.
+        Parameters
+        ----------
+        query : str
+            The query string to search.
+        k : int, default 5
+            Number of top results to retrieve.
+
+        Returns
+        -------
+        Tuple[List[int], List[float]]
+            Parallel lists containing document IDs and similarity scores.
+
+        Notes
+        -----
+        Returns empty lists if `k <= 0`.
         """
         if k <= 0:
             return [], []
 
-        # FAISS espera shape (1, dim)
-        q_vec = np.asarray([self.embedder.embed(query)], dtype="float32")
-        sims, idxs = self.index.search(q_vec, min(k, self.index.ntotal))
+        # FAISS expects shape (1, dimension)
+        query_vec = np.asarray([self.embedder.embed(query)], dtype="float32")
+        scores, indices = self.index.search(query_vec, min(k, self.index.ntotal))
 
-        sims = sims[0]
-        idxs = idxs[0]
+        scores, indices = scores[0], indices[0]
 
-        ids: list[int] = []
-        scores: list[float] = []
-        for faiss_idx, score in zip(idxs, sims):
+        ids: List[int] = []
+        sim_scores: List[float] = []
+
+        for faiss_idx, score in zip(indices, scores):
             if faiss_idx == -1:
-                continue  # FAISS rellena con -1 si no alcanza k resultados
+                continue  # FAISS fills with -1 if fewer than k results found
             doc_id = self._id_map[faiss_idx]
             if doc_id is None:
-                continue  # hueco en el mapa
-            ids.append(int(doc_id))
-            scores.append(float(score))
+                continue  # Skip if ID mapping is missing
 
-        return ids, scores
+            ids.append(int(doc_id))
+            sim_scores.append(float(score))
+
+        return ids, sim_scores

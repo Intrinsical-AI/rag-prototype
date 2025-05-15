@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 """OpenAI embeddings adapter (v1 API)
-
-Cumple con las expectativas de los tests de `tests/unit/adapters/embeddings/`.
 """
 
 from typing import List
@@ -14,9 +12,6 @@ from src.settings import settings
 
 __all__ = ["OpenAIEmbedder"]
 
-
-# Mapping sencillo «modelo → dimensión».
-# Mantener actualizado si se añaden modelos nuevos.
 _MODEL_DIM: dict[str, int] = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
@@ -34,18 +29,18 @@ class OpenAIEmbedder(EmbedderPort):
         self.model = model or settings.openai_embedding_model
         self.DIM: int = _MODEL_DIM.get(self.model, DEFAULT_DIM)
 
-        # Cliente OpenAI v1
+        # OpenAI v1+ Client
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     # ------------------------------------------------------------------
-    # Implementación del puerto
+    # Port Implementation
     # ------------------------------------------------------------------
     def embed(self, text: str) -> List[float]:
         """Devuelve el embedding como *lista* de floats."""
         try:
             resp = self.client.embeddings.create(model=self.model, input=text)
-        except APIError as e:  # Relevantar igual; la capa superior decide
+        except APIError as e:
             raise
 
-        emb_vector = resp.data[0].embedding  # list[float]
+        emb_vector = resp.data[0].embedding
         return emb_vector
