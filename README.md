@@ -182,6 +182,27 @@ pytest --cov=src --cov-report=html # Open htmlcov/index.html to view the detaile
 # pytest --cov=src for a quick summary in the console:
 ```
 
+File	statements	missing	excluded	branches	partial	coverage
+src/utils.py	8	0	0	0	0	100%
+src/settings.py	23	0	0	0	0	100%
+src/db/models.py	12	0	0	0	0	100%
+src/db/crud.py	16	0	0	2	0	100%
+src/db/base.py	11	0	0	0	0	100%
+src/core/rag.py	17	0	0	0	0	100%
+src/core/ports.py	14	3	0	0	0	79%
+src/app/main.py	45	12	0	4	1	69%
+src/app/dependencies.py	96	6	0	28	9	88%
+src/app/api_router.py	27	0	0	0	0	100%
+src/adapters/retrieval/sparse_bm25.py	46	9	0	12	4	78%
+src/adapters/retrieval/hybrid.py	25	1	0	6	1	94%
+src/adapters/retrieval/dense_faiss.py	50	9	0	20	7	74%
+src/adapters/generation/openai_chat.py	22	0	0	0	0	100%
+src/adapters/generation/ollama_chat.py	33	2	0	2	0	94%
+src/adapters/embeddings/sentence_transformers.py	9	0	0	0	0	100%
+src/adapters/embeddings/openai.py	22	0	0	0	0	100%
+Total	476	42	0	74	22	
+
+
 ## 8. API Endpoints
 
 The primary API endpoints are exposed under the `/api` prefix.

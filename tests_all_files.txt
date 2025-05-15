@@ -1,0 +1,1714 @@
+
+================================================================================
+FILE: tests/conftest.py
+================================================================================
+
+# tests/conftest.py
+
+import sys
+from pathlib import Path
+import pytest
+import logging
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session as SQLAlchemySession
+from sqlalchemy.pool import StaticPool
+import importlib
+
+# 1. Add 'src' to PYTHONPATH if not present
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 2. Patch global app settings for the test session
+from src.settings import settings as global_app_settings
+
+# Use a named in-memory SQLite DB (shared cache) for all tests in this session
+NAMED_IN_MEMORY_DB_URL = "sqlite:///file:test_rag_db?mode=memory&cache=shared&uri=true"
+global_app_settings.sqlite_url = NAMED_IN_MEMORY_DB_URL
+global_app_settings.retrieval_mode = "sparse"
+global_app_settings.openai_api_key = "sk-dummy-conftest-key"
+global_app_settings.ollama_enabled = False
+
+empty_faq_path = PROJECT_ROOT / "tests/data/empty_faq_for_tests.csv"
+global_app_settings.faq_csv = str(empty_faq_path)
+global_app_settings.csv_has_header = True
+
+empty_faq_path.parent.mkdir(parents=True, exist_ok=True)
+if not empty_faq_path.exists():
+    import csv
+    with open(empty_faq_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow(["question", "answer"])  # Only header
+
+# 3. Patch DB engine and SessionLocal for src.db.base
+import src.db.base as db_base_module
+import src.db.models as db_models_module
+from src.app import dependencies as app_dependencies_module
+
+_test_engine = create_engine(
+    global_app_settings.sqlite_url,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+    echo=False,
+)
+db_base_module.engine = _test_engine
+db_base_module.SessionLocal.configure(bind=_test_engine)
+
+# 4. Session-scoped fixture to create all DB tables once
+@pytest.fixture(scope="session", autouse=True)
+def create_db_tables_session_scoped():
+    """
+    Create all DB tables once per session using the test engine.
+    """
+    db_models_module.Base.metadata.create_all(bind=_test_engine)
+    yield
+    db_models_module.Base.metadata.drop_all(bind=_test_engine)
+    _test_engine.dispose()
+
+# 5. Function-scoped fixture: yields a clean session and wipes tables
+@pytest.fixture(scope="function")
+def db_session() -> SQLAlchemySession:
+    """
+    Provides a SQLAlchemy session with all tables emptied before each test.
+    """
+    session = db_base_module.SessionLocal()
+    for table in reversed(db_models_module.Base.metadata.sorted_tables):
+        session.execute(table.delete())
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
+
+# 6. Function-scoped fixture: resets the RAG service singleton before each test
+@pytest.fixture(scope="function", autouse=True)
+def reset_rag_service_singleton():
+    """
+    Ensures the _rag_service singleton is None before each test.
+    """
+    app_dependencies_module._rag_service = None
+    yield
+    # Optionally re-clear again after test if paranoid
+
+# 7. SessionLocal fixture for direct usage (if needed)
+@pytest.fixture(scope="function")
+def AppSessionLocal() -> sessionmaker:
+    return db_base_module.SessionLocal
+
+# 8. Fixture: Populates DB with test data (for integration tests)
+@pytest.fixture(scope="function")
+def populated_db_session(db_session: SQLAlchemySession):
+    """
+    Populates the DB with a standard set of documents for integration tests.
+    """
+    from src.db.models import Document as DbDocument
+    test_docs_data = [
+        {"id": 101, "content": "The refund policy states you can request a refund within 14 days."},
+        {"id": 102, "content": "To contact support, please email support@example.com."},
+        {"id": 103, "content": "Available features include semantic search and document processing."},
+    ]
+    for doc_data in test_docs_data:
+        if not db_session.get(DbDocument, doc_data["id"]):
+            db_session.add(DbDocument(**doc_data))
+    db_session.commit()
+    return db_session
+
+# 9. Fixture: Initializes the RAG service (after DB is populated)
+@pytest.fixture(scope="function")
+def initialized_rag_service(populated_db_session, monkeypatch):
+    """
+    Initializes the RAG service singleton for integration tests.
+    """
+    # Ensure the FAQ CSV exists and points to a valid file (not used since DB is already populated)
+    dummy_faq_csv = PROJECT_ROOT / "tests/data/dummy_faq_for_init.csv"
+    dummy_faq_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(dummy_faq_csv, "w", newline="", encoding="utf-8") as f:
+        import csv
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow(["question", "answer"])
+        writer.writerow(["Q_init1", "A_init1"])
+
+    monkeypatch.setattr(global_app_settings, "faq_csv", str(dummy_faq_csv))
+    app_dependencies_module.init_rag_service()
+    service = app_dependencies_module.get_rag_service()
+    yield service
+    app_dependencies_module._rag_service = None
+
+# 10. Aliases for integration tests if needed
+@pytest.fixture(scope="function")
+def initialized_rag_service_for_integration(initialized_rag_service):
+    return initialized_rag_service
+
+@pytest.fixture(scope="function")
+def populated_db_for_integration(populated_db_session):
+    return populated_db_session
+
+
+
+================================================================================
+FILE: tests/integration/test_api_ask.py
+================================================================================
+
+# tests/integration/test_api_ask.py
+import pytest
+from fastapi.testclient import TestClient
+from unittest import mock
+import random
+import importlib # Para recargar módulos si es necesario
+from src.settings import settings
+from src.app.main import app # app se importa después de conftest.py
+from src.app import dependencies as app_dependencies_module # Para re-init
+
+# --- Fixture para el TestClient (ya no necesita ser module-scoped si la app es estable) ---
+@pytest.fixture(scope="function")
+def client(populated_db_for_integration) -> TestClient: # Depende de la DB poblada
+    # populated_db_for_integration se ejecuta primero, asegura que la DB tiene datos.
+    # reset_rag_service_singleton (si es autouse) también se habrá ejecutado.
+    from src.app import dependencies as app_dependencies # Para resetear el singleton si es necesario
+    
+    # Asegurar que el servicio se reinicializa para ESTA instancia de TestClient,
+    # especialmente si los settings fueron monkeypatcheados por un test anterior.
+    app_dependencies._rag_service = None 
+    importlib.reload(app_dependencies) # Recarga para asegurar que init_rag_service usa los settings actuales
+
+    # Cuando TestClient(app) se crea, el lifespan de la app se ejecuta,
+    # llamando a init_rag_service. Esta llamada ahora encontrará la DB poblada.
+    with TestClient(app) as c:
+        yield c
+
+# --- Fixture para limpiar la tabla de historial ---
+@pytest.fixture(scope="function")
+def clean_history_table():
+    from src.db.base import SessionLocal # Usar el SessionLocal ya reconfigurado por conftest
+    from src.db.models import QaHistory
+    with SessionLocal() as db:
+        db.query(QaHistory).delete()
+        db.commit()
+    yield
+
+# --- Helper para mock de OpenAI API v1.x ---
+def _make_openai_v1_mock(answer_text: str):
+    mock_completion = mock.MagicMock()
+    mock_completion.choices = [mock.MagicMock()]
+    mock_completion.choices[0].message = mock.MagicMock()
+    mock_completion.choices[0].message.content = answer_text
+    return mock_completion
+
+# --- Tests ---
+@mock.patch("src.adapters.generation.openai_chat.OpenAI") # Path donde OpenAI es instanciado
+def test_api_ask_with_openai_retrieves_and_generates(
+    MockOpenAIClass,
+    client: TestClient,
+    monkeypatch
+):
+    # Arrange
+    # 1. Asegurar que se usará OpenAIGenerator y que tiene una API key para __init__
+    monkeypatch.setattr(settings, "ollama_enabled", False)
+    current_openai_api_key = settings.openai_api_key # Guardar por si se parchea
+    if settings.openai_api_key is None or settings.openai_api_key == "sk-dummy-test-key": # Evitar sobreescribir una real
+        monkeypatch.setattr(settings, "openai_api_key", "sk-integration-openai-ask")
+
+    # 2. Configurar el mock para la clase OpenAI
+    mock_openai_client_instance = MockOpenAIClass.return_value
+    expected_answer = "Mocked AI answer about our refund policy."
+    mock_openai_client_instance.chat.completions.create.return_value = _make_openai_v1_mock(expected_answer)
+
+    # 3. Forzar la re-inicialización de RagService para que use el OpenAIGenerator
+    #    que a su vez usará la clase OpenAI mockeada.
+    #    Y para que el retriever se cree con el modo correcto si lo cambiamos.
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse") # Asegurar modo para aserción de source_id
+    importlib.reload(app_dependencies_module) # Recargar para que vea los settings parcheados
+    app_dependencies_module.init_rag_service() # Recrea _rag_service
+
+    question_text = "What is the refund policy?"
+    payload = {"question": question_text}
+
+    # Act
+    response = client.post("/api/ask", json=payload)
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == expected_answer
+    assert isinstance(body["source_ids"], list)
+    assert 101 in body["source_ids"] # Basado en datos de prueba en conftest.py
+
+    mock_openai_client_instance.chat.completions.create.assert_called_once()
+    args, kwargs = mock_openai_client_instance.chat.completions.create.call_args
+    sent_prompt_content = kwargs["messages"][0]["content"]
+    assert question_text in sent_prompt_content
+    assert "refund policy states" in sent_prompt_content.lower() # Contexto del Doc ID 1
+
+    # Restaurar API key si se cambió, aunque monkeypatch debería hacerlo por test
+    monkeypatch.setattr(settings, "openai_api_key", current_openai_api_key)
+
+
+@mock.patch("requests.post") # Path donde requests.post es llamado por OllamaGenerator
+def test_api_ask_with_ollama_retrieves_and_generates(
+    mock_requests_post,
+    client: TestClient,
+    monkeypatch
+):
+    # Arrange
+    # 1. Habilitar Ollama y deshabilitar retrieval denso para simplificar
+    monkeypatch.setattr(settings, "ollama_enabled", True)
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse") # O el modo que quieras probar
+
+    # 2. Configurar mock para requests.post (Ollama)
+    expected_answer = "Mocked Ollama answer regarding support."
+    mock_ollama_response_obj = mock.MagicMock()
+    mock_ollama_response_obj.json.return_value = {"response": expected_answer}
+    mock_ollama_response_obj.status_code = 200
+    mock_ollama_response_obj.raise_for_status.return_value = None
+    mock_requests_post.return_value = mock_ollama_response_obj
+
+    # 3. Forzar la re-inicialización de RagService para que use OllamaGenerator
+    #    y el retriever correcto.
+    importlib.reload(app_dependencies_module)
+    app_dependencies_module.init_rag_service()
+
+    question_text = "How to contact support?"
+    payload = {"question": question_text}
+
+    # Act
+    response = client.post("/api/ask", json=payload)
+
+    # Assert
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == expected_answer
+    assert 102 in body["source_ids"]
+    mock_requests_post.assert_called_once()
+    args, kwargs = mock_requests_post.call_args
+    sent_payload = kwargs["json"]
+    assert question_text in sent_payload["prompt"]
+    assert "contact support, please email" in sent_payload["prompt"].lower() # Contexto del Doc ID 2
+
+
+def test_api_ask_validation_error_missing_question(client: TestClient):
+    response = client.post("/api/ask", json={})
+    assert response.status_code == 422
+    detail = response.json().get("detail", [])
+    assert any("question" in error.get("loc", []) for error in detail if isinstance(error, dict) and "loc" in error)
+
+
+def test_api_ask_validation_error_wrong_type(client: TestClient):
+    response = client.post("/api/ask", json={"question": 123})
+    assert response.status_code == 422
+    detail = response.json().get("detail", [])
+    assert any("Input should be a valid string" in error.get("msg", "") for error in detail if isinstance(error, dict) and "msg" in error)
+
+
+@mock.patch("src.adapters.generation.openai_chat.OpenAI")
+def test_history_endpoint_records_and_retrieves_qa(
+    MockOpenAIClass,
+    client: TestClient,
+    monkeypatch,
+    clean_history_table # Usar fixture para limpiar tabla
+):
+    # Arrange
+    # 1. Configurar para usar OpenAIGenerator con mock
+    monkeypatch.setattr(settings, "ollama_enabled", False)
+    current_openai_api_key = settings.openai_api_key
+    if settings.openai_api_key is None or settings.openai_api_key == "sk-dummy-test-key":
+        monkeypatch.setattr(settings, "openai_api_key", "sk-integration-hist-test")
+    
+    mock_openai_client_instance = MockOpenAIClass.return_value
+
+    # Forzar re-init de RagService para asegurar que usa estos settings
+    # (aunque conftest.py ya lo hace una vez, ollama_enabled podría haber cambiado)
+    importlib.reload(app_dependencies_module)
+    app_dependencies_module.init_rag_service()
+
+    # Primera Q&A
+    q_text1 = f"History Q1 {random.randint(1000, 9999)}"
+    ans_text1 = "Hist Ans 1"
+    mock_openai_client_instance.chat.completions.create.return_value = _make_openai_v1_mock(ans_text1)
+    resp1 = client.post("/api/ask", json={"question": q_text1})
+    assert resp1.status_code == 200
+
+    # Segunda Q&A
+    q_text2 = f"History Q2 {random.randint(1000, 9999)}"
+    ans_text2 = "Hist Ans 2"
+    # Importante: .create es un mock, si la misma instancia de mock_openai_client_instance se usa,
+    # su return_value para .create necesita ser reconfigurado si la respuesta cambia.
+    mock_openai_client_instance.chat.completions.create.return_value = _make_openai_v1_mock(ans_text2)
+    resp2 = client.post("/api/ask", json={"question": q_text2})
+    assert resp2.status_code == 200
+    
+    # Act
+    resp_hist = client.get("/api/history?limit=5")
+    assert resp_hist.status_code == 200
+    history_data = resp_hist.json()
+
+    # Assert
+    assert len(history_data) == 2 # Exactamente 2 debido a clean_history_table
+
+    assert history_data[0]["question"] == q_text2 # Más reciente primero
+    assert history_data[0]["answer"] == ans_text2
+    assert history_data[1]["question"] == q_text1
+    assert history_data[1]["answer"] == ans_text1
+
+    assert mock_openai_client_instance.chat.completions.create.call_count == 2
+
+    monkeypatch.setattr(settings, "openai_api_key", current_openai_api_key)
+
+
+================================================================================
+FILE: tests/unit/adapters/embeddings/test_openai_embeddings.py
+================================================================================
+
+# tests/unit/adapters/embeddings/test_openai_embeddings.py
+import pytest
+from unittest import mock
+from openai import APIError # type: ignore
+
+from src.adapters.embeddings.openai import OpenAIEmbedder
+from src.settings import settings
+
+
+@mock.patch("src.adapters.embeddings.openai.OpenAI")
+def test_openai_embedder_happy_path(MockOpenAI, monkeypatch):
+    """Test embedding with a successful OpenAI API response."""
+    # Arrange
+    # Ensure API key is set for the test if not already by conftest
+    current_api_key = settings.openai_api_key
+    if not current_api_key:
+        monkeypatch.setattr(settings, "openai_api_key", "sk-test-key-happy-path")
+    
+    text = "This is a test sentence for embedding."
+
+    # Instantiate embedder ONCE
+    embedder = OpenAIEmbedder() # This will call MockOpenAI constructor
+    expected_dim = embedder.DIM
+    expected_vector = [float(i) * 0.001 for i in range(expected_dim)]
+
+    mock_openai_instance = MockOpenAI.return_value # Get the mocked instance
+    mock_embedding_response = mock.MagicMock()
+    mock_embedding_data_item = mock.MagicMock()
+    mock_embedding_data_item.embedding = expected_vector
+    mock_embedding_response.data = [mock_embedding_data_item]
+
+    mock_openai_instance.embeddings.create.return_value = mock_embedding_response
+
+    # Act
+    result = embedder.embed(text) # Use the same embedder instance
+
+    # Assert
+    # The OpenAI constructor should have been called once during embedder instantiation
+    MockOpenAI.assert_called_once_with(api_key=settings.openai_api_key)
+    
+    mock_openai_instance.embeddings.create.assert_called_once_with(
+        model=settings.openai_embedding_model,
+        input=text
+    )
+    assert result == expected_vector
+    assert len(result) == expected_dim
+
+    # Restore original API key if it was patched specifically for this test
+    if not current_api_key and settings.openai_api_key == "sk-test-key-happy-path":
+        monkeypatch.setattr(settings, "openai_api_key", None)
+
+
+@mock.patch("src.adapters.embeddings.openai.OpenAI")
+def test_openai_embedder_handles_api_error(MockOpenAI, monkeypatch):
+    """Test embedder raises exception when OpenAI API returns an error."""
+    # Arrange
+    current_api_key = settings.openai_api_key
+    if not current_api_key:
+        monkeypatch.setattr(settings, "openai_api_key", "sk-test-key-api-error")
+
+    text = "This sentence will trigger an API error."
+
+    mock_openai_instance = MockOpenAI.return_value
+    mock_openai_instance.embeddings.create.side_effect = APIError(
+        message="Mock Embedding API Error",
+        request=None, # type: ignore
+        body=None
+    )
+
+    embedder = OpenAIEmbedder() # Instantiate once
+
+    # Act & Assert
+    with pytest.raises(APIError) as exc_info:
+        embedder.embed(text)
+
+    assert "Mock Embedding API Error" in str(exc_info.value)
+    mock_openai_instance.embeddings.create.assert_called_once_with(
+        model=settings.openai_embedding_model,
+        input=text
+    )
+    MockOpenAI.assert_called_once_with(api_key=settings.openai_api_key) # Constructor called once
+
+    if not current_api_key and settings.openai_api_key == "sk-test-key-api-error":
+        monkeypatch.setattr(settings, "openai_api_key", None)
+
+
+@mock.patch("src.adapters.embeddings.openai.OpenAI")
+def test_openai_embedder_dim_updates_with_model_setting(MockOpenAI, monkeypatch):
+    """Test that embedder dimension correctly updates based on configured model."""
+    original_model = settings.openai_embedding_model
+    current_api_key = settings.openai_api_key
+    if not current_api_key:
+        monkeypatch.setattr(settings, "openai_api_key", "sk-test-key-dim-update")
+
+    try:
+        # Test case: text-embedding-3-large (expected DIM=3072)
+        monkeypatch.setattr(settings, "openai_embedding_model", "text-embedding-3-large")
+        
+        embedder_large = OpenAIEmbedder()
+        assert embedder_large.DIM == 3072
+        MockOpenAI.assert_called_with(api_key=settings.openai_api_key) # Called for embedder_large
+
+        MockOpenAI.reset_mock() # Reset mock for the next instantiation
+
+        # Test case: text-embedding-ada-002 (expected DIM=1536)
+        monkeypatch.setattr(settings, "openai_embedding_model", "text-embedding-ada-002")
+        embedder_ada = OpenAIEmbedder()
+        assert embedder_ada.DIM == 1536
+        MockOpenAI.assert_called_with(api_key=settings.openai_api_key) # Called for embedder_ada
+
+    finally:
+        # Restore original model setting and API key
+        monkeypatch.setattr(settings, "openai_embedding_model", original_model)
+        if not current_api_key and settings.openai_api_key == "sk-test-key-dim-update":
+            monkeypatch.setattr(settings, "openai_api_key", None)
+
+
+================================================================================
+FILE: tests/unit/adapters/embeddings/test_sentence_transformer_embedder.py
+================================================================================
+
+# tests/unit/adapters/embeddings/test_sentence_transformer_embedder.py
+
+from unittest import mock
+import numpy as np
+
+from src.adapters.embeddings.sentence_transformers import SentenceTransformerEmbedder
+
+
+@mock.patch("src.adapters.embeddings.sentence_transformers.SentenceTransformer")
+def test_sentence_transformer_embedder_happy_path(MockSentenceTransformer):
+    """Test embedding generation with default model successfully."""
+
+    # Arrange
+    default_model_name = "all-MiniLM-L6-v2"
+    input_text = "This is a test sentence for sentence-transformer."
+
+    # Setup mock for SentenceTransformer instance and encode method
+    mock_model_instance = MockSentenceTransformer.return_value
+
+    expected_embedding_array = np.array([i * 0.01 for i in range(384)], dtype=np.float32)
+    expected_embedding_list = expected_embedding_array.tolist()
+
+    mock_model_instance.encode.return_value = [expected_embedding_array]
+
+    # Act
+    embedder = SentenceTransformerEmbedder(model_name=default_model_name)
+    embedding_result = embedder.embed(input_text)
+
+    # Assert
+    MockSentenceTransformer.assert_called_once_with(default_model_name)
+    mock_model_instance.encode.assert_called_once_with([input_text])
+
+    assert embedding_result == expected_embedding_list
+    assert isinstance(embedding_result, list)
+    assert len(embedding_result) == 384
+    assert all(isinstance(x, float) for x in embedding_result)
+
+    assert embedder.DIM == 384
+
+
+@mock.patch("src.adapters.embeddings.sentence_transformers.SentenceTransformer")
+def test_sentence_transformer_embedder_custom_model(MockSentenceTransformer):
+    """Test embedding generation with a custom model name successfully."""
+
+    # Arrange
+    custom_model_name = "paraphrase-multilingual-MiniLM-L12-v2"
+    input_text = "Another test sentence."
+
+    mock_model_instance = MockSentenceTransformer.return_value
+
+    expected_embedding_array = np.array([i * 0.02 for i in range(384)], dtype=np.float32)
+    expected_embedding_list = expected_embedding_array.tolist()
+
+    mock_model_instance.encode.return_value = [expected_embedding_array]
+
+    # Act
+    embedder = SentenceTransformerEmbedder(model_name=custom_model_name)
+    embedding_result = embedder.embed(input_text)
+
+    # Assert
+    MockSentenceTransformer.assert_called_once_with(custom_model_name)
+    mock_model_instance.encode.assert_called_once_with([input_text])
+
+    assert embedding_result == expected_embedding_list
+    assert isinstance(embedding_result, list)
+    assert len(embedding_result) == 384
+    assert all(isinstance(x, float) for x in embedding_result)
+
+    # Note: The dimension is currently hardcoded; update this test if DIM becomes dynamic.
+    assert embedder.DIM == 384
+
+
+
+================================================================================
+FILE: tests/unit/adapters/generation/test_generation_ollama.py
+================================================================================
+
+# tests/unit/test_generation_ollama.py
+import pytest
+from unittest import mock
+import requests # Para los tipos de excepciones
+from fastapi import HTTPException
+
+from src.adapters.generation.ollama_chat import OllamaGenerator
+from src.settings import settings # Para las configuraciones
+
+@pytest.fixture
+def ollama_generator() -> OllamaGenerator:
+    # Si necesitas mockear settings para este test, usa monkeypatch
+    return OllamaGenerator()
+
+@mock.patch("requests.post") # Mockea requests.post
+def test_ollama_generator_happy_path(mock_post, ollama_generator: OllamaGenerator):
+    # Arrange
+    question = "Ollama test question?"
+    contexts = ["Ollama context 1.", "Ollama context 2."]
+    expected_ollama_answer = "This is a mock Ollama answer."
+
+    mock_response_object = mock.MagicMock()
+    mock_response_object.json.return_value = {"response": expected_ollama_answer}
+    mock_response_object.status_code = 200
+    mock_response_object.raise_for_status.return_value = None # No levanta error
+    mock_post.return_value = mock_response_object
+
+    # Act
+    answer = ollama_generator.generate(question, contexts)
+
+    # Assert
+    assert answer == expected_ollama_answer
+    mock_post.assert_called_once()
+    
+    args, kwargs = mock_post.call_args
+    # print(args)
+    # print(kwargs)
+    
+    expected_api_url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
+    assert args[0] == expected_api_url
+    
+    payload = kwargs["json"]
+    assert payload["model"] == settings.ollama_model
+    assert payload["stream"] is False
+    
+    ctx_block_expected = "\n".join(f"- {c}" for c in contexts)
+    full_prompt_expected = (
+        "Based on the following context, please answer the question.\nIf the context does not provide an answer, say so.\n\n"
+        "CONTEXT:\n"
+        f"{ctx_block_expected}\n\n"
+        "QUESTION:\n"
+        f"{question}"
+    )
+    assert payload["prompt"] == full_prompt_expected
+    assert kwargs["timeout"] == settings.ollama_request_timeout
+
+
+@mock.patch("requests.post")
+def test_ollama_generator_handles_connection_error(mock_post, ollama_generator: OllamaGenerator):
+    # Arrange
+    mock_post.side_effect = requests.exceptions.ConnectionError("Failed to connect")
+
+    # Act & Assert
+    with pytest.raises(HTTPException) as exc_info:
+        ollama_generator.generate("q", ["c"])
+    
+    assert exc_info.value.status_code == 503
+    assert "Could not connect to Ollama server" in exc_info.value.detail
+
+
+@mock.patch("requests.post")
+def test_ollama_generator_handles_http_error(mock_post, ollama_generator: OllamaGenerator):
+    # Arrange
+    mock_response_object = mock.MagicMock()
+    mock_response_object.status_code = 500
+    mock_response_object.text = "Internal Server Error from Ollama"
+    mock_response_object.raise_for_status.side_effect = requests.exceptions.HTTPError(
+        "Mock HTTP Error", response=mock_response_object
+    )
+    mock_post.return_value = mock_response_object
+    
+    # Act & Assert
+    with pytest.raises(HTTPException) as exc_info:
+        ollama_generator.generate("q", ["c"])
+        
+    assert exc_info.value.status_code == 500
+    assert "Ollama API error: Internal Server Error from Ollama" in exc_info.value.detail
+
+@mock.patch("requests.post")
+def test_ollama_generator_handles_malformed_json_response(mock_post, ollama_generator: OllamaGenerator):
+    # Arrange
+    mock_response_object = mock.MagicMock()
+    mock_response_object.status_code = 200
+    mock_response_object.raise_for_status.return_value = None
+    mock_response_object.json.return_value = {"error": "unexpected_format_no_response_key"} # Falta la clave 'response'
+    mock_post.return_value = mock_response_object
+
+    # Act & Assert
+    with pytest.raises(HTTPException) as exc_info:
+        ollama_generator.generate("q", ["c"])
+    
+    assert exc_info.value.status_code == 500
+    assert "Ollama response malformed: 'response' key missing" in exc_info.value.detail
+
+
+================================================================================
+FILE: tests/unit/adapters/generation/test_generation_openai.py
+================================================================================
+
+# tests/unit/test_generation_openai.py
+
+import pytest
+from unittest import mock
+from fastapi import HTTPException
+from openai import APIError
+
+from src.adapters.generation.openai_chat import OpenAIGenerator
+from src.settings import settings
+
+@pytest.fixture
+def openai_generator_instance(monkeypatch):
+    """
+    Fixture that creates an OpenAIGenerator with a dummy API key set via environment variable.
+    Cleans up the env var after use.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-dummy-test-key-for-env")
+    generator = OpenAIGenerator()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    return generator
+
+@mock.patch("src.adapters.generation.openai_chat.OpenAI")
+def test_openai_generator_happy_path(MockOpenAI):
+    """
+    Test OpenAIGenerator.generate() returns the expected answer and
+    calls the API with the correct arguments.
+    """
+    question = "Test question?"
+    contexts = ["Context 1.", "Context 2 snippet."]
+    expected_generated_answer = "This is a mock AI answer for API v1."
+
+    # Mock OpenAI client and completion API
+    mock_client_instance = MockOpenAI.return_value
+    mock_completion = mock.MagicMock()
+    mock_completion.choices = [mock.MagicMock()]
+    mock_completion.choices[0].message = mock.MagicMock()
+    mock_completion.choices[0].message.content = expected_generated_answer
+
+    mock_client_instance.chat.completions.create.return_value = mock_completion
+
+    # Instantiate generator with the mocked OpenAI class
+    generator = OpenAIGenerator()
+
+    # Act
+    answer = generator.generate(question, contexts)
+
+    # Assert: output
+    assert answer == expected_generated_answer
+
+    # Assert: OpenAI API was called once, with correct parameters
+    mock_client_instance.chat.completions.create.assert_called_once()
+    _, kwargs = mock_client_instance.chat.completions.create.call_args
+
+    assert kwargs["model"] == settings.openai_model
+    assert kwargs["temperature"] == settings.openai_temperature
+
+    # Prompt construction check
+    messages = kwargs["messages"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+
+    ctx_block_expected = "\n".join(f"- {c}" for c in contexts)
+    prompt_content_expected = (
+        "Answer using ONLY the context provided.\n\n"
+        f"CONTEXT:\n{ctx_block_expected}\n\n"
+        f"QUESTION: {question}"
+    )
+    assert messages[0]["content"] == prompt_content_expected
+
+@mock.patch("src.adapters.generation.openai_chat.OpenAI")
+def test_openai_generator_handles_api_error(MockOpenAI):
+    """
+    Test OpenAIGenerator.generate() raises HTTPException with correct code
+    and error message if OpenAI APIError is raised.
+    """
+    question = "Another question"
+    contexts = ["Some context."]
+
+    # Configure the mock to raise APIError on completion call
+    mock_client_instance = MockOpenAI.return_value
+    mock_client_instance.chat.completions.create.side_effect = APIError(
+        message="Mock API Error from v1",
+        request=None,
+        body=None
+    )
+
+    generator = OpenAIGenerator()
+
+    # Act & Assert
+    with pytest.raises(HTTPException) as exc_info:
+        generator.generate(question, contexts)
+
+    assert exc_info.value.status_code == 502
+    assert "OpenAI API Error: Mock API Error from v1" in str(exc_info.value.detail)
+    mock_client_instance.chat.completions.create.assert_called_once()
+
+
+
+================================================================================
+FILE: tests/unit/adapters/retrieval/test_hybrid_retriever.py
+================================================================================
+
+# tests/unit/adapters/retrieval/test_hybrid_retriever.py
+import pytest
+from unittest.mock import Mock
+from src.adapters.retrieval.hybrid import HybridRetriever
+from src.core.ports import RetrieverPort # Asegúrate que este path sea correcto
+
+@pytest.fixture
+def mock_dense_retriever() -> Mock:
+    retriever = Mock(spec=RetrieverPort)
+    retriever.retrieve.return_value = ([], []) # Default: no devuelve nada
+    return retriever
+
+@pytest.fixture
+def mock_sparse_retriever() -> Mock:
+    retriever = Mock(spec=RetrieverPort)
+    retriever.retrieve.return_value = ([], []) # Default: no devuelve nada
+    return retriever
+
+def test_hybrid_dense_only(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
+    # Arrange
+    dense_ids, dense_scores = [1, 2], [0.8, 0.7]
+    mock_dense_retriever.retrieve.return_value = (dense_ids, dense_scores)
+    mock_sparse_retriever.retrieve.return_value = ([], [])
+    
+    alpha = 0.5 # Weight for sparse, so (1-alpha) for dense
+    hybrid_retriever = HybridRetriever(dense=mock_dense_retriever, sparse=mock_sparse_retriever, alpha=alpha)
+    
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query")
+    
+    # Assert
+    mock_dense_retriever.retrieve.assert_called_once_with("test query", 5) # k=5 es el default
+    mock_sparse_retriever.retrieve.assert_called_once_with("test query", 5)
+
+    assert retrieved_ids == [1, 2]
+    # Scores should be (1-alpha) * original dense scores
+    expected_scores = [s * (1 - alpha) for s in dense_scores]
+    assert retrieved_scores == pytest.approx(expected_scores, rel=1e-9) # CORRECTO
+
+def test_hybrid_sparse_only(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
+    # Arrange
+    sparse_ids, sparse_scores = [3, 4], [0.9, 0.6]
+    mock_dense_retriever.retrieve.return_value = ([], [])
+    mock_sparse_retriever.retrieve.return_value = (sparse_ids, sparse_scores)
+
+    alpha = 0.5
+    hybrid_retriever = HybridRetriever(dense=mock_dense_retriever, sparse=mock_sparse_retriever, alpha=alpha)
+
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query")
+
+    # Assert
+    assert retrieved_ids == [3, 4]
+    # Scores should be alpha * original sparse scores
+    expected_scores = [s * alpha for s in sparse_scores]
+    assert pytest.approx(retrieved_scores, rel=1e-9) == expected_scores
+
+def test_hybrid_both_no_overlap(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
+    # Arrange
+    mock_dense_retriever.retrieve.return_value = ([1], [0.8])
+    mock_sparse_retriever.retrieve.return_value = ([2], [0.9])
+    
+    alpha = 0.5
+    hybrid_retriever = HybridRetriever(dense=mock_dense_retriever, sparse=mock_sparse_retriever, alpha=alpha)
+
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query")
+
+    # Assert
+    # Dense score: 0.8 * (1-0.5) = 0.4
+    # Sparse score: 0.9 * 0.5 = 0.45
+    # Expected order: doc 2 (sparse) then doc 1 (dense)
+    assert retrieved_ids == [2, 1]
+    assert pytest.approx(retrieved_scores, rel=1e-9) == [0.45, 0.4]
+
+def test_hybrid_both_with_overlap(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
+    # Arrange
+    mock_dense_retriever.retrieve.return_value = ([1, 2], [0.8, 0.6]) # doc 1, doc 2
+    mock_sparse_retriever.retrieve.return_value = ([2, 3], [0.9, 0.7]) # doc 2, doc 3
+    
+    alpha = 0.5
+    hybrid_retriever = HybridRetriever(dense=mock_dense_retriever, sparse=mock_sparse_retriever, alpha=alpha)
+
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query")
+
+    # Assert
+    # Doc 1 (dense only): 0.8 * (1-0.5) = 0.4
+    # Doc 2 (both): (0.6 * (1-0.5)) + (0.9 * 0.5) = 0.3 + 0.45 = 0.75
+    # Doc 3 (sparse only): 0.7 * 0.5 = 0.35
+    # Expected order: Doc 2, Doc 1, Doc 3
+    assert retrieved_ids == [2, 1, 3]
+    assert pytest.approx(retrieved_scores, rel=1e-9) == [0.75, 0.4, 0.35]
+
+@pytest.mark.parametrize("alpha_val, expected_id_order, expected_scores_approx", [
+    (0.0, [10], [0.8]),   # Dense only
+    (1.0, [10], [0.7]),   # Sparse only
+    (0.3, [10], [0.8*0.7 + 0.7*0.3]), # Weighted, 0.56 + 0.21 = 0.77
+    (0.7, [10], [0.8*0.3 + 0.7*0.7]), # Weighted, 0.24 + 0.49 = 0.73
+])
+def test_hybrid_alpha_variations(
+    mock_dense_retriever: Mock,
+    mock_sparse_retriever: Mock,
+    alpha_val: float,
+    expected_id_order: list[int],
+    expected_scores_approx: list[float]
+):
+    # Arrange
+    # Use a single common document to clearly see alpha's effect
+    mock_dense_retriever.retrieve.return_value = ([10], [0.8])
+    mock_sparse_retriever.retrieve.return_value = ([10], [0.7])
+    
+    hybrid_retriever = HybridRetriever(
+        dense=mock_dense_retriever, 
+        sparse=mock_sparse_retriever, 
+        alpha=alpha_val
+    )
+
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query")
+
+    # Assert
+    assert retrieved_ids == expected_id_order
+    assert pytest.approx(retrieved_scores, rel=1e-9) == expected_scores_approx
+
+def test_hybrid_respects_k_param(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
+    # Arrange
+    # Both retrievers return more docs than k
+    mock_dense_retriever.retrieve.return_value = ([1, 2, 3], [0.9, 0.8, 0.7])
+    mock_sparse_retriever.retrieve.return_value = ([3, 4, 5], [0.85, 0.75, 0.65])
+    
+    alpha = 0.5
+    k_val = 2 # We want only top 2 results
+    hybrid_retriever = HybridRetriever(dense=mock_dense_retriever, sparse=mock_sparse_retriever, alpha=alpha)
+
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query", k=k_val)
+
+    # Assert
+    mock_dense_retriever.retrieve.assert_called_once_with("test query", k_val)
+    mock_sparse_retriever.retrieve.assert_called_once_with("test query", k_val)
+    
+    assert len(retrieved_ids) == k_val
+    assert len(retrieved_scores) == k_val
+    # Scores for context:
+    # Doc 1 (dense): 0.9 * 0.5 = 0.45
+    # Doc 2 (dense): 0.8 * 0.5 = 0.4
+    # Doc 3 (both): (0.7 * 0.5) + (0.85 * 0.5) = 0.35 + 0.425 = 0.775
+    # Doc 4 (sparse): 0.75 * 0.5 = 0.375
+    # Doc 5 (sparse): 0.65 * 0.5 = 0.325
+    # Top 2 expected: Doc 3, Doc 1
+    assert retrieved_ids == [3, 1]
+    assert pytest.approx(retrieved_scores, rel=1e-9) == [0.775, 0.45]
+
+def test_hybrid_empty_results_from_both(mock_dense_retriever: Mock, mock_sparse_retriever: Mock):
+    # Arrange
+    mock_dense_retriever.retrieve.return_value = ([], [])
+    mock_sparse_retriever.retrieve.return_value = ([], [])
+    
+    hybrid_retriever = HybridRetriever(dense=mock_dense_retriever, sparse=mock_sparse_retriever, alpha=0.5)
+
+    # Act
+    retrieved_ids, retrieved_scores = hybrid_retriever.retrieve("test query")
+
+    # Assert
+    assert retrieved_ids == []
+    assert retrieved_scores == []
+
+
+================================================================================
+FILE: tests/unit/adapters/retrieval/test_retrieval_bm25.py
+================================================================================
+
+# tests/unit/test_retrieval_bm25.py
+
+import pytest
+from src.adapters.retrieval.sparse_bm25 import SparseBM25Retriever
+
+@pytest.fixture
+def sample_documents_data() -> tuple[list[str], list[int]]:
+    """Provides a set of example documents and their IDs for BM25 retrieval tests."""
+    documents = [
+        "The quick brown dog jumps over the lazy fox.",
+        "The rain in Spain falls mainly in the plain.",
+        "A dog is man's best friend.",
+        "Foxes are agile, and dogs are too.",
+    ]
+    doc_ids = [10, 20, 30, 40]  # Arbitrary document IDs
+    return documents, doc_ids
+
+def test_bm25_retrieves_relevant_doc(sample_documents_data):
+    """BM25 retrieves the most relevant document for a simple query."""
+    documents, doc_ids = sample_documents_data
+    retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
+
+    query = "dog friend"
+    retrieved_ids, retrieved_scores = retriever.retrieve(query, k=1)
+
+    assert len(retrieved_ids) == 1
+    # "A dog is man's best friend." should be the best match
+    assert retrieved_ids[0] == 30
+    assert len(retrieved_scores) == 1
+    assert isinstance(retrieved_scores[0], float)
+
+def test_bm25_respects_k(sample_documents_data):
+    """BM25 returns the correct number of results as specified by k."""
+    documents, doc_ids = sample_documents_data
+    retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
+
+    query = "LES"  # Query not present, should fallback to order/score
+    k_val = 2
+    retrieved_ids, retrieved_scores = retriever.retrieve(query, k=k_val)
+
+    assert len(retrieved_ids) == k_val
+    assert len(retrieved_scores) == k_val
+    # Optionally: Check IDs are among provided doc_ids
+    for doc_id in retrieved_ids:
+        assert doc_id in doc_ids
+
+def test_bm25_no_match(sample_documents_data):
+    """BM25 handles queries with no matching terms gracefully."""
+    documents, doc_ids = sample_documents_data
+    retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
+
+    query = "unicorn cat nonexistent"
+    retrieved_ids, retrieved_scores = retriever.retrieve(query, k=1)
+
+    # Depending on implementation, BM25 may still return results with zero score
+    assert isinstance(retrieved_ids, list)
+    assert isinstance(retrieved_scores, list)
+    assert len(retrieved_ids) == len(retrieved_scores)
+    if retrieved_scores:
+        assert all(isinstance(score, float) for score in retrieved_scores)
+
+def test_bm25_empty_query(sample_documents_data):
+    """BM25 returns k documents with zero scores for an empty query."""
+    documents, doc_ids = sample_documents_data
+    retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
+
+    query = ""
+    retrieved_ids, retrieved_scores = retriever.retrieve(query, k=1)
+
+    assert len(retrieved_ids) <= 1
+    assert len(retrieved_scores) <= 1
+    if retrieved_scores:
+        assert all(score == 0.0 for score in retrieved_scores)
+
+def test_bm25_returns_sorted_scores(sample_documents_data):
+    """BM25 returns results sorted by score in descending order."""
+    documents, doc_ids = sample_documents_data
+    retriever = SparseBM25Retriever(documents=documents, doc_ids=doc_ids)
+
+    query = "dog fox"
+    k_val = 4
+    retrieved_ids, retrieved_scores = retriever.retrieve(query, k=k_val)
+
+    # Scores should be in non-increasing order
+    assert all(retrieved_scores[i] >= retrieved_scores[i+1] for i in range(len(retrieved_scores)-1))
+
+
+
+================================================================================
+FILE: tests/unit/adapters/retrieval/test_retrieval_faiss.py
+================================================================================
+
+# tests/unit/test_retrieval_dense_faiss.py
+
+import pytest
+import numpy as np
+import faiss
+import pickle
+from pathlib import Path
+
+from src.settings import settings as global_settings
+from src.adapters.retrieval.dense_faiss import DenseFaissRetriever
+from src.core.ports import EmbedderPort
+
+# --- Dummy Embedder for controlled testing ---
+class DummyEmbedder(EmbedderPort):
+    """A dummy embedder returning pre-defined vectors for given texts."""
+    DIM: int
+
+    def __init__(self, dim: int, predefined_embeddings: dict[str, list[float]] = None):
+        self.DIM = dim
+        self.predefined_embeddings = predefined_embeddings if predefined_embeddings else {}
+        self.default_vector = [0.0] * self.DIM
+
+    def embed(self, text: str) -> list[float]:
+        return self.predefined_embeddings.get(text, self.default_vector)
+
+# --- FAISS index and id-map artifact fixture ---
+@pytest.fixture
+def faiss_test_artifacts(tmp_path: Path) -> tuple[Path, Path, dict[str, list[float]], int]:
+    """Creates a minimal FAISS index and ID map for dense retrieval tests."""
+    dim = 4
+    doc_embeddings = {
+        "doc1_text": [1.0, 0.1, 0.2, 0.3],   # Closest to query_target_doc1
+        "doc2_text": [0.2, 1.0, 0.3, 0.4],
+        "doc3_text": [0.3, 0.2, 1.0, 0.5],
+    }
+    doc_ids_in_db = [101, 102, 103]
+
+    query_embeddings = {
+        "query_target_doc1": [0.9, 0.15, 0.25, 0.35],  # Closest to doc1_text
+        "query_target_doc2": [0.25, 0.9, 0.35, 0.45],  # Closest to doc2_text
+        "query_no_match":    [0.0, 0.0, 0.0, 0.0],     # Not close to any doc
+    }
+
+    all_predefined_embeddings = {**doc_embeddings, **query_embeddings}
+
+    index_path = tmp_path / "test_index.faiss"
+    id_map_path = tmp_path / "test_id_map.pkl"
+
+    vectors_np = np.array(list(doc_embeddings.values()), dtype="float32")
+    index = faiss.IndexFlatL2(dim)
+    index.add(vectors_np)
+    faiss.write_index(index, str(index_path))
+
+    id_map_content = {i: doc_id for i, doc_id in enumerate(doc_ids_in_db)}
+    with open(id_map_path, "wb") as f:
+        pickle.dump(id_map_content, f)
+
+    return index_path, id_map_path, all_predefined_embeddings, dim
+
+# --- Tests ---
+
+def test_faiss_retrieves_closest_doc(faiss_test_artifacts, monkeypatch):
+    """
+    DenseFaissRetriever returns the closest document for a given query embedding.
+    """
+    index_path, id_map_path, predefined_embeddings, dim = faiss_test_artifacts
+    monkeypatch.setattr(global_settings, "index_path", str(index_path))
+    monkeypatch.setattr(global_settings, "id_map_path", str(id_map_path))
+
+    embedder = DummyEmbedder(dim=dim, predefined_embeddings=predefined_embeddings)
+    retriever = DenseFaissRetriever(embedder=embedder)
+
+    query_text = "query_target_doc1"
+    retrieved_ids, retrieved_scores = retriever.retrieve(query_text, k=1)
+
+    assert len(retrieved_ids) == 1
+    assert retrieved_ids[0] == 101  # "doc1_text"
+    assert len(retrieved_scores) == 1
+    assert isinstance(retrieved_scores[0], float)
+    assert retrieved_scores[0] < 0.1  # Should be a small L2 distance
+
+def test_faiss_respects_k(faiss_test_artifacts, monkeypatch):
+    """
+    DenseFaissRetriever returns exactly k results, including the most relevant.
+    """
+    index_path, id_map_path, predefined_embeddings, dim = faiss_test_artifacts
+    monkeypatch.setattr(global_settings, "index_path", str(index_path))
+    monkeypatch.setattr(global_settings, "id_map_path", str(id_map_path))
+
+    embedder = DummyEmbedder(dim=dim, predefined_embeddings=predefined_embeddings)
+    retriever = DenseFaissRetriever(embedder=embedder)
+
+    query_text = "query_target_doc1"
+    k_val = 2
+    retrieved_ids, retrieved_scores = retriever.retrieve(query_text, k=k_val)
+
+    assert len(retrieved_ids) == k_val
+    assert len(retrieved_scores) == k_val
+    assert 101 in retrieved_ids  # Closest doc should always be present
+
+def test_faiss_no_match_returns_something(faiss_test_artifacts, monkeypatch):
+    """
+    Even for queries not close to any doc, returns k results (lowest relevance).
+    """
+    index_path, id_map_path, predefined_embeddings, dim = faiss_test_artifacts
+    monkeypatch.setattr(global_settings, "index_path", str(index_path))
+    monkeypatch.setattr(global_settings, "id_map_path", str(id_map_path))
+
+    embedder = DummyEmbedder(dim=dim, predefined_embeddings=predefined_embeddings)
+    retriever = DenseFaissRetriever(embedder=embedder)
+
+    query_text = "query_no_match"
+    retrieved_ids, retrieved_scores = retriever.retrieve(query_text, k=1)
+
+    assert isinstance(retrieved_ids, list)
+    assert isinstance(retrieved_scores, list)
+    assert len(retrieved_ids) == len(retrieved_scores)
+    if retrieved_ids:
+        assert len(retrieved_ids) == 1
+        assert retrieved_scores[0] > 0.5  # Arbitrary: Should be greater than "close match" threshold
+
+def test_faiss_k_larger_than_docs(faiss_test_artifacts, monkeypatch):
+    """
+    If k is greater than number of docs in the index, returns all available docs.
+    """
+    index_path, id_map_path, predefined_embeddings, dim = faiss_test_artifacts
+    monkeypatch.setattr(global_settings, "index_path", str(index_path))
+    monkeypatch.setattr(global_settings, "id_map_path", str(id_map_path))
+
+    embedder = DummyEmbedder(dim=dim, predefined_embeddings=predefined_embeddings)
+    retriever = DenseFaissRetriever(embedder=embedder)
+
+    query_text = "query_target_doc2"
+    k_val = 5  # More than number of docs (3)
+    retrieved_ids, retrieved_scores = retriever.retrieve(query_text, k=k_val)
+
+    assert len(retrieved_ids) == 3  # Should return all docs present
+    assert len(retrieved_scores) == 3
+
+def test_faiss_empty_query_returns_default(faiss_test_artifacts, monkeypatch):
+    """
+    If the query is empty, uses the embedder's default vector and returns k results.
+    """
+    index_path, id_map_path, predefined_embeddings, dim = faiss_test_artifacts
+    monkeypatch.setattr(global_settings, "index_path", str(index_path))
+    monkeypatch.setattr(global_settings, "id_map_path", str(id_map_path))
+
+    embedder = DummyEmbedder(dim=dim, predefined_embeddings=predefined_embeddings)
+    retriever = DenseFaissRetriever(embedder=embedder)
+
+    query_text = ""  # No embedding defined, uses default (zero vector)
+    k_val = 2
+    retrieved_ids, retrieved_scores = retriever.retrieve(query_text, k=k_val)
+
+    assert len(retrieved_ids) == k_val
+    assert len(retrieved_scores) == k_val
+    # All returned scores should be the L2 distance to [0, 0, 0, 0] (can assert actual values if desired)
+
+
+
+
+================================================================================
+FILE: tests/unit/test_build.py
+================================================================================
+
+# tests/unit/test_build.py
+from pathlib import Path
+import csv
+import importlib
+import pickle
+
+import faiss
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from src.settings import settings as st
+import src.db.base as db_base
+from src.db.models import Document
+import scripts.build_index as build_index
+
+
+# ---------- helper ----------
+def _count_documents(url: str) -> int:
+    engine = create_engine(url)
+    Session = sessionmaker(bind=engine)
+    with Session() as s:
+        return s.query(Document).count()
+
+
+# ---------- tests ----------
+def test_build_index_sparse(tmp_path: Path, monkeypatch):
+    db_file = tmp_path / "app_sparse.db"
+    csv_file = tmp_path / "kb_sparse.csv"
+
+    rows = [["question", "answer"], ["q1", "a1"], ["q2", "a2"]]
+    with csv_file.open("w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh, delimiter=";").writerows(rows)
+
+    # patch settings
+    monkeypatch.setattr(st, "faq_csv", str(csv_file))
+    monkeypatch.setattr(st, "csv_has_header", True)
+    monkeypatch.setattr(st, "sqlite_url", f"sqlite:///{db_file}")
+    monkeypatch.setattr(st, "retrieval_mode", "sparse")
+
+    importlib.reload(db_base)  # refrezca engine de src.db.base
+
+    build_index.main()
+
+    assert _count_documents(f"sqlite:///{db_file}") == 2  # excluye cabecera
+
+
+def test_build_index_dense(tmp_path: Path, monkeypatch):
+    db_file = tmp_path / "app_dense.db"
+    csv_file = tmp_path / "kb_dense.csv"
+    index_file = tmp_path / "index.faiss"
+    id_map_file = tmp_path / "id_map.pkl"
+
+    rows = [["question", "answer"], ["d1", "a1"], ["d2", "a2"]]
+    with csv_file.open("w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh, delimiter=";").writerows(rows)
+
+    monkeypatch.setattr(st, "faq_csv", str(csv_file))
+    monkeypatch.setattr(st, "csv_has_header", True)
+    monkeypatch.setattr(st, "sqlite_url", f"sqlite:///{db_file}")
+    monkeypatch.setattr(st, "index_path", str(index_file))
+    monkeypatch.setattr(st, "id_map_path", str(id_map_file))
+    monkeypatch.setattr(st, "retrieval_mode", "dense")
+
+    importlib.reload(db_base)
+
+    build_index.main()
+
+    # DB
+    assert _count_documents(f"sqlite:///{db_file}") == 2
+
+    # archivos FAISS
+    assert index_file.exists()
+    assert id_map_file.exists()
+
+    faiss_index = faiss.read_index(str(index_file))
+    with open(id_map_file, "rb") as fh:
+        ids = pickle.load(fh)
+
+    assert faiss_index.ntotal == 2
+    assert len(ids) == 2
+
+
+
+================================================================================
+FILE: tests/unit/test_db_setup.py
+================================================================================
+
+# Ejemplo de test mínimo en tests/unit/test_db_setup.py (nuevo archivo)
+from src.db.models import Document as DbDocument # O el nombre que uses
+from sqlalchemy.orm import Session
+
+def test_basic_db_insert(db_session: Session):
+    """Testea si se puede insertar en la tabla documents."""
+    test_doc_id = 999
+    test_doc_content = "basic insert test"
+    doc = DbDocument(id=test_doc_id, content=test_doc_content)
+    db_session.add(doc)
+    db_session.commit() # Esto fallará si la tabla no existe
+
+    retrieved_doc = db_session.get(DbDocument, test_doc_id)
+    assert retrieved_doc is not None
+    assert retrieved_doc.content == test_doc_content
+
+
+================================================================================
+FILE: tests/unit/test_dependencies.py
+================================================================================
+
+# tests/unit/app/test_dependencies.py
+
+import pytest
+from unittest.mock import patch, MagicMock, call
+import importlib
+from pathlib import Path
+import csv
+import requests
+import logging
+
+from src.app import dependencies as app_dependencies_module
+from src.settings import settings as global_settings
+from src.adapters.generation.openai_chat import OpenAIGenerator
+from src.adapters.generation.ollama_chat import OllamaGenerator
+from src.adapters.retrieval.sparse_bm25 import SparseBM25Retriever
+from src.db.base import SessionLocal as AppSessionLocal
+from src.db.models import Document as DbDocument
+
+# ----------------- Fixtures -----------------
+
+@pytest.fixture(autouse=True)
+def reset_rag_service_singleton():
+    """Ensure the RAG service singleton is reset before and after each test."""
+    app_dependencies_module._rag_service = None
+    yield
+    app_dependencies_module._rag_service = None
+
+@pytest.fixture
+def mock_requests_get_fixture():
+    """Patch requests.get for Ollama health-check simulation."""
+    with patch("requests.get") as mock_get:
+        yield mock_get
+
+@pytest.fixture
+def mock_path_is_file_fixture():
+    """Patch Path.is_file for artifact existence simulation."""
+    with patch.object(Path, 'is_file') as mock_is_file:
+        yield mock_is_file
+
+# ----------------- Tests: _choose_generator logic -----------------
+
+def test_choose_generator_ollama_enabled_and_works(monkeypatch, mock_requests_get_fixture):
+    """Ollama enabled and reachable: should use OllamaGenerator."""
+    monkeypatch.setattr(global_settings, "ollama_enabled", True)
+    monkeypatch.setattr(global_settings, "openai_api_key", None)
+    mock_requests_get_fixture.return_value = MagicMock(status_code=200)
+    
+    generator = app_dependencies_module._choose_generator()
+
+    assert isinstance(generator, OllamaGenerator)
+    mock_requests_get_fixture.assert_called_once_with(
+        f"{global_settings.ollama_base_url.rstrip('/')}/api/tags", timeout=2
+    )
+
+def test_choose_generator_ollama_enabled_primary_fails_openai_works(monkeypatch, mock_requests_get_fixture):
+    """If Ollama check fails and OpenAI key is set, fallback to OpenAIGenerator."""
+    monkeypatch.setattr(global_settings, "ollama_enabled", True)
+    monkeypatch.setattr(global_settings, "openai_api_key", "sk-testkey")
+    mock_requests_get_fixture.side_effect = requests.exceptions.ConnectionError("Ollama down")
+
+    importlib.reload(app_dependencies_module)
+    generator = app_dependencies_module._choose_generator()
+
+    assert isinstance(generator, OpenAIGenerator)
+    mock_requests_get_fixture.assert_called_once_with(
+        f"{global_settings.ollama_base_url.rstrip('/')}/api/tags", timeout=2
+    )
+
+def test_choose_generator_ollama_disabled_openai_works(monkeypatch, mock_requests_get_fixture):
+    """If Ollama is disabled and OpenAI key is set, use OpenAIGenerator directly."""
+    monkeypatch.setattr(global_settings, "ollama_enabled", False)
+    monkeypatch.setattr(global_settings, "openai_api_key", "sk-testkey")
+
+    importlib.reload(app_dependencies_module)
+    generator = app_dependencies_module._choose_generator()
+
+    assert isinstance(generator, OpenAIGenerator)
+    mock_requests_get_fixture.assert_not_called()
+
+def test_choose_generator_ollama_primary_fails_no_openai_key_ollama_fallback_works(monkeypatch, mock_requests_get_fixture):
+    """If OpenAI key is not set and Ollama primary fails, should try Ollama fallback."""
+    monkeypatch.setattr(global_settings, "ollama_enabled", True)
+    monkeypatch.setattr(global_settings, "openai_api_key", None)
+    mock_requests_get_fixture.side_effect = [
+        requests.exceptions.Timeout("Ollama primary timeout"),
+        MagicMock(status_code=200)
+    ]
+
+    importlib.reload(app_dependencies_module)
+    generator = app_dependencies_module._choose_generator()
+
+    assert isinstance(generator, OllamaGenerator)
+    assert mock_requests_get_fixture.call_count == 2
+    expected_ollama_tags_url = f"{global_settings.ollama_base_url.rstrip('/')}/api/tags"
+    mock_requests_get_fixture.assert_has_calls([
+        call(expected_ollama_tags_url, timeout=2),
+        call(expected_ollama_tags_url, timeout=2)
+    ])
+
+def test_choose_generator_all_fail_raises_runtime_error(monkeypatch, mock_requests_get_fixture):
+    """If both Ollama and OpenAI are unavailable, raise RuntimeError."""
+    monkeypatch.setattr(global_settings, "ollama_enabled", True)
+    monkeypatch.setattr(global_settings, "openai_api_key", None)
+    mock_requests_get_fixture.side_effect = requests.exceptions.RequestException("Ollama always fails")
+
+    importlib.reload(app_dependencies_module)
+    with pytest.raises(RuntimeError, match="LLM Generator could not be initialized"):
+        app_dependencies_module._choose_generator()
+    assert mock_requests_get_fixture.call_count == 2
+
+# ----------------- Tests: init_rag_service DB/CSV population and fallback -----------------
+
+def test_init_rag_service_dense_mode_fallback_to_sparse_if_files_missing(
+    monkeypatch, mock_path_is_file_fixture, caplog, AppSessionLocal
+):
+    """Dense mode: if FAISS artifacts missing, fall back to SparseBM25Retriever."""
+    with AppSessionLocal() as db:
+        db.query(DbDocument).delete()
+        db.commit()
+        db.add_all([DbDocument(content="doc1"), DbDocument(content="doc2")])
+        db.commit()
+        assert db.query(DbDocument).count() == 2
+
+    monkeypatch.setattr(global_settings, "retrieval_mode", "dense")
+    mock_path_is_file_fixture.return_value = False
+    monkeypatch.setattr(global_settings, "openai_api_key", "sk-testkey-dense-fallback")
+    monkeypatch.setattr(global_settings, "faq_csv", "/tmp/non_existent_faq_for_dense_fallback.csv")
+
+    caplog.set_level(logging.WARNING, logger="src.app.dependencies")
+    importlib.reload(app_dependencies_module)
+    app_dependencies_module.init_rag_service()
+    service = app_dependencies_module.get_rag_service()
+
+    assert service is not None
+    assert isinstance(service.retriever, SparseBM25Retriever)
+    expected_log_substring = "Falling back to sparse retrieval: dense artifacts missing"
+    found_log = any(
+        record.name == "src.app.dependencies"
+        and record.levelname == "WARNING"
+        and expected_log_substring in record.message
+        for record in caplog.records
+    )
+    assert found_log, f"Expected fallback warning log not found. Logs:\n{caplog.text}"
+
+def test_init_rag_service_populates_db_from_csv_if_empty(
+    monkeypatch, tmp_path: Path, caplog, AppSessionLocal
+):
+    """Should populate DB from CSV if empty."""
+    with AppSessionLocal() as db:
+        db.query(DbDocument).delete()
+        db.commit()
+        assert db.query(DbDocument).count() == 0
+
+    csv_file_path = tmp_path / "dummy_faq_for_population.csv"
+    csv_data = [
+        ["question", "answer"],
+        ["Q1", "A1: some keywords"],
+        ["Q2", "A2: more data"],
+    ]
+    num_data_rows = len(csv_data) - 1
+
+    with open(csv_file_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerows(csv_data)
+
+    monkeypatch.setattr(global_settings, "faq_csv", str(csv_file_path))
+    monkeypatch.setattr(global_settings, "csv_has_header", True)
+    monkeypatch.setattr(global_settings, "openai_api_key", "sk-testkey-csv-pop")
+    monkeypatch.setattr(global_settings, "retrieval_mode", "sparse")
+
+    caplog.set_level(logging.INFO, logger="src.app.dependencies")
+    importlib.reload(app_dependencies_module)
+    app_dependencies_module.init_rag_service()
+
+    with AppSessionLocal() as db_after_init:
+        doc_count = db_after_init.query(DbDocument).count()
+        assert doc_count == num_data_rows
+
+def test_init_rag_service_does_not_populate_db_if_not_empty(
+    monkeypatch, tmp_path: Path, caplog
+):
+    """Should not populate DB from CSV if DB already has content."""
+    initial_doc_content = "existing document"
+    with AppSessionLocal() as db:
+        db.query(DbDocument).delete()
+        db.add(DbDocument(content=initial_doc_content))
+        db.commit()
+        assert db.query(DbDocument).count() == 1
+
+    csv_file_path = tmp_path / "dummy_faq_ignored.csv"
+    with open(csv_file_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow(["QH", "AH"])
+        writer.writerow(["NewQ", "NewA"])
+
+    monkeypatch.setattr(global_settings, "faq_csv", str(csv_file_path))
+    monkeypatch.setattr(global_settings, "openai_api_key", "sk-testkey")
+    monkeypatch.setattr(global_settings, "retrieval_mode", "sparse")
+
+    caplog.set_level(logging.INFO, logger="src.app.dependencies")
+    importlib.reload(app_dependencies_module)
+    app_dependencies_module.init_rag_service()
+
+    with AppSessionLocal() as db:
+        doc_count = db.query(DbDocument).count()
+        assert doc_count == 1
+        first_doc = db.query(DbDocument).first()
+        assert first_doc.content == initial_doc_content
+
+    assert not any(
+        record.levelname == "INFO"
+        and "Populating from" in record.message
+        for record in caplog.records
+        if record.name == "src.app.dependencies"
+    ), f"DB population log found, but DB was not empty. Logs:\n{caplog.text}"
+
+def test_get_rag_service_raises_assertion_error_if_not_initialized():
+    """Should raise AssertionError if RAG service is accessed before initialization."""
+    assert app_dependencies_module._rag_service is None
+    with patch.object(app_dependencies_module, 'init_rag_service') as mock_init_fallback:
+        with pytest.raises(AssertionError, match="RagService has not been initialized"):
+            app_dependencies_module.get_rag_service()
+        mock_init_fallback.assert_not_called()
+
+    app_dependencies_module._rag_service = None
+    with patch.object(app_dependencies_module, 'init_rag_service') as mock_init_fails:
+        with pytest.raises(AssertionError, match="RagService has not been initialized"):
+            app_dependencies_module.get_rag_service()
+        mock_init_fails.assert_not_called()
+
+def test_get_rag_service_raises_if_init_fails_to_set_service(monkeypatch):
+    """Should raise AssertionError if init_rag_service fails to set singleton."""
+    assert app_dependencies_module._rag_service is None
+    def mock_init_that_does_not_set_singleton():
+        app_dependencies_module._rag_service = None # Explicitly keep it None
+    monkeypatch.setattr(app_dependencies_module, "init_rag_service", mock_init_that_does_not_set_singleton)
+    with pytest.raises(AssertionError, match="RagService has not been initialized"):
+        app_dependencies_module.get_rag_service()
+
+
+
+================================================================================
+FILE: tests/unit/test_rag.py
+================================================================================
+
+# tests/unit/test_rag.py
+"""
+Unit-test del núcleo RagService sin depender de OpenAI ni BM25 reales,
+y usando una base de datos en memoria para aislamiento.
+"""
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session # Importar Session explícitamente
+
+# Importar Base y modelos directamente para usarlos con el engine en memoria
+from src.db.base import Base # El Base original para definir la estructura de tablas
+from src.db.models import Document as DbDocument # Alias para evitar confusión con un posible Document de Pydantic
+
+from src.core.rag import RagService
+from src.core.ports import RetrieverPort, GeneratorPort # Importar los Puertos
+
+# --- Test Doubles (Stubs) ---
+class DummyRetriever(RetrieverPort): # Implementar el Puerto
+    def __init__(self, doc_ids: list[int] = None, scores: list[float] = None):
+        self.doc_ids_to_return = doc_ids if doc_ids is not None else [1]
+        self.scores_to_return = scores if scores is not None else [0.9] * len(self.doc_ids_to_return)
+        if len(self.doc_ids_to_return) != len(self.scores_to_return):
+            raise ValueError("doc_ids y scores deben tener la misma longitud en DummyRetriever")
+
+    def retrieve(self, query: str, k: int = 5) -> tuple[list[int], list[float]]:
+        # Devolver solo hasta k resultados
+        return self.doc_ids_to_return[:k], self.scores_to_return[:k]
+
+
+class DummyGenerator(GeneratorPort): # Implementar el Puerto
+    def __init__(self, answer: str = "dummy answer"):
+        self.answer_to_return = answer
+
+    def generate(self, question: str, contexts: list[str]) -> str:
+        # Podrías incluso hacer asserts sobre 'question' o 'contexts' aquí si fuera necesario
+        return self.answer_to_return
+
+
+# --- Fixture para la base de datos en memoria ---
+@pytest.fixture(scope="function") # 'function' scope para una BD limpia por test
+def db_session() -> Session: # Tipar el retorno para claridad
+    # Crear un engine SQLite en memoria para este test
+    engine = create_engine("sqlite:///:memory:")
+    # Crear todas las tablas definidas en Base.metadata (ej. Document, QaHistory)
+    Base.metadata.create_all(bind=engine)
+
+    # Crear una SessionLocal específica para este engine en memoria
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    db = TestingSessionLocal()
+    try:
+        yield db # Proporcionar la sesión al test
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine) # Limpiar después del test
+
+
+# --- Tests ---
+def test_rag_service_ask_retrieves_and_generates(db_session: Session):
+    """
+    Test que RagService.ask:
+    1. Llama a retriever.retrieve().
+    2. Llama a crud.get_documents() con los IDs del retriever.
+    3. Llama a generator.generate() con la pregunta y los contextos.
+    4. Devuelve la respuesta del generador y los IDs fuente.
+    """
+    # 1. Poblar la BD en memoria con un documento de prueba
+    test_doc_id = 1
+    test_doc_content = "dummy context content"
+    doc = DbDocument(id=test_doc_id, content=test_doc_content)
+    db_session.add(doc)
+    db_session.commit()
+
+    # 2. Configurar los Test Doubles
+    retriever = DummyRetriever(doc_ids=[test_doc_id], scores=[0.95])
+    generator = DummyGenerator(answer="specific dummy answer for this test")
+    
+    rag_service = RagService(retriever, generator)
+    
+    question = "hello?"
+
+    # Act
+    result = rag_service.ask(db_session, question)
+    
+    # Assert
+    assert result["answer"] == "specific dummy answer for this test"
+    assert result["source_ids"] == [test_doc_id]
+    # Opcional: verificar que el historial se guardó (si QaHistory está definido en Base.metadata)
+    # from src.db.models import QaHistory
+    # history_entry = db_session.query(QaHistory).first()
+    # assert history_entry is not None
+    # assert history_entry.question == question
+    # assert history_entry.answer == "specific dummy answer for this test"
+
+
+def test_rag_service_ask_no_documents_found(db_session: Session):
+    """
+    Test que RagService.ask maneja el caso donde el retriever no devuelve IDs
+    o los IDs no corresponden a documentos en la BD.
+    El generador debería ser llamado con un contexto vacío.
+    """
+    # Arrange
+    # BD está vacía (o los IDs devueltos no existen)
+    
+    retriever = DummyRetriever(doc_ids=[], scores=[]) # Retriever no devuelve nada
+    
+    # Queremos asegurar que el generador se llama con contextos vacíos
+    class GeneratorSpy(GeneratorPort):
+        called_with_contexts: list[str] | None = None
+        def generate(self, question: str, contexts: list[str]) -> str:
+            self.called_with_contexts = contexts
+            return "generated with no context"
+
+    generator_spy = GeneratorSpy()
+    rag_service = RagService(retriever, generator_spy)
+    question = "any question"
+
+    # Act
+    result = rag_service.ask(db_session, question)
+
+    # Assert
+    assert result["answer"] == "generated with no context"
+    assert result["source_ids"] == []
+    assert generator_spy.called_with_contexts == [] # Verifica que el contexto estaba vacío
+
+
+def test_rag_service_uses_k_for_retrieval(db_session: Session):
+    """
+    Test que RagService.ask pasa el parámetro 'k' (o su default) al retriever.
+    """
+    # Arrange
+    # Poblar la BD con suficientes documentos para que 'k' importe
+    for i in range(1, 6):
+        db_session.add(DbDocument(id=i, content=f"doc {i}"))
+    db_session.commit()
+
+    class RetrieverSpy(RetrieverPort):
+        called_with_k: int | None = None
+        def retrieve(self, query: str, k: int = 5) -> tuple[list[int], list[float]]:
+            self.called_with_k = k
+            # Devolver algunos IDs y scores válidos para que el flujo continúe
+            actual_ids = [1, 2, 3, 4, 5]
+            return actual_ids[:k], [0.9] * k 
+
+    retriever_spy = RetrieverSpy()
+    generator = DummyGenerator() # No nos importa la respuesta aquí
+    rag_service = RagService(retriever_spy, generator)
+    
+    # Act
+    rag_service.ask(db_session, "test question", k=3) # Llamar con k=3
+
+    # Assert
+    assert retriever_spy.called_with_k == 3
+
+    # Act: Llamar sin k explícito (debería usar el default de RagService.ask, que es 3)
+    rag_service.ask(db_session, "another test question")
+    assert retriever_spy.called_with_k == 3 # El default de RagService.ask es k=3.
+

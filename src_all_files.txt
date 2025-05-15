@@ -1,0 +1,1254 @@
+
+================================================================================
+FILE: src/__init__.py
+================================================================================
+
+"""
+File: src/__init__.py
+Path: src/__init__.py
+src package initialization
+"""
+__version__ = "0.1.0"
+
+
+
+# # Core settings
+# from src.settings import settings
+
+# # Database components
+# from src.db import Base, get_db, SessionLocal, engine, Document, get_documents, add_documents
+
+# # Adapters
+# from src.adapters import OpenAIEmbedder, SentenceTransformerEmbedder
+
+# __all__ = [
+#     "settings",
+#     "Base", 
+#     "get_db",
+#     "SessionLocal",
+#     "engine",
+#     "Document",
+#     "get_documents",
+#     "add_documents",
+#     "OpenAIEmbedder",
+#     "SentenceTransformerEmbedder"
+# ] 
+
+
+================================================================================
+FILE: src/adapters/__init__.py
+================================================================================
+
+"""
+File: src/adapters/__init__.py
+Path: src/adapters/__init__.py
+Adapters module for external service integrations.
+"""
+
+from .embeddings import OpenAIEmbedder, SentenceTransformerEmbedder
+
+__all__ = [
+    "OpenAIEmbedder",
+    "SentenceTransformerEmbedder"
+] 
+
+
+================================================================================
+FILE: src/adapters/embeddings/__init__.py
+================================================================================
+
+"""
+File: src/adapters/embeddings/__init__.py
+Path: src/adapters/embeddings/__init__.py
+Embedding adapters for text embedding generation.
+"""
+
+from .openai import OpenAIEmbedder
+from .sentence_transformers import SentenceTransformerEmbedder
+
+__all__ = [
+    "OpenAIEmbedder",
+    "SentenceTransformerEmbedder"
+] 
+
+
+================================================================================
+FILE: src/adapters/embeddings/openai.py
+================================================================================
+
+from __future__ import annotations
+
+"""OpenAI embeddings adapter (v1 API)
+"""
+
+from typing import List
+
+from openai import OpenAI, APIError  # type: ignore
+
+from src.core.ports import EmbedderPort
+from src.settings import settings
+
+__all__ = ["OpenAIEmbedder"]
+
+_MODEL_DIM: dict[str, int] = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
+
+DEFAULT_MODEL = settings.openai_embedding_model
+DEFAULT_DIM = _MODEL_DIM.get(DEFAULT_MODEL, 1536)
+
+
+class OpenAIEmbedder(EmbedderPort):
+    """Adapter para la API de *embeddings* de OpenAI v1.x"""
+
+    def __init__(self, *, model: str | None = None) -> None:
+        self.model = model or settings.openai_embedding_model
+        self.DIM: int = _MODEL_DIM.get(self.model, DEFAULT_DIM)
+
+        # OpenAI v1+ Client
+        self.client = OpenAI(api_key=settings.openai_api_key)
+
+    # ------------------------------------------------------------------
+    # Port Implementation
+    # ------------------------------------------------------------------
+    def embed(self, text: str) -> List[float]:
+        """Devuelve el embedding como *lista* de floats."""
+        try:
+            resp = self.client.embeddings.create(model=self.model, input=text)
+        except APIError as e:
+            raise
+
+        emb_vector = resp.data[0].embedding
+        return emb_vector
+
+
+
+================================================================================
+FILE: src/adapters/embeddings/sentence_transformers.py
+================================================================================
+
+"""
+File: src/adapters/embeddings/sentence_transformers.p
+SentenceTransformer embedder (CPU-friendly).
+"""
+from typing import List
+from sentence_transformers import SentenceTransformer
+
+from src.core.ports import EmbedderPort
+
+class SentenceTransformerEmbedder(EmbedderPort):
+    DIM = 384
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        self.model = SentenceTransformer(model_name)
+
+    # ------------------------------------------------------------------ #
+    def embed(self, text: str) -> List[float]:
+        return self.model.encode([text])[0].tolist()
+
+
+================================================================================
+FILE: src/adapters/generation/__init__.py
+================================================================================
+
+"""
+File: src/adapters/generation/__init__.py
+Path: src/adapters/generation/__init__.py
+Generation adapters for LLM text generation.
+"""
+
+from .ollama_chat import OllamaGenerator
+from .openai_chat import OpenAIGenerator
+
+__all__ = [
+    "OllamaGenerator",
+    "OpenAIGenerator"
+] 
+
+
+================================================================================
+FILE: src/adapters/generation/ollama_chat.py
+================================================================================
+
+# src/adapters/generation/ollama_chat.py
+import requests
+from typing import List
+from fastapi import HTTPException 
+from src.core.ports import GeneratorPort
+from src.settings import settings #  settings.ollama_base_url y settings.ollama_request_timeout exists
+
+import logging
+logger = logging.getLogger(__name__)
+
+class OllamaGenerator(GeneratorPort):
+    def generate(self, question: str, contexts: List[str]) -> str:
+        ctx_block = "\n".join(f"- {c}" for c in contexts)
+        full_prompt = (
+            "Based on the following context, please answer the question.\nIf the context does not provide an answer, say so.\n\n"
+            "CONTEXT:\n"
+            f"{ctx_block}\n\n"
+            "QUESTION:\n"
+            f"{question}"
+        )
+        
+        payload = {
+            "model": settings.ollama_model,
+            "prompt": full_prompt,
+            "stream": False # Ollama by default returns the full response if stream equals false
+            # "options": {"temperature": 0.7} #  OPTIONAL
+        }
+        
+        base_url = settings.ollama_base_url.rstrip('/')
+        api_url = f"{base_url}/api/generate" 
+        
+        try:
+            response = requests.post(
+                api_url, 
+                json=payload, 
+                timeout=settings.ollama_request_timeout
+            )
+            response.raise_for_status() # HTTP codes 4xx/5xx
+            
+            response_data = response.json()
+
+            # The endpoint /api/generate retuns a JSON where every line it's a JSON if stream = True (default), else only 1 json with full answer:
+            # when stream=False:
+            # {
+            #   "model": "...", "created_at": "...", "response": "...", "done": true, 
+            #   "context": [...], "total_duration": ..., ...
+            # }
+            if "response" in response_data and isinstance(response_data["response"], str):
+                return response_data["response"].strip()
+            else:
+                # logger.warning(f"Ollama response malformed. Data: {response_data}")
+                raise HTTPException(500, detail="Ollama response malformed: 'response' key missing or not a string.")
+
+        except requests.exceptions.Timeout as err:
+            raise HTTPException(504, detail=f"Ollama request timed out after {settings.ollama_request_timeout}s: {api_url}") from err
+        except requests.exceptions.ConnectionError as err:
+            raise HTTPException(503, detail=f"Could not connect to Ollama server at {api_url}") from err
+        except requests.exceptions.HTTPError as err:
+            error_content = err.response.text if err.response is not None else str(err)
+            status_code = err.response.status_code if err.response is not None else 500
+            raise HTTPException(status_code, detail=f"Ollama API error: {error_content}") from err
+        except requests.exceptions.JSONDecodeError as err:
+            # logger.error(f"Failed to decode Ollama JSON response. Status: {response.status_code}, Content: {response.text}")
+            raise HTTPException(500, detail=f"Failed to decode Ollama JSON response. Original error: {str(err)}") from err
+        except Exception as e:
+            # logger.exception("Unexpected error during Ollama call") # Log con traceback
+            raise HTTPException(500, detail=f"Unexpected error during Ollama call: {str(e)}") from e
+
+
+================================================================================
+FILE: src/adapters/generation/openai_chat.py
+================================================================================
+
+
+# === file: src/adapters/generation/openai_chat.py ===
+"""OpenAI Chat completion generator (compatible con API v1)
+
+Cumple los tests:
+* Se instancia con `OpenAI(api_key=…)`.
+* `generate()` construye prompt exactamente como esperan los asserts.
+* Maneja `APIError` y lo convierte a `HTTPException 502`.
+"""
+from __future__ import annotations
+
+from typing import List
+
+from fastapi import HTTPException
+from openai import OpenAI, APIError  # type: ignore
+
+from src.core.ports import GeneratorPort
+from src.settings import settings
+
+__all__ = ["OpenAIGenerator"]
+
+
+class OpenAIGenerator(GeneratorPort):
+    """Adapter para chat‑completion de OpenAI v1.x"""
+
+    def __init__(self, *, model: str | None = None, temperature: float | None = None) -> None:
+        self.model = model or settings.openai_model
+        self.temperature = temperature if temperature is not None else settings.openai_temperature
+        self.client = OpenAI(api_key=settings.openai_api_key)
+
+    # ------------------------------------------------------------------
+    def _build_prompt(self, question: str, contexts: List[str]) -> str:
+        ctx_block = "\n".join(f"- {c}" for c in contexts)
+        return (
+            "Answer using ONLY the context provided.\n\n"
+            f"CONTEXT:\n{ctx_block}\n\n"
+            f"QUESTION: {question}"
+        )
+
+    def generate(self, question: str, contexts: List[str]) -> str:
+        prompt = self._build_prompt(question, contexts)
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except APIError as err:
+            raise HTTPException(status_code=502, detail=f"OpenAI API Error: {err.message}") from err
+
+        return resp.choices[0].message.content  # type: ignore[attr-defined]
+
+
+================================================================================
+FILE: src/adapters/retrieval/__init__.py
+================================================================================
+
+"""
+File: src/adapters/retrieval/__init__.py
+Path: src/adapters/retrieval/__init__.py
+Retrieval adapters for document retrieval.
+"""
+
+from .dense_faiss import DenseFaissRetriever
+from .sparse_bm25 import SparseBM25Retriever
+from .hybrid import HybridRetriever
+
+__all__ = [
+    "DenseFaissRetriever",
+    "SparseBM25Retriever",
+    "HybridRetriever"
+] 
+
+
+================================================================================
+FILE: src/adapters/retrieval/dense_faiss.py
+================================================================================
+
+from __future__ import annotations
+
+"""Dense FAISS Retriever.
+
+++ 
+
+* Accept injectable `embedder` to avoid downloads during tests.
+* Support both list and dict formats for `id_map` for backward compatibility.
+* Ensure dimension consistency between FAISS index and embedder.
+* Public API: `retrieve(query: str, k: int = 5)` → `(ids, scores)`.
+"""
+
+import pickle
+from pathlib import Path
+from typing import List, Tuple, Sequence
+
+import faiss  # type: ignore
+import numpy as np
+
+from src.core.ports import RetrieverPort, EmbedderPort
+from src.settings import settings
+from src.adapters.embeddings.sentence_transformers import (
+    SentenceTransformerEmbedder,
+)
+
+__all__ = ["DenseFaissRetriever"]
+
+
+class DenseFaissRetriever(RetrieverPort):
+    """Embedding-based search using FAISS.
+
+    Parameters
+    ----------
+    embedder : EmbedderPort, optional
+        Implementation of `EmbedderPort` to convert text into embeddings.
+        Defaults to `SentenceTransformerEmbedder` if None.
+    index_path : str | Path, optional
+        Path to the FAISS index file. Default obtained from `settings`.
+    id_map_path : str | Path, optional
+        Path to the ID mapping file. Default obtained from `settings`.
+    """
+
+    def __init__(
+        self,
+        *,
+        embedder: EmbedderPort | None = None,
+        index_path: str | Path | None = None,
+        id_map_path: str | Path | None = None,
+    ) -> None:
+        # Embedder initialization
+        self.embedder: EmbedderPort = embedder or SentenceTransformerEmbedder()
+
+        # Artifact paths
+        self.index_path = Path(index_path or settings.index_path)
+        self.id_map_path = Path(id_map_path or settings.id_map_path)
+
+        if not self.index_path.is_file():
+            raise FileNotFoundError(f"FAISS index not found: {self.index_path}")
+        if not self.id_map_path.is_file():
+            raise FileNotFoundError(f"ID map file not found: {self.id_map_path}")
+
+        # Load FAISS index
+        self.index: faiss.Index = faiss.read_index(str(self.index_path))
+
+        # Load ID map with backward compatibility
+        with self.id_map_path.open("rb") as file:
+            raw_id_map = pickle.load(file)
+
+        # Allow list or dict for backward compatibility
+        if isinstance(raw_id_map, dict):
+            max_idx = max(raw_id_map.keys(), default=-1)
+            self._id_map: List[int | None] = [None] * (max_idx + 1)
+            for idx, doc_id in raw_id_map.items():
+                self._id_map[idx] = doc_id
+        elif isinstance(raw_id_map, Sequence):
+            self._id_map = list(raw_id_map)  # shallow copy for safety
+        else:
+            raise TypeError(
+                "id_map must be either a list or dict mapping FAISS indices to document IDs"
+            )
+
+        # Validation
+        if self.index.d != self.embedder.DIM:
+            raise ValueError(
+                f"Dimension mismatch: FAISS index ({self.index.d}) vs embedder ({self.embedder.DIM})"
+            )
+
+    def retrieve(self, query: str, k: int = 5) -> Tuple[List[int], List[float]]:
+        """Retrieve the top-k most similar documents.
+
+        Parameters
+        ----------
+        query : str
+            The query string to search.
+        k : int, default 5
+            Number of top results to retrieve.
+
+        Returns
+        -------
+        Tuple[List[int], List[float]]
+            Parallel lists containing document IDs and similarity scores.
+
+        Notes
+        -----
+        Returns empty lists if `k <= 0`.
+        """
+        if k <= 0:
+            return [], []
+
+        # FAISS expects shape (1, dimension)
+        query_vec = np.asarray([self.embedder.embed(query)], dtype="float32")
+        scores, indices = self.index.search(query_vec, min(k, self.index.ntotal))
+
+        scores, indices = scores[0], indices[0]
+
+        ids: List[int] = []
+        sim_scores: List[float] = []
+
+        for faiss_idx, score in zip(indices, scores):
+            if faiss_idx == -1:
+                continue  # FAISS fills with -1 if fewer than k results found
+            doc_id = self._id_map[faiss_idx]
+            if doc_id is None:
+                continue  # Skip if ID mapping is missing
+
+            ids.append(int(doc_id))
+            sim_scores.append(float(score))
+
+        return ids, sim_scores
+
+
+
+================================================================================
+FILE: src/adapters/retrieval/hybrid.py
+================================================================================
+
+from __future__ import annotations
+
+"""Hybrid Retriever: Combines Dense and Sparse (BM25) Retrievers.
+
+Uses linear interpolation to combine results:
+
+- final_score = (1 - alpha) * dense_score + alpha * sparse_score
+```
+
+```
+"""
+
+from typing import List, Tuple
+
+from src.core.ports import RetrieverPort
+
+__all__ = ["HybridRetriever"]
+
+
+class HybridRetriever(RetrieverPort):
+    """Hybrid retrieval combining dense and sparse retrievers.
+
+    Parameters
+    ----------
+    dense : RetrieverPort
+        Retriever using dense vector embeddings.
+    sparse : RetrieverPort
+        Retriever using sparse (BM25) scores.
+    alpha : float, default 0.5
+        Interpolation parameter (0 ≤ alpha ≤ 1). Higher alpha emphasizes sparse retrieval.
+    """
+
+    def __init__(self, *, dense: RetrieverPort, sparse: RetrieverPort, alpha: float = 0.5):
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("Parameter 'alpha' must be in [0, 1].")
+        self.dense = dense
+        self.sparse = sparse
+        self.alpha = alpha
+
+    def retrieve(self, query: str, k: int = 5) -> Tuple[List[int], List[float]]:
+        """Retrieve the top-k documents by combining dense and sparse scores.
+
+        Parameters
+        ----------
+        query : str
+            Query string.
+        k : int, default 5
+            Number of top documents to retrieve.
+
+        Returns
+        -------
+        Tuple[List[int], List[float]]
+            Parallel lists containing document IDs and combined scores.
+        """
+        dense_ids, dense_scores = self.dense.retrieve(query, k)
+        sparse_ids, sparse_scores = self.sparse.retrieve(query, k)
+
+        # Weight scores
+        dense_scores = [score * (1 - self.alpha) for score in dense_scores]
+        sparse_scores = [score * self.alpha for score in sparse_scores]
+
+        # Merge scores
+        combined_scores: dict[int, float] = {}
+
+        for doc_id, score in zip(dense_ids, dense_scores):
+            combined_scores[doc_id] = combined_scores.get(doc_id, 0.0) + score
+
+        for doc_id, score in zip(sparse_ids, sparse_scores):
+            combined_scores[doc_id] = combined_scores.get(doc_id, 0.0) + score
+
+        # Sort by combined score (descending)
+        sorted_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)[:k]
+
+        ids, scores = zip(*sorted_results) if sorted_results else ([], [])
+
+        return list(ids), list(scores)
+
+
+
+================================================================================
+FILE: src/adapters/retrieval/sparse_bm25.py
+================================================================================
+
+# src/adapters/retrieval/sparse_bm25.py
+from typing import List, Tuple
+import re
+
+from src.core.ports import RetrieverPort
+from rank_bm25 import BM25Okapi
+from src.utils import preprocess_text
+
+import logging
+logger = logging.getLogger(__name__)
+
+class SparseBM25Retriever(RetrieverPort):
+    def __init__(self, documents: List[str], doc_ids: List[int]):
+        self.doc_ids = doc_ids
+        self.bm25 = None                     
+        self.corpus_is_empty = not documents # flag
+
+        if not self.corpus_is_empty:
+            tokenized_corpus = [self._tok(d) for d in documents]
+            # Only init BM25 if tokenized corpus have content - if not, rank_bm25 might fail 
+            if any(tokenized_corpus):
+                try:
+                    self.bm25 = BM25Okapi(tokenized_corpus)
+                except ZeroDivisionError:
+                    # safeguard - testing feedback
+                    logger.warning("BM25Okapi ZeroDivisionError despite non-empty tokenized corpus. BM25 will not be initialized.", exc_info=True) # CAMBIO A INGLÉS
+
+                    self.corpus_is_empty = True
+                    self.bm25 = None
+            else:
+                logger.warning("WARNING: Tokenized corpus it's empty. BM25 will not be initialized.")
+                self.corpus_is_empty = True
+        else:
+            logger.warning("WARNING: Document corpus it's empty. BM25 will not be initialized.")
+
+    @staticmethod
+    def _tok(text: str) -> List[str]:
+        return re.findall(r"\w+", preprocess_text(text))
+
+    def retrieve(self, query: str, k: int = 5) -> Tuple[List[int], List[float]]:
+        if self.corpus_is_empty or self.bm25 is None:
+            return [], [] 
+        
+        query_tokens = self._tok(query)
+        if not query_tokens: 
+            return [], []
+
+        doc_scores = self.bm25.get_scores(query_tokens)
+        
+        # k top scores or all docs
+        num_docs_to_return = min(k, len(doc_scores))
+
+        top_indices = sorted(range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True)[:num_docs_to_return]
+
+        retrieved_ids = [self.doc_ids[i] for i in top_indices]
+        retrieved_scores_raw = [doc_scores[i] for i in top_indices]
+
+        # Norm between [0,1]
+        if not retrieved_scores_raw:
+            return retrieved_ids, []
+
+        min_score = min(retrieved_scores_raw)
+        max_score = max(retrieved_scores_raw)
+        
+        if max_score == min_score: 
+            # if only 1 score retrieved, or all equals
+            normalized_scores = [0.0 if max_score == 0 else 1.0] * len(retrieved_scores_raw)
+        else:
+            normalized_scores = [(s - min_score) / (max_score - min_score) for s in retrieved_scores_raw]
+            
+        return retrieved_ids, normalized_scores
+
+
+================================================================================
+FILE: src/app/__init__.py
+================================================================================
+
+"""
+File: src/app/__init__.py
+Path: src/app/__init__.py
+FastAPI application module.
+"""
+
+from .main import app
+from .dependencies import get_rag_service
+
+__all__ = [
+    "app",
+    "get_rag_service"
+] 
+
+
+================================================================================
+FILE: src/app/api_router.py
+================================================================================
+
+# src/app/api_router.py
+
+"""
+FastAPI router for the application endpoints.
+"""
+
+from typing import List
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from src.db.base import get_db
+from src.core.rag import RagService
+from src.app.dependencies import get_rag_service
+from src.db import crud
+
+router = APIRouter()
+
+
+# ------------------- Pydantic Schemas ------------------- #
+
+class AskRequest(BaseModel):
+    """Request schema for the `/ask` endpoint."""
+    question: str = Field(..., description="User's question")
+    k: int = Field(3, ge=1, le=10, description="Number of documents to retrieve")
+
+
+class AskResponse(BaseModel):
+    """Response schema for the `/ask` endpoint."""
+    answer: str
+    source_ids: List[int]
+
+
+class HistoryItem(BaseModel):
+    """Schema representing a single history item."""
+    id: int
+    question: str
+    answer: str
+    created_at: str
+
+
+# ---------------------- API Endpoints ---------------------- #
+
+@router.post("/ask", response_model=AskResponse)
+def ask(
+    request: AskRequest,
+    db: Session = Depends(get_db),
+    service: RagService = Depends(get_rag_service),
+) -> AskResponse:
+    """
+    Handles a user's question and retrieves an AI-generated answer using the RAG service.
+
+    Args:
+        request (AskRequest): Request body containing the user's question and the k-value.
+        db (Session): Database session dependency.
+        service (RagService): RAG service dependency.
+
+    Returns:
+        AskResponse: Generated answer and source document IDs.
+    """
+    return service.ask(db=db, question=request.question, k=request.k)
+
+
+@router.get("/history", response_model=List[HistoryItem])
+def history(
+    limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
+    offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
+    db: Session = Depends(get_db),
+) -> List[HistoryItem]:
+    """
+    Retrieves historical Q&A pairs from the database.
+
+    Args:
+        limit (int): Maximum number of history records to return.
+        offset (int): Number of records to skip.
+        db (Session): Database session dependency.
+
+    Returns:
+        List[HistoryItem]: List of historical Q&A entries.
+    """
+    history_entries = crud.get_history(db=db, limit=limit, offset=offset)
+
+    return [
+        HistoryItem(
+            id=entry.id,
+            question=entry.question,
+            answer=entry.answer,
+            created_at=entry.created_at.isoformat(),
+        )
+        for entry in history_entries
+    ]
+
+
+
+================================================================================
+FILE: src/app/dependencies.py
+================================================================================
+
+from __future__ import annotations
+
+import logging
+import sys
+import csv
+from pathlib import Path
+
+import requests
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
+from src.settings import settings
+from src.core.rag import RagService
+from src.utils import preprocess_text
+from src.adapters.retrieval.sparse_bm25 import SparseBM25Retriever
+from src.adapters.retrieval.dense_faiss import DenseFaissRetriever
+from src.adapters.embeddings.sentence_transformers import SentenceTransformerEmbedder
+from src.adapters.generation.openai_chat import OpenAIGenerator
+from src.adapters.generation.ollama_chat import OllamaGenerator
+
+import src.db.base as db_base
+from src.db.models import Base as AppDeclarativeBase, Document as DbDocument
+from src.db.crud import add_documents as crud_add_documents
+
+
+# --------------------------------------------------------------------------- #
+# Logging Configuration
+# --------------------------------------------------------------------------- #
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        stream=sys.stdout,
+    )
+logger = logging.getLogger(__name__)
+
+_rag_service: RagService | None = None
+
+
+# --------------------------------------------------------------------------- #
+# LLM Generator Selection
+# --------------------------------------------------------------------------- #
+def _choose_generator():
+    """Select and return an appropriate LLM generator based on configuration."""
+    ollama_tags_url = f"{settings.ollama_base_url.rstrip('/')}/api/tags"
+
+    if settings.ollama_enabled:
+        try:
+            if requests.get(ollama_tags_url, timeout=2).status_code == 200:
+                logger.info("Using OllamaGenerator (primary).")
+                return OllamaGenerator()
+        except requests.RequestException:
+            logger.warning("Primary Ollama health-check failed.")
+
+    if settings.openai_api_key:
+        logger.info("Using OpenAIGenerator.")
+        return OpenAIGenerator()
+
+    if settings.ollama_enabled:  # Fallback
+        try:
+            if requests.get(ollama_tags_url, timeout=2).status_code == 200:
+                logger.info("Using OllamaGenerator (fallback).")
+                return OllamaGenerator()
+        except requests.RequestException:
+            logger.warning("Fallback Ollama health-check failed.")
+
+    raise RuntimeError("LLM Generator could not be initialized: no OpenAI key and Ollama unreachable.")
+
+
+# --------------------------------------------------------------------------- #
+# RagService Initialization
+# --------------------------------------------------------------------------- #
+def init_rag_service():
+    """Initialize the singleton `RagService`."""
+    global _rag_service
+    logger.info("Initializing RagService...")
+
+    is_in_memory_db = "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
+
+    if not db_base.engine or str(db_base.engine.url) != settings.sqlite_url or (
+        is_in_memory_db and not isinstance(db_base.engine.pool, StaticPool)
+    ):
+        logger.warning("Engine mismatch or missing. Reconfiguring engine.")
+        pool_kwargs = {"poolclass": StaticPool} if is_in_memory_db else {}
+        new_engine = create_engine(
+            settings.sqlite_url,
+            connect_args={"check_same_thread": False},
+            **pool_kwargs,
+        )
+        db_base.engine = new_engine
+        db_base.SessionLocal.configure(bind=new_engine)
+        logger.info("Engine reconfigured to %s", new_engine.url)
+
+    logger.info("Ensuring tables exist at %s", db_base.engine.url)
+    AppDeclarativeBase.metadata.create_all(bind=db_base.engine)
+
+    with db_base.SessionLocal() as db:
+        doc_count = db.query(DbDocument).count()
+        faq_csv_path = Path(settings.faq_csv)
+
+        if doc_count == 0 and faq_csv_path.is_file():
+            logger.info("Database empty. Populating from CSV: %s", faq_csv_path)
+            texts = []
+            try:
+                with faq_csv_path.open(newline="", encoding="utf-8") as fh:
+                    reader = csv.reader(fh, delimiter=";")
+                    if settings.csv_has_header:
+                        next(reader, None)
+                    for i, row in enumerate(reader):
+                        if len(row) >= 2:
+                            texts.append(preprocess_text(f"{row[0]} {row[1]}"))
+                        else:
+                            logger.warning("Row %d malformed: %s", i+1, row)
+            except Exception as e:
+                logger.error("Error reading CSV: %s", e, exc_info=True)
+
+            if texts:
+                crud_add_documents(db, texts)
+                db.commit()
+                logger.info("Committed %d documents to DB.", len(texts))
+
+    with db_base.SessionLocal() as db:
+        docs = db.query(DbDocument).all()
+        corpus = [doc.content for doc in docs]
+        ids = [doc.id for doc in docs]
+
+    if settings.retrieval_mode == "dense":
+        index_path = Path(settings.index_path)
+        id_map_path = Path(settings.id_map_path)
+        if not index_path.is_file() or not id_map_path.is_file():
+            logger.warning("Falling back to sparse retrieval: dense artifacts missing.")
+            retriever = SparseBM25Retriever(corpus, ids)
+        else:
+            logger.info("Using DenseFaissRetriever.")
+            retriever = DenseFaissRetriever(embedder=SentenceTransformerEmbedder())
+    else:
+        logger.info("Using SparseBM25Retriever.")
+        retriever = SparseBM25Retriever(corpus, ids)
+
+    generator = _choose_generator()
+    _rag_service = RagService(retriever, generator)
+    logger.info("RagService initialized successfully.")
+
+
+def get_rag_service() -> RagService:
+    """FastAPI dependency providing the initialized RagService singleton."""
+    assert _rag_service is not None, "RagService has not been initialized."
+    return _rag_service
+
+
+
+================================================================================
+FILE: src/app/main.py
+================================================================================
+
+# src/app/main.py
+import logging
+import sys 
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from contextlib import asynccontextmanager
+from pathlib import Path
+from src.app.api_router import router
+from src.app.dependencies import init_rag_service
+from src.db.base import Base as AppDeclarativeBase
+from src.db.base import engine as global_app_engine
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s',
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__) # logger after de basicConfig
+
+# --- Lifespan Context Manager ---
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    logger.info("Lifespan startup: Checking/Creating database tables...")
+    AppDeclarativeBase.metadata.create_all(bind=global_app_engine)
+    logger.info("Lifespan startup: Database tables checked/created.")
+
+    logger.info("Lifespan startup: Initializing RAG service...")
+    init_rag_service()
+    logger.info("Lifespan startup: RAG service initialized.")
+    yield
+    logger.info("Lifespan shutdown: Cleaning up resources (if any)...")
+
+app = FastAPI(
+    title="Local RAG Demo",
+    lifespan=lifespan
+)
+
+
+app.include_router(router, prefix="/api")
+
+CURRENT_FILE_PATH = Path(__file__).resolve() 
+SRC_APP_DIR = CURRENT_FILE_PATH.parent       
+SRC_DIR = SRC_APP_DIR.parent                 
+PROJECT_ROOT_DIR = SRC_DIR.parent            
+FRONTEND_DIR = PROJECT_ROOT_DIR / "frontend" 
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_frontend_route(request: Request): 
+    index_html_path = FRONTEND_DIR / "index.html"
+    if not index_html_path.is_file(): 
+        # Cambiar print a logger.error
+        logger.error(f"Frontend file not found at {index_html_path}")
+        return HTMLResponse(content="<h1>Frontend not found</h1><p>Please check server configuration.</p>", status_code=404)
+    
+    try:
+        with open(index_html_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content, status_code=200)
+    except Exception as e: 
+        # Cambiar print a logger.error con exc_info
+        logger.error(f"Could not read frontend file {index_html_path}: {e}", exc_info=True)
+        return HTMLResponse(content="<h1>Error serving frontend</h1>", status_code=500)
+
+if __name__ == "__main__":
+    uvicorn.run("src.app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+================================================================================
+FILE: src/core/__init__.py
+================================================================================
+
+"""
+File: src/core/__init__.py
+Core module with the main business logic.
+"""
+
+from .ports import RetrieverPort, GeneratorPort
+from .rag import RagService
+
+__all__ = [
+    "RetrieverPort", 
+    "GeneratorPort", 
+    "RagService"
+] 
+
+
+================================================================================
+FILE: src/core/ports.py
+================================================================================
+
+"""
+File: src/core/ports.py
+Domain Interfaces - Adapters
+"""
+
+from typing import Protocol, List, Tuple, runtime_checkable
+
+@runtime_checkable
+class RetrieverPort(Protocol):
+    def retrieve(self, query: str, k: int = 5) -> Tuple[List[int], List[float]]:
+        ...
+
+@runtime_checkable
+class GeneratorPort(Protocol):
+    def generate(self, question: str, contexts: List[str]) -> str:
+        ...
+
+@runtime_checkable
+class EmbedderPort(Protocol):
+    
+    DIM: int
+    def embed(self, text: str) -> List[float]:
+        ...
+
+
+
+================================================================================
+FILE: src/core/rag.py
+================================================================================
+
+# === file: src/core/rag.py ===
+"""Servicio principal de Retrieval‑Augmented Generation"""
+from __future__ import annotations
+
+from typing import List, Dict, Any
+
+from sqlalchemy.orm import Session
+
+from src.core.ports import RetrieverPort, GeneratorPort
+from src.db import crud
+
+__all__ = ["RagService"]
+
+
+class RagService:
+    """Orquesta recuperación + generación."""
+
+    def __init__(self, retriever: RetrieverPort, generator: GeneratorPort):
+        self.retriever = retriever
+        self.generator = generator
+
+    # k default 3 como requieren los tests
+    def ask(self, db: Session, question: str, k: int = 3) -> Dict[str, Any]:
+        doc_ids, _ = self.retriever.retrieve(question, k)
+        documents = crud.get_documents(db, doc_ids) if doc_ids else []
+        contexts = [d.content for d in documents]
+        answer = self.generator.generate(question, contexts)
+
+        crud.save_qa_history(db, question, answer)
+        return {"answer": answer, "source_ids": doc_ids}
+
+
+
+================================================================================
+FILE: src/db/__init__.py
+================================================================================
+
+"""
+File: src/db/__init__.py
+Path: src/db/__init__.py
+Database module for the local RAG backend.
+"""
+
+from .base import Base, get_db, SessionLocal, engine
+from .models import Document
+from .crud import get_documents, add_documents
+
+__all__ = [
+    "Base", 
+    "get_db",
+    "SessionLocal",
+    "engine",
+    "Document",
+    "get_documents",
+    "add_documents"
+] 
+
+
+================================================================================
+FILE: src/db/base.py
+================================================================================
+
+"""
+File: src/db/base.py
+SQLAlchemy database connection configuration.
+"""
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from src.settings import settings
+
+engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+
+================================================================================
+FILE: src/db/crud.py
+================================================================================
+
+"""
+File: src/db/crud.py
+Database CRUD operations for documents and history.
+"""
+
+from sqlalchemy.orm import Session
+from src.db import models
+
+# ------------------ Docs ------------------ #
+def get_documents(db: Session, ids: list[int]):
+    return db.query(models.Document).filter(models.Document.id.in_(ids)).all()
+
+
+def add_documents(db: Session, texts: list[str]):
+    for t in texts:
+        db.add(models.Document(content=t))
+    db.commit()
+
+
+# ------------------ History (bonus) ------------------ #
+def add_history(db: Session, question: str, answer: str):
+    db.add(models.QaHistory(question=question, answer=answer))
+    db.commit()
+
+
+def get_history(db: Session, limit: int = 10, offset: int = 0):
+    return (
+        db.query(models.QaHistory)
+        .order_by(models.QaHistory.created_at.desc(), models.QaHistory.id.desc()) # <--- 2nd ordering by ID
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+
+def save_qa_history(db: Session, question: str, answer: str):
+
+    models.Base.metadata.create_all(bind=db.get_bind())
+    add_history(db, question, answer)
+
+
+================================================================================
+FILE: src/db/models.py
+================================================================================
+
+"""
+File: src/db/models.py
+Path: src/db/models.py
+SQLAlchemy ORM models for the database.
+"""
+
+from sqlalchemy import Column, Integer, Text, DateTime, func
+from src.db.base import Base
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content = Column(Text, nullable=False)
+
+
+# ------------------------------------------------------------------ #
+# BONUS: Q&A History
+# ------------------------------------------------------------------ #
+class QaHistory(Base):
+    __tablename__ = "qa_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+
+================================================================================
+FILE: src/settings.py
+================================================================================
+
+"""
+File: src/settings.py
+Path: src/settings.py
+Global configuration loaded via environment variables.
+Use `python-dotenv` or export vars before running.
+
+Why? Centralises all tunables and keeps secrets out of code.
+"""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+
+class Settings(BaseSettings):
+    # RUNTIME
+    app_host: str = "0.0.0.0"
+    app_port: int = 8000
+    # RETRIEVAL
+    retrieval_mode: str = Field("sparse", pattern="^(sparse|dense)$")
+    # OPENAI
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-3.5-turbo"
+    # OPENAI sampling
+    openai_temperature: float = 0.2
+    openai_top_p: float = 1.0
+    openai_max_tokens: int = 256
+    openai_embedding_model: str = "text-embedding-3-small" # embeddings
+    # OLLAMA
+    ollama_enabled: bool = True
+    ollama_model: str = "gemma3:4b"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_request_timeout: int = 90 # Timeout en segundos
+    # PATHS
+    index_path: str = "data/index.faiss"
+    id_map_path: str = "data/id_map.pkl"
+    faq_csv: str = "data/faq.csv"     # for build_index.py
+    sqlite_url: str = "sqlite:///./data/app.db"
+    csv_has_header:bool = True
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+settings = Settings()
+
+
+
+================================================================================
+FILE: src/utils.py
+================================================================================
+
+"""
+Utils: light helpers - no external deps (nltk)
+"""
+
+import re
+
+__all__ = ["preprocess_text"]
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+def preprocess_text(text: str) -> str:
+    """
+    Normalize texts texto:
+    1. lowercase
+    2. colapse whitespaces
+    """
+    text = text.lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = _HTML_TAG_RE.sub("", text)
+    return text
+
+
