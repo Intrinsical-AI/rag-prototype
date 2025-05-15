@@ -6,6 +6,7 @@ from pathlib import Path
 import csv
 import requests
 import logging
+from unittest import mock # Add this import
 
 # Importar el módulo a testear y los settings para monkeypatch
 from src.app import dependencies as app_dependencies_module
@@ -58,10 +59,7 @@ def test_choose_generator_ollama_enabled_and_works(monkeypatch, mock_requests_ge
     monkeypatch.setattr(global_settings, "ollama_enabled", True)
     monkeypatch.setattr(global_settings, "openai_api_key", None) # Sin OpenAI
     mock_requests_get_fixture.return_value = MagicMock(status_code=200)
-
-    # Recargar el módulo para que use los settings parcheados si _choose_generator los lee directamente
-    # o si importa OllamaGenerator/OpenAIGenerator que leen settings en su __init__.
-    importlib.reload(app_dependencies_module)
+    
     generator = app_dependencies_module._choose_generator()
 
     assert isinstance(generator, OllamaGenerator)
@@ -157,8 +155,6 @@ def test_init_rag_service_dense_mode_fallback_to_sparse_if_files_missing(
     # El logger en src/app/dependencies.py se llama 'src.app.dependencies'
     caplog.set_level(logging.WARNING, logger="src.app.dependencies")
 
-    # importlib.reload(app_dependencies_module)
-
     # Imprime la configuración del engine de la SessionLocal que usará init_rag_service
     from src.db.base import SessionLocal as SL_in_deps # La que importa dependencies
     print(f"DEBUG TEST - Engine URL from SessionLocal in deps: {SL_in_deps.kw['bind'].url}")
@@ -180,6 +176,7 @@ def test_init_rag_service_dense_mode_fallback_to_sparse_if_files_missing(
             found_warning_log = True
             break
     assert found_warning_log, f"Expected fallback warning log was not found. Captured logs:\n{caplog.text}"
+
 def test_init_rag_service_populates_db_from_csv_if_empty(
     monkeypatch,
     tmp_path: Path,
@@ -228,15 +225,16 @@ def test_init_rag_service_populates_db_from_csv_if_empty(
 
     # Assert (Log)
     found_population_log = False
+    expected_log_part = f"DEPS: DB empty and FAQ CSV found; populating from {str(csv_file_path)}"
     # print(f"Caplog text for populate test: {caplog.text}") # Para depurar
     for record in caplog.records:
+        # print(f"DEBUG LOG RECORD: name={record.name}, level={record.levelname}, msg='{record.message}'")
         if record.name == "src.app.dependencies" and \
-           record.levelname == "INFO" and \
-           "Populating from" in record.message and \
-           str(tmp_path / "dummy_faq.csv") in record.message:
+            record.levelname == "INFO" and \
+            expected_log_part in record.message: # More precise check
             found_population_log = True
             break
-    assert found_population_log, f"Expected DB population info log was not found. Captured logs:\n{caplog.text}"
+    assert found_population_log, f"Expected DB population info log part '{expected_log_part}' was not found. Captured logs:\n{caplog.text}"
 
 
 def test_init_rag_service_does_not_populate_db_if_not_empty(

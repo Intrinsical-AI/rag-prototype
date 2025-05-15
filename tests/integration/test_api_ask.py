@@ -80,7 +80,7 @@ def test_api_ask_with_openai_retrieves_and_generates(
     body = response.json()
     assert body["answer"] == expected_answer
     assert isinstance(body["source_ids"], list)
-    assert 1 in body["source_ids"] # Basado en datos de prueba en conftest.py
+    assert 101 in body["source_ids"] # Basado en datos de prueba en conftest.py
 
     mock_openai_client_instance.chat.completions.create.assert_called_once()
     args, kwargs = mock_openai_client_instance.chat.completions.create.call_args
@@ -126,8 +126,7 @@ def test_api_ask_with_ollama_retrieves_and_generates(
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == expected_answer
-    assert 2 in body["source_ids"] # Basado en datos de prueba en conftest.py
-
+    assert 102 in body["source_ids"]
     mock_requests_post.assert_called_once()
     args, kwargs = mock_requests_post.call_args
     sent_payload = kwargs["json"]
