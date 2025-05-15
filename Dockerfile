@@ -22,7 +22,7 @@ WORKDIR /app
 # Copiamos el código fuente (excluido por .dockerignore lo que no hace falta)
 COPY src ./src
 COPY frontend ./frontend
-COPY data ./data       # semilla opcional
+COPY data ./data 
 
 # Crear usuario no-root (buena práctica)
 RUN adduser --disabled-password --gecos "" appuser
