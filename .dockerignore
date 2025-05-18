@@ -1,8 +1,16 @@
+# Entornos y bytecode
 .venv
-__pycache__
+__pycache__/
 *.pyc
-*.pkl
+pytest_cache/
+
+# Configuración sensible
+.env
+
+# Modelos de datos y vectores generados (pero dejamos el CSV)
 *.db
 *.faiss
-pytest_cache
-.env 
+*.pkl
+
+# Reportes de cobertura
+htmlcov/

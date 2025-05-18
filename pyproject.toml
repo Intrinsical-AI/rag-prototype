@@ -28,6 +28,7 @@ dev = [
   "pytest",
   "pytest-cov",
   "ruff",
+  "isort"
 ]
 
 [build-system]
@@ -37,6 +38,11 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 line-length = 100
 fix = true
+
+[tool.isort]
+profile = "black"
+line_length = 100  # igual que black
+
 
 [tool.coverage.run]
 branch = true

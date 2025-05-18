@@ -86,7 +86,7 @@ The fundamental rule is that **dependencies flow inwards**: `Adapters` depend on
 ```mermaid
 flowchart LR
     A[External World <br/> (FastAPI, Frontend, OpenAI API, Ollama, Database)]
-    B(Adapters <br/> src/adapters/*, src/app/api_router.py, src.db/*)
+    B(Adapters <br/> src/adapters/*, src/app/api_router.py, src.infrastructure.persistence/*)
     C(Ports <br/> src/core/ports.py)
     D[Application Core / Domain Logic <br/> src/core/rag.py]
 

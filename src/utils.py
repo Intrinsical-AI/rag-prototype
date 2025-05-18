@@ -4,8 +4,6 @@ Utils: light helpers - no external deps (nltk)
 
 import re
 
-__all__ = ["preprocess_text"]
-
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -19,3 +17,8 @@ def preprocess_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     text = _HTML_TAG_RE.sub("", text)
     return text
+
+
+def get_corpus_and_ids(doc_repo):
+    docs = doc_repo.get_all_documents()
+    return [d.content for d in docs], [d.id for d in docs]

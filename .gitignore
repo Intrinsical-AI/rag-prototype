@@ -21,6 +21,8 @@ src_all_files.txt
 
 tests_all_files.txt
 
+*.mp4
+
 # ___ Distribución / Empaquetado ___
 # Archivos generados al construir o distribuir paquetes Python.
 .Python
