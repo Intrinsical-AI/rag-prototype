@@ -290,7 +290,7 @@
   <section class="card">
     <h1>Q&A AI Bot</h1>
     <div class="floating-label-input">
-      <textarea id="question" placeholder=" " required></textarea>
+      <textarea id="question" placeholder=" " required autofocus></textarea>
       <span class="floating-label">Type your question here…</span>
     </div>
     <div class="example-questions">
@@ -338,6 +338,8 @@
     const historyTools = qs('#historyTools');
     const clearHistoryBtn = qs('#clearHistoryBtn');
     const exampleListEl = qs('#exampleList');
+
+    statusEl.hidden = true;
     // --- Theme Management ---
     const applyTheme = (theme) => {
       document.documentElement.dataset.theme = theme;
@@ -378,7 +380,7 @@
       answerMeta.innerHTML = '';
 
       let answer = '';
-      let source_ids = [];
+      let sources = [];
       let errorMsg = '';
 
       try {
@@ -397,19 +399,19 @@
 
         const json = await response.json();
         answer = json.answer || '(No answer received)';
-        source_ids = json.source_ids || [];
+        sources = Array.isArray(json.sources) ? json.sources : [];
       } catch (err) {
         errorMsg = `Error: ${err.message}`;
       } finally {
-        statusEl.hidden = true;  // OCULTAR SPINNER antes de mostrar el resultado
+        statusEl.hidden = true;
         askBtn.disabled = false;
 
         if (errorMsg) {
           answerBox.textContent = errorMsg;
         } else {
           answerBox.textContent = answer;
-          renderAnswerMeta(answer, source_ids);
-          pushToHistory(question, answer, source_ids);
+          renderAnswerMeta(answer, sources);
+          pushToHistory(question, answer, sources);
           questionEl.value = '';
           questionEl.focus();
         }
@@ -420,27 +422,30 @@
         historyBox.innerHTML = '';
         historyBox.hidden = true;
         historyTools.hidden = true;
-        answerBox.textContent = 'The answer will appear here…';   // ← add this
-        answerMeta.innerHTML = '';                                // ← add this
+        answerBox.textContent = 'The answer will appear here…';
+        answerMeta.innerHTML = '';
       }
     });
     // --- Helper Functions ---
-    function renderAnswerMeta(answerText, sourceIds) {
-        answerMeta.innerHTML = '';
-        if (sourceIds.length > 0) {
-            const sourcesDiv = document.createElement('div');
-            sourcesDiv.className = 'source-ids';
-            sourcesDiv.innerHTML = 'Sources: ';
-            sourceIds.forEach((id, i) => {
-                const codeEl = document.createElement('code');
-                codeEl.textContent = id;
-                sourcesDiv.appendChild(codeEl);
-                if (i < sourceIds.length - 1) sourcesDiv.append(', ');
-            });
-            answerMeta.appendChild(sourcesDiv);
-        }
+    function renderAnswerMeta(answerText, sources) {
+      answerMeta.innerHTML = '';
+      if (sources.length > 0) {
+        const sourcesDiv = document.createElement('div');
+        sourcesDiv.className = 'source-ids';
+        sourcesDiv.innerHTML = 'Sources: ';
+        sources.forEach((src, i) => {
+          if (src.document) {
+            const codeEl = document.createElement('code');
+            codeEl.textContent = `#${src.document.id}`;
+            codeEl.title = src.document.content.length > 60 ? src.document.content.slice(0,60) + '…' : src.document.content;
+            sourcesDiv.appendChild(codeEl);
+            if (i < sources.length - 1) sourcesDiv.append(', ');
+          }
+        });
+        answerMeta.appendChild(sourcesDiv);
+      }
     }
-    function pushToHistory(question, answer, sourceIds) {
+    function pushToHistory(question, answer, sources) {
       historyTools.hidden = false;
       historyBox.hidden = false;
       const itemDiv = document.createElement('div');
@@ -451,15 +456,18 @@
       const aPara = document.createElement('p');
       aPara.innerHTML = `<strong>A:</strong> ${escapeHTML(answer)}`;
       itemDiv.appendChild(aPara);
-      if (sourceIds.length > 0) {
+      if (sources.length > 0) {
         const sourcesDiv = document.createElement('div');
         sourcesDiv.className = 'source-ids';
         sourcesDiv.innerHTML = 'Sources: ';
-        sourceIds.forEach((id, i) => {
+        sources.forEach((src, i) => {
+          if (src.document) {
             const codeEl = document.createElement('code');
-            codeEl.textContent = id;
+            codeEl.textContent = `#${src.document.id}`;
+            codeEl.title = src.document.content.length > 60 ? src.document.content.slice(0,60) + '…' : src.document.content;
             sourcesDiv.appendChild(codeEl);
-            if (i < sourceIds.length - 1) sourcesDiv.append(', ');
+            if (i < sources.length - 1) sourcesDiv.append(', ');
+          }
         });
         itemDiv.appendChild(sourcesDiv);
       }
