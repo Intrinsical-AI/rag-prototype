@@ -1,77 +1,84 @@
 # 🧠 Local-RAG Backend & Frontend
 
-> **Goal**: Retrieval-Augmented Generation Q\&A prototype showcasing (*the best*) architecture, design, implementation, testing, documentation, and scalability practices. Ready to RAG!
+> A minimal, modular, and production-ready Retrieval-Augmented Generation (RAG) prototype. Engineered for extensibility, portability, and robust testing using FastAPI, with support for Ollama/OpenAI and FAISS/BM25.
+
+---
+# pythonenv
+# pyproject.toml
+# Unit Testing
+# Integration Testing
+# Pre-commits + Linting
+# Docker
+# Compose
+# Git
+# CI
+# Swagger / Docs
 
 ---
 
-![Diag](docs/hex-arch.png)
+![Architecture diagram](docs/hex-arch.png)
 
 ## Table of Contents
 
-[Summary](#summary)
-
-1. [Project Structure](#1-project-structure)
-2. [Why This Design?](#2-why-this-design)
-3. [Architecture at a Glance](#3-architecture-at-a-glance)
-4. [Quick Start](#4-quick-start)
-5. [Configuration](#5-configuration)
+1. [Project Overview](#project-overview)
+2. [Folder Layout](#folder-layout)
+3. [Architecture](#architecture)
+4. [Quick Start](#quick-start)
+5. [Configuration](#configuration)
+6. [Run & Develop](#run--develop)
+7. [Tests & Coverage](#tests--coverage)
+8. [Common Dev Commands](#common-dev-commands)
+9. [Design Choices](#design-choices)
+10. [Limitations](#limitations)
+11. [Credits](#credits)
 
 ---
 
-## Summary
+## Project Overview
 
-This prototype integrates a comprehensive set of professional standards from design to delivery:
+#### Core Tenets & Design Philosophy
 
-* **Hexagonal Architecture (Ports & Adapters):** separation of domain logic, infrastructure, and API layers, enabling easy component swaps and thorough testability.
-* **Modular Project Layout:** Well‑defined directories (`data/`, `frontend/`, `scripts/`, `src/`, `tests/`) aligned with responsibilities.
-* **Development Tools & Workflow:**
+This project serves as a blueprint for building robust RAG systems, emphasizing:
 
-  * **Python 3+ with Type Hints & Docstrings** for maintainability.
-  * **Pre‑commit Hooks & Linting** (Black, isort, Flake8) for consistent code style.
-  * **CI/CD Pipeline Templates** (GitHub Actions) prepared for linting, testing, and coverage on each PR.
-* **Exhaustive Testing:**
+Modularity & Testability: Achieved through a clean Hexagonal (Ports & Adapters) architecture, allowing components (LLMs, vector stores, databases) to be swapped with minimal impact.
 
-  * **Unit Tests** for core logic and adapters using `pytest`.
-  * **Integration Tests** for FastAPI endpoints with `TestClient`, in‑memory DB, and mocked LLMs.
-  * **Coverage Metrics** with `pytest‑cov`, targeting > 80 % coverage.
-* **Documentation:**
+Developer Experience: Streamlined setup, clear documentation, and a comprehensive suite of development tools (Docker, Makefile, pre-commit hooks, linters, formatters).
 
-  * **Detailed README** including architecture overview, quick start, configuration, design trade‑offs, and limitations.
-  * **Interactive Swagger UI** at `/docs`.
-  * **Reserved `docs/` Folder** for diagrams (Mermaid/PlantUML) and advanced guides.
-* **Containerization & Orchestration:**
+Production Readiness (Prototype Level): Demonstrates best practices in configuration, testing (>80% coverage), and containerization, forming a solid foundation for further development.
 
-  * **Dockerfile & docker‑compose.yml** for backend (FastAPI + SQLite/FAISS) and optional Ollama service.
-  * **Makefile** with common commands (`make test`, `make build-index`).
-  * **Environment Management** via `.env` and `python‑dotenv` in `src/settings.py`.
-* **Key Components:**
+Flexibility: Supports fully offline operation (BM25 + SQLite) as well as integration with services like OpenAI.
 
-  * **Retrieval Modes:** BM25 (sparse) by default, FAISS (dense) optional, with hybrid fallback.
-  * **LLM Adapters:** Abstract `GeneratorPort` with `OpenAIGenerator` and `OllamaGenerator` implementations.
-  * **Persistence Layer:** SQLite managed with SQLAlchemy, clear models and CRUD operations, plus `build_index.py` for index generation.
-* **Best Practices & Patterns:**
 
-  * **Dependency Injection & Singleton Patterns** for configurable components and test isolation.
-  * **Error Handling** for CSV ingestion, DB operations, and LLM calls, with informative logs.
-  * **Prepared Logging Hooks** for future integration of monitoring tools.
+#### Features
+* **Hexagonal (Ports & Adapters) architecture** → Swap any component (LLM, vector DB, …) without touching business code.
+* **Two retrieval modes**
 
+  * **Sparse** BM25 (`rank‑bm25`) – default, 100 % offline.
+  * **Dense** FAISS – optional, needs embeddings (run the build script once).
+  * **Hybrid** – combine both.
+* **Two LLM adapters**
+
+  * **OpenAI** (`gpt‑3.5‑turbo` by default).
+  * **Ollama** (local model like `gemma3:4b`).
+* **SQLite + SQLAlchemy** for documents and Q\&A history.
+* **FastAPI** backend + tiny **vanilla‑JS** frontend (single `index.html`).
+* **Full test suite** (unit + integration).
+* **Docker‑ready & CI template** (GitHub Actions).
+
+---
 ---
 
 ## 1. Project Structure
 
-* `data/`: Contains the input CSV (`faq.csv`) and serves as the default location for the SQLite database and FAISS index.
-* `frontend/`: Contains the `index.html` file for the minimal user interface.
-* `scripts/`: Includes `build_index.py` for pre‑populating the database and building vector indexes.
-* `src/`: The core application code.
-
-  * `adapters/`: Concrete implementations (drivers) for external services or specific algorithms (e.g., BM25, FAISS, OpenAI, Ollama).
-  * `app/`: FastAPI application setup, API routing, and dependency injection.
-  * `core/`: Domain logic, use cases (e.g., `RagService`), and abstract ports (interfaces). Pure Python.
-  * `db/`: SQLAlchemy models, CRUD operations, and database session management.
-* `tests/`: Automated tests.
-
-  * `unit/`: Unit tests for individual components.
-  * `integration/`: Integration tests for API endpoints.
+```
+.
+├── data/          # csv, sqlite db, faiss files                   
+├── frontend/      # single‑page UI (index.html + css/js)
+├── scripts/       # helper cli scripts (build_index.py, bootstrap.py)
+├── src/           # application code (ports, adapters, api)
+├── tests/         # unit + integration + e2e tests
+└── docs/          # diagrams & extra docs
+```
 
 ---
 
@@ -95,7 +102,8 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote
 ![Arch‑Mermaid‑Diagram](docs/arch-diagram.png)
 
 **Dependency Rule:** Imports flow inwards toward the `src/core` components, following the Dependency Inversion Principle.
-![Dependency Flow](docs/dependancy-flow.png)
+
+![Hex-Arch-Colored](docs/hex-arch-colors.png)
 
 > For a deep dive, see [`docs/architecture.md`](docs/architecture.md).
 
@@ -104,34 +112,28 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote
 ## 4. Quick Start
 
 1. **Create Environment & Install Dependencies:**
+```bash
+# 1. Create virtual‑env
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# 2. Install in editable mode (recommended for scripts)
+pip install -e .
+```
+
+
+2. **Initialize Database & Build Index:**
+
+  ```bash
+  python -m scripts.bootstrap.py
+  ```
+
+
+4. **Run the Server:**
+    
 
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   pip install .
-   ```
-
-2. **(Optional) Create `.env` file:**
-   Copy `.env.example` to `.env` (if provided) or create a new `.env` file in the project root. Configure your `OPENAI_API_KEY` if you plan to use OpenAI, or set `OLLAMA_ENABLED=true` if you have a local Ollama instance running with the required models.
-
-   ```env
-   # OPENAI_API_KEY="sk‑yourkey"
-   # OLLAMA_ENABLED=true
-   # OLLAMA_MODEL="gemma:2b"
-   ```
-
-3. **Initialize Database & Build Index (Recommended):**
-
-   ```bash
-   python -m scripts.build_index
-   ```
-
-   *The application will also attempt to auto‑populate on first run if the DB is empty.*
-
-4. **Run the Application:**
-
-   ```bash
-   uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+   make run # or uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
    * UI: `http://localhost:8000/`
@@ -177,76 +179,43 @@ Settings are centralized in `src/settings.py` and can be overridden via environm
 
 ---
 
-## 6. Running the Application
+## 6. Run & Develop
 
-1. Ensure your `.env` file is configured and dependencies installed.
-2. (Recommended) Run the index builder:
+| Task                          | Command                                   |
+| ----------------------------- | ----------------------------------------- |
+| Run server (dev)              | `make run` or `uvicorn src.app.main:app --reload`      |
+| Build / rebuild index         | `python -m scripts.bootstrap.py`           |
+| Lint all files                | `black . ; isort . ; ruff check .`        |
+| Run pre‑commit hooks manually | `pre-commit run --all-files`              |
+| Run tests                     | `make test` (alias to `pytest -v tests/`) |
 
-   ```bash
-   python scripts/build_index.py
-   ```
-3. Start the FastAPI server:
+### Running scripts directly
 
-   ```bash
-   uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-4. Access:
+Because we use a **`src/` layout**, Python must see the project root on `PYTHONPATH` when you run helpers:
 
-   * **UI:** `http://localhost:8000/`
-   * **Swagger UI:** `http://localhost:8000/docs`
+```bash
+# Good
+PYTHONPATH=$PWD python scripts/bootstrap.py
+
+# Also good (package installed in editable mode)
+pip install -e .
+python scripts/bootstrap.py
+```
 
 ---
 
-## 7. Running Tests
-
-Activate your virtual environment and run:
+## Tests & Coverage
 
 ```bash
-make test
+make test                   # unit + integration (35 tests)
+pytest --cov=src            # quick coverage in console
+pytest --cov=src -q         # quiet
+pytest --cov=src --cov-report=html  # open htmlcov/index.html
 ```
 
-This covers:
-
-* Unit tests for core logic and adapters.
-* Integration tests for API endpoints with in-memory SQLite and mocked LLMs.
-
-### 7.1. Test Coverage
-
-Generate a detailed HTML report:
-
-```bash
-pytest --cov=src --cov-report=html
-```
-
-Quick console summary:
-
-```bash
-pytest --cov=src
-```
-
-File	statements	missing	excluded	branches	partial	coverage
-src/adapters/embeddings/openai.py	22	0	0	0	0	100%
-src/adapters/embeddings/sentence_transformers.py	9	0	0	0	0	100%
-src/adapters/generation/ollama_chat.py	33	2	0	2	0	94%
-src/adapters/generation/openai_chat.py	22	0	0	0	0	100%
-src/adapters/retrieval/dense_faiss.py	50	9	0	20	7	74%
-src/adapters/retrieval/hybrid.py	25	1	0	6	1	94%
-src/adapters/retrieval/sparse_bm25.py	46	9	0	12	4	78%
-src/app/api_router.py	27	0	0	0	0	100%
-src/app/dependencies.py	115	22	0	34	10	79%
-src/app/main.py	45	12	0	4	1	69%
-src/core/ports.py	14	3	0	0	0	79%
-src/core/rag.py	17	0	0	0	0	100%
-src/data_loader.py	94	10	0	24	3	89%
-src/db/base.py	11	0	0	0	0	100%
-src/db/crud.py	19	1	0	2	1	90%
-src/db/models.py	12	0	0	0	0	100%
-src/settings.py	26	0	0	0	0	100%
-src/utils.py	7	0	0	0	0	100%
-Total	594	69	0	104	27	86%
+The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downloads.
 
 ---
-
 
 ## 8. API Endpoints
 
@@ -280,10 +249,10 @@ Total	594	69	0	104	27	86%
 
 ## 10. Known Limitations
 
-* Dense retrieval requires `build_index.py` to be run first.
+* **Run `scripts/bootstrap.py` first** (DataRepos init + configured csv ETL).
 * Minimal UI without automated frontend tests (manual only).
 * No authentication or rate-limiting—unsuitable for open production.
-* BM25 and IndexFlatL2 are prototyping choices; scale with Elasticsearch, IVF, HNSW as needed.
+* BM25 and IndexFlatL2 are prototyping choices; scale with Elasticsearch, IVF, HNSW as needed. That's why hex-arch makes sense here!
 * Basic error handling; production demands finer-grained monitoring and retries.
 * Timezone handling: `created_at` fields are ISO 8601 strings; UI may need conversion per locale.
 
@@ -292,7 +261,7 @@ Total	594	69	0	104	27	86%
 ## 11. Further Reading / Bonus
 
 * Detailed Ports & Adapters guide: `docs/architecture.md`
-* Mermaid diagrams: `docs/arch-diagram.png`
+* Diagrams n Stuff: `docs/`
 * Performance tips for FAISS: see FAISS documentation.
 
 ---
