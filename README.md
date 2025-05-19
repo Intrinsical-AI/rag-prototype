@@ -3,18 +3,6 @@
 > A minimal, modular, and production-ready Retrieval-Augmented Generation (RAG) prototype. Engineered for extensibility, portability, and robust testing using FastAPI, with support for Ollama/OpenAI and FAISS/BM25.
 
 ---
-# pythonenv
-# pyproject.toml
-# Unit Testing
-# Integration Testing
-# Pre-commits + Linting
-# Docker
-# Compose
-# Git
-# CI
-# Swagger / Docs
-
----
 
 ![Architecture diagram](docs/hex-arch.png)
 
@@ -54,7 +42,7 @@ Flexibility: Supports fully offline operation (BM25 + SQLite) as well as integra
 * **Two retrieval modes**
 
   * **Sparse** BM25 (`rank‑bm25`) – default, 100 % offline.
-  * **Dense** FAISS – optional, needs embeddings (run the build script once).
+  * **Dense** FAISS – optional, needs embeddings (run the build script `scripts/bootstrap.py` once).
   * **Hybrid** – combine both.
 * **Two LLM adapters**
 
@@ -74,7 +62,7 @@ Flexibility: Supports fully offline operation (BM25 + SQLite) as well as integra
 .
 ├── data/          # csv, sqlite db, faiss files                   
 ├── frontend/      # single‑page UI (index.html + css/js)
-├── scripts/       # helper cli scripts (build_index.py, bootstrap.py)
+├── scripts/       # helper cli scripts (bootstrap.py)
 ├── src/           # application code (ports, adapters, api)
 ├── tests/         # unit + integration + e2e tests
 └── docs/          # diagrams & extra docs
@@ -90,7 +78,7 @@ Flexibility: Supports fully offline operation (BM25 + SQLite) as well as integra
 | *Scalable Path*         | Ability to swap components without major refactor. | Ports & Adapters (Hexagonal Architecture).               |
 | *AI Integration*        | Must work offline **or** with OpenAI.              | `GeneratorPort` → `OpenAIGenerator` / `OllamaGenerator`. |
 | *Data Handling*         | Basic knowledge base from CSV.                     | CSV ingested into SQLite; FAISS option for dense search. |
-| *Efficient Reviewer UX* | Clone → install → (build index) → test → run.      | `build_index.py` script, `.env`‑based `settings.py`.     |
+| *Efficient Reviewer UX* | Clone → install → (build index) → test → run.      | `bootstrap.py` script, `.env`‑based `settings.py`.     |
 | *Minimal UI*            | Simple, functional, no heavy frameworks.           | Single `index.html` with vanilla HTML/CSS/JS.            |
 
 ---
@@ -124,20 +112,19 @@ pip install -e .
 
 2. **Initialize Database & Build Index:**
 
-  ```bash
-  python -m scripts.bootstrap.py
-  ```
+```bash
+python -m scripts.bootstrap.py
+```
 
 
-4. **Run the Server:**
+3. **Run the Server:**
     
+ ```bash
+ make run # or uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+ ```
 
-   ```bash
-   make run # or uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-   * UI: `http://localhost:8000/`
-   * API docs: `http://localhost:8000/docs`
+ * UI: `http://localhost:8000/`
+ * API docs: `http://localhost:8000/docs`
 
 **Docker (Alternative):**
 
@@ -238,7 +225,7 @@ The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downlo
 | **Frontend**       | Vanilla HTML/CSS/JS                                                 | React, Vue, Jinja2 templates  | Minimal dependencies; rapid prototyping.             |
 | **Architecture**   | Ports & Adapters (Hexagonal)                                        | Monolithic, Layered           | Decoupling, testability, swappable components.       |
 | **Data Store**     | SQLite                                                              | In-memory list, CSV, Postgres | Simple persistent storage with ORM; zero infra.      |
-| **Data Ingestion** | CSV ingested via `build_index.py`                                   | Direct DB input, API upload   | Script allows preprocessing and index building.      |
+| **Data Ingestion** | CSV ingested via `bootstrap.py`                                   | Direct DB input, API upload   | Script allows preprocessing and index building.      |
 | **Retrieval**      | BM25 (sparse), FAISS (dense)                                        | TF-IDF, other vector DBs      | BM25 for quick start; FAISS for embedding lookup.    |
 | **LLM Interface**  | Abstract `GeneratorPort` with `OpenAIGenerator` & `OllamaGenerator` | Direct SDK calls              | Enables easy switching between local and cloud LLMs. |
 | **Testing**        | Pytest, `TestClient`, `unittest.mock`                               | `unittest`                    | Clean syntax, fixtures, built‑in coverage plugins.   |
