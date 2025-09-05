@@ -4,6 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.infrastructure.persistence.sqlalchemy import base as db_base
+from src.infrastructure.persistence.sqlalchemy import sql_
+# Import models to ensure they are registered with Base.metadata
+from src.infrastructure.persistence.sqlalchemy import models
 
 
 @pytest.fixture()
@@ -15,13 +18,17 @@ def in_memory_sqlite(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-    # Crear las tablas que registre nuestro Base
+    # Crear las tablas que registre nuestro Base (ahora que models está importado)
     db_base.Base.metadata.create_all(bind=engine)
 
     # Parchar los objetos usados en el código
     monkeypatch.setattr(db_base, "engine", engine)
     monkeypatch.setattr(db_base, "SessionLocal", TestingSessionLocal)
-    yield
+    # También parchear en el módulo sql_ para que SqlDocumentStorage use la sesión de test
+    monkeypatch.setattr(sql_, "SessionLocal", TestingSessionLocal)
+    
+    # Return the session factory for tests that need it explicitly
+    return TestingSessionLocal
 
 
 class DummyFaissIndex:

@@ -12,14 +12,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-# Importar las funciones del nuevo módulo data_loader
-from src.data_loader import setup_initial_data_from_csv
-
 # Para asegurar la creación de tablas
-from src.infra.persistence.sqlalchemy.models import Base as AppDeclarativeBase
+from src.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
+# Import models to ensure they are registered with Base.metadata
+from src.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 
 # Importar el embedder que se usará para la indexación si es modo denso
-from src.infrastructure.embeddings import (  # o el que decidas
+from src.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
 from src.settings import settings
@@ -65,34 +64,60 @@ def main() -> None:
         logger.error(f"Failed to ensure database schema: {e}", exc_info=True)
         return  # Salir si no se pueden crear las tablas
 
-    # 3. Embedder
+    # 3. Embedder (para dense o hybrid mode)
     embedder_for_indexing = None
-    if settings.retrieval_mode == "dense":
+    if settings.retrieval_mode in ["dense", "hybrid"]:
         logger.info(
-            "Dense retrieval mode detected. Initializing embedder for indexing."
+            f"{settings.retrieval_mode.title()} retrieval mode detected. Initializing embedder for indexing."
         )
         embedder_for_indexing = SentenceTransformerEmbedder(
             model_name=settings.st_embedding_model
         )
 
-    # 4. Usar una sesión de BBDD para llamar a la lógica de data_loader
+    # 4. Usar la lógica de ETL directamente (similar a bootstrap.py)
     try:
-        with ScriptSessionLocal() as session:
-            logger.info("Calling data_loader.setup_initial_data_from_csv...")
-            csv_to_use = settings.faq_csv
-            header_setting = settings.csv_has_header
-            should_create_dense_index = (
-                settings.create_dense_index is True
-                and settings.retrieval_mode == "dense"
+        from src.core.services.etl import ETLService
+        from src.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from src.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        import csv
+        
+        # Leer CSV
+        csv_path = Path(settings.faq_csv)
+        if not csv_path.is_file():
+            raise FileNotFoundError(f"CSV file not found at {csv_path}")
+
+        texts = []
+        with csv_path.open(encoding="utf-8") as fh:
+            reader = csv.reader(fh, delimiter=";")
+            if settings.csv_has_header:
+                next(reader, None)
+            for i, row in enumerate(reader, 1):
+                if len(row) < 2:
+                    logger.warning(f"Row {i} skipped (len={len(row)}): {row}")
+                    continue
+                texts.append(f"{row[0].strip()} {row[1].strip()}")
+        
+        if not texts:
+            raise ValueError("No texts found in CSV.")
+
+        logger.info(f"Parsed {len(texts)} documents from CSV.")
+
+        # ETL Service
+        doc_repo = SqlDocumentStorage(session_factory=ScriptSessionLocal)
+        
+        if settings.retrieval_mode in ["dense", "hybrid"] and embedder_for_indexing:
+            vector_repo = FaissVectorStorage(
+                index_path=settings.index_path, 
+                id_map_path=settings.id_map_path
             )
-            logger.info(f"Using CSV for build_index: {csv_to_use}")
-            setup_initial_data_from_csv(
-                db_session=session,
-                csv_path_str=Path(csv_to_use),  # PASAR EXPLÍCITAMENTE
-                has_header=header_setting,  # PASAR EXPLÍCITAMENTE
-                create_dense_index_flag=should_create_dense_index,
-                embedder_instance=embedder_for_indexing,
-            )
+            etl = ETLService(doc_repo, vector_repo, embedder_for_indexing)
+            ids = etl.ingest(texts)
+            logger.info(f"Ingested {len(ids)} docs into SQL and FAISS.")
+        else:
+            # Solo SQL para sparse mode
+            ids = doc_repo.store_documents(texts)
+            logger.info(f"Ingested {len(ids)} docs into SQL only (sparse mode).")
+            
         logger.info("build_index script finished successfully.")
 
     except FileNotFoundError as e:

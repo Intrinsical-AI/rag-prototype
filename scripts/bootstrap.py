@@ -65,14 +65,19 @@ def main():
 
     # 3) Invocamos ETL con nuestro SessionLocal freshly-built
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
-    vector_repo = FaissVectorStorage(
-        index_path=settings.index_path, id_map_path=settings.id_map_path
-    )
-    embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-    etl = ETLService(doc_repo, vector_repo, embedder)
-    ids = etl.ingest(texts)
-
-    print(f"[OK] Ingested {len(ids)} docs into SQL and FAISS.")
+    
+    if settings.retrieval_mode in ["dense", "hybrid"]:
+        vector_repo = FaissVectorStorage(
+            index_path=settings.index_path, id_map_path=settings.id_map_path
+        )
+        embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        etl = ETLService(doc_repo, vector_repo, embedder)
+        ids = etl.ingest(texts)
+        print(f"[OK] Ingested {len(ids)} docs into SQL and FAISS.")
+    else:
+        # Solo SQL para sparse mode
+        ids = doc_repo.store_documents(texts)
+        print(f"[OK] Ingested {len(ids)} docs into SQL only (sparse mode).")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@ from src.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
 
 def test_store_and_get_documents(in_memory_sqlite):
-    storage = SqlDocumentStorage()
+    # Use the session factory returned by the fixture
+    storage = SqlDocumentStorage(session_factory=in_memory_sqlite)
     texts = ["primer doc", "segundo doc"]
 
     # --- create ---
