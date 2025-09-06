@@ -122,8 +122,9 @@ def main() -> None:
         
         if settings.retrieval_mode in ["dense", "hybrid"] and embedder_for_indexing:
             vector_repo = FaissVectorStorage(
-                index_path=settings.index_path, 
-                id_map_path=settings.id_map_path
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=embedder_for_indexing.dim,
             )
             etl = ETLService(doc_repo, vector_repo, embedder_for_indexing)
             ids = etl.ingest(texts)

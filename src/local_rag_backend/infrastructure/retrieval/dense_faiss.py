@@ -33,8 +33,12 @@ class DenseFaissRetriever(RetrieverPort):
                 sims = [(s - min_s) / (max_s - min_s) for s in sims_raw]
         else:
             sims = []
-        # Map id -> normalized score, guarding invalid indices
-        id_to_score = {id_: sim for id_, i, sim in zip(ids, idxs, sims) if i != -1}
+        # Map id -> normalized score, guarding invalid indices (avoid misalignment)
+        id_to_score = {}
+        for i, sim in zip(idxs, sims):
+            if i != -1:
+                real_id = self.faiss_index.id_map[i]
+                id_to_score[real_id] = float(sim)
         final_docs, final_scores = [], []
         for doc in docs:
             if doc.id in id_to_score:

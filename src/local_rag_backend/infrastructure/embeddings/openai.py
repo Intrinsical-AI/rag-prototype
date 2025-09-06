@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from openai import APIError, OpenAI  # type: ignore
+from openai import OpenAI  # type: ignore
 
 from local_rag_backend.core.ports import EmbedderPort, Embedding
 from local_rag_backend.settings import settings
@@ -32,6 +32,9 @@ class OpenAIEmbedder(EmbedderPort):
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         try:
             resp = self.client.embeddings.create(model=self.model, input=list(texts))
-        except APIError:
-            raise
+        except Exception as err:
+            # Be robust to different SDK exception classes
+            raise RuntimeError(
+                f"OpenAI embeddings error: {getattr(err, 'message', str(err))}"
+            ) from err
         return [item.embedding for item in resp.data]

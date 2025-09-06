@@ -35,6 +35,9 @@ class DocumentRepoPort(Protocol):
 @runtime_checkable
 class VectorRepoPort(Protocol):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
+    # The second element must be a normalized similarity score in [0,1],
+    # where 1.0 is most similar. Backends should internally convert their
+    # native metric (e.g., L2 distance) into this common scale.
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]: ...
 
 

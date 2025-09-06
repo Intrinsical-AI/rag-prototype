@@ -19,8 +19,22 @@ class FaissVectorStorage(VectorRepoPort):
 
     def similar(self, vector, k: int):
         idxs, dists = self.faiss_index.search(vector, k)
-        real_ids = [self.faiss_index.id_map[i] for i in idxs if i != -1]
-        return list(zip(real_ids, dists))
+        # Convert L2 distances to similarities and normalize to [0,1]
+        sims_raw = [1.0 / (1.0 + float(d)) for d in dists]
+        if sims_raw:
+            min_s, max_s = min(sims_raw), max(sims_raw)
+            if max_s == min_s:
+                sims = [0.0 if max_s == 0 else 1.0] * len(sims_raw)
+            else:
+                sims = [(s - min_s) / (max_s - min_s) for s in sims_raw]
+        else:
+            sims = []
+        pairs: list[tuple[int, float]] = []
+        for i, sim in zip(idxs, sims):
+            if i != -1:
+                real_id = self.faiss_index.id_map[i]
+                pairs.append((real_id, float(sim)))
+        return pairs
 
 
 """

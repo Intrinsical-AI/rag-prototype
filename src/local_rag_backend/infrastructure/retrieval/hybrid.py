@@ -1,4 +1,4 @@
-# src/infrastructure/retrieval/sparse_bm25.py
+# src/infrastructure/retrieval/hybrid.py
 
 from typing import Sequence, Tuple
 
