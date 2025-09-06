@@ -4,7 +4,7 @@ import pytest
 import requests
 from fastapi import HTTPException
 
-from src.infrastructure.llms.ollama_chat import OllamaGenerator
+from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 
 
 # ---------------- helpers -------------------------------------------------- #

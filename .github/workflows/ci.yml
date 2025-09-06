@@ -17,32 +17,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
 
-      # ---------- venv caché ----------
-      - name: Cache virtualenv
-        id: cache-venv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-
-      - name: Create virtualenv (first run only)
-        if: steps.cache-venv.outputs.cache-hit != 'true'
-        run: python -m venv .venv
-        
-
-      - name: Install dependencies from pyproject.toml
+      - name: Install dependencies
         run: |
-          . .venv/bin/activate
           python -m pip install --upgrade pip
-          # install package + dev extras ([project.optional-dependencies].dev)
           pip install -e ".[dev]"
 
-      # Exportamos ruta del venv al resto de pasos
-      - name: Export VIRTUAL_ENV
+      - name: Lint (ruff + black --check)
         run: |
-          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+          ruff check .
+          black --check .
 
       - name: Run unit & integration tests with coverage
         run: pytest --cov=src --cov-report=term-missing

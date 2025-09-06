@@ -1,30 +1,16 @@
-# --- Gitignore Mejorado para Proyectos Python de Data Science, ML y Análisis ---
-# Basado en el estándar de GitHub y ampliado para necesidades específicas.
-# Fuente original: https://github.com/github/gitignore/blob/main/Python.gitignore
+# =============================================================================
+# Python RAG Prototype - Production .gitignore
+# =============================================================================
+# Based on GitHub's Python.gitignore template with RAG-specific additions
+# https://github.com/github/gitignore/blob/main/Python.gitignore
 
-# ___ Archivos de Bytecode y Optimizados ___
-# Evita commitear código compilado o intermedio de Python.
+# === PYTHON BYTECODE & COMPILED FILES ===
 __pycache__/
 *.py[cod]
 *$py.class
-build/
-htmlcov/
-
-*TODO.md*
-
-# ___ Extensiones C ___
-# Ignora binarios compilados de extensiones C.
 *.so
 
-.coverage
-src_all_files.txt
-
-tests_all_files.txt
-
-*.mp4
-
-# ___ Distribución / Empaquetado ___
-# Archivos generados al construir o distribuir paquetes Python.
+# === DISTRIBUTION & PACKAGING ===
 .Python
 build/
 develop-eggs/
@@ -44,17 +30,15 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# ___ PyInstaller ___
-# Archivos generados por PyInstaller para crear ejecutables.
+# === PYINSTALLER ===
 *.manifest
 *.spec
 
-# ___ Logs de Instalador y Dependencias ___
+# === INSTALLER LOGS ===
 pip-log.txt
 pip-delete-this-directory.txt
 
-# ___ Reportes de Tests y Cobertura ___
-# Archivos generados por herramientas de testing y cobertura.
+# === TESTING & COVERAGE ===
 htmlcov/
 .tox/
 .nox/
@@ -68,174 +52,113 @@ coverage.xml
 *.py,cover
 .hypothesis/
 cover/
-pytestdebug.log
 
-# ___ Archivos de Traducción ___
+# === TRANSLATIONS ===
 *.mo
 *.pot
 
-# ___ Específicos de Frameworks (Ejemplos) ___
-# Django:
-*.log       # Logs generales (también útil fuera de Django)
-local_settings.py # Configuraciones locales sensibles
+# === DJANGO/FLASK SPECIFIC ===
+*.log
+local_settings.py
 db.sqlite3
 db.sqlite3-journal
-# Flask:
-instance/   # Configuraciones de instancia sensibles
+instance/
 .webassets-cache
-# Scrapy:
+
+# === SCRAPY ===
 .scrapy
 
-# ___ Documentación Generada ___
-# Archivos generados por Sphinx, MkDocs, etc.
+# === DOCUMENTATION ===
 docs/_build/
-docs/build/
-docs/dist/
-site/ # Común para MkDocs
+site/
 
-# ___ PyBuilder ___
+# === PYBUILDER ===
 .pybuilder/
 target/
 
-# ___ Jupyter Notebook / IPython ___
-# Checkpoints autogenerados y configuraciones locales.
+# === JUPYTER NOTEBOOK ===
 .ipynb_checkpoints
+
+# === IPYTHON ===
 profile_default/
 ipython_config.py
 
-# ___ Gestores de Entornos y Dependencias (Archivos de Bloqueo Opcionales) ___
-# Los archivos de bloqueo (Pipfile.lock, poetry.lock, etc.) *generalmente* se recomiendan
-# en el control de versiones para aplicaciones (asegura builds reproducibles),
-# pero a veces se ignoran para librerías (para permitir más flexibilidad).
-# Descomenta si decides ignorarlos en tu caso específico.
-# Pipfile.lock
-# poetry.lock
-# pdm.lock
-# uv.lock
-
-# Archivos de configuración local de gestores de dependencias.
-# (PEP 582 / pdm / pyflow)
-__pypackages__/
-.pdm.toml
-.pdm-python
-.pdm-build/
-
-# ___ Celery ___
-# Archivos de estado y PID de Celery.
-celerybeat-schedule
-celerybeat.pid
-
-# ___ SageMath ___
-*.sage.py
-
-# ___ ENTORNO VIRTUALES (¡MUY IMPORTANTE!) ___
-# Ignora siempre las carpetas de entornos virtuales.
+# === ENVIRONMENTS ===
 .env
+.env.local
+.env.*.local
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-ENV.bak/
-VENV/
 
-# ___ Configuraciones de IDEs y Editores ___
-# Spyder:
+# === DEPENDENCY MANAGEMENT ===
+__pypackages__/
+.pdm.toml
+.pdm-python
+.pdm-build/
+
+# === CELERY ===
+celerybeat-schedule
+celerybeat.pid
+
+# === SAGEMATH ===
+*.sage.py
+
+# === EDITORS & IDES ===
+.vscode/
+.idea/
 .spyderproject
 .spyproject
-# Rope:
 .ropeproject
-# VSCode:
-.vscode/
+*.sublime-project
+*.sublime-workspace
 
-.idea/ 
-
-*~
-#*#
-/.#*
-.#*
-# Vim:
+# === VIM ===
 *.swp
 *.swo
 *.swn
 *~
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
 
-# ___ Herramientas de Calidad de Código / Linters / Tipado ___
-# mypy:
+# === CODE QUALITY TOOLS ===
 .mypy_cache/
 .dmypy.json
 dmypy.json
-# Pyre:
 .pyre/
-# pytype:
 .pytype/
-# Ruff:
 .ruff_cache/
-# Cython debug:
 cython_debug/
 
-# ___ Archivos del Sistema Operativo ___
-# macOS:
+# === OPERATING SYSTEM ===
+# macOS
 .DS_Store
 .AppleDouble
 .LSOverride
-# Windows:
+# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# -----------------------------------------------------------------------------
-# --- AMPLIACIONES ESPECÍFICAS PARA DATA SCIENCE / ML / ANÁLISIS / PROYECTOS ---
-# -----------------------------------------------------------------------------
+# =============================================================================
+# RAG-SPECIFIC IGNORES
+# =============================================================================
 
-# ___ DATOS CRUDOS Y PROCESADOS (¡ADAPTAR SEGÚN NECESIDAD!) ___
-# REGLA GENERAL: Evita commitear datasets grandes o que cambian frecuentemente.
-# Considera usar DVC (dvc.org) o Git LFS para versionar datos grandes si es necesario.
+# === DATA FILES ===
+# Keep sample data but ignore large datasets
+data/*.db
+data/*.sqlite*
+data/*.faiss
+data/*.pkl
+data/embeddings/
+data/models/
+# Keep the sample CSV for testing
+!data/faq.csv
+!data/.gitkeep
 
-# Archivos de datos crudos específicos (ajusta rutas y extensiones):
-# Si son pequeños y necesarios para reproducir, podrías *no* ignorarlos.
-# Si son grandes o descargables, ignóralos.
-/resources/raw/*.csv
-/resources/raw/*.json
-/resources/raw/*.jsonl
-/resources/raw/*.zip
-/resources/raw/*.txt
-/resources/raw/energy/ # Ejemplo de ignorar una carpeta entera si es necesario
-**/data/raw/
-
-# Archivos de datos intermedios o procesados:
-# Generalmente generados por scripts/notebooks, por lo que se pueden ignorar.
-# Podrías commitear ejemplos pequeños si son útiles.
-/resources/energy/spain/*.csv
-/resources/ioda/*.csv
-/rag-openai-chats/data/interim/messages.jsonl
-/rag-openai-chats/data/processed/chunks.parquet
-/rag-openai-chats/data/processed/messages_raw.parquet # Si generas este backup
-**/data/interim/
-**/data/processed/
-
-# EMBEDDINGS (¡SIEMPRE IGNORAR!)
-# Suelen ser muy grandes y se generan a partir de los datos procesados.
-/rag-openai-chats/data/processed/embeddings_batches/
-**/embeddings_batches/
-*.emb 
-
-# BASES DE DATOS LOCALES
-# Ignora archivos de bases de datos locales como SQLite.
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
-*.sqlitedb
-
-# MODELOS DE MACHINE LEARNING Y CACHES
-# Ignora modelos descargados, entrenados localmente o caches de librerías.
+# === MACHINE LEARNING MODELS ===
 models/
-downloaded_models/
 *.pt
 *.pth
 *.h5
@@ -244,86 +167,37 @@ downloaded_models/
 *.onnx
 *.bin
 *.joblib
-*.pkl
 *.model
-# Cache específico de librerías (puede estar en ~/.cache, pero por si acaso)
-.cache/
-hf_cache/
-torch_cache/
 
-# CREDENCIALES Y ARCHIVOS SENSIBLES (¡MUY IMPORTANTE!)
-# NUNCA commitear claves de API, contraseñas, tokens, etc.
-# .env ya está cubierto arriba, pero añadir patrones comunes explícitamente.
+# === VECTOR DATABASES & EMBEDDINGS ===
+vectordb/
+*.emb
+**/embeddings_batches/
+
+# === CREDENTIALS & SECRETS ===
 credentials.*
 secrets.*
-config.py
 *.pem
 *.key
 *.p12
 *.pfx
 .pypirc
 
-# LOGS GENERADOS POR TUS SCRIPTS
-# *.log ya está cubierto, pero añadir explícitamente y carpeta común.
-*.log
+# === LOGS ===
 logs/
 *.log.*
 
-# VISUALIZACIONES Y REPORTES GENERADOS
-# Ignora plots, HTMLs, PDFs generados si son numerosos o fácilmente reproducibles.
-# Ajusta las rutas si es necesario. Podrías commitear *algunos* ejemplos clave.
-**/plots/
-**/reports/
-**/figures/
-*.png # Ignorar solo si están en carpetas de salida específicas
-*.jpg
-*.jpeg
-*.svg
-*.html # Ignorar solo si son reportes generados
-*.pdf  # Ignorar solo si son reportes generados
-
-
-sql/
-
-# Ignorar TODOS los datos crudos (exportaciones completas)
-/rag-openai-chats/data/raw/
-/rag-openai-chats/data/interim/
-/rag-openai-chats/data/processed/
-**/data/raw/
-**/data/interim/
-**/data/processed/
-
-# Embeddings (siempre ignorar)
-/rag-openai-chats/data/processed/embeddings_batches/
-**/embeddings_batches/
-*.emb
-
-# Bases de datos locales y temporales (binarios)
-/rag-openai-chats/sql/*.db
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
-*.sqlitedb
-
-# Logs y salidas manuales
-*.log
-logs/
-t
+# === TEMPORARY & DEVELOPMENT FILES ===
+TODO.md
+*TODO.md*
+src_all_files.txt
+tests_all_files.txt
 tree*.txt
+temp/
+tmp/
 
-# Visualizaciones y reportes generados (en carpetas específicas)
-**/plots/
-**/reports/
-**/figures/
-**/output/
-**/visuals/
-**/plots/*
-**/reports/*
-**/figures/*
-**/output/*
-**/visuals/*
-
-# Otros archivos sensibles y temporales
-vectordb/
-local-docs/
+# === GENERATED REPORTS ===
+reports/
+output/
+plots/
+figures/

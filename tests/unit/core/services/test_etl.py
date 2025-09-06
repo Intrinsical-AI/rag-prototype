@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.services.etl import ETLService
+from local_rag_backend.core.services.etl import ETLService
 
 
 class DummyDocRepo:

@@ -13,15 +13,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 # Para asegurar la creación de tablas
-from src.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 # Import models to ensure they are registered with Base.metadata
-from src.infrastructure.persistence.sqlalchemy import models  # noqa: F401
+from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 
 # Importar el embedder que se usará para la indexación si es modo denso
-from src.infrastructure.embeddings.sentence_transformers import (
+from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
-from src.settings import settings
+from local_rag_backend.settings import settings
 
 logger = logging.getLogger(__name__)
 # Configurar el logging para que se vea la salida del script y de data_loader
@@ -76,9 +76,9 @@ def main() -> None:
 
     # 4. Usar la lógica de ETL directamente (similar a bootstrap.py)
     try:
-        from src.core.services.etl import ETLService
-        from src.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-        from src.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.core.services.etl import ETLService
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
         import csv
         
         # Leer CSV

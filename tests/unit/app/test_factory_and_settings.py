@@ -3,8 +3,8 @@ import importlib
 
 import pytest
 
-from src.app import factory
-from src.settings import settings
+from local_rag_backend.app import factory
+from local_rag_backend.settings import settings
 
 
 # ---------- helpers -----------------------------------------------------------
@@ -16,14 +16,14 @@ def reload_factory():
 class DummySqlDocumentStorage:
     def get_all_documents(self):
         # devuelvo 2 docs «falsos» para evitar código que falla con corpus vacío
-        from src.core.domain.entities import Document
+        from local_rag_backend.core.domain.entities import Document
 
         return [Document(id=1, content="D1"), Document(id=2, content="D2")]
 
 
 class DummySqlDocumentStorageV2:
     def get_all_documents(self):
-        from src.core.domain.entities import Document
+        from local_rag_backend.core.domain.entities import Document
 
         return [Document(id=1, content="D1"), Document(id=2, content="D2")]
 

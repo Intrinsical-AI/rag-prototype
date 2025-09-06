@@ -1,8 +1,8 @@
 # tests/e2e/test_api.py
 from fastapi.testclient import TestClient
 
-from src.app.dependencies import get_rag_service
-from src.app.main import app
+from local_rag_backend.app.dependencies import get_rag_service
+from local_rag_backend.app.main import app
 
 
 class DummyRagSvc:

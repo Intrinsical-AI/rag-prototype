@@ -45,35 +45,36 @@ src/
 
 ### **Examples**
 
-#### Ports (Interfaces) in `src/core/ports.py`
+#### Ports (Interfaces) in `src/core/ports/`
 
 ```python
-# src/core/ports.py
+# src/core/ports/__init__.py
 
-class DocumentRetrieverPort:
-    def retrieve(self, query: str, k: int) -> list:
-        raise NotImplementedError
+from typing import Protocol, Sequence, Tuple
+from local_rag_backend.core.domain.entities import Document, Embedding
 
-class GeneratorPort:
-    def generate(self, question: str, docs: list) -> str:
-        raise NotImplementedError
+class GeneratorPort(Protocol):
+    def generate(self, question: str, contexts: Sequence[str]) -> str: ...
+
+class RetrieverPort(Protocol):
+    def retrieve(self, query: str, k: int = 5) -> Tuple[Sequence[Document], Sequence[float]]: ...
 ```
 
-#### Adapters in `src/infrastructure/retrieval/bm25.py`
+#### Adapters in `src/infrastructure/retrieval/sparse_bm25.py`
 
 ```python
-# src/infrastructure/retrieval/bm25.py
+# src/infrastructure/retrieval/sparse_bm25.py
 
-from src.core.ports import DocumentRetrieverPort
+from local_rag_backend.core.ports import RetrieverPort
 
-class BM25Retriever(DocumentRetrieverPort):
+class SparseBM25Retriever(RetrieverPort):
     def __init__(self, documents):
-        # ...setup BM25
-        pass
+        # setup BM25 with documents
+        ...
 
-    def retrieve(self, query: str, k: int):
-        # ...run BM25 search
-        return top_k_results
+    def retrieve(self, query: str, k: int = 5):
+        # run BM25 search and return (docs, scores)
+        ...
 ```
 
 #### Application (API layer) in `src/app/main.py`
@@ -81,12 +82,12 @@ class BM25Retriever(DocumentRetrieverPort):
 Here, you **inject** the implementation:
 
 ```python
-from src.core.ports import DocumentRetrieverPort, GeneratorPort
-from src.infrastructure.retrieval.bm25 import BM25Retriever
-from src.infrastructure.generation.openai_chat import OpenAIGenerator
+from local_rag_backend.core.ports import RetrieverPort, GeneratorPort
+from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
+from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 
-retriever = BM25Retriever(docs)
-generator = OpenAIGenerator(api_key)
+retriever: RetrieverPort = SparseBM25Retriever(docs)
+generator: GeneratorPort = OpenAIGenerator()
 
 # Now, use these in your FastAPI endpoints!
 ```

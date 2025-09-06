@@ -1,7 +1,7 @@
 # tests/test_utils.py
 
-from src.core.domain.entities import Document
-from src.utils import get_corpus_and_ids, preprocess_text
+from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.utils import get_corpus_and_ids, preprocess_text
 
 
 class DummyRepo:

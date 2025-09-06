@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.infrastructure.persistence.sqlalchemy.base import Base
-from src.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
 
 @pytest.fixture(scope="function")

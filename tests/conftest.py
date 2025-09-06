@@ -3,10 +3,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.infrastructure.persistence.sqlalchemy import base as db_base
-from src.infrastructure.persistence.sqlalchemy import sql_
+from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+from local_rag_backend.infrastructure.persistence.sqlalchemy import sql_
 # Import models to ensure they are registered with Base.metadata
-from src.infrastructure.persistence.sqlalchemy import models
+from local_rag_backend.infrastructure.persistence.sqlalchemy import models
 
 
 @pytest.fixture()

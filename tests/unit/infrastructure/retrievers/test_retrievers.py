@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from src.core.domain.entities import Document
-from src.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
-from src.infrastructure.retrieval.hybrid import HybridRetriever
-from src.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
+from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
+from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 
 class DummyEmbedder:

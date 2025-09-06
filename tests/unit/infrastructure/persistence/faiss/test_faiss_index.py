@@ -2,7 +2,7 @@
 import numpy as np
 from pytest import approx
 
-from src.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 
 """
 Revisar locks si el proycto crece

@@ -1,20 +1,22 @@
-# 🧠 Local-RAG Backend & Frontend
+# 🧠 Intrinsical RAG Prototype
 
-> A minimal, modular, and production-ready Retrieval-Augmented Generation (RAG) prototype. Engineered for extensibility, portability, and robust testing using FastAPI, with support for Ollama/OpenAI and FAISS/BM25.
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-green.svg)](https://fastapi.tiangolo.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
----
-# pythonenv
-# pyproject.toml
-# Unit Testing
-# Integration Testing
-# Pre-commits + Linting
-# Docker
-# Compose
-# Git
-# CI
-# Swagger / Docs
+> A production-ready Retrieval-Augmented Generation (RAG) prototype built with hexagonal architecture. Features FastAPI backend, multiple retrieval modes (sparse/dense/hybrid), and comprehensive testing suite.
 
----
+## ✨ Key Features
+
+- **🏗️ Hexagonal Architecture** - Clean separation of concerns with ports & adapters pattern
+- **🔍 Multiple Retrieval Modes** - Sparse (BM25), Dense (FAISS), and Hybrid approaches
+- **🤖 LLM Flexibility** - Support for OpenAI and Ollama with easy switching
+- **⚡ FastAPI Backend** - Modern async API with automatic documentation
+- **🧪 Comprehensive Testing** - Unit, integration, and E2E tests with >80% coverage
+- **🐳 Docker Ready** - Production-ready containerization with Docker Compose
+- **📦 PyPI Ready** - Professional packaging with proper metadata and entry points
 
 ![Architecture diagram](docs/hex-arch.png)
 
@@ -109,47 +111,81 @@ The application follows a Ports & Adapters (Hexagonal) architecture to promote
 
 ---
 
-## 4. Quick Start
+## 🚀 Quick Start
 
-1. **Create Environment & Install Dependencies:**
+### Installation
+
+#### From PyPI (Recommended)
+
 ```bash
-# 1. Create virtual‑env
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+# Install the latest stable version
+pip install intrinsical-rag-prototype
 
-# 2. Install in editable mode (recommended for scripts)
-pip install -e .
+# Install with development dependencies
+pip install "intrinsical-rag-prototype[dev]"
+
+# Install with all optional dependencies
+pip install "intrinsical-rag-prototype[all]"
 ```
 
-
-2. **Initialize Database & Build Index:**
-
-  ```bash
-  python -m scripts.bootstrap.py
-  ```
-
-
-4. **Run the Server:**
-    
-
-   ```bash
-   make run # or uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-   * UI: `http://localhost:8000/`
-   * API docs: `http://localhost:8000/docs`
-
-**Docker (Alternative):**
+#### From Source
 
 ```bash
-# Build image
-docker build -t local-rag-app .
+# Clone the repository
+git clone https://github.com/Intrinsical-AI/rag-prototype.git
+cd rag-prototype
 
-# Run backend only
-docker run -p 8000:8000 -e OPENAI_API_KEY=<key> local-rag-app
+# Install in development mode
+pip install -e ".[dev]"
 
-# Run with Ollama using compose profile
+# Or install in production mode
+pip install .
+```
+
+#### Requirements
+
+- **Python**: 3.11 or higher
+- **Operating System**: Windows, macOS, or Linux
+- **Memory**: Minimum 4GB RAM (8GB+ recommended for dense retrieval)
+- **Storage**: ~500MB for dependencies, additional space for data/models
+
+### Basic Usage
+
+1. **Initialize the system:**
+```bash
+# Using CLI commands (after pip install)
+rag-bootstrap
+
+# Or using Python modules
+python -m scripts.bootstrap
+```
+
+2. **Start the server:**
+```bash
+# Using CLI command
+rag-server
+
+# Or using uvicorn directly
+uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+3. **Access the application:**
+   - **Web UI**: http://localhost:8000/
+   - **API Documentation**: http://localhost:8000/docs
+   - **OpenAPI Spec**: http://localhost:8000/openapi.json
+
+### Docker Deployment
+
+```bash
+# Quick start with Docker Compose
+docker compose up --build
+
+# With Ollama support
 docker compose --profile with-ollama up --build
+
+# Production deployment
+docker build -t intrinsical-rag .
+docker run -p 8000:8000 -e OPENAI_API_KEY=your_key intrinsical-rag
 ```
 
 ---
@@ -179,27 +215,42 @@ Settings are centralized in `src/settings.py` and can be overridden via environm
 
 ---
 
-## 6. Run & Develop
+## 🛠️ Development
 
-| Task                          | Command                                   |
-| ----------------------------- | ----------------------------------------- |
-| Run server (dev)              | `make run` or `uvicorn src.app.main:app --reload`      |
-| Build / rebuild index         | `python -m scripts.bootstrap.py`           |
-| Lint all files                | `black . ; isort . ; ruff check .`        |
-| Run pre‑commit hooks manually | `pre-commit run --all-files`              |
-| Run tests                     | `make test` (alias to `pytest -v tests/`) |
+### Development Commands
 
-### Running scripts directly
+| Task | Command | Description |
+|------|---------|-------------|
+| **Install dev dependencies** | `pip install -e ".[dev]"` | Install with all development tools |
+| **Run server (dev)** | `rag-server` or `uvicorn src.app.main:app --reload` | Start development server |
+| **Build index** | `rag-build-index` or `python -m scripts.build_index` | Create/rebuild search index |
+| **Bootstrap data** | `rag-bootstrap` or `python -m scripts.bootstrap` | Initialize database and data |
+| **Run tests** | `pytest` | Run full test suite |
+| **Test with coverage** | `pytest --cov=src --cov-report=html` | Generate coverage report |
+| **Lint code** | `ruff check .` | Check code quality |
+| **Format code** | `black . && isort .` | Auto-format code |
+| **Type check** | `mypy src/` | Static type checking |
+| **Pre-commit hooks** | `pre-commit run --all-files` | Run all quality checks |
 
-Because we use a **`src/` layout**, Python must see the project root on `PYTHONPATH` when you run helpers:
+### Development Setup
 
 ```bash
-# Good
-PYTHONPATH=$PWD python scripts/bootstrap.py
+# Clone and setup development environment
+git clone https://github.com/Intrinsical-AI/rag-prototype.git
+cd rag-prototype
 
-# Also good (package installed in editable mode)
-pip install -e .
-python scripts/bootstrap.py
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install in development mode
+pip install -e ".[dev]"
+
+# Setup pre-commit hooks
+pre-commit install
+
+# Initialize the system
+rag-bootstrap
 ```
 
 ---
@@ -207,7 +258,6 @@ python scripts/bootstrap.py
 ## Tests & Coverage
 
 ```bash
-make test                   # unit + integration (35 tests)
 pytest --cov=src            # quick coverage in console
 pytest --cov=src -q         # quiet
 pytest --cov=src --cov-report=html  # open htmlcov/index.html
@@ -266,4 +316,4 @@ The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downlo
 
 ---
 
-*(Made by IntrinsicalAI, Gemini 2.5-05-06, and GPT o3 (v14/05/2025))*
+*(Made by IntrinsicalAI)*

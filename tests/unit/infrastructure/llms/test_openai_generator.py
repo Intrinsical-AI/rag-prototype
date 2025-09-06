@@ -3,7 +3,7 @@
 import pytest
 from fastapi import HTTPException
 
-from src.infrastructure.llms.openai_chat import OpenAIGenerator
+from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 
 
 # --------------------------------------------------------------------------- #

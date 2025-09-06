@@ -8,14 +8,15 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.core.services.etl import ETLService
-from src.infrastructure.embeddings.sentence_transformers import (
+from local_rag_backend.core.services.etl import ETLService
+from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
-from src.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from src.infrastructure.persistence.sqlalchemy.base import Base
-from src.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-from src.settings import settings
+from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
+from local_rag_backend.settings import settings
 
 DELIMITER = ";"
 
@@ -27,19 +28,6 @@ def main():
     )
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
-
-    # 2️⃣  ¡muy importante!  -> que todo el proyecto use ESTA sesión
-    from src.infrastructure.persistence.sqlalchemy import base as _db_base
-
-    _db_base.SessionLocal = SessionLocal  # ← sobrescribimos la global
-
-    from src.infrastructure.persistence.sqlalchemy import sql_ as _sql_mod
-
-    # 3️⃣  Que las próximas llamadas a SqlDocumentStorage() sin argumentos
-    #     utilicen ESTA nueva SessionLocal -------------------------------
-    _sql_mod.SessionLocal = SessionLocal  # módulo
-    _sql_mod.SqlDocumentStorage.__init__.__defaults__ = (SessionLocal,)
-    _db_base.engine = engine  # (opcional, por coherencia)
 
     # 2) Leemos CSV
     csv_path = Path(settings.faq_csv)

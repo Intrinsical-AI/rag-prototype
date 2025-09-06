@@ -1,50 +1,264 @@
 [project]
-name            = "local-rag-backend"
-version         = "0.1.0"
-description     = "Minimal RAG Q&A backend with FastAPI + FAISS/BM25"
-readme          = "README.md"
+name = "intrinsical-rag-prototype"
+version = "0.1.0"
+description = "Production-ready RAG prototype with FastAPI, FAISS, and hexagonal architecture"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
-authors         = [{ name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }]
+license = { text = "MIT" }
+authors = [
+    { name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }
+]
+maintainers = [
+    { name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }
+]
+keywords = [
+    "rag", "retrieval-augmented-generation", "fastapi", "faiss", 
+    "nlp", "ai", "machine-learning", "semantic-search", "llm",
+    "hexagonal-architecture", "vector-search", "openai", "ollama"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
 
 dependencies = [
-  "fastapi>=0.111,<1.0",
-  "uvicorn[standard]>=0.29",
-  "sentence-transformers>=2.7",
-  "faiss-cpu>=1.8.0,<2.0",
-  "rank-bm25>=0.2",
-  "numpy>=1.26",
-  "openai>=1.24",
-  "requests>=2.31",
-  "sqlalchemy>=2.0",
-  "pydantic-settings>=2.2",
-  "python-dotenv>=1.0",
-  "pytest>=8.2",
-  "pytest-cov>=6.1.1",
-  "pre-commit>=4.2.0"
+    "fastapi>=0.111,<1.0",
+    "uvicorn[standard]>=0.29,<1.0",
+    "sentence-transformers>=2.7,<3.0",
+    "faiss-cpu>=1.8.0,<2.0",
+    "rank-bm25>=0.2,<1.0",
+    "numpy>=1.26,<2.0",
+    "openai>=1.24,<2.0",
+    "requests>=2.31,<3.0",
+    "sqlalchemy>=2.0,<3.0",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.2,<3.0",
+    "python-dotenv>=1.0,<2.0",
+    "click>=8.0,<9.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest",
-  "pytest-cov",
-  "ruff",
-  "isort"
+    "pytest>=8.2,<9.0",
+    "pytest-cov>=6.1.1,<7.0",
+    "pytest-asyncio>=0.23,<1.0",
+    "httpx>=0.27,<1.0",  # for FastAPI TestClient
+    "ruff>=0.4,<1.0",
+    "black>=24.0,<25.0",
+    "isort>=5.13,<6.0",
+    "pre-commit>=4.2.0,<5.0",
+    "mypy>=1.10,<2.0",
+    "types-requests>=2.31,<3.0",
 ]
+test = [
+    "pytest>=8.2,<9.0",
+    "pytest-cov>=6.1.1,<7.0",
+    "pytest-asyncio>=0.23,<1.0",
+    "httpx>=0.27,<1.0",
+]
+lint = [
+    "ruff>=0.4,<1.0",
+    "black>=24.0,<25.0",
+    "isort>=5.13,<6.0",
+    "mypy>=1.10,<2.0",
+    "types-requests>=2.31,<3.0",
+]
+docs = [
+    "mkdocs>=1.5,<2.0",
+    "mkdocs-material>=9.5,<10.0",
+    "mkdocstrings[python]>=0.24,<1.0",
+]
+all = [
+    # union of dev + docs (avoid self-referencing extras)
+    "pytest>=8.2,<9.0",
+    "pytest-cov>=6.1.1,<7.0",
+    "pytest-asyncio>=0.23,<1.0",
+    "httpx>=0.27,<1.0",
+    "ruff>=0.4,<1.0",
+    "black>=24.0,<25.0",
+    "isort>=5.13,<6.0",
+    "pre-commit>=4.2.0,<5.0",
+    "mypy>=1.10,<2.0",
+    "types-requests>=2.31,<3.0",
+    "mkdocs>=1.5,<2.0",
+    "mkdocs-material>=9.5,<10.0",
+    "mkdocstrings[python]>=0.24,<1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Intrinsical-AI/rag-prototype"
+Documentation = "https://github.com/Intrinsical-AI/rag-prototype#readme"
+Repository = "https://github.com/Intrinsical-AI/rag-prototype.git"
+Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
+Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
+
+[project.scripts]
+rag-server = "src.cli:rag_server"
+rag-build-index = "src.cli:rag_build_index"
+rag-bootstrap = "src.cli:rag_bootstrap"
+rag-status = "src.cli:rag_status"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json"]
+
+# === DEVELOPMENT TOOLS ===
+
 [tool.ruff]
 line-length = 100
+target-version = "py311"
 fix = true
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "B904",  # raise from None
+]
+
+[tool.ruff.per-file-ignores]
+"tests/**/*" = ["ARG", "S101"]  # Allow unused args and assert in tests
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
 
 [tool.isort]
 profile = "black"
-line_length = 100  # igual que black
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
 
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "faiss.*",
+    "rank_bm25.*",
+    "sentence_transformers.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=src",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html:htmlcov",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+    "ignore::PendingDeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
 
 [tool.coverage.run]
 branch = true
 source = ["src"]
-omit   = ["tests/*", "*/__init__.py"]
+omit = [
+    "tests/*",
+    "*/__init__.py",
+    "*/conftest.py",
+    "scripts/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+skip_covered = true
+
+[tool.coverage.html]
+directory = "htmlcov"

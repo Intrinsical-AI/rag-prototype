@@ -1,4 +1,4 @@
-from src.infrastructure.embeddings.sentence_transformers import (
+from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
 

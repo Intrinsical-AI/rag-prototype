@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 
 
 def test_faiss_index_add_and_search(tmp_path):

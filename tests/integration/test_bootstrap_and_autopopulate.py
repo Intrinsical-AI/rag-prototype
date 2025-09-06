@@ -1,7 +1,7 @@
 import csv
 import importlib
 
-from src.settings import settings
+from local_rag_backend.settings import settings
 
 
 def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
@@ -12,7 +12,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
             return [[0.0] * self.dim for _ in texts]
 
     # Mock FAISS Index para asegurar dim consistente
-    from src.infrastructure.persistence.faiss import index as faiss_index_mod
+    from local_rag_backend.infrastructure.persistence.faiss import index as faiss_index_mod
 
     class DummyFaissIndex:
         def __init__(self, index_path, id_map_path, dim=None):  # <-- Aquí el cambio
@@ -32,7 +32,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(settings, "st_embedding_model", "dummy-4", raising=False)
     monkeypatch.setattr(
-        "src.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
         lambda model_name=None: DummyEmbedder(),
         raising=True,
     )
@@ -59,7 +59,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
 
     # Resetear singleton si hace falta
     try:
-        from src.app import factory
+        from local_rag_backend.app import factory
 
         if hasattr(factory, "reset_rag_service"):
             factory.reset_rag_service()
@@ -74,7 +74,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Ingested" in captured.out or "Ingerido" in captured.out
 
-    from src.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
     docs = SqlDocumentStorage().get_all_documents()
     assert len(docs) == 1 and "RAG" in docs[0].content
