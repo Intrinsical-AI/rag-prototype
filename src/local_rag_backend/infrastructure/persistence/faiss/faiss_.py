@@ -11,8 +11,8 @@ class FaissVectorStorage(VectorRepoPort):
     Adapter que implementa VectorRepoPort usando FAISS.
     """
 
-    def __init__(self, index_path: str, id_map_path: str):
-        self.faiss_index = FaissIndex(index_path, id_map_path)
+    def __init__(self, index_path: str, id_map_path: str, dim: int | None = None):
+        self.faiss_index = FaissIndex(index_path, id_map_path, dim=dim or 384)
 
     def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         self.faiss_index.add_to_index(list(ids), list(vectors))

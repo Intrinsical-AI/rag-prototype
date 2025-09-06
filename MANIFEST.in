@@ -25,15 +25,8 @@ exclude data/*.pkl
 recursive-include docs *.md *.png *.jpg *.svg
 exclude docs/_build
 
-# === FRONTEND ===
-recursive-include frontend *.html *.css *.js
-
-# === SCRIPTS ===
-include scripts/*.py
-
-# === SOURCE CODE ===
-recursive-include src *.py
-recursive-include tests *.py
+# Note: Frontend assets are packaged under local_rag_backend/frontend via package-data
+# Tests and Python sources are included by setuptools; no need to list here
 
 # === EXCLUDE DEVELOPMENT FILES ===
 exclude .coverage

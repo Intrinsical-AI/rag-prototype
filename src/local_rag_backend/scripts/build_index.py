@@ -7,6 +7,7 @@ It uses a dedicated database engine and session for this process.
 
 import logging
 from pathlib import Path
+from importlib import resources
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -83,19 +84,33 @@ def main() -> None:
         
         # Leer CSV
         csv_path = Path(settings.faq_csv)
-        if not csv_path.is_file():
-            raise FileNotFoundError(f"CSV file not found at {csv_path}")
-
         texts = []
-        with csv_path.open(encoding="utf-8") as fh:
-            reader = csv.reader(fh, delimiter=";")
-            if settings.csv_has_header:
-                next(reader, None)
-            for i, row in enumerate(reader, 1):
-                if len(row) < 2:
-                    logger.warning(f"Row {i} skipped (len={len(row)}): {row}")
-                    continue
-                texts.append(f"{row[0].strip()} {row[1].strip()}")
+        if csv_path.is_file():
+            with csv_path.open(encoding="utf-8") as fh:
+                reader = csv.reader(fh, delimiter=";")
+                if settings.csv_has_header:
+                    next(reader, None)
+                for i, row in enumerate(reader, 1):
+                    if len(row) < 2:
+                        logger.warning(f"Row {i} skipped (len={len(row)}): {row}")
+                        continue
+                    texts.append(f"{row[0].strip()} {row[1].strip()}")
+        else:
+            # fallback to packaged sample data
+            try:
+                pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
+                with pkg_csv.open("r", encoding="utf-8") as fh:
+                    reader = csv.reader(fh, delimiter=";")
+                    if settings.csv_has_header:
+                        next(reader, None)
+                    for i, row in enumerate(reader, 1):
+                        if len(row) < 2:
+                            logger.warning(f"Row {i} skipped (len={len(row)}): {row}")
+                            continue
+                        texts.append(f"{row[0].strip()} {row[1].strip()}")
+                logger.info("Loaded packaged sample data (local CSV not found).")
+            except Exception:
+                raise FileNotFoundError(f"CSV file not found at {csv_path} and no packaged sample available.")
         
         if not texts:
             raise ValueError("No texts found in CSV.")

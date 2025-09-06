@@ -26,6 +26,11 @@ class FaissIndex:
 
     def add_to_index(self, ids: List[int], embeddings: List[Sequence[float]]):
         vectors = np.asarray(embeddings, dtype="float32")
+        # Validate dimensionality matches index.d to avoid FAISS errors later
+        if vectors.ndim != 2 or vectors.shape[1] != self.index.d:
+            raise ValueError(
+                f"FAISS dim mismatch: index {self.index.d} vs vectors {vectors.shape}"
+            )
         self.index.add(vectors)
         self.id_map.extend(ids)
         self.save()

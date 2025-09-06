@@ -8,14 +8,14 @@ via environment variables or .env file.
 Example:
     export OPENAI_API_KEY="your-key-here"
     export RETRIEVAL_MODE="hybrid"
-    python -m src.app.main
+    python -m local_rag_backend.app.main
 """
 
 import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -96,14 +96,14 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
-    @validator("data_dir", pre=True)
+    @field_validator("data_dir", mode="before")
     def ensure_data_dir_exists(cls, v):
         """Ensure data directory exists."""
         path = Path(v)
         path.mkdir(parents=True, exist_ok=True)
         return path
     
-    @validator("sqlite_url")
+    @field_validator("sqlite_url")
     def validate_sqlite_url(cls, v):
         """Validate SQLite URL format."""
         if not v.startswith("sqlite:///"):

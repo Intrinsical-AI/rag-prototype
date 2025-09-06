@@ -13,10 +13,11 @@ import click
 import uvicorn
 
 from local_rag_backend.settings import settings
+from local_rag_backend import __version__
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="intrinsical-rag-prototype")
+@click.version_option(version=__version__, prog_name="intrinsical-rag-prototype")
 def cli():
     """Intrinsical RAG Prototype - Production-ready RAG system with hexagonal architecture."""
     pass
@@ -41,7 +42,7 @@ def server(host: Optional[str], port: Optional[int], reload: Optional[bool], log
     click.echo(f"📝 Log level: {server_log_level.upper()}")
     
     uvicorn.run(
-        "src.app.main:app",
+        "local_rag_backend.app.main:app",
         host=server_host,
         port=server_port,
         reload=server_reload,
@@ -54,7 +55,7 @@ def build_index():
     """Build FAISS index from existing documents."""
     try:
         # Import here to avoid circular imports
-        from scripts.build_index import main as build_main
+        from local_rag_backend.scripts.build_index import main as build_main
         
         click.echo("🔨 Building FAISS index...")
         with click.progressbar(length=1, label="Building index") as bar:
@@ -71,7 +72,7 @@ def bootstrap():
     """Bootstrap database with sample data."""
     try:
         # Import here to avoid circular imports
-        from scripts.bootstrap import main as bootstrap_main
+        from local_rag_backend.scripts.bootstrap import main as bootstrap_main
         
         click.echo("🌱 Bootstrapping database with sample data...")
         with click.progressbar(length=1, label="Bootstrapping") as bar:
@@ -123,22 +124,22 @@ def status():
 # Entry point functions for setuptools
 def rag_server():
     """Entry point for rag-server command."""
-    cli(["server"])
+    cli(["server", *sys.argv[1:]])
 
 
 def rag_build_index():
     """Entry point for rag-build-index command."""
-    cli(["build-index"])
+    cli(["build-index", *sys.argv[1:]])
 
 
 def rag_bootstrap():
     """Entry point for rag-bootstrap command."""
-    cli(["bootstrap"])
+    cli(["bootstrap", *sys.argv[1:]])
 
 
 def rag_status():
     """Entry point for rag-status command."""
-    cli(["status"])
+    cli(["status", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

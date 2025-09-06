@@ -3,6 +3,7 @@
 import csv
 import sys
 from pathlib import Path
+from importlib import resources
 
 # IMPORTS PARA BD DINÁMICA
 from sqlalchemy import create_engine
@@ -29,22 +30,36 @@ def main():
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
-    # 2) Leemos CSV
+    # 2) Leemos CSV (local primero, luego paquete)
     csv_path = Path(settings.faq_csv)
-    if not csv_path.is_file():
-        print(f"[ERR] CSV file not found at {csv_path}")
-        sys.exit(1)
-
     texts = []
-    with csv_path.open(encoding="utf-8") as fh:
-        reader = csv.reader(fh, delimiter=DELIMITER)
-        if settings.csv_has_header:
-            next(reader, None)
-        for i, row in enumerate(reader, 1):
-            if len(row) < 2:
-                print(f"[WARN] Row {i} skipped (len={len(row)}): {row}")
-                continue
-            texts.append(f"{row[0].strip()} {row[1].strip()}")
+    if csv_path.is_file():
+        with csv_path.open(encoding="utf-8") as fh:
+            reader = csv.reader(fh, delimiter=DELIMITER)
+            if settings.csv_has_header:
+                next(reader, None)
+            for i, row in enumerate(reader, 1):
+                if len(row) < 2:
+                    print(f"[WARN] Row {i} skipped (len={len(row)}): {row}")
+                    continue
+                texts.append(f"{row[0].strip()} {row[1].strip()}")
+    else:
+        # Fallback to packaged CSV
+        try:
+            pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
+            with pkg_csv.open("r", encoding="utf-8") as fh:
+                reader = csv.reader(fh, delimiter=DELIMITER)
+                if settings.csv_has_header:
+                    next(reader, None)
+                for i, row in enumerate(reader, 1):
+                    if len(row) < 2:
+                        print(f"[WARN] Row {i} skipped (len={len(row)}): {row}")
+                        continue
+                    texts.append(f"{row[0].strip()} {row[1].strip()}")
+            print("[INFO] Loaded packaged sample data (local CSV not found).")
+        except Exception:
+            print(f"[ERR] CSV file not found at {csv_path} and no packaged sample available.")
+            sys.exit(1)
     if not texts:
         print("[ERR] No texts found in CSV.")
         sys.exit(1)
@@ -55,10 +70,12 @@ def main():
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
     
     if settings.retrieval_mode in ["dense", "hybrid"]:
-        vector_repo = FaissVectorStorage(
-            index_path=settings.index_path, id_map_path=settings.id_map_path
-        )
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        vector_repo = FaissVectorStorage(
+            index_path=settings.index_path,
+            id_map_path=settings.id_map_path,
+            dim=embedder.dim,
+        )
         etl = ETLService(doc_repo, vector_repo, embedder)
         ids = etl.ingest(texts)
         print(f"[OK] Ingested {len(ids)} docs into SQL and FAISS.")

@@ -99,6 +99,7 @@ __pypackages__/
 .pdm.toml
 .pdm-python
 .pdm-build/
+uv.lock
 
 # === CELERY ===
 celerybeat-schedule
@@ -201,3 +202,7 @@ reports/
 output/
 plots/
 figures/
+
+.locals/
+.github/workflows/release.yml
+build_package.py

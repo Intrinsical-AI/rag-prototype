@@ -76,8 +76,11 @@ Flexibility: Supports fully offline operation (BM25 + SQLite) as well as integra
 .
 ├── data/          # csv, sqlite db, faiss files                   
 ├── frontend/      # single‑page UI (index.html + css/js)
-├── scripts/       # helper cli scripts (build_index.py, bootstrap.py)
-├── src/           # application code (ports, adapters, api)
+├── src/           # application code (ports, adapters, api, scripts)
+│   └── local_rag_backend/
+│       ├── app/           # FastAPI app (main, routers, DI)
+│       ├── scripts/       # helper scripts (build_index.py, bootstrap.py)
+│       └── frontend/      # packaged index.html served by the app
 ├── tests/         # unit + integration + e2e tests
 └── docs/          # diagrams & extra docs
 ```
@@ -153,20 +156,20 @@ pip install .
 
 1. **Initialize the system:**
 ```bash
-# Using CLI commands (after pip install)
+# Using CLI command (after pip install)
 rag-bootstrap
 
-# Or using Python modules
-python -m scripts.bootstrap
+# Or using Python module path
+python -m local_rag_backend.scripts.bootstrap
 ```
 
 2. **Start the server:**
 ```bash
-# Using CLI command
+# Using CLI command (recommended)
 rag-server
 
 # Or using uvicorn directly
-uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn local_rag_backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 3. **Access the application:**
@@ -192,7 +195,7 @@ docker run -p 8000:8000 -e OPENAI_API_KEY=your_key intrinsical-rag
 
 ## 5. Configuration
 
-Settings are centralized in `src/settings.py` and can be overridden via environment variables or a `.env` file.
+Settings are centralized in `local_rag_backend/settings.py` (installed as part of the package) and can be overridden via environment variables or a `.env` file at the project root.
 
 | Variable                 | Default                   | Required?            | Description                            |
 | ------------------------ | ------------------------- | -------------------- | -------------------------------------- |
@@ -222,9 +225,9 @@ Settings are centralized in `src/settings.py` and can be overridden via environm
 | Task | Command | Description |
 |------|---------|-------------|
 | **Install dev dependencies** | `pip install -e ".[dev]"` | Install with all development tools |
-| **Run server (dev)** | `rag-server` or `uvicorn src.app.main:app --reload` | Start development server |
-| **Build index** | `rag-build-index` or `python -m scripts.build_index` | Create/rebuild search index |
-| **Bootstrap data** | `rag-bootstrap` or `python -m scripts.bootstrap` | Initialize database and data |
+| **Run server (dev)** | `rag-server` or `uvicorn local_rag_backend.app.main:app --reload` | Start development server |
+| **Build index** | `rag-build-index` or `python -m local_rag_backend.scripts.build_index` | Create/rebuild search index |
+| **Bootstrap data** | `rag-bootstrap` or `python -m local_rag_backend.scripts.bootstrap` | Initialize database and data |
 | **Run tests** | `pytest` | Run full test suite |
 | **Test with coverage** | `pytest --cov=src --cov-report=html` | Generate coverage report |
 | **Lint code** | `ruff check .` | Check code quality |
@@ -275,7 +278,9 @@ The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downlo
 | `POST` | `/api/ask`     | `{ "question": "str", "k": int }` | `{ "answer": "str", "sources": [ {document, score}, ... ] }` | Returns AI-generated answer & source docs. |
 |  `GET` | `/api/history` | Query: `limit`, `offset`          | `[ { "id": int, "question": "str", ... }, ... ]` | Retrieves past Q&A records.               |
 
-*See interactive docs at `/docs` for full details and schemas.*
+*Note:* The frontend HTML is bundled within the package and served automatically at `/`. In development, if you modify `frontend/index.html` at the repo root, the server will fall back to that file.
+
+*See interactive API docs at `/docs` for full details and schemas.*
 
 
 ---

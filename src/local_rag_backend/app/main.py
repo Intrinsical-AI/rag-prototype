@@ -3,6 +3,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from importlib import resources
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -50,6 +51,18 @@ FRONTEND_DIR = PROJECT_ROOT_DIR / "frontend"
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend_route(request: Request):
+    # 1) Try to serve packaged frontend (installed package)
+    try:
+        pkg_index = resources.files("local_rag_backend.frontend").joinpath("index.html")
+        if pkg_index.is_file():
+            with pkg_index.open("r", encoding="utf-8") as f:
+                html_content = f.read()
+            return HTMLResponse(content=html_content, status_code=200)
+    except Exception:
+        # Ignore and fallback to repository frontend
+        pass
+
+    # 2) Fallback: serve from repository root (developer mode)
     index_html_path = FRONTEND_DIR / "index.html"
     if not index_html_path.is_file():
         logger.error(f"Frontend file not found at {index_html_path}")
@@ -72,5 +85,5 @@ async def serve_frontend_route(request: Request):
 if __name__ == "__main__":
     # default: host="0.0.0.0", port=8000
     uvicorn.run(
-        "src.app.main:app", host=settings.app_host, port=settings.app_port, reload=True
+        "local_rag_backend.app.main:app", host=settings.app_host, port=settings.app_port, reload=True
     )

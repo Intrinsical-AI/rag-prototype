@@ -66,7 +66,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     except ImportError:
         pass
 
-    import scripts.bootstrap as bootstrap
+    from local_rag_backend.scripts import bootstrap as bootstrap
 
     importlib.reload(bootstrap)
     bootstrap.main()

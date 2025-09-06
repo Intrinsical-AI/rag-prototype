@@ -113,24 +113,27 @@ Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
 Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 
 [project.scripts]
-rag-server = "src.cli:rag_server"
-rag-build-index = "src.cli:rag_build_index"
-rag-bootstrap = "src.cli:rag_bootstrap"
-rag-status = "src.cli:rag_status"
+rag-server = "local_rag_backend.cli:rag_server"
+rag-build-index = "local_rag_backend.cli:rag_build_index"
+rag-bootstrap = "local_rag_backend.cli:rag_bootstrap"
+rag-status = "local_rag_backend.cli:rag_status"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["src", "src.*"]
-
 [tool.setuptools]
 include-package-data = true
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["local_rag_backend*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json"]
+"local_rag_backend.frontend" = ["*.html"]
+"local_rag_backend.data" = ["*.csv"]
 
 # === DEVELOPMENT TOOLS ===
 

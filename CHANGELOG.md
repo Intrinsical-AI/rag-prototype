@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-commit hooks for code quality assurance
 - Comprehensive environment configuration example
 - Professional .gitignore optimized for RAG projects
+- Packaged frontend (`local_rag_backend/frontend/index.html`) served automatically via FastAPI
+- Packaged sample data (`local_rag_backend/data/faq.csv`) with fallback loading in scripts
 
 ### Changed
 - Improved pyproject.toml with better metadata and classifiers
@@ -23,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimized `setup.cfg` to avoid duplication with `pyproject.toml`
 - Trimmed `MANIFEST.in` to include only necessary files (removed `pytest.ini`, `.pre-commit-config.yaml`)
 - Minor README polish (removed `make` dependency in test commands)
+- Adopted src-layout packaging with `package-dir = {"" = "src"}`
+- Fixed console script entry points to `local_rag_backend.cli:*`
+- Uvicorn import path corrected to `local_rag_backend.app.main:app`
+- README updated to reflect new module paths and packaged frontend behavior
+- `.env.example` now documents `OPENAI_TOP_P`
 
 ### Removed
 - `setuptools-scm` from build-system to simplify versioning (manual `project.version`)
