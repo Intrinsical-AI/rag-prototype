@@ -3,11 +3,12 @@
 from collections.abc import Sequence
 
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.ports import DocumentRepoPort
 from local_rag_backend.core.ports import RetrieverPort
 
 
 class SparseBM25Retriever(RetrieverPort):
-    def __init__(self, documents, doc_ids, doc_repo):
+    def __init__(self, documents: Sequence[str], doc_ids: Sequence[int], doc_repo: DocumentRepoPort):
         self.doc_ids = doc_ids
         self.doc_repo = doc_repo
         self.bm25 = None
@@ -24,7 +25,7 @@ class SparseBM25Retriever(RetrieverPort):
             self.corpus_is_empty = True
 
     @staticmethod
-    def _tok(text: str):
+    def _tok(text: str) -> list[str]:
         import re
 
         from local_rag_backend.utils import preprocess_text

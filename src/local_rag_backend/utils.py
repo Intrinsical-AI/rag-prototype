@@ -19,6 +19,6 @@ def preprocess_text(text: str) -> str:
     return text
 
 
-def get_corpus_and_ids(doc_repo):
+def get_corpus_and_ids(doc_repo: DocumentRepoPort) -> tuple[list[str], list[int]]:
     docs = doc_repo.get_all_documents()
     return [d.content for d in docs], [d.id for d in docs]

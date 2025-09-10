@@ -3,11 +3,13 @@
 from collections.abc import Sequence
 
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort
+from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.core.ports import RetrieverPort
 
 
 class DenseFaissRetriever(RetrieverPort):
-    def __init__(self, embedder, faiss_index, doc_repo):
+    def __init__(self, embedder: EmbedderPort, faiss_index: FaissVectorStorage, doc_repo: DocumentRepoPort):
         self.embedder = embedder
         self.faiss_index = faiss_index
         self.doc_repo = doc_repo
@@ -22,7 +24,7 @@ class DenseFaissRetriever(RetrieverPort):
         idxs, dists = self.faiss_index.search(q_vec, k)
         # Convert distances -> similarities in [0,1] (monotonic): sim = 1/(1+d)
         # Filter out invalid entries (-1) before normalization
-        valid_pairs = [(i, d) for i, d in zip(idxs, dists) if i != -1]
+        valid_pairs = [(i, d) for i, d in zip(idxs, dists, strict=False) if i != -1]
         if valid_pairs:
             valid_dists = [d for _, d in valid_pairs]
             sims_raw = [1.0 / (1.0 + float(d)) for d in valid_dists]

@@ -1,7 +1,10 @@
 # src/infrastructure/persistence/models.py
 
-from sqlalchemy import Column, DateTime, Integer, Text, func
-from sqlalchemy.types import JSON  # <-- Nueva línea, si usas SQLite 3.9+
+import datetime
+
+from sqlalchemy import DateTime, Integer, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 
@@ -12,8 +15,8 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 class Document(Base):
     __tablename__ = "documents"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    content = Column(Text, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 # ------------------------------------------------------------------ #
@@ -22,10 +25,10 @@ class Document(Base):
 class QaHistory(Base):
     __tablename__ = "qa_history"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    question = Column(Text, nullable=False)
-    answer = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    source_ids = Column(
-        JSON, nullable=True
-    )  # <--- NUEVA COLUMNA (mejor JSON si SQLite lo soporta)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    source_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)

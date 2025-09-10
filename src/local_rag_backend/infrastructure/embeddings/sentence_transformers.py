@@ -4,6 +4,7 @@ SentenceTransformer embedder (CPU-friendly).
 """
 
 from collections.abc import Sequence
+from typing import cast
 
 from sentence_transformers import SentenceTransformer
 
@@ -19,4 +20,5 @@ class SentenceTransformerEmbedder(EmbedderPort):
         self.dim = self.model.get_sentence_embedding_dimension()
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
-        return self.model.encode(list(texts)).tolist()
+        embeddings = self.model.encode(list(texts))
+        return cast(Sequence[Embedding], embeddings.tolist())

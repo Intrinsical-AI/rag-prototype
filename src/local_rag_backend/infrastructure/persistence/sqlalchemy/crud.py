@@ -1,15 +1,17 @@
 # src/infrastructure/persistence/crud.py
+from collections.abc import Sequence
+
 from sqlalchemy.orm import Session
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document, QaHistory
 
 
 # ------------------ Docs ------------------ #
-def get_documents(db: Session, ids: list[int]):
+def get_documents(db: Session, ids: list[int]) -> Sequence[Document]:
     return db.query(Document).filter(Document.id.in_(ids)).all()
 
 
-def add_documents(db: Session, texts: list[str]) -> list[int | None]:
+def add_documents(db: Session, texts: list[str]) -> list[int]:
     """
     Adds multiple documents to the database from a list of text contents
     and returns a list of their assigned IDs.
@@ -23,6 +25,9 @@ def add_documents(db: Session, texts: list[str]) -> list[int | None]:
     # 2. Añadir todas las instancias a la sesión
     db.add_all(doc_objects)
 
+    # Flush to get IDs before commit
+    db.flush()
+
     # 3.commit
     db.commit()
 
@@ -31,7 +36,7 @@ def add_documents(db: Session, texts: list[str]) -> list[int | None]:
 
 
 # ------------------ History (bonus) ------------------ #
-def add_history(db: Session, question: str, answer: str, source_ids=None):
+def add_history(db: Session, question: str, answer: str, source_ids: list[int] | None = None) -> None:
     from local_rag_backend.infrastructure.persistence.sqlalchemy.models import QaHistory
 
     history = QaHistory(
@@ -43,7 +48,7 @@ def add_history(db: Session, question: str, answer: str, source_ids=None):
     db.commit()
 
 
-def get_history(db: Session, limit: int = 10, offset: int = 0):
+def get_history(db: Session, limit: int = 10, offset: int = 0) -> Sequence[QaHistory]:
     return (
         db.query(QaHistory)
         .order_by(QaHistory.created_at.desc(), QaHistory.id.desc())
@@ -53,5 +58,5 @@ def get_history(db: Session, limit: int = 10, offset: int = 0):
     )
 
 
-def save_qa_history(db: Session, question: str, answer: str, source_ids=None):
+def save_qa_history(db: Session, question: str, answer: str, source_ids: list[int] | None = None) -> None:
     add_history(db, question, answer, source_ids)

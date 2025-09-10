@@ -2,6 +2,9 @@
 
 from collections.abc import Sequence
 
+import numpy as np
+from numpy.typing import NDArray
+
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 
@@ -17,11 +20,18 @@ class FaissVectorStorage(VectorRepoPort):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         self.faiss_index.add_to_index(list(ids), list(vectors))
 
-    def similar(self, vector, k: int):
-        idxs, dists = self.faiss_index.search(vector, k)
+    def search(self, query_vector: Sequence[float], k: int) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
+        return self.faiss_index.search(query_vector, k)
+
+    @property
+    def id_map(self) -> list[int]:
+        return self.faiss_index.id_map
+
+    def similar(self, vector: Sequence[float], k: int) -> list[tuple[int, float]]:
+        idxs, dists = self.search(vector, k)
         # Convert L2 distances to similarities and normalize to [0,1]
         # Filter out invalid entries (-1) before normalization
-        valid_pairs = [(i, d) for i, d in zip(idxs, dists) if i != -1]
+        valid_pairs = [(i, d) for i, d in zip(idxs, dists, strict=False) if i != -1]
         if valid_pairs:
             valid_dists = [d for _, d in valid_pairs]
             sims_raw = [1.0 / (1.0 + float(d)) for d in valid_dists]

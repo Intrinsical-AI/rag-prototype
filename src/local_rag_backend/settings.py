@@ -13,7 +13,7 @@ Example:
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -107,21 +107,21 @@ class Settings(BaseSettings):
     )
 
     @field_validator("data_dir", mode="before")
-    def ensure_data_dir_exists(cls, v):
+    def ensure_data_dir_exists(cls, v: Any) -> Path:
         """Ensure data directory exists."""
         path = Path(v)
         path.mkdir(parents=True, exist_ok=True)
         return path
 
     @field_validator("sqlite_url")
-    def validate_sqlite_url(cls, v):
+    def validate_sqlite_url(cls, v: str) -> str:
         """Validate SQLite URL format."""
         if not v.startswith("sqlite:///"):
             raise ValueError("SQLite URL must start with 'sqlite:///'")
         return v
 
     @field_validator("ollama_base_url")
-    def validate_ollama_url(cls, v):
+    def validate_ollama_url(cls, v: str) -> str:
         """Validate Ollama URL format."""
         if not v.startswith(("http://", "https://")):
             raise ValueError("Ollama URL must start with http:// or https://")

@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
@@ -19,7 +19,7 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Docum
 # src/infrastructure/persistence/sqlalchemy/sql_.py
 
 
-def _new_session_factory_from_settings() -> sessionmaker:
+def _new_session_factory_from_settings() -> sessionmaker[Session]:
     """
     Use the global SessionLocal from base.py to avoid duplicate engines.
     """
@@ -28,13 +28,13 @@ def _new_session_factory_from_settings() -> sessionmaker:
 
 
 class SqlDocumentStorage(DocumentRepoPort):
-    def __init__(self, session_factory: sessionmaker | None = None):
+    def __init__(self, session_factory: sessionmaker[Session] | None = None):
         # If no factory is provided, create one dynamically from current settings
         self._session_factory = (
             session_factory if session_factory is not None else _new_session_factory_from_settings()
         )
 
-    def store_documents(self, texts: Sequence[str]) -> Sequence[int]:
+    def store_documents(self, texts: Sequence[str]) -> list[int]:
         session = self._session_factory()
         try:
             # Ensure metadata is created on this connection (idempotent)
@@ -68,9 +68,9 @@ class SqlDocumentStorage(DocumentRepoPort):
 
 
 class HistorySqlStorage(QAHistoryPort):
-    def save(self, q, a, source_ids):
+    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None:
         session = SessionLocal()
         try:
-            save_qa_history(session, q, a, source_ids=source_ids)
+            save_qa_history(session, q, a, source_ids=list(source_ids))
         finally:
             session.close()
