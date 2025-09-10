@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Iterable
 
-    from local_rag_backend.core.domain.entities import Document, Embedding
+    from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
 
 
 # -------- Ports --------
@@ -47,3 +47,8 @@ class VectorRepoPort(Protocol):
 @runtime_checkable
 class QAHistoryPort(Protocol):
     def save(self, q: str, a: str, source_ids: Sequence[int]) -> None: ...
+
+
+@runtime_checkable
+class LoaderPort(Protocol):
+    def load(self) -> Iterable[LoadedItem]: ...

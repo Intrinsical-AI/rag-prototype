@@ -65,6 +65,7 @@ def test_get_generator_no_llm_configured(monkeypatch):
 def test_get_retriever_selects_correct_class(monkeypatch, mode, patched_class_name):
     # Parcheamos sobre factory las clases concretas
     monkeypatch.setattr(settings, "retrieval_mode", mode, raising=False)
+    monkeypatch.setattr(settings, "enable_faiss_consistency_check", False, raising=False)
     monkeypatch.setattr(
         factory, "SqlDocumentStorage", lambda: DummySqlDocumentStorage()
     )
@@ -79,9 +80,8 @@ def test_get_retriever_selects_correct_class(monkeypatch, mode, patched_class_na
         raising=True,
     )
     monkeypatch.setattr(
-        factory,
-        "FaissIndex",
-        lambda **kwargs: type("I", (), {"id_map": []})(),
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        lambda **kwargs: type("S", (), {"id_map": [], "search": lambda *a, **k: ([0], [0.0])})(),
         raising=True,
     )
 

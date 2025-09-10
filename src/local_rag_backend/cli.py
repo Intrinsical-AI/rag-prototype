@@ -17,7 +17,7 @@ from local_rag_backend.settings import settings
 
 @click.group()
 @click.version_option(version=__version__, prog_name="intrinsical-rag-prototype")
-def cli():
+def cli() -> None:
     """Intrinsical RAG Prototype - Production-ready RAG system with hexagonal architecture."""
     pass
 
@@ -27,7 +27,7 @@ def cli():
 @click.option("--port", default=None, type=int, help="Port number")
 @click.option("--reload/--no-reload", default=None, help="Enable auto-reload")
 @click.option("--log-level", default=None, type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]), help="Log level")
-def server(host: str | None, port: int | None, reload: bool | None, log_level: str | None):
+def server(host: str | None, port: int | None, reload: bool | None, log_level: str | None) -> None:
     """Start the RAG FastAPI server."""
     # Use CLI args or fall back to settings
     server_host = host or settings.app_host
@@ -50,7 +50,7 @@ def server(host: str | None, port: int | None, reload: bool | None, log_level: s
 
 
 @cli.command("build-index")
-def build_index():
+def build_index() -> None:
     """Build FAISS index from existing documents."""
     try:
         # Import here to avoid circular imports
@@ -67,7 +67,7 @@ def build_index():
 
 
 @cli.command()
-def bootstrap():
+def bootstrap() -> None:
     """Bootstrap database with sample data."""
     try:
         # Import here to avoid circular imports
@@ -84,7 +84,7 @@ def bootstrap():
 
 
 @cli.command()
-def status():
+def status() -> None:
     """Show system status and configuration."""
     click.echo("🧠 Intrinsical RAG Prototype - System Status")
     click.echo("=" * 50)
@@ -121,22 +121,22 @@ def status():
 
 
 # Entry point functions for setuptools
-def rag_server():
+def rag_server() -> None:
     """Entry point for rag-server command."""
     cli(["server", *sys.argv[1:]])
 
 
-def rag_build_index():
+def rag_build_index() -> None:
     """Entry point for rag-build-index command."""
     cli(["build-index", *sys.argv[1:]])
 
 
-def rag_bootstrap():
+def rag_bootstrap() -> None:
     """Entry point for rag-bootstrap command."""
     cli(["bootstrap", *sys.argv[1:]])
 
 
-def rag_status():
+def rag_status() -> None:
     """Entry point for rag-status command."""
     cli(["status", *sys.argv[1:]])
 

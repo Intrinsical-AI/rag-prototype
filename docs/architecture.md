@@ -172,4 +172,4 @@ generator: GeneratorPort = OpenAIGenerator()
 
 ---
 
-*Questions? Open an issue, or check the source for more real examples!*
+*Questions? Open an issue!*

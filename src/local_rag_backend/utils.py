@@ -4,6 +4,8 @@ Utils: light helpers - no external deps (nltk)
 
 import re
 
+from local_rag_backend.core.ports import DocumentRepoPort
+
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -11,11 +13,12 @@ def preprocess_text(text: str) -> str:
     """
     Normalize text:
     1. lowercase
-    2. collapse whitespaces
+    2. remove HTML tags
+    3. collapse whitespaces
     """
     text = text.lower().strip()
-    text = re.sub(r"\s+", " ", text)
     text = _HTML_TAG_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text)
     return text
 
 

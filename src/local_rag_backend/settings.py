@@ -88,6 +88,10 @@ class Settings(BaseSettings):
         default=True,
         description="Enable FAISS/SQL consistency checks on startup (can be expensive for large datasets)"
     )
+    
+    # === INGESTION SETTINGS ===
+    ingest_chunk_chars: int = Field(default=1200, ge=200, le=8000, description="Maximum characters per chunk")
+    ingest_chunk_overlap: int = Field(default=200, ge=0, le=4000, description="Character overlap between chunks")
 
     # === LOGGING ===
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(

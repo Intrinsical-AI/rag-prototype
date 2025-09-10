@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from openai import OpenAI  # type: ignore
+from openai import OpenAI
 
 from local_rag_backend.core.ports import EmbedderPort, Embedding
 from local_rag_backend.settings import settings

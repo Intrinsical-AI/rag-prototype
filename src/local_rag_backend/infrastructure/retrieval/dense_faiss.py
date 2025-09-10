@@ -1,15 +1,17 @@
 # src/infrastructure/retrieval/dense_faiss.py
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.core.ports import RetrieverPort
+from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, RetrieverPort
+
+if TYPE_CHECKING:
+    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 
 
 class DenseFaissRetriever(RetrieverPort):
-    def __init__(self, embedder: EmbedderPort, faiss_index: FaissVectorStorage, doc_repo: DocumentRepoPort):
+    def __init__(self, embedder: EmbedderPort, faiss_index: "FaissVectorStorage", doc_repo: DocumentRepoPort):
         self.embedder = embedder
         self.faiss_index = faiss_index
         self.doc_repo = doc_repo

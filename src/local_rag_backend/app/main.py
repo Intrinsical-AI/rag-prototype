@@ -50,7 +50,7 @@ FRONTEND_DIR = PROJECT_ROOT_DIR / "frontend"
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_frontend_route(_request: Request):
+async def read_root(_request: Request) -> HTMLResponse:
     # 1) Try to serve packaged frontend (installed package)
     try:
         pkg_index = resources.files("local_rag_backend.frontend").joinpath("index.html")

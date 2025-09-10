@@ -8,8 +8,10 @@ Cumple los tests:
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from fastapi import HTTPException
-from openai import OpenAI  # type: ignore
+from openai import OpenAI
 
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.settings import settings
@@ -30,24 +32,18 @@ class OpenAIGenerator(GeneratorPort):
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     # ------------------------------------------------------------------
-    def _build_prompt(self, question: str, contexts: list[str]) -> str:
+    def _build_prompt(self, question: str, contexts: Sequence[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
         return settings.openai_prompt_template.format(
-            context=ctx_block,
-            question=question
+            context=ctx_block, question=question
         )
 
-    def generate(
-        self, question: str, contexts: list[str], temperature: float = None
-    ) -> str:
-        temperature = (
-            temperature if temperature is not None else settings.openai_temperature
-        )
+    def generate(self, question: str, contexts: Sequence[str]) -> str:
         prompt = self._build_prompt(question, contexts)
         try:
             resp = self.client.chat.completions.create(
                 model=self.model,
-                temperature=temperature,
+                temperature=self.temperature,
                 top_p=settings.openai_top_p,
                 max_tokens=settings.openai_max_tokens,
                 messages=[{"role": "user", "content": prompt}],

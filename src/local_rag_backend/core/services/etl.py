@@ -32,6 +32,8 @@ class ETLService:
         self._embedder = embedder
 
     def ingest(self, texts: Sequence[str]) -> Sequence[int]:
+        if not texts:
+            return []
         # 1) SQL
         ids = self._doc_store.store_documents(texts)
 

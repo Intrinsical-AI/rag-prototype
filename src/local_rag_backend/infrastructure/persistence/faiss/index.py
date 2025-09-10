@@ -4,6 +4,8 @@ from pathlib import Path
 
 import faiss
 import numpy as np
+from typing import cast
+
 from numpy.typing import NDArray
 
 
@@ -21,7 +23,7 @@ class FaissIndex:
             self.index = faiss.IndexFlatL2(self.dim)
         if self.id_map_path.exists():
             with self.id_map_path.open("rb") as f:
-                self.id_map = pickle.load(f)
+                self.id_map = cast(list[int], pickle.load(f))
         else:
             self.id_map = []
 

@@ -1,7 +1,7 @@
 [project]
-name = "local-rag-backend"
-version = "0.1.0"
-description = "Production-ready RAG prototype with FastAPI, FAISS, and hexagonal architecture"
+name = "intrinsical-rag-prototype"
+version = "1.0.0"
+description = "Enterprise-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,7 +14,8 @@ maintainers = [
 keywords = [
     "rag", "retrieval-augmented-generation", "fastapi", "faiss", 
     "nlp", "ai", "machine-learning", "semantic-search", "llm",
-    "hexagonal-architecture", "vector-search", "openai", "ollama"
+    "hexagonal-architecture", "vector-search", "openai", "ollama",
+    "enterprise", "production-ready", "microservices", "docker"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -42,33 +43,55 @@ classifiers = [
 ]
 
 dependencies = [
+    # Web Framework & Server
     "fastapi>=0.111,<1.0",
     "uvicorn[standard]>=0.29,<1.0",
+    
+    # AI/ML Core
     "sentence-transformers>=2.7,<3.0",
     "faiss-cpu>=1.8.0,<2.0",
     "rank-bm25>=0.2,<1.0",
     "numpy>=2.0,<2.3",
+    
+    # LLM Integrations
     "openai>=1.24,<2.0",
     "requests>=2.31,<3.0",
+    
+    # Database & ORM
     "sqlalchemy>=2.0,<3.0",
+    
+    # Configuration & Validation
     "pydantic>=2.0,<3.0",
     "pydantic-settings>=2.2,<3.0",
     "python-dotenv>=1.0,<2.0",
+    
+    # CLI & Utilities
     "click>=8.0,<9.0",
+    "rich>=13.0,<14.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+    # Testing Framework
     "pytest>=8.2,<9.0",
     "pytest-cov>=6.1.1,<7.0",
     "pytest-asyncio>=0.23,<1.0",
+    "pytest-xdist>=3.5,<4.0",  # parallel testing
     "httpx>=0.27,<1.0",  # for FastAPI TestClient
+    
+    # Code Quality & Formatting
     "ruff>=0.4,<1.0",
     "black>=24.0,<25.0",
     "isort>=5.13,<6.0",
     "pre-commit>=4.2.0,<5.0",
+    
+    # Type Checking
     "mypy>=1.10,<2.0",
     "types-requests>=2.31,<3.0",
+    
+    # Development Tools
+    "ipython>=8.0,<9.0",
+    "jupyter>=1.0,<2.0",
 ]
 test = [
     "pytest>=8.2,<9.0",
@@ -87,12 +110,24 @@ docs = [
     "mkdocs>=1.5,<2.0",
     "mkdocs-material>=9.5,<10.0",
     "mkdocstrings[python]>=0.24,<1.0",
+    "mkdocs-mermaid2-plugin>=1.1,<2.0",
+    "mkdocs-include-markdown-plugin>=6.0,<7.0",
+]
+performance = [
+    "faiss-gpu>=1.8.0,<2.0",  # GPU acceleration
+    "torch>=2.0,<3.0",  # PyTorch for advanced models
+]
+monitoring = [
+    "prometheus-client>=0.19,<1.0",
+    "structlog>=23.0,<24.0",
+    "sentry-sdk[fastapi]>=1.40,<2.0",
 ]
 all = [
-    # union of dev + docs (avoid self-referencing extras)
+    # Complete development environment
     "pytest>=8.2,<9.0",
     "pytest-cov>=6.1.1,<7.0",
     "pytest-asyncio>=0.23,<1.0",
+    "pytest-xdist>=3.5,<4.0",
     "httpx>=0.27,<1.0",
     "ruff>=0.4,<1.0",
     "black>=24.0,<25.0",
@@ -100,9 +135,16 @@ all = [
     "pre-commit>=4.2.0,<5.0",
     "mypy>=1.10,<2.0",
     "types-requests>=2.31,<3.0",
+    "ipython>=8.0,<9.0",
+    "jupyter>=1.0,<2.0",
     "mkdocs>=1.5,<2.0",
     "mkdocs-material>=9.5,<10.0",
     "mkdocstrings[python]>=0.24,<1.0",
+    "mkdocs-mermaid2-plugin>=1.1,<2.0",
+    "mkdocs-include-markdown-plugin>=6.0,<7.0",
+    "prometheus-client>=0.19,<1.0",
+    "structlog>=23.0,<24.0",
+    "sentry-sdk[fastapi]>=1.40,<2.0",
 ]
 
 [project.urls]
@@ -113,10 +155,16 @@ Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
 Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 
 [project.scripts]
+# Production CLI commands
 rag-server = "local_rag_backend.cli:rag_server"
 rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap = "local_rag_backend.cli:rag_bootstrap"
 rag-status = "local_rag_backend.cli:rag_status"
+
+# Development & maintenance commands
+rag-dev = "local_rag_backend.cli:rag_dev"
+rag-health = "local_rag_backend.cli:rag_health"
+rag-migrate = "local_rag_backend.cli:rag_migrate"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -131,9 +179,10 @@ where = ["src"]
 include = ["local_rag_backend*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json"]
-"local_rag_backend.frontend" = ["*.html"]
-"local_rag_backend.data" = ["*.csv"]
+"*" = ["*.txt", "*.md", "*.yml", "*.yaml", "*.json", "*.toml"]
+"local_rag_backend.frontend" = ["*.html", "*.css", "*.js", "*.ico"]
+"local_rag_backend.data" = ["*.csv", "*.json", "*.parquet"]
+"local_rag_backend.config" = ["*.yaml", "*.json"]
 
 # === DEVELOPMENT TOOLS ===
 
@@ -154,15 +203,24 @@ select = [
     "ARG", # flake8-unused-arguments
     "SIM", # flake8-simplify
     "TCH", # flake8-type-checking
+    "S",   # bandit security
+    "N",   # pep8-naming
+    "RUF", # ruff-specific rules
+    "PERF", # perflint performance
 ]
 ignore = [
     "E501",  # line too long, handled by black
     "B008",  # do not perform function calls in argument defaults
     "B904",  # raise from None
+    "S101",  # use of assert (allowed in tests)
+    "S603",  # subprocess call without shell=True
+    "S607",  # starting process with partial executable path
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["ARG", "S101"]  # Allow unused args and assert in tests
+"tests/**/*" = ["ARG", "S101", "S106", "S311"]  # Allow test-specific patterns
+"scripts/**/*" = ["S602", "S603", "S607"]  # Allow subprocess in scripts
+"**/conftest.py" = ["ARG001"]  # Allow unused fixtures
 
 [tool.black]
 line-length = 100
@@ -223,6 +281,9 @@ addopts = [
     "--cov-report=term-missing:skip-covered",
     "--cov-report=html:htmlcov",
     "--cov-report=xml",
+    "--cov-fail-under=85",
+    "--tb=short",
+    "--durations=10",
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -237,6 +298,9 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "e2e: marks tests as end-to-end tests",
+    "gpu: marks tests requiring GPU acceleration",
+    "network: marks tests requiring network access",
 ]
 
 [tool.coverage.run]

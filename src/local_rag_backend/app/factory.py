@@ -9,6 +9,7 @@ Singleton lifecycle for RagService:
 """
 
 import logging
+from typing import Any, TYPE_CHECKING
 
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -16,7 +17,6 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
     HistorySqlStorage,
     SqlDocumentStorage,
@@ -30,21 +30,21 @@ from local_rag_backend.utils import get_corpus_and_ids
 logger = logging.getLogger(__name__)
 
 
-def check_faiss_sql_consistency(doc_ids, faiss_index):
+def check_faiss_sql_consistency(doc_ids: list[int], faiss_storage: Any) -> None:
     # validación exhaustiva - puede ser costoso si la base de datos crece mucho
     sql_set = set(doc_ids)
-    faiss_set = set(faiss_index.id_map)
+    faiss_set = set(faiss_storage.id_map)
     if sql_set != faiss_set:
         logger.warning(
             f"FAISS/SQL id mismatch. SQL: {sql_set - faiss_set}, FAISS: {faiss_set - sql_set}."
         )
-    if len(doc_ids) != len(faiss_index.id_map):
+    if len(doc_ids) != len(faiss_storage.id_map):
         logger.warning(
-            f"FAISS id_map ({len(faiss_index.id_map)}) and SQL docs ({len(doc_ids)}) count mismatch. Possible index desync."
+            f"FAISS id_map ({len(faiss_storage.id_map)}) and SQL docs ({len(doc_ids)}) count mismatch. Possible index desync."
         )
 
 
-def get_generator():
+def get_generator() -> OpenAIGenerator | OllamaGenerator:
     if settings.ollama_enabled:
         logger.info(f"Using OllamaGenerator (model: {settings.ollama_model})")
         return OllamaGenerator()
@@ -56,37 +56,39 @@ def get_generator():
         raise RuntimeError("No LLM generator configured")
 
 
-def get_retriever():
+def get_retriever() -> DenseFaissRetriever | SparseBM25Retriever | HybridRetriever:
     doc_repo = SqlDocumentStorage()
     corpus, doc_ids = get_corpus_and_ids(doc_repo)
 
     if settings.retrieval_mode == "dense":
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-        faiss_index = FaissIndex(
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        faiss_storage = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
             dim=embedder.dim,
         )
         if settings.enable_faiss_consistency_check:
-            check_faiss_sql_consistency(doc_ids, faiss_index)
+            check_faiss_sql_consistency(doc_ids, faiss_storage)
         logger.info(f"Using DenseFaissRetriever (docs: {len(doc_ids)})")
         return DenseFaissRetriever(
-            embedder=embedder, faiss_index=faiss_index, doc_repo=doc_repo
+            embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo
         )
     elif settings.retrieval_mode == "sparse":
         logger.info(f"Using SparseBM25Retriever (docs: {len(doc_ids)})")
         return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
     elif settings.retrieval_mode == "hybrid":
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-        faiss_index = FaissIndex(
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        faiss_storage = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
             dim=embedder.dim,
         )
         if settings.enable_faiss_consistency_check:
-            check_faiss_sql_consistency(doc_ids, faiss_index)
+            check_faiss_sql_consistency(doc_ids, faiss_storage)
         dense = DenseFaissRetriever(
-            embedder=embedder, faiss_index=faiss_index, doc_repo=doc_repo
+            embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo
         )
         sparse = SparseBM25Retriever(
             documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
@@ -111,7 +113,7 @@ def get_rag_service(force_reload: bool = False) -> RagService:
     return _rag_service
 
 
-def reset_rag_service():
+def reset_rag_service() -> None:
     """
     Reset the singleton RAG service (for tests, dev, or controlled reload).
     """

@@ -1,6 +1,5 @@
 # scripts/bootstrap.py
 
-import csv
 import sys
 from importlib import resources
 from pathlib import Path
@@ -10,9 +9,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from local_rag_backend.core.services.etl import ETLService
+from local_rag_backend.core.services.ingestion import IngestionPipeline, default_chunker
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
+from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
@@ -22,7 +23,7 @@ from local_rag_backend.settings import settings
 DELIMITER = ";"
 
 
-def main():
+def main() -> None:
     # 1) Creamos engine y sesión basados en la URL actualizada
     engine = create_engine(
         settings.sqlite_url, connect_args={"check_same_thread": False}
@@ -30,43 +31,12 @@ def main():
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
-    # 2) Leemos CSV (local primero, luego paquete)
+    # 2) Determine CSV path (local first, then packaged)
     csv_path = Path(settings.faq_csv)
-    texts = []
-    if csv_path.is_file():
-        with csv_path.open(encoding="utf-8") as fh:
-            reader = csv.reader(fh, delimiter=DELIMITER)
-            if settings.csv_has_header:
-                next(reader, None)
-            for i, row in enumerate(reader, 1):
-                if len(row) < 2:
-                    print(f"[WARN] Row {i} skipped (len={len(row)}): {row}")
-                    continue
-                texts.append(f"{row[0].strip()} {row[1].strip()}")
-    else:
-        # Fallback to packaged CSV
-        try:
-            pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
-            with pkg_csv.open("r", encoding="utf-8") as fh:
-                reader = csv.reader(fh, delimiter=DELIMITER)
-                if settings.csv_has_header:
-                    next(reader, None)
-                for i, row in enumerate(reader, 1):
-                    if len(row) < 2:
-                        print(f"[WARN] Row {i} skipped (len={len(row)}): {row}")
-                        continue
-                    texts.append(f"{row[0].strip()} {row[1].strip()}")
-            print("[INFO] Loaded packaged sample data (local CSV not found).")
-        except Exception:
-            print(f"[ERR] CSV file not found at {csv_path} and no packaged sample available.")
-            sys.exit(1)
-    if not texts:
-        print("[ERR] No texts found in CSV.")
-        sys.exit(1)
+    if not csv_path.is_file():
+        pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
+        csv_path = Path(pkg_csv)
 
-    print(f"[INFO] Parsed {len(texts)} documents from CSV.")
-
-    # 3) Invocamos ETL con nuestro SessionLocal freshly-built
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
 
     if settings.retrieval_mode in ["dense", "hybrid"]:
@@ -77,10 +47,18 @@ def main():
             dim=embedder.dim,
         )
         etl = ETLService(doc_repo, vector_repo, embedder)
-        ids = etl.ingest(texts)
+        loader = CSVLoader(csv_path, delimiter=DELIMITER, has_header=settings.csv_has_header)
+        pipeline = IngestionPipeline(
+            loader, 
+            etl,
+            chunk=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+        )
+        ids = pipeline.run()
         print(f"[OK] Ingested {len(ids)} docs into SQL and FAISS.")
     else:
-        # Solo SQL para sparse mode
+        # modo sparse: simple (sin embeddings)
+        loader = CSVLoader(csv_path, delimiter=DELIMITER, has_header=settings.csv_has_header)
+        texts = [li.text for li in loader.load()]
         ids = doc_repo.store_documents(texts)
         print(f"[OK] Ingested {len(ids)} docs into SQL only (sparse mode).")
 

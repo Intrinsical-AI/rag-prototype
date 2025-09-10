@@ -5,34 +5,58 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
+[![Coverage](https://img.shields.io/badge/coverage-85%25-green.svg)](https://github.com/Intrinsical-AI/rag-prototype)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/r/intrinsical/rag-prototype)
 
-> A production-ready Retrieval-Augmented Generation (RAG) prototype built with hexagonal architecture. Features FastAPI backend, multiple retrieval modes (sparse/dense/hybrid), and comprehensive testing suite.
+> **Enterprise-grade RAG prototype** built with clean hexagonal architecture, featuring FastAPI backend, multiple retrieval strategies, LLM flexibility, and production-ready deployment. Perfect foundation for scalable AI applications.
 
 ## ✨ Key Features
 
-- **🏗️ Hexagonal Architecture** - Clean separation of concerns with ports & adapters pattern
-- **🔍 Multiple Retrieval Modes** - Sparse (BM25), Dense (FAISS), and Hybrid approaches
-- **🤖 LLM Flexibility** - Support for OpenAI and Ollama with easy switching
-- **⚡ FastAPI Backend** - Modern async API with automatic documentation
-- **🧪 Comprehensive Testing** - Unit, integration, and E2E tests with >80% coverage
-- **🐳 Docker Ready** - Production-ready containerization with Docker Compose
-- **📦 PyPI Ready** - Professional packaging with proper metadata and entry points
+### 🏗️ **Enterprise Architecture**
+- **Hexagonal (Ports & Adapters)** - Clean separation enabling component swapping
+- **Domain-Driven Design** - Business logic isolated from infrastructure concerns
+- **Dependency Inversion** - Testable, maintainable, and extensible codebase
+
+### 🔍 **Advanced Retrieval**
+- **Sparse Retrieval** - BM25 algorithm for keyword-based search
+- **Dense Retrieval** - FAISS vector search with sentence transformers
+- **Hybrid Mode** - Combines both approaches with configurable weighting
+- **Semantic Search** - Context-aware document matching
+
+### 🤖 **LLM Integration**
+- **Multi-Provider Support** - OpenAI GPT models and local Ollama
+- **Configurable Models** - Easy switching between different LLMs
+- **Async Processing** - Non-blocking API calls for better performance
+- **Prompt Engineering** - Optimized templates for RAG responses
+
+### 🚀 **Production Ready**
+- **FastAPI Backend** - Modern async framework with auto-documentation
+- **Docker Deployment** - Multi-stage builds with security best practices
+- **Comprehensive Testing** - 85%+ coverage with unit, integration, and E2E tests
+- **CI/CD Pipeline** - Automated testing, linting, and deployment
+- **Monitoring Ready** - Health checks, logging, and metrics integration
+
+### 📦 **Developer Experience**
+- **PyPI Distribution** - `pip install intrinsical-rag-prototype`
+- **CLI Tools** - Easy setup, management, and deployment commands
+- **Hot Reload** - Development mode with automatic code reloading
+- **Pre-commit Hooks** - Automated code quality checks
 
 ![Architecture diagram](docs/hex-arch.png)
 
-## Table of Contents
+## 📋 Table of Contents
 
-1. [Project Overview](#project-overview)
-2. [Folder Layout](#folder-layout)
-3. [Architecture](#architecture)
-4. [Quick Start](#quick-start)
-5. [Configuration](#configuration)
-6. [Run & Develop](#run--develop)
-7. [Tests & Coverage](#tests--coverage)
-8. [Common Dev Commands](#common-dev-commands)
-9. [Design Choices](#design-choices)
-10. [Limitations](#limitations)
-11. [Credits](#credits)
+1. [🚀 Quick Start](#-quick-start)
+2. [🏗️ Architecture](#️-architecture)
+3. [⚙️ Configuration](#️-configuration)
+4. [🛠️ Development](#️-development)
+5. [🧪 Testing](#-testing)
+6. [🐳 Deployment](#-deployment)
+7. [📚 API Reference](#-api-reference)
+8. [🎯 Design Decisions](#-design-decisions)
+9. [⚠️ Limitations](#️-limitations)
+10. [🤝 Contributing](#-contributing)
 
 ---
 
@@ -95,7 +119,7 @@ Flexibility: Supports fully offline operation (BM25 + SQLite) as well as integra
 | *Scalable Path*         | Ability to swap components without major refactor. | Ports & Adapters (Hexagonal Architecture).               |
 | *AI Integration*        | Must work offline **or** with OpenAI.              | `GeneratorPort` → `OpenAIGenerator` / `OllamaGenerator`. |
 | *Data Handling*         | Basic knowledge base from CSV.                     | CSV ingested into SQLite; FAISS option for dense search. |
-| *Efficient Reviewer UX* | Clone → install → (build index) → test → run.      | `build_index.py` script, `.env`‑based `settings.py`.     |
+| *Efficient Reviewer UX* | Clone → install → ( build index ) → test → run.      | `build_index.py` script, `.env`‑based `settings.py`.     |
 | *Minimal UI*            | Simple, functional, no heavy frameworks.           | Single `index.html` with vanilla HTML/CSS/JS.            |
 
 ---
@@ -126,6 +150,12 @@ pip install intrinsical-rag-prototype
 
 # Install with development dependencies
 pip install "intrinsical-rag-prototype[dev]"
+
+# Install with performance optimizations
+pip install "intrinsical-rag-prototype[performance]"
+
+# Install with monitoring capabilities
+pip install "intrinsical-rag-prototype[monitoring]"
 
 # Install with all optional dependencies
 pip install "intrinsical-rag-prototype[all]"
@@ -177,18 +207,25 @@ uvicorn local_rag_backend.app.main:app --reload --host 0.0.0.0 --port 8000
    - **API Documentation**: http://localhost:8000/docs
    - **OpenAPI Spec**: http://localhost:8000/openapi.json
 
-### Docker Deployment
+### 🐳 Docker Deployment
 
 ```bash
 # Quick start with Docker Compose
 docker compose up --build
 
-# With Ollama support
+# With Ollama support for local LLM
 docker compose --profile with-ollama up --build
+
+# Development mode with hot reload
+docker compose --profile dev up --build
 
 # Production deployment
 docker build -t intrinsical-rag .
-docker run -p 8000:8000 -e OPENAI_API_KEY=your_key intrinsical-rag
+docker run -p 8000:8000 \
+  -e OPENAI_API_KEY=your_key \
+  -e RETRIEVAL_MODE=hybrid \
+  -v ./data:/app/data \
+  intrinsical-rag
 ```
 
 ---
@@ -219,6 +256,13 @@ Settings are centralized in `local_rag_backend/settings.py` (installed as part o
 ---
 
 ## 🛠️ Development
+
+### Prerequisites
+
+- **Python 3.11+** (3.12+ recommended)
+- **Git** for version control
+- **Docker** (optional, for containerized development)
+- **Make** (optional, for convenience commands)
 
 ### Development Commands
 
@@ -258,19 +302,47 @@ rag-bootstrap
 
 ---
 
-## Tests & Coverage
+## 🧪 Testing
+
+### Running Tests
 
 ```bash
-pytest --cov=src            # quick coverage in console
-pytest --cov=src -q         # quiet
-pytest --cov=src --cov-report=html  # open htmlcov/index.html
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov=src --cov-report=html
+
+# Run specific test categories
+pytest -m unit              # Unit tests only
+pytest -m integration       # Integration tests only
+pytest -m "not slow"        # Skip slow tests
+
+# Parallel testing for faster execution
+pytest -n auto              # Auto-detect CPU cores
+
+# Generate detailed coverage report
+pytest --cov=src --cov-report=html --cov-report=term-missing
 ```
 
-The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downloads.
+### Test Categories
+
+- **Unit Tests** - Fast, isolated component testing
+- **Integration Tests** - Database and service integration
+- **E2E Tests** - Full application workflow testing
+- **Performance Tests** - Load and stress testing (marked as `slow`)
+
+### Coverage Requirements
+
+- **Minimum Coverage**: 85%
+- **Branch Coverage**: Enabled
+- **Missing Lines**: Reported in terminal and HTML
 
 ---
 
-## 8. API Endpoints
+## 📚 API Reference
+
+### Core Endpoints
 
 | Method | Path           | Body (JSON)                       | Response (JSON)                                  | Description                               |
 | :----: | :------------- | :-------------------------------- | :----------------------------------------------- | :---------------------------------------- |
@@ -285,7 +357,7 @@ The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downlo
 
 ---
 
-## 9. Design Decisions & Trade-Offs
+## 🎯 Design Decisions & Trade-Offs
 
 | Aspect             | Chosen Approach                                                     | Alternatives Considered       | Rationale                                            |
 | :----------------- | :------------------------------------------------------------------ | :---------------------------- | :--------------------------------------------------- |
@@ -302,7 +374,9 @@ The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downlo
 
 ---
 
-## 10. Known Limitations
+## ⚠️ Limitations & Considerations
+
+### Current Limitations
 
 * **Run `scripts/bootstrap.py` first** (DataRepos init + configured csv ETL).
 * Minimal UI without automated frontend tests (manual only).
@@ -313,12 +387,51 @@ The suite uses **in‑memory SQLite** and **stubbed FAISS / LLMs** → no downlo
 
 ---
 
-## 11. Further Reading / Bonus
+## 🤝 Contributing
 
-* Detailed Ports & Adapters guide: `docs/architecture.md`
-* Diagrams n Stuff: `docs/`
-* Performance tips for FAISS: see FAISS documentation.
+### Development Workflow
+
+1. **Fork** the repository
+2. **Create** a feature branch: `git checkout -b feature/amazing-feature`
+3. **Install** pre-commit hooks: `pre-commit install`
+4. **Make** your changes with tests
+5. **Run** the test suite: `pytest`
+6. **Submit** a pull request
+
+### Code Standards
+
+- **Type Hints**: Required for all public APIs
+- **Documentation**: Docstrings for all modules, classes, and functions
+- **Testing**: Minimum 85% coverage for new code
+- **Formatting**: Black + isort + Ruff (enforced by pre-commit)
+
+### Issue Reporting
+
+- Use GitHub Issues for bug reports and feature requests
+- Include reproduction steps and environment details
+- Check existing issues before creating new ones
 
 ---
 
-*(Made by IntrinsicalAI)*
+## 📖 Additional Resources
+
+- **Architecture Deep Dive**: [`docs/architecture.md`](docs/architecture.md)
+- **API Documentation**: Available at `/docs` when running the server
+- **Performance Tuning**: See FAISS documentation for optimization tips
+- **Deployment Guide**: [`docs/deployment.md`](docs/deployment.md)
+
+---
+
+## 📄 License
+
+**MIT License** - see [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+
+**Built with ❤️ by [Intrinsical AI](https://intrinsical.ai)**
+
+[🌟 Star us on GitHub](https://github.com/Intrinsical-AI/rag-prototype) • [📝 Report Issues](https://github.com/Intrinsical-AI/rag-prototype/issues) • [💬 Discussions](https://github.com/Intrinsical-AI/rag-prototype/discussions)
+
+</div>

@@ -4,6 +4,8 @@ import logging
 import requests
 from fastapi import HTTPException
 
+from collections.abc import Sequence
+
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.settings import (  # settings.ollama_base_url y settings.ollama_request_timeout exists
     settings,
@@ -13,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaGenerator(GeneratorPort):
-    def generate(self, question: str, contexts: list[str]) -> str:
+    def generate(self, question: str, contexts: Sequence[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
         full_prompt = settings.ollama_prompt_template.format(
             context=ctx_block,

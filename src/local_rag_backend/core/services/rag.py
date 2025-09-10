@@ -18,7 +18,7 @@ class RagService:
         docs, scores = self.retriever.retrieve(question, top_k)
         if not docs:
             return {
-                "answer": "No documents are indexed. Please run the ingestion process.",
+                "answer": "No hay documentos indexados. Por favor ejecuta el proceso de ingesta.",
                 "docs": [],
                 "scores": [],
             }
