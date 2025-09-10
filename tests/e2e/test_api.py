@@ -41,3 +41,12 @@ def test_get_root_frontend_not_found(tmp_path, monkeypatch):
     monkeypatch.setattr("local_rag_backend.app.main.FRONTEND_DIR", tmp_path)
     resp = client.get("/")
     assert resp.status_code == 404
+
+
+def test_get_root_frontend_packaged_ok():
+    # Sin monkeypatch: debe servir el index.html empaquetado
+    resp = client.get("/")
+    assert resp.status_code == 200
+    # HTMLResponse establece content-type text/html por defecto
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert isinstance(resp.text, str) and len(resp.text) > 100

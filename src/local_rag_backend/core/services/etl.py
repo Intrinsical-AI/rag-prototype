@@ -1,9 +1,16 @@
 # src/core/etl.py
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
-from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from local_rag_backend.core.ports import (
+        DocumentRepoPort,
+        EmbedderPort,
+        VectorRepoPort,
+    )
 
 
 class ETLService:

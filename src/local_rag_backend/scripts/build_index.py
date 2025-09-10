@@ -6,22 +6,23 @@ It uses a dedicated database engine and session for this process.
 """
 
 import logging
-from pathlib import Path
 from importlib import resources
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-# Para asegurar la creación de tablas
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
-# Import models to ensure they are registered with Base.metadata
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
-
 # Importar el embedder que se usará para la indexación si es modo denso
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
+
+# Import models to ensure they are registered with Base.metadata
+from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
+
+# Para asegurar la creación de tablas
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 from local_rag_backend.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -77,11 +78,12 @@ def main() -> None:
 
     # 4. Usar la lógica de ETL directamente (similar a bootstrap.py)
     try:
+        import csv
+
         from local_rag_backend.core.services.etl import ETLService
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-        import csv
-        
+
         # Leer CSV
         csv_path = Path(settings.faq_csv)
         texts = []
@@ -111,7 +113,7 @@ def main() -> None:
                 logger.info("Loaded packaged sample data (local CSV not found).")
             except Exception:
                 raise FileNotFoundError(f"CSV file not found at {csv_path} and no packaged sample available.")
-        
+
         if not texts:
             raise ValueError("No texts found in CSV.")
 
@@ -119,7 +121,7 @@ def main() -> None:
 
         # ETL Service
         doc_repo = SqlDocumentStorage(session_factory=ScriptSessionLocal)
-        
+
         if settings.retrieval_mode in ["dense", "hybrid"] and embedder_for_indexing:
             vector_repo = FaissVectorStorage(
                 index_path=settings.index_path,
@@ -133,7 +135,7 @@ def main() -> None:
             # Solo SQL para sparse mode
             ids = doc_repo.store_documents(texts)
             logger.info(f"Ingested {len(ids)} docs into SQL only (sparse mode).")
-            
+
         logger.info("build_index script finished successfully.")
 
     except FileNotFoundError as e:

@@ -11,9 +11,8 @@ def make_dummy_openai(should_raise=False):
     class DummyComp:
         def create(self, **_):
             if should_raise:
-                from openai import APIError
-
-                raise APIError("boom", request=None)  # <-- Aquí el cambio
+                # Raise a generic exception; generator should map it to HTTP 502
+                raise Exception("boom")
 
             class DummyResp:
                 choices = [
@@ -48,7 +47,7 @@ def test_generate_success(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "DUMMY")
 
     monkeypatch.setattr(
-        "src.infrastructure.llms.openai_chat.OpenAI", make_dummy_openai()
+        "local_rag_backend.infrastructure.llms.openai_chat.OpenAI", make_dummy_openai()
     )
     gen = OpenAIGenerator()
     out = gen.generate("hola", ["ctx"])
@@ -59,7 +58,7 @@ def test_generate_api_error(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "DUMMY")
 
     monkeypatch.setattr(
-        "src.infrastructure.llms.openai_chat.OpenAI",
+        "local_rag_backend.infrastructure.llms.openai_chat.OpenAI",
         make_dummy_openai(should_raise=True),
     )
     gen = OpenAIGenerator()

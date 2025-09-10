@@ -1,5 +1,5 @@
 [project]
-name = "intrinsical-rag-prototype"
+name = "local-rag-backend"
 version = "0.1.0"
 description = "Production-ready RAG prototype with FastAPI, FAISS, and hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -47,7 +47,7 @@ dependencies = [
     "sentence-transformers>=2.7,<3.0",
     "faiss-cpu>=1.8.0,<2.0",
     "rank-bm25>=0.2,<1.0",
-    "numpy>=1.26,<2.0",
+    "numpy>=2.0,<2.3",
     "openai>=1.24,<2.0",
     "requests>=2.31,<3.0",
     "sqlalchemy>=2.0,<3.0",
@@ -141,6 +141,8 @@ include = ["local_rag_backend*"]
 line-length = 100
 target-version = "py311"
 fix = true
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -159,7 +161,7 @@ ignore = [
     "B904",  # raise from None
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/**/*" = ["ARG", "S101"]  # Allow unused args and assert in tests
 
 [tool.black]

@@ -8,8 +8,6 @@ Cumple los tests:
 """
 from __future__ import annotations
 
-from typing import List
-
 from fastapi import HTTPException
 from openai import OpenAI  # type: ignore
 
@@ -32,16 +30,15 @@ class OpenAIGenerator(GeneratorPort):
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     # ------------------------------------------------------------------
-    def _build_prompt(self, question: str, contexts: List[str]) -> str:
+    def _build_prompt(self, question: str, contexts: list[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
-        return (
-            "Answer using ONLY the context provided.\n\n"
-            f"CONTEXT:\n{ctx_block}\n\n"
-            f"QUESTION: {question}"
+        return settings.openai_prompt_template.format(
+            context=ctx_block,
+            question=question
         )
 
     def generate(
-        self, question: str, contexts: List[str], temperature: float = None
+        self, question: str, contexts: list[str], temperature: float = None
     ) -> str:
         temperature = (
             temperature if temperature is not None else settings.openai_temperature
@@ -65,4 +62,5 @@ class OpenAIGenerator(GeneratorPort):
                 detail=f"OpenAI API Error: {getattr(err, 'message', str(err))}",
             ) from err
 
-        return resp.choices[0].message.content  # type: ignore[attr-defined]
+        content = resp.choices[0].message.content
+        return content or ""  # Handle None case

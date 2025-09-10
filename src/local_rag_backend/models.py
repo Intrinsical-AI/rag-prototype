@@ -1,16 +1,12 @@
 # src/models.py
-from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DocumentInDB(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     content: str
-    metadata: Optional[Dict[str, Any]] = None
-
-    class Config:
-        orm_mode = True
 
 
 class QueryResult(BaseModel):
@@ -28,7 +24,7 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    sources: List[QueryResult]
+    sources: list[QueryResult]
 
 
 class HistoryItem(BaseModel):
@@ -36,4 +32,4 @@ class HistoryItem(BaseModel):
     question: str
     answer: str
     created_at: str
-    source_ids: List[int] = Field(default_factory=list)
+    source_ids: list[int] = Field(default_factory=list)

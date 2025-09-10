@@ -1,6 +1,5 @@
 # src/adapters/generation/ollama_chat.py
 import logging
-from typing import List
 
 import requests
 from fastapi import HTTPException
@@ -14,14 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaGenerator(GeneratorPort):
-    def generate(self, question: str, contexts: List[str]) -> str:
+    def generate(self, question: str, contexts: list[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
-        full_prompt = (
-            "Based on the following context, please answer the question.\nIf the context does not provide an answer, say so.\n\n"
-            "CONTEXT:\n"
-            f"{ctx_block}\n\n"
-            "QUESTION:\n"
-            f"{question}"
+        full_prompt = settings.ollama_prompt_template.format(
+            context=ctx_block,
+            question=question
         )
 
         payload = {

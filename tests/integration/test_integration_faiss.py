@@ -1,3 +1,8 @@
+import pytest
+
+# Skip if faiss is not available in the environment
+pytest.importorskip("faiss")
+
 import numpy as np
 
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex

@@ -1,12 +1,14 @@
 # ./conftest.py
 import pytest
+from contextlib import suppress
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy import sql_
+
 # Import models to ensure they are registered with Base.metadata
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models
+from local_rag_backend.infrastructure.persistence.sqlalchemy import sql_
 
 
 @pytest.fixture()
@@ -15,7 +17,13 @@ def in_memory_sqlite(monkeypatch):
     Crea una BD SQLite en memoria y parchea SessionLocal global
     para que todos los DAOs la usen durante los tests.
     """
-    engine = create_engine("sqlite:///:memory:")
+    # Use StaticPool so all sessions share the same in-memory database connection
+    # and add check_same_thread=False for sqlite thread-safety in tests
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     # Crear las tablas que registre nuestro Base (ahora que models está importado)
@@ -26,9 +34,16 @@ def in_memory_sqlite(monkeypatch):
     monkeypatch.setattr(db_base, "SessionLocal", TestingSessionLocal)
     # También parchear en el módulo sql_ para que SqlDocumentStorage use la sesión de test
     monkeypatch.setattr(sql_, "SessionLocal", TestingSessionLocal)
-    
-    # Return the session factory for tests that need it explicitly
-    return TestingSessionLocal
+
+    # Yield the session factory for tests that need it explicitly
+    try:
+        yield TestingSessionLocal
+    finally:
+        # Ensure all sessions are closed
+        with suppress(Exception):
+            TestingSessionLocal.close_all()
+        # Dispose engine to close underlying connection and avoid ResourceWarning
+        engine.dispose()
 
 
 class DummyFaissIndex:

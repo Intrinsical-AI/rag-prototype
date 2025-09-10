@@ -4,7 +4,6 @@
 FastAPI router for the application endpoints.
 """
 
-from typing import List
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -36,12 +35,12 @@ def ask(
             ),  # extiende aquí si hay metadata
             score=score,
         )
-        for doc, score in zip(docs, scores)
+        for doc, score in zip(docs, scores, strict=False)
     ]
     return AskResponse(answer=rag_result["answer"], sources=sources)
 
 
-@router.get("/history", response_model=List[HistoryItem])
+@router.get("/history", response_model=list[HistoryItem])
 def history(
     limit: int = Query(
         10, ge=1, le=100, description="Max number of history items to retrieve"
@@ -50,7 +49,7 @@ def history(
         0, ge=0, description="Number of items to skip (useful for pagination)"
     ),
     db: Session = Depends(get_db),
-) -> List[HistoryItem]:
+) -> list[HistoryItem]:
     """
     Retrieves historical Q&A pairs from the database.
 
@@ -69,7 +68,10 @@ def history(
             id=entry.id,
             question=entry.question,
             answer=entry.answer,
-            created_at=entry.created_at.isoformat(),
+            created_at=(
+                entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat")
+                else str(entry.created_at)
+            ),
             source_ids=entry.source_ids or [],
         )
         for entry in history_entries

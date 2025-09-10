@@ -9,9 +9,9 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 def preprocess_text(text: str) -> str:
     """
-    Normalize texts texto:
+    Normalize text:
     1. lowercase
-    2. colapse whitespaces
+    2. collapse whitespaces
     """
     text = text.lower().strip()
     text = re.sub(r"\s+", " ", text)

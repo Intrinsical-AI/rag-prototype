@@ -1,3 +1,8 @@
+import pytest
+
+# Skip if sentence_transformers is not available in the environment
+pytest.importorskip("sentence_transformers")
+
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )

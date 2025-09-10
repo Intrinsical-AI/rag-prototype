@@ -7,13 +7,12 @@ starting the server, building indices, and bootstrapping data.
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 import uvicorn
 
-from local_rag_backend.settings import settings
 from local_rag_backend import __version__
+from local_rag_backend.settings import settings
 
 
 @click.group()
@@ -28,19 +27,19 @@ def cli():
 @click.option("--port", default=None, type=int, help="Port number")
 @click.option("--reload/--no-reload", default=None, help="Enable auto-reload")
 @click.option("--log-level", default=None, type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]), help="Log level")
-def server(host: Optional[str], port: Optional[int], reload: Optional[bool], log_level: Optional[str]):
+def server(host: str | None, port: int | None, reload: bool | None, log_level: str | None):
     """Start the RAG FastAPI server."""
     # Use CLI args or fall back to settings
     server_host = host or settings.app_host
     server_port = port or settings.app_port
     server_reload = reload if reload is not None else settings.debug
     server_log_level = (log_level or settings.log_level).lower()
-    
+
     click.echo(f"🚀 Starting RAG server on {server_host}:{server_port}")
     click.echo(f"📊 Retrieval mode: {settings.retrieval_mode}")
     click.echo(f"🔧 Debug mode: {server_reload}")
     click.echo(f"📝 Log level: {server_log_level.upper()}")
-    
+
     uvicorn.run(
         "local_rag_backend.app.main:app",
         host=server_host,
@@ -56,7 +55,7 @@ def build_index():
     try:
         # Import here to avoid circular imports
         from local_rag_backend.scripts.build_index import main as build_main
-        
+
         click.echo("🔨 Building FAISS index...")
         with click.progressbar(length=1, label="Building index") as bar:
             build_main()
@@ -73,7 +72,7 @@ def bootstrap():
     try:
         # Import here to avoid circular imports
         from local_rag_backend.scripts.bootstrap import main as bootstrap_main
-        
+
         click.echo("🌱 Bootstrapping database with sample data...")
         with click.progressbar(length=1, label="Bootstrapping") as bar:
             bootstrap_main()
@@ -89,7 +88,7 @@ def status():
     """Show system status and configuration."""
     click.echo("🧠 Intrinsical RAG Prototype - System Status")
     click.echo("=" * 50)
-    
+
     # Configuration
     click.echo(f"🌐 Host: {settings.app_host}:{settings.app_port}")
     click.echo(f"🔍 Retrieval Mode: {settings.retrieval_mode}")
@@ -97,7 +96,7 @@ def status():
     click.echo(f"📁 Data Directory: {settings.data_dir}")
     click.echo(f"🗄️  Database: {settings.sqlite_url}")
     click.echo(f"📊 FAISS Index: {settings.index_path}")
-    
+
     # LLM Configuration
     click.echo(f"🤖 Ollama Enabled: {settings.ollama_enabled}")
     if settings.ollama_enabled:
@@ -105,17 +104,17 @@ def status():
         click.echo(f"   └── Model: {settings.ollama_model}")
     click.echo(f"🧠 OpenAI Model: {settings.openai_model}")
     click.echo(f"🔤 Embedding Model: {settings.st_embedding_model}")
-    
+
     # File Status
     click.echo("\n📋 File Status:")
     db_path = settings.get_database_path()
     db_status = "✅ YES" if db_path.exists() else "❌ NO"
     click.echo(f"   Database: {db_status} ({db_path})")
-    
+
     index_path = Path(settings.index_path)
     index_status = "✅ YES" if index_path.exists() else "❌ NO"
     click.echo(f"   FAISS index: {index_status} ({index_path})")
-    
+
     csv_path = Path(settings.faq_csv)
     csv_status = "✅ YES" if csv_path.exists() else "❌ NO"
     click.echo(f"   Sample data: {csv_status} ({csv_path})")

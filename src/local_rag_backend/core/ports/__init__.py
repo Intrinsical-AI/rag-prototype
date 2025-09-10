@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Protocol, Sequence, Tuple, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from local_rag_backend.core.domain.entities import Document, Embedding
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from local_rag_backend.core.domain.entities import Document, Embedding
 
 
 # -------- Ports --------
@@ -22,7 +25,7 @@ class GeneratorPort(Protocol):
 class RetrieverPort(Protocol):
     def retrieve(
         self, query: str, k: int = 5
-    ) -> Tuple[Sequence[Document], Sequence[float]]: ...
+    ) -> tuple[Sequence[Document], Sequence[float]]: ...
 
 
 @runtime_checkable

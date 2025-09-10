@@ -1,6 +1,6 @@
 # src/infrastructure/retrieval/sparse_bm25.py
 
-from typing import Sequence, Tuple
+from collections.abc import Sequence
 
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.ports import RetrieverPort
@@ -33,7 +33,7 @@ class SparseBM25Retriever(RetrieverPort):
 
     def retrieve(
         self, query: str, k: int = 5
-    ) -> Tuple[Sequence[Document], Sequence[float]]:
+    ) -> tuple[Sequence[Document], Sequence[float]]:
         if self.corpus_is_empty or self.bm25 is None:
             return [], []
         query_tokens = self._tok(query)
@@ -59,12 +59,12 @@ class SparseBM25Retriever(RetrieverPort):
             normalized_scores = [
                 (s - min_score) / (max_score - min_score) for s in retrieved_scores_raw
             ]
-        docs = self.doc_repo.get(retrieved_ids)
-        # Map id->score para match exacto con los docs (si hay desfase)
-        id_to_score = dict(zip(retrieved_ids, normalized_scores))
-        final_docs, final_scores = [], []
-        for doc in docs:
-            if doc.id in id_to_score:
-                final_docs.append(doc)
-                final_scores.append(float(id_to_score[doc.id]))
-        return final_docs, final_scores
+        # Fix ordering bug: reconstruct (doc, score) in the order of retrieved indices
+        docs_by_id = {d.id: d for d in self.doc_repo.get(retrieved_ids)}
+        ordered = []
+        for doc_id, sc in zip(retrieved_ids, normalized_scores, strict=False):
+            doc = docs_by_id.get(doc_id)
+            if doc is not None:
+                ordered.append((doc, float(sc)))
+        docs, scores = zip(*ordered, strict=False) if ordered else ([], [])
+        return list(docs), list(scores)

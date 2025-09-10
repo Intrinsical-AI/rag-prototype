@@ -1,4 +1,5 @@
 import pytest
+from contextlib import suppress
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -18,10 +19,16 @@ def in_memory_db(tmp_path):
     # Crear tablas
     Base.metadata.create_all(bind=engine)
 
-    yield Session
-
-    # teardown: borrar archivo
-    db_file.unlink(missing_ok=True)
+    try:
+        yield Session
+    finally:
+        # Close all sessions and dispose the engine to release file handles on Windows
+        with suppress(Exception):
+            Session.close_all()
+        with suppress(Exception):
+            engine.dispose()
+        # teardown: borrar archivo
+        db_file.unlink(missing_ok=True)
 
 
 def test_add_and_get_documents(in_memory_db):

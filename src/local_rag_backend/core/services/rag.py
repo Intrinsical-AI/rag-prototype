@@ -1,6 +1,7 @@
 # src/core/rag.py
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
 
@@ -17,7 +18,7 @@ class RagService:
         docs, scores = self.retriever.retrieve(question, top_k)
         if not docs:
             return {
-                "answer": "No hay documentos indexados. Por favor, ejecuta la ingestión.",
+                "answer": "No documents are indexed. Please run the ingestion process.",
                 "docs": [],
                 "scores": [],
             }

@@ -1,6 +1,6 @@
 import pickle
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Sequence
 
 import faiss  # type: ignore
 import numpy as np
@@ -24,7 +24,7 @@ class FaissIndex:
         else:
             self.id_map = []
 
-    def add_to_index(self, ids: List[int], embeddings: List[Sequence[float]]):
+    def add_to_index(self, ids: list[int], embeddings: list[Sequence[float]]):
         vectors = np.asarray(embeddings, dtype="float32")
         # Validate dimensionality matches index.d to avoid FAISS errors later
         if vectors.ndim != 2 or vectors.shape[1] != self.index.d:

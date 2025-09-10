@@ -50,7 +50,8 @@ def test_dense_faiss_retriever_basic():
     )
     docs, scores = retriever.retrieve("Doc A", k=1)
     assert docs and docs[0].content == "Doc A"
-    assert scores[0] == pytest.approx(0.0)
+    # With similarity normalization, identical match should score at top (~1.0)
+    assert scores[0] == pytest.approx(1.0)
     docs, scores = retriever.retrieve("Doc B", k=1)
     assert docs and docs[0].content == "Doc B"
 
@@ -103,5 +104,5 @@ def test_hybrid_retriever_merges_and_ranks():
     sparse = DummyRetriever([doc_b], [1.0])
     hybrid = HybridRetriever(dense=dense, sparse=sparse, alpha=0.5)
     docs, scores = hybrid.retrieve("irrelevant", k=2)
-    assert set(d.content for d in docs) == {"Doc A", "Doc B"}
+    assert {d.content for d in docs} == {"Doc A", "Doc B"}
     assert len(scores) == 2

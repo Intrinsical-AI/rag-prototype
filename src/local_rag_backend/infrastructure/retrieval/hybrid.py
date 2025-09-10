@@ -1,6 +1,6 @@
 # src/infrastructure/retrieval/hybrid.py
 
-from typing import Sequence, Tuple
+from collections.abc import Sequence
 
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.ports import RetrieverPort
@@ -16,16 +16,16 @@ class HybridRetriever(RetrieverPort):
 
     def retrieve(
         self, query: str, k: int = 5
-    ) -> Tuple[Sequence[Document], Sequence[float]]:
+    ) -> tuple[Sequence[Document], Sequence[float]]:
         dense_docs, dense_scores = self.dense.retrieve(query, k)
         sparse_docs, sparse_scores = self.sparse.retrieve(query, k)
 
         # Creamos mappings id->doc, id->score
         dense_map = {
-            doc.id: (doc, score) for doc, score in zip(dense_docs, dense_scores)
+            doc.id: (doc, score) for doc, score in zip(dense_docs, dense_scores, strict=False)
         }
         sparse_map = {
-            doc.id: (doc, score) for doc, score in zip(sparse_docs, sparse_scores)
+            doc.id: (doc, score) for doc, score in zip(sparse_docs, sparse_scores, strict=False)
         }
         # Unimos IDs
         all_ids = set(dense_map) | set(sparse_map)
@@ -41,5 +41,5 @@ class HybridRetriever(RetrieverPort):
                 combined.append((doc, score))
         # Ordenar por score descendente
         combined = sorted(combined, key=lambda t: t[1], reverse=True)[:k]
-        docs, scores = zip(*combined) if combined else ([], [])
+        docs, scores = zip(*combined, strict=False) if combined else ([], [])
         return list(docs), list(scores)

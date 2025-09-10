@@ -12,8 +12,6 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
             return [[0.0] * self.dim for _ in texts]
 
     # Mock FAISS Index para asegurar dim consistente
-    from local_rag_backend.infrastructure.persistence.faiss import index as faiss_index_mod
-
     class DummyFaissIndex:
         def __init__(self, index_path, id_map_path, dim=None):  # <-- Aquí el cambio
             self.index_path = index_path
@@ -36,7 +34,11 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
         lambda model_name=None: DummyEmbedder(),
         raising=True,
     )
-    monkeypatch.setattr(faiss_index_mod, "FaissIndex", DummyFaissIndex)
+    # Parcheamos la clase en el módulo donde la usa FaissVectorStorage
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
+        DummyFaissIndex,
+    )
 
     # CSV temporal y settings
     csv_file = tmp_path / "faq.csv"

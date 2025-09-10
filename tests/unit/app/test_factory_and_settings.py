@@ -71,6 +71,19 @@ def test_get_retriever_selects_correct_class(monkeypatch, mode, patched_class_na
     monkeypatch.setattr(factory, "DenseFaissRetriever", lambda *a, **k: "DENSE")
     monkeypatch.setattr(factory, "SparseBM25Retriever", lambda *a, **k: "SPARSE")
     monkeypatch.setattr(factory, "HybridRetriever", lambda *a, **k: "HYBRID")
+    # Evitar dependencias reales (faiss, sentence_transformers)
+    monkeypatch.setattr(
+        factory,
+        "SentenceTransformerEmbedder",
+        lambda model_name=None: type("E", (), {"dim": 4})(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        factory,
+        "FaissIndex",
+        lambda **kwargs: type("I", (), {"id_map": []})(),
+        raising=True,
+    )
 
     # No hace falta recargar módulo si los parches van bien
     retriever = factory.get_retriever()

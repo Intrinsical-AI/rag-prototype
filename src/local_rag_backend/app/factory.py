@@ -1,4 +1,4 @@
-# src/app/factories.py
+# src/app/factory.py
 
 """
 Singleton lifecycle for RagService:
@@ -67,7 +67,8 @@ def get_retriever():
             id_map_path=settings.id_map_path,
             dim=embedder.dim,
         )
-        check_faiss_sql_consistency(doc_ids, faiss_index)
+        if settings.enable_faiss_consistency_check:
+            check_faiss_sql_consistency(doc_ids, faiss_index)
         logger.info(f"Using DenseFaissRetriever (docs: {len(doc_ids)})")
         return DenseFaissRetriever(
             embedder=embedder, faiss_index=faiss_index, doc_repo=doc_repo
@@ -82,15 +83,16 @@ def get_retriever():
             id_map_path=settings.id_map_path,
             dim=embedder.dim,
         )
-        check_faiss_sql_consistency(doc_ids, faiss_index)
+        if settings.enable_faiss_consistency_check:
+            check_faiss_sql_consistency(doc_ids, faiss_index)
         dense = DenseFaissRetriever(
             embedder=embedder, faiss_index=faiss_index, doc_repo=doc_repo
         )
         sparse = SparseBM25Retriever(
             documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
         )
-        logger.info(f"Using HybridRetriever (dense+bm25) (docs: {len(doc_ids)})")
-        return HybridRetriever(dense=dense, sparse=sparse, alpha=0.5)
+        logger.info(f"Using HybridRetriever (dense+bm25) (docs: {len(doc_ids)}, alpha: {settings.hybrid_retrieval_alpha})")
+        return HybridRetriever(dense=dense, sparse=sparse, alpha=settings.hybrid_retrieval_alpha)
     else:
         logger.error(f"Unsupported retrieval_mode: {settings.retrieval_mode}")
         raise ValueError(f"Unsupported retrieval_mode: {settings.retrieval_mode}")

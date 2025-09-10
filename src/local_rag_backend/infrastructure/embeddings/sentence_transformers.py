@@ -1,9 +1,9 @@
 """
-File: src/adapters/embeddings/sentence_transformers.p
+File: src/infrastructure/embeddings/sentence_transformers.py
 SentenceTransformer embedder (CPU-friendly).
 """
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from sentence_transformers import SentenceTransformer
 
@@ -16,7 +16,7 @@ class SentenceTransformerEmbedder(EmbedderPort):
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model_name)
-        self.dim = 384
+        self.dim = self.model.get_sentence_embedding_dimension()
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         return self.model.encode(list(texts)).tolist()

@@ -2,8 +2,8 @@
 import logging
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from importlib import resources
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)  # logger after de basicConfig
 
 # --- Lifespan Context Manager ---
 @asynccontextmanager
-async def lifespan(app_instance: FastAPI):
+async def lifespan(_app_instance: FastAPI):
     logger.info("Lifespan startup: Checking/Creating database tables...")
     AppDeclarativeBase.metadata.create_all(bind=global_app_engine)
     logger.info("Lifespan startup: Database tables checked/created.")
@@ -50,7 +50,7 @@ FRONTEND_DIR = PROJECT_ROOT_DIR / "frontend"
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_frontend_route(request: Request):
+async def serve_frontend_route(_request: Request):
     # 1) Try to serve packaged frontend (installed package)
     try:
         pkg_index = resources.files("local_rag_backend.frontend").joinpath("index.html")
@@ -72,7 +72,7 @@ async def serve_frontend_route(request: Request):
         )
 
     try:
-        with open(index_html_path, "r", encoding="utf-8") as f:
+        with open(index_html_path, encoding="utf-8") as f:
             html_content = f.read()
         return HTMLResponse(content=html_content, status_code=200)
     except Exception as e:
@@ -83,7 +83,10 @@ async def serve_frontend_route(request: Request):
 
 
 if __name__ == "__main__":
-    # default: host="0.0.0.0", port=8000
     uvicorn.run(
-        "local_rag_backend.app.main:app", host=settings.app_host, port=settings.app_port, reload=True
+        "local_rag_backend.app.main:app",
+        host=settings.app_host,
+        port=settings.app_port,
+        reload=settings.debug,
+        log_level=settings.log_level.lower(),
     )

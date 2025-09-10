@@ -1,6 +1,6 @@
-# src/adapters/storage/faiss_crud.py
+# src/infrastructure/persistence/faiss/faiss_.py
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
@@ -20,8 +20,11 @@ class FaissVectorStorage(VectorRepoPort):
     def similar(self, vector, k: int):
         idxs, dists = self.faiss_index.search(vector, k)
         # Convert L2 distances to similarities and normalize to [0,1]
-        sims_raw = [1.0 / (1.0 + float(d)) for d in dists]
-        if sims_raw:
+        # Filter out invalid entries (-1) before normalization
+        valid_pairs = [(i, d) for i, d in zip(idxs, dists) if i != -1]
+        if valid_pairs:
+            valid_dists = [d for _, d in valid_pairs]
+            sims_raw = [1.0 / (1.0 + float(d)) for d in valid_dists]
             min_s, max_s = min(sims_raw), max(sims_raw)
             if max_s == min_s:
                 sims = [0.0 if max_s == 0 else 1.0] * len(sims_raw)
@@ -30,10 +33,9 @@ class FaissVectorStorage(VectorRepoPort):
         else:
             sims = []
         pairs: list[tuple[int, float]] = []
-        for i, sim in zip(idxs, sims):
-            if i != -1:
-                real_id = self.faiss_index.id_map[i]
-                pairs.append((real_id, float(sim)))
+        for (i, _), sim in zip(valid_pairs, sims, strict=False):
+            real_id = self.faiss_index.id_map[i]
+            pairs.append((real_id, float(sim)))
         return pairs
 
 

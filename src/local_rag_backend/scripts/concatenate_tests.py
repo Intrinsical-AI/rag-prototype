@@ -1,6 +1,6 @@
 """
-File: scripts/concatenate_src.py
-Script to concatenate all Python files from src directory into a single text file.
+File: scripts/concatenate_tests.py
+Script to concatenate all Python files from tests directory into a single text file.
 """
 
 import glob
@@ -10,7 +10,7 @@ def concatenate_python_files():
     # Output file
     output_file = "tests_all_files.txt"
 
-    # Get all Python files in src directory and subdirectories
+    # Get all Python files in tests directory and subdirectories
     python_files = glob.glob("tests/**/*.py", recursive=True)
 
     # Sort files to ensure consistent order
@@ -25,7 +25,7 @@ def concatenate_python_files():
 
             # Read and write the content of each file
             try:
-                with open(file_path, "r", encoding="utf-8") as infile:
+                with open(file_path, encoding="utf-8") as infile:
                     content = infile.read()
                     outfile.write(content)
                     outfile.write("\n\n")  # Add extra newlines between files
@@ -33,7 +33,7 @@ def concatenate_python_files():
                 outfile.write(f"Error reading file: {str(e)}\n")
 
     print(
-        f"All Python files from src directory have been concatenated into {output_file}"
+        f"All Python files from tests directory have been concatenated into {output_file}"
     )
     print(f"Total files processed: {len(python_files)}")
 

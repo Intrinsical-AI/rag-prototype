@@ -2,8 +2,8 @@
 
 import csv
 import sys
-from pathlib import Path
 from importlib import resources
+from pathlib import Path
 
 # IMPORTS PARA BD DINÁMICA
 from sqlalchemy import create_engine
@@ -14,9 +14,9 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 from local_rag_backend.settings import settings
 
 DELIMITER = ";"
@@ -68,7 +68,7 @@ def main():
 
     # 3) Invocamos ETL con nuestro SessionLocal freshly-built
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
-    
+
     if settings.retrieval_mode in ["dense", "hybrid"]:
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
         vector_repo = FaissVectorStorage(
