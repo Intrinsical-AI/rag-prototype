@@ -114,7 +114,9 @@ docs = [
     "mkdocs-include-markdown-plugin>=6.0,<7.0",
 ]
 performance = [
-    "faiss-gpu>=1.8.0,<2.0",  # GPU acceleration
+    # NOTE: faiss-cpu is included in base deps. Do NOT install faiss-gpu together with faiss-cpu.
+    # If you target GPU, uninstall faiss-cpu first and install this extra on Linux only.
+    "faiss-gpu>=1.8.0,<2.0; platform_system!='Windows'",  # GPU acceleration (align with CPU)
     "torch>=2.0,<3.0",  # PyTorch for advanced models
 ]
 monitoring = [
