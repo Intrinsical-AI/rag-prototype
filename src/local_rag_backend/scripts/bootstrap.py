@@ -1,6 +1,5 @@
 # scripts/bootstrap.py
 
-import sys
 from importlib import resources
 from pathlib import Path
 
@@ -9,7 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from local_rag_backend.core.services.etl import ETLService
-from local_rag_backend.core.services.ingestion import IngestionPipeline, default_chunker
+from local_rag_backend.core.services.ingestion import (
+    IngestionPipeline,
+    default_chunker,
+    default_preprocess,
+    default_formatter,
+)
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
@@ -18,12 +22,14 @@ from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVecto
 from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import settings as default_settings
 
 DELIMITER = ";"
 
 
-def main() -> None:
+def main(settings=None) -> None:
+    if settings is None:
+        settings = default_settings
     # 1) Creamos engine y sesión basados en la URL actualizada
     engine = create_engine(
         settings.sqlite_url, connect_args={"check_same_thread": False}
@@ -56,10 +62,24 @@ def main() -> None:
         ids = pipeline.run()
         print(f"[OK] Ingested {len(ids)} docs into SQL and FAISS.")
     else:
-        # modo sparse: simple (sin embeddings)
+        # modo sparse: aplicar el mismo flujo de preprocesado + chunking + formateo,
+        # pero almacenando únicamente en SQL (sin embeddings / FAISS)
         loader = CSVLoader(csv_path, delimiter=DELIMITER, has_header=settings.csv_has_header)
-        texts = [li.text for li in loader.load()]
-        ids = doc_repo.store_documents(texts)
+        chunk = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+
+        buf: list[str] = []
+        ids: list[int] = []
+        BATCH = 128
+        for item in loader.load():
+            clean = default_preprocess(item.text, item.metadata or None)
+            for c in chunk(clean):
+                buf.append(default_formatter(c, item.metadata or None))
+                if len(buf) >= BATCH:
+                    ids += list(doc_repo.store_documents(buf))
+                    buf.clear()
+        if buf:
+            ids += list(doc_repo.store_documents(buf))
+
         print(f"[OK] Ingested {len(ids)} docs into SQL only (sparse mode).")
 
 

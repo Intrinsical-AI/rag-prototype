@@ -31,7 +31,7 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     from local_rag_backend.scripts import bootstrap
 
     importlib.reload(bootstrap)
-    bootstrap.main()
+    bootstrap.main(settings=settings)
 
     captured = capsys.readouterr()
     assert "Ingested" in captured.out
@@ -116,7 +116,7 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
     from local_rag_backend.scripts import bootstrap
 
     importlib.reload(bootstrap)
-    bootstrap.main()
+    bootstrap.main(settings=settings)
 
     captured = capsys.readouterr()
     assert "Ingested" in captured.out
@@ -146,7 +146,7 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     from local_rag_backend.scripts import bootstrap
 
     importlib.reload(bootstrap)
-    bootstrap.main()
+    bootstrap.main(settings=settings)
 
     # Verify multiple chunks were created
     from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage

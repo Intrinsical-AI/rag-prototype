@@ -76,7 +76,15 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Ingested" in captured.out or "Ingerido" in captured.out
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+        SqlDocumentStorage,
+    )
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
-    docs = SqlDocumentStorage().get_all_documents()
+    engine = create_engine(settings.sqlite_url)
+    Session = sessionmaker(bind=engine)
+    doc_storage = SqlDocumentStorage(session_factory=Session)
+
+    docs = doc_storage.get_all_documents()
     assert len(docs) == 1 and "RAG" in docs[0].content
