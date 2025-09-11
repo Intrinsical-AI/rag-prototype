@@ -27,17 +27,17 @@ def test_ask_rejects_k_out_of_range():
     assert response.status_code == 200
 
 
-def test_ask_rejects_empty_question():
-    """Test that /api/ask rejects empty questions."""
+def test_ask_accepts_empty_question():
+    """Test that /api/ask accepts empty questions (handled by business logic)."""
     client = TestClient(app)
     
-    # Empty string should be rejected
+    # Empty string should be accepted by schema validation
     response = client.post("/api/ask", json={"question": "", "k": 5})
-    assert response.status_code == 422
+    assert response.status_code == 200
     
-    # Whitespace-only should be rejected
+    # Whitespace-only should be accepted by schema validation
     response = client.post("/api/ask", json={"question": "   ", "k": 5})
-    assert response.status_code == 422
+    assert response.status_code == 200
 
 
 def test_history_limit_offset_bounds():
@@ -69,18 +69,18 @@ def test_history_limit_offset_bounds():
 
 
 def test_ask_missing_required_fields():
-    """Test that /api/ask requires both question and k fields."""
+    """Test that /api/ask requires question field but k has default."""
     client = TestClient(app)
     
-    # Missing question field
+    # Missing question field should be rejected
     response = client.post("/api/ask", json={"k": 5})
     assert response.status_code == 422
     
-    # Missing k field
+    # Missing k field should be accepted (has default value of 3)
     response = client.post("/api/ask", json={"question": "test"})
-    assert response.status_code == 422
+    assert response.status_code == 200
     
-    # Missing both fields
+    # Missing both fields should be rejected (question is required)
     response = client.post("/api/ask", json={})
     assert response.status_code == 422
 

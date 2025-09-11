@@ -13,12 +13,12 @@ def preprocess_text(text: str) -> str:
     """
     Normalize text:
     1. lowercase
-    2. remove HTML tags
+    2. remove HTML tags (replace with space to prevent word concatenation)
     3. collapse whitespaces
     """
     text = text.lower().strip()
-    text = _HTML_TAG_RE.sub("", text)
-    text = re.sub(r"\s+", " ", text)
+    text = _HTML_TAG_RE.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
 

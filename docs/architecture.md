@@ -1,175 +1,269 @@
-# Architecture Guide: Ports & Adapters (Hexagonal Architecture)
+# Architecture Guide: Hexagonal (Ports & Adapters)
+
+The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Ports & Adapters) to maximize modularity, testability, and maintainability. Business logic lives in the core; external tech (LLMs, vector stores, databases) are plugged in via adapters.
+
+## Core Principles
+
+* **Dependency Inversion**: the core depends on *ports* (interfaces), never on concrete implementations.
+* **Stable Core**: domain entities and services are tech-agnostic.
+* **Adapters at the Edge**: infrastructure code implements the ports.
+* **Composition Root**: `app/factory.py` wires ports to adapters based on settings.
+* **Testability**: adapters can be swapped for fakes/mocks; ports are `Protocol`s.
 
 ---
 
-## 1. What Is Ports & Adapters?
-
-**Ports & Adapters** (also called **Hexagonal Architecture**) is a way to organize code so that the **core logic** (business/domain rules) is separated from details like databases, APIs, or external services.
-
-* The **Core** does not depend on any specific database, model, or API.
-* All connections to the outside (APIs, DBs, LLMs) go through **Ports** (interfaces).
-* **Adapters** are concrete implementations: "plug-ins" for each technology.
-
-**Why?**
-
-* Makes your code easier to test.
-* Lets you swap databases, LLMs, etc., with almost no changes to core logic.
-* Keeps the system clean and easier to grow.
-
----
-
-## 2. Main Concepts
-
-| Term        | In Practice                                                                                                          |
-| ----------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Port**    | An *interface* in Python (an abstract base class or Protocol). Example: `DocumentRetrieverPort`, `GeneratorPort`.    |
-| **Adapter** | A *class* that implements a Port for a specific tech. Example: `BM25Retriever`, `OpenAIGenerator`, `FaissRetriever`. |
-
-**Note:**
-
-* "Hexagonal" refers to the diagram, not to code shape.
-* This is NOT the same as the classic "layered" (MVC) approach: here, all dependencies go **inward** (adapters depend on ports, not the other way).
-
----
-
-## 3. How It Looks in This Project
-
-The project follows this structure:
+## Project Structure
 
 ```
-src/
-├── core/           # Core logic, Ports (interfaces), domain services
-├── infrastructure/ # Adapters for embeddings, LLMs, DBs, retrieval
-├── app/            # FastAPI app, dependency wiring, entrypoints
+src/local_rag_backend/
+├── core/                       # Domain + application services (technology-agnostic)
+│   ├── domain/                 # Entities (Document, etc.)
+│   ├── ports/                  # Ports (Protocols) for core dependencies
+│   └── services/               # ETL, IngestionPipeline, RagService
+├── infrastructure/             # Adapters (technology-specific)
+│   ├── embeddings/             # ST/OpenAI embedders
+│   ├── llms/                   # OpenAI / Ollama generators
+│   ├── persistence/            # SQLAlchemy (SQL), FAISS (vectors)
+│   ├── retrieval/              # BM25 (sparse), FAISS (dense), Hybrid
+│   └── ingestion/              # CSV loader, etc.
+├── app/                        # Application layer
+│   ├── main.py                 # FastAPI app + lifespan
+│   ├── api_router.py           # HTTP endpoints (/api/ask, /api/history)
+│   ├── dependencies.py         # DI bridge to factory
+│   └── factory.py              # Composition root (build retriever/LLM/services)
+└── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
 
-### **Examples**
+---
 
-#### Ports (Interfaces) in `src/core/ports/`
+## Dependency Flow (High-Level)
+
+```mermaid
+graph TD
+  A[FastAPI Router] --> B[RagService]
+  B --> C[RetrieverPort]
+  B --> D[GeneratorPort]
+  B --> E[QAHistoryPort]
+
+  subgraph Core
+    B
+    C
+    D
+    E
+  end
+
+  subgraph Infrastructure (Adapters)
+    C1[SparseBM25Retriever]
+    C2[DenseFaissRetriever]
+    C3[HybridRetriever]
+    D1[OpenAIGenerator]
+    D2[OllamaGenerator]
+    E1[HistorySqlStorage]
+    S1[SqlDocumentStorage]
+    V1[FaissVectorStorage]
+  end
+
+  A -->|DI via factory| C1 & C2 & C3 & D1 & D2 & E1 & S1 & V1
+```
+
+The composition root `app/factory.py` chooses specific adapters (BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`.
+
+---
+
+## Key Ports (Core Interfaces)
 
 ```python
-# src/core/ports/__init__.py
-
-from typing import Protocol, Sequence, Tuple
+# src/local_rag_backend/core/ports/__init__.py
+from typing import Protocol, Sequence, runtime_checkable
 from local_rag_backend.core.domain.entities import Document, Embedding
 
+@runtime_checkable
+class EmbedderPort(Protocol):
+    dim: int
+    def embed(self, texts: Sequence[str]) -> Sequence[Embedding]: ...
+
+@runtime_checkable
 class GeneratorPort(Protocol):
     def generate(self, question: str, contexts: Sequence[str]) -> str: ...
 
+@runtime_checkable
 class RetrieverPort(Protocol):
-    def retrieve(self, query: str, k: int = 5) -> Tuple[Sequence[Document], Sequence[float]]: ...
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
+
+@runtime_checkable
+class DocumentRepoPort(Protocol):
+    def store_documents(self, contents: Sequence[str]) -> Sequence[int]: ...
+    def get(self, ids: Sequence[int]) -> Sequence[Document]: ...
+    def get_all_documents(self) -> Sequence[Document]: ...
+
+@runtime_checkable
+class VectorRepoPort(Protocol):
+    def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
+    def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]: ...
+
+@runtime_checkable
+class QAHistoryPort(Protocol):
+    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None: ...
+
+@runtime_checkable
+class LoaderPort(Protocol):
+    def load(self): ...
 ```
 
-#### Adapters in `src/infrastructure/retrieval/sparse_bm25.py`
+---
+
+## Representative Adapters
+
+**Retrievers**
+
+* `SparseBM25Retriever` (BM25 over preprocessed text; SQL for doc lookup)
+* `DenseFaissRetriever` (SentenceTransformers/OpenAI embeddings + FAISS; SQL for doc lookup)
+* `HybridRetriever` (linear blend of dense + sparse, configurable `alpha`)
+
+**LLMs**
+
+* `OpenAIGenerator` (chat completions)
+* `OllamaGenerator` (HTTP to local Ollama server)
+
+**Persistence**
+
+* `SqlDocumentStorage` (documents via SQLAlchemy/SQLite)
+* `FaissVectorStorage` (vector index + ID map)
+* `HistorySqlStorage` (Q\&A history)
+
+**Ingestion**
+
+* `CSVLoader` → `IngestionPipeline` → `ETLService` (store docs, embed, upsert vectors)
+
+All of these implement the ports above and can be swapped at composition time.
+
+---
+
+## Composition Root (Factory)
+
+`app/factory.py` wires the system from configuration:
+
+* Chooses **retriever** by `settings.retrieval_mode` (`sparse`, `dense`, `hybrid`)
+* Chooses **generator**: OpenAI (if `OPENAI_API_KEY`) or Ollama (if `OLLAMA_ENABLED`)
+* Instantiates `RagService(retriever, generator, history_storage)`
+* Provides a process-local singleton via `get_rag_service()` (and `reset_rag_service()` for tests)
+
+---
+
+## Request Flow (End-to-End)
+
+```mermaid
+sequenceDiagram
+  participant U as Client
+  participant API as FastAPI /api/ask
+  participant S as RagService
+  participant R as RetrieverPort
+  participant G as GeneratorPort
+  participant H as QAHistoryPort
+
+  U->>API: POST /api/ask {"question": "...", "k": 3}
+  API->>S: ask(question, top_k=k)
+  S->>R: retrieve(query, k)
+  R-->>S: (docs, scores)
+  alt no docs
+    S-->>API: {"answer": "No documents indexed...", "sources": []}
+  else docs
+    S->>G: generate(question, [doc.content...])
+    G-->>S: answer
+    S->>H: save(question, answer, source_ids=[...])
+    S-->>API: {"answer": answer, "sources": [{document, score}, ...]}
+  end
+```
+
+`/api/history` reads persisted Q\&A with pagination.
+
+---
+
+## Extending the System
+
+**Add a new retriever (e.g., Elasticsearch):**
+
+1. Implement `RetrieverPort`.
+2. Resolve documents (by ID) via your `DocumentRepoPort` implementation.
+3. Expose a setting (e.g., `RETRIEVAL_MODE=elasticsearch`) and branch in `factory.py`.
+
+**Add a new LLM (e.g., Anthropic):**
+
+1. Implement `GeneratorPort`.
+2. Add settings (API key, model, etc.).
+3. Select in `factory.get_generator()` based on settings.
+
+**Swap embeddings backend:**
+
+* Implement `EmbedderPort` (or reuse `OpenAIEmbedder` / `SentenceTransformerEmbedder`).
+* Ensure FAISS index dimensionality matches `embedder.dim`.
+* Rebuild the index after changing the embedding model.
+
+---
+
+## Testing Strategy
+
+* **Unit tests**: mock the ports to isolate core services (`RagService`, `ETLService`, `IngestionPipeline`).
+* **Integration tests**: real SQLite (temp), optional FAISS, real BM25; adapters tested together.
+* **E2E tests**: FastAPI `TestClient` hitting `/api/ask` and `/`.
+
+The codebase already includes fixtures (e.g., in-memory SQLite with `StaticPool`), adapter fakes, and coverage for edge cases (dim mismatches, missing docs, error propagation).
+
+---
+
+## Trade-offs & Considerations
+
+* More files/indirection than a simple script, but greatly improved swapability and testability.
+* FAISS `IndexFlatL2` is chosen for simplicity; for larger corpora, consider IVF/HNSW and external vector DBs.
+* The RAG prompt templates live in settings; adapt them to your safety/grounding needs.
+
+---
+
+## Minimal Code Examples
+
+**Port usage in a service (core):**
 
 ```python
-# src/infrastructure/retrieval/sparse_bm25.py
+# src/local_rag_backend/core/services/rag.py
+class RagService:
+    def __init__(self, retriever, generator, history):
+        self.retriever = retriever
+        self.generator = generator
+        self.history = history
 
-from local_rag_backend.core.ports import RetrieverPort
+    def ask(self, question: str, top_k: int = 3):
+        docs, scores = self.retriever.retrieve(question, top_k)
+        if not docs:
+            return {"answer": "No documents indexed. Please run ingestion.", "docs": [], "scores": []}
+        answer = self.generator.generate(question, [d.content for d in docs])
+        self.history.save(question, answer, [d.id for d in docs])
+        return {"answer": answer, "docs": docs, "scores": scores}
+```
 
+**Adapter implementing a port (sparse example):**
+
+```python
+# src/local_rag_backend/infrastructure/retrieval/sparse_bm25.py
 class SparseBM25Retriever(RetrieverPort):
-    def __init__(self, documents):
-        # setup BM25 with documents
+    def __init__(self, documents, doc_ids, doc_repo):
+        # tokenize+fit BM25; keep doc_repo to resolve IDs -> Document
         ...
 
     def retrieve(self, query: str, k: int = 5):
-        # run BM25 search and return (docs, scores)
+        # BM25 scores -> normalize -> map to Document via repo -> return (docs, scores)
         ...
 ```
 
-#### Application (API layer) in `src/app/main.py`
-
-Here, you **inject** the implementation:
+**Factory wiring (excerpt):**
 
 ```python
-from local_rag_backend.core.ports import RetrieverPort, GeneratorPort
-from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
-from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-
-retriever: RetrieverPort = SparseBM25Retriever(docs)
-generator: GeneratorPort = OpenAIGenerator()
-
-# Now, use these in your FastAPI endpoints!
+# src/local_rag_backend/app/factory.py
+def get_rag_service(force_reload=False) -> RagService:
+    global _rag_service
+    if force_reload or _rag_service is None:
+        retriever = get_retriever()   # sparse | dense | hybrid
+        generator = get_generator()   # openai | ollama
+        history_storage = HistorySqlStorage()
+        _rag_service = RagService(retriever, generator, history_storage)
+    return _rag_service
 ```
-
----
-
-## 4. How a Request Flows (Step-by-Step)
-
-1. **User sends a question** (to `/api/ask`).
-2. FastAPI handler uses **retriever port** (e.g., BM25Retriever or FaissRetriever) to get documents.
-3. Handler passes docs to **generator port** (e.g., OpenAIGenerator or OllamaGenerator) to generate an answer.
-4. The answer is returned to the user.
-
-**If you want to swap BM25 for FAISS:**
-
-* You only change which adapter is "plugged in".
-* No change to main app logic, ports, or endpoints.
-
----
-
-## 5. Benefits
-
-* **Easy to Test**: You can replace real adapters with *mocks* in tests.
-* **Easy to Extend**: Add new LLMs or retrievers by creating new adapters.
-* **Less Tech Lock-in**: Change DB, LLM, vector index… core stays the same.
-* **Better for Teams**: Teams can work on different adapters without conflict.
-
----
-
-## 6. Trade-Offs
-
-* **More files & structure** than "quick scripts".
-* **More abstract**: Newcomers may need to learn about Ports/Adapters.
-* For very simple, short scripts, this may be "overkill".
-* But for real projects, it's much easier to scale and maintain.
-
----
-
-## 7. How to Add or Change Adapters
-
-* To add a new retriever (e.g., ElasticSearchRetriever):
-
-  1. Create a new class that implements `DocumentRetrieverPort`.
-  2. Plug it in at app start (FastAPI dependency).
-* To add a new LLM (e.g., HuggingFaceGenerator):
-
-  1. Create a class for it, implement `GeneratorPort`.
-  2. Wire it up via settings/env or code.
-
-**Testing:**
-
-* Use mocks/fakes for ports in unit tests.
-* Only test adapters separately if needed.
-
----
-
-## 8. Diagram
-
-![Hexagonal Architecture Diagram](hex-arch-colors.png)
-
----
-
-## 9. Final Notes
-
-* This architecture makes your backend **modular, robust, and future-proof**.
-* It’s worth the small up-front effort for any non-trivial system.
-* If you want to extend this project, **just add a new adapter and wire it up!**
-
----
-
-
-## 10. Resources
-
-* [Alistair Cockburn’s Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture/)
-* [FastAPI Dependency Injection](https://fastapi.tiangolo.com/tutorial/dependencies/)
-* [Clean Architecture (Uncle Bob)](https://8thlight.com/blog/uncle-bob/2012/08/13/the-clean-architecture.html)
-
----
-
-
-**Any contributor can follow these principles to add features without fear of breaking the core logic.**
-
----
-
-*Questions? Open an issue!*

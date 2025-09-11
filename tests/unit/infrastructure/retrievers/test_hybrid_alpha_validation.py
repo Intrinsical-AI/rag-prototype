@@ -19,7 +19,7 @@ def test_hybrid_raises_on_invalid_alpha(alpha):
     dense = MockRetriever()
     sparse = MockRetriever()
     
-    with pytest.raises(ValueError, match="Alpha must be between 0 and 1"):
+    with pytest.raises(ValueError, match="alpha debe estar en"):
         HybridRetriever(dense=dense, sparse=sparse, alpha=alpha)
 
 
