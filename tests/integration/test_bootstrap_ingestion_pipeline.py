@@ -1,7 +1,5 @@
 import csv
 import importlib
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 from local_rag_backend.core.domain.entities import LoadedItem
@@ -22,9 +20,7 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(
-        settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False
-    )
+    monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_chars", 1200, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 200, raising=False)
 
@@ -38,18 +34,19 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     assert "sparse mode" in captured.out
 
     # Verify documents were stored
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
-    
+
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
     docs = doc_repo.get_all_documents()
-    
+
     assert len(docs) == 2
     assert any("RAG" in doc.content for doc in docs)
     assert any("funciona" in doc.content for doc in docs)
@@ -57,6 +54,7 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
 
 def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, capsys):
     """Test bootstrap using ingestion pipeline in dense mode."""
+
     class DummyEmbedder:
         dim = 4
 
@@ -90,15 +88,9 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
-    monkeypatch.setattr(
-        settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False
-    )
-    monkeypatch.setattr(
-        settings, "index_path", str(tmp_path / "idx.faiss"), raising=False
-    )
-    monkeypatch.setattr(
-        settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False
-    )
+    monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
+    monkeypatch.setattr(settings, "index_path", str(tmp_path / "idx.faiss"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_chars", 50, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 10, raising=False)
 
@@ -137,9 +129,7 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(
-        settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False
-    )
+    monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_chars", 50, raising=False)  # Small chunks
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 10, raising=False)
 
@@ -149,18 +139,19 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     bootstrap.main(settings=settings)
 
     # Verify multiple chunks were created
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
-    
+
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
     docs = doc_repo.get_all_documents()
-    
+
     # Should have multiple chunks due to small chunk size
     assert len(docs) > 1
     # Each chunk should contain the title metadata
@@ -169,22 +160,29 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
 
 def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
     """Test bootstrap falls back to packaged CSV when local file doesn't exist."""
+
     # Mock the packaged CSV loader to return test data
     def mock_csv_loader_load(self):
-        return iter([
-            LoadedItem(text="Packaged Question\n\nPackaged Answer", metadata={"title": "Packaged Question"})
-        ])
+        return iter(
+            [
+                LoadedItem(
+                    text="Packaged Question\n\nPackaged Answer",
+                    metadata={"title": "Packaged Question"},
+                )
+            ]
+        )
 
     # Configure non-existent local CSV
     monkeypatch.setattr(settings, "faq_csv", "nonexistent.csv", raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(
-        settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False
-    )
+    monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
     # Mock CSVLoader to simulate packaged data
-    with patch("local_rag_backend.infrastructure.ingestion.loaders.csv_loader.CSVLoader.load", mock_csv_loader_load):
+    with patch(
+        "local_rag_backend.infrastructure.ingestion.loaders.csv_loader.CSVLoader.load",
+        mock_csv_loader_load,
+    ):
         from local_rag_backend.scripts import bootstrap
 
         importlib.reload(bootstrap)
@@ -194,17 +192,18 @@ def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
         assert "Ingested" in captured.out
 
         # Verify packaged data was loaded
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
+
         from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
+        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
         engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
         SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
         Base.metadata.create_all(bind=engine)
-        
+
         doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
         docs = doc_repo.get_all_documents()
-        
+
         assert len(docs) == 1
         assert "Packaged Question" in docs[0].content

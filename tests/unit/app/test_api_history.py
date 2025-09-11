@@ -12,21 +12,20 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base, g
 
 
 @pytest.fixture()
-def test_db_session_factory():
+def test_db_session_factory() -> sessionmaker:
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
-    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
     try:
-        yield Session
+        yield session_factory
     finally:
         engine.dispose()
 
 
-def test_api_history_endpoint(monkeypatch, test_db_session_factory):
+def setup_history_data(session: sessionmaker, monkeypatch) -> None:
     # Seed data
-    session = test_db_session_factory()
     try:
         session.add(models.QaHistory(question="Q1", answer="A1", source_ids=[1, 2]))
         session.add(models.QaHistory(question="Q2", answer="A2", source_ids=None))
@@ -39,6 +38,7 @@ def test_api_history_endpoint(monkeypatch, test_db_session_factory):
 
     # Patch the symbols used by FastAPI lifespan in app.main
     import local_rag_backend.app.main as app_main
+
     # Use an in-memory engine for lifespan DB init to avoid file side effects
     lp_engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool

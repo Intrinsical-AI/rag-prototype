@@ -3,12 +3,13 @@
 from collections.abc import Sequence
 
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.core.ports import DocumentRepoPort
-from local_rag_backend.core.ports import RetrieverPort
+from local_rag_backend.core.ports import DocumentRepoPort, RetrieverPort
 
 
 class SparseBM25Retriever(RetrieverPort):
-    def __init__(self, documents: Sequence[str], doc_ids: Sequence[int], doc_repo: DocumentRepoPort):
+    def __init__(
+        self, documents: Sequence[str], doc_ids: Sequence[int], doc_repo: DocumentRepoPort
+    ):
         self.doc_ids = doc_ids
         self.doc_repo = doc_repo
         self.bm25 = None
@@ -32,9 +33,7 @@ class SparseBM25Retriever(RetrieverPort):
 
         return re.findall(r"\w+", preprocess_text(text))
 
-    def retrieve(
-        self, query: str, k: int = 5
-    ) -> tuple[Sequence[Document], Sequence[float]]:
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
         if self.corpus_is_empty or self.bm25 is None:
             return [], []
         query_tokens = self._tok(query)
@@ -42,9 +41,9 @@ class SparseBM25Retriever(RetrieverPort):
             return [], []
         doc_scores = self.bm25.get_scores(query_tokens)
         num_docs_to_return = min(k, len(doc_scores))
-        top_indices = sorted(
-            range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True
-        )[:num_docs_to_return]
+        top_indices = sorted(range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True)[
+            :num_docs_to_return
+        ]
         retrieved_ids = [self.doc_ids[i] for i in top_indices]
         retrieved_scores_raw = [doc_scores[i] for i in top_indices]
         # Normalizamos
@@ -53,9 +52,7 @@ class SparseBM25Retriever(RetrieverPort):
         min_score = min(retrieved_scores_raw)
         max_score = max(retrieved_scores_raw)
         if max_score == min_score:
-            normalized_scores = [0.0 if max_score == 0 else 1.0] * len(
-                retrieved_scores_raw
-            )
+            normalized_scores = [0.0 if max_score == 0 else 1.0] * len(retrieved_scores_raw)
         else:
             normalized_scores = [
                 (s - min_score) / (max_score - min_score) for s in retrieved_scores_raw

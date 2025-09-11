@@ -1,6 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Mapping, Any
+from typing import Any
 
 
 @dataclass(frozen=True)

@@ -42,20 +42,14 @@ def main() -> None:
     # 1. Crear un engine y SessionLocal exclusivos para este script
     #    Esto evita interferencias con el engine de la aplicación principal.
     logger.info(f"Using database URL: {settings.sqlite_url}")
-    is_in_memory = (
-        "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
-    )
+    is_in_memory = "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
     pool_kwargs = {"poolclass": StaticPool} if is_in_memory else {}
     script_engine = create_engine(
         settings.sqlite_url,
-        connect_args={
-            "check_same_thread": False
-        },  # Necesario para SQLite si se usa en threads
+        connect_args={"check_same_thread": False},  # Necesario para SQLite si se usa en threads
         **pool_kwargs,
     )
-    ScriptSessionLocal = sessionmaker(
-        bind=script_engine, autocommit=False, autoflush=False
-    )
+    script_session_local = sessionmaker(bind=script_engine, autocommit=False, autoflush=False)
 
     # 2. Asegurar que el esquema de la BBDD (tablas) existe
     logger.info(f"Ensuring database schema exists at {script_engine.url}...")
@@ -72,9 +66,7 @@ def main() -> None:
         logger.info(
             f"{settings.retrieval_mode.title()} retrieval mode detected. Initializing embedder for indexing."
         )
-        embedder_for_indexing = SentenceTransformerEmbedder(
-            model_name=settings.st_embedding_model
-        )
+        embedder_for_indexing = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
 
     # 4. Usar la lógica de ETL directamente (similar a bootstrap.py)
     try:
@@ -112,7 +104,9 @@ def main() -> None:
                         texts.append(f"{row[0].strip()} {row[1].strip()}")
                 logger.info("Loaded packaged sample data (local CSV not found).")
             except Exception:
-                raise FileNotFoundError(f"CSV file not found at {csv_path} and no packaged sample available.")
+                raise FileNotFoundError(
+                    f"CSV file not found at {csv_path} and no packaged sample available."
+                )
 
         if not texts:
             raise ValueError("No texts found in CSV.")
@@ -120,7 +114,7 @@ def main() -> None:
         logger.info(f"Parsed {len(texts)} documents from CSV.")
 
         # ETL Service
-        doc_repo = SqlDocumentStorage(session_factory=ScriptSessionLocal)
+        doc_repo = SqlDocumentStorage(session_factory=script_session_local)
 
         if settings.retrieval_mode in ["dense", "hybrid"] and embedder_for_indexing:
             vector_repo = FaissVectorStorage(
@@ -143,9 +137,7 @@ def main() -> None:
     except ValueError as e:  # Por ejemplo, el mismatch de dimensiones del embedder
         logger.error(f"Halting script due to value error: {e}", exc_info=True)
     except Exception as e:
-        logger.error(
-            f"An unexpected error occurred during build_index: {e}", exc_info=True
-        )
+        logger.error(f"An unexpected error occurred during build_index: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

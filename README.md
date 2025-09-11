@@ -256,7 +256,7 @@ MIT. See [LICENSE](LICENSE) file for details.
 <div align="center">
 
 **Built with ❤️ by [Intrinsical AI](https://intrinsical.ai)**
- 
+
 [📝 Report Issues](https://github.com/Intrinsical-AI/rag-prototype/issues) • [💬 Discussions](https://github.com/Intrinsical-AI/rag-prototype/discussions)
 
 </div>

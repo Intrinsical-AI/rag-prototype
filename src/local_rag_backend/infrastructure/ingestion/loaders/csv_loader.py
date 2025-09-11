@@ -1,6 +1,7 @@
 import csv
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
+
 from local_rag_backend.core.domain.entities import LoadedItem
 from local_rag_backend.core.ports import LoaderPort
 

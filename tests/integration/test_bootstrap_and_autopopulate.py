@@ -49,15 +49,9 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
-    monkeypatch.setattr(
-        settings, "index_path", str(tmp_path / "idx.faiss"), raising=False
-    )
-    monkeypatch.setattr(
-        settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False
-    )
-    monkeypatch.setattr(
-        settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False
-    )
+    monkeypatch.setattr(settings, "index_path", str(tmp_path / "idx.faiss"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
+    monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
     # Resetear singleton si hace falta
     try:
@@ -76,11 +70,12 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Ingested" in captured.out or "Ingerido" in captured.out
 
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
     from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
         SqlDocumentStorage,
     )
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
 
     engine = create_engine(settings.sqlite_url)
     Session = sessionmaker(bind=engine)

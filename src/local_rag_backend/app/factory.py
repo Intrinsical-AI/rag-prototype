@@ -9,7 +9,7 @@ Singleton lifecycle for RagService:
 """
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -63,6 +63,7 @@ def get_retriever() -> DenseFaissRetriever | SparseBM25Retriever | HybridRetriev
     if settings.retrieval_mode == "dense":
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+
         faiss_storage = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
@@ -71,15 +72,14 @@ def get_retriever() -> DenseFaissRetriever | SparseBM25Retriever | HybridRetriev
         if settings.enable_faiss_consistency_check:
             check_faiss_sql_consistency(doc_ids, faiss_storage)
         logger.info(f"Using DenseFaissRetriever (docs: {len(doc_ids)})")
-        return DenseFaissRetriever(
-            embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo
-        )
+        return DenseFaissRetriever(embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo)
     elif settings.retrieval_mode == "sparse":
         logger.info(f"Using SparseBM25Retriever (docs: {len(doc_ids)})")
         return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
     elif settings.retrieval_mode == "hybrid":
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+
         faiss_storage = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
@@ -87,13 +87,11 @@ def get_retriever() -> DenseFaissRetriever | SparseBM25Retriever | HybridRetriev
         )
         if settings.enable_faiss_consistency_check:
             check_faiss_sql_consistency(doc_ids, faiss_storage)
-        dense = DenseFaissRetriever(
-            embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo
+        dense = DenseFaissRetriever(embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo)
+        sparse = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+        logger.info(
+            f"Using HybridRetriever (dense+bm25) (docs: {len(doc_ids)}, alpha: {settings.hybrid_retrieval_alpha})"
         )
-        sparse = SparseBM25Retriever(
-            documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
-        )
-        logger.info(f"Using HybridRetriever (dense+bm25) (docs: {len(doc_ids)}, alpha: {settings.hybrid_retrieval_alpha})")
         return HybridRetriever(dense=dense, sparse=sparse, alpha=settings.hybrid_retrieval_alpha)
     else:
         logger.error(f"Unsupported retrieval_mode: {settings.retrieval_mode}")

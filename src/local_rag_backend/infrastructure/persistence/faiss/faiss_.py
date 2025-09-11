@@ -20,7 +20,9 @@ class FaissVectorStorage(VectorRepoPort):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         self.faiss_index.add_to_index(list(ids), list(vectors))
 
-    def search(self, query_vector: Sequence[float], k: int) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
+    def search(
+        self, query_vector: Sequence[float], k: int
+    ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
         return self.faiss_index.search(query_vector, k)
 
     @property

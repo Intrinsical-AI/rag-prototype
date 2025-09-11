@@ -6,9 +6,13 @@ Cumple los tests:
 * `generate()` construye prompt exactamente como esperan los asserts.
 * Maneja `APIError` y lo convierte a `HTTPException 502`.
 """
+
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 from fastapi import HTTPException
 from openai import OpenAI
@@ -20,23 +24,17 @@ __all__ = ["OpenAIGenerator"]
 
 
 class OpenAIGenerator(GeneratorPort):
-    """Adapter para chat‑completion de OpenAI v1.x"""
+    """Adapter para chat-completion de OpenAI v1.x"""
 
-    def __init__(
-        self, *, model: str | None = None, temperature: float | None = None
-    ) -> None:
+    def __init__(self, *, model: str | None = None, temperature: float | None = None) -> None:
         self.model = model or settings.openai_model
-        self.temperature = (
-            temperature if temperature is not None else settings.openai_temperature
-        )
+        self.temperature = temperature if temperature is not None else settings.openai_temperature
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     # ------------------------------------------------------------------
     def _build_prompt(self, question: str, contexts: Sequence[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
-        return settings.openai_prompt_template.format(
-            context=ctx_block, question=question
-        )
+        return settings.openai_prompt_template.format(context=ctx_block, question=question)
 
     def generate(self, question: str, contexts: Sequence[str]) -> str:
         prompt = self._build_prompt(question, contexts)

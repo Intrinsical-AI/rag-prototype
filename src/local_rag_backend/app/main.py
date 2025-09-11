@@ -1,6 +1,7 @@
 # src/app/main.py
 import logging
 import sys
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)  # logger after de basicConfig
 
 # --- Lifespan Context Manager ---
 @asynccontextmanager
-async def lifespan(_app_instance: FastAPI):
+async def lifespan(_app_instance: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Lifespan startup: Checking/Creating database tables...")
     AppDeclarativeBase.metadata.create_all(bind=global_app_engine)
     logger.info("Lifespan startup: Database tables checked/created.")
@@ -58,9 +59,9 @@ async def read_root(_request: Request) -> HTMLResponse:
             with pkg_index.open("r", encoding="utf-8") as f:
                 html_content = f.read()
             return HTMLResponse(content=html_content, status_code=200)
-    except Exception:
-        # Ignore and fallback to repository frontend
-        pass
+    except Exception as e:
+        # Log error and fallback to repository frontend
+        logger.warning(f"Failed to load packaged frontend: {e}")
 
     # 2) Fallback: serve from repository root (developer mode)
     index_html_path = FRONTEND_DIR / "index.html"
@@ -76,9 +77,7 @@ async def read_root(_request: Request) -> HTMLResponse:
             html_content = f.read()
         return HTMLResponse(content=html_content, status_code=200)
     except Exception as e:
-        logger.error(
-            f"Could not read frontend file {index_html_path}: {e}", exc_info=True
-        )
+        logger.error(f"Could not read frontend file {index_html_path}: {e}", exc_info=True)
         return HTMLResponse(content="<h1>Error serving frontend</h1>", status_code=500)
 
 

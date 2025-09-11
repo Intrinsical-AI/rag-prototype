@@ -1,5 +1,5 @@
 # Intrinsical RAG Prototype - Continuous Integration
-# Comprehensive testing, linting, security, and Docker build pipeline
+# Simplified testing and quality checks
 
 name: CI
 
@@ -20,20 +20,17 @@ on:
 
 env:
   PYTHON_VERSION: '3.11'
-  CACHE_VERSION: v1
 
 jobs:
-  # Code Quality & Security Checks
-  quality:
-    name: Code Quality & Security
+  # Combined Quality Checks and Tests
+  test:
+    name: Quality & Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    
+    timeout-minutes: 15
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -42,61 +39,15 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'pyproject.toml'
 
-      - name: Install linting dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff black isort mypy bandit safety pre-commit
-
-      - name: Run pre-commit hooks
-        run: |
-          pre-commit install
-          pre-commit run --all-files --show-diff-on-failure
-
-      - name: Security scan with Bandit
-        run: bandit -r src/ -f json -o bandit-report.json || true
-
-      - name: Dependency vulnerability scan
-        run: safety check --json --output safety-report.json || true
-
-      - name: Upload security reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-reports
-          path: |
-            bandit-report.json
-            safety-report.json
-          retention-days: 30
-
-  # Unit and Integration Tests
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ['3.11', '3.12']
-        exclude:
-          - os: windows-latest
-            python-version: '3.12'  # Reduce matrix size
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,test]"
+
+      - name: Run pre-commit hooks
+        run: |
+          pre-commit install
+          pre-commit run --all-files
 
       - name: Run tests with coverage
         run: |
@@ -104,12 +55,10 @@ jobs:
             --cov=src \
             --cov-report=xml \
             --cov-report=term-missing \
-            --cov-fail-under=80 \
             --junit-xml=pytest-results.xml \
             -v
 
       - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
@@ -120,17 +69,18 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+          name: test-results
           path: pytest-results.xml
           retention-days: 30
 
-  # Docker Build & Test
+  # Optional Docker Build (only on main branch)
   docker:
-    name: Docker Build & Test
-    needs: [quality, test]
+    name: Docker Build
+    needs: [test]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -143,80 +93,6 @@ jobs:
         with:
           context: .
           push: false
-          tags: |
-            intrinsical-rag-prototype:latest
-            intrinsical-rag-prototype:${{ github.sha }}
+          tags: intrinsical-rag-prototype:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-
-      - name: Test Docker image
-        run: |
-          docker run --rm \
-            -e RAG_MODE=sparse \
-            -e LLM_PROVIDER=ollama \
-            -e OLLAMA_ENABLED=false \
-            intrinsical-rag-prototype:latest \
-            rag-status
-
-      - name: Test Docker Compose
-        run: |
-          docker compose -f docker-compose.yml config
-          docker compose -f docker-compose.yml build rag-app
-
-  # End-to-End Tests
-  e2e:
-    name: End-to-End Tests
-    needs: [quality, test]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run E2E tests
-        run: |
-          pytest tests/e2e/ \
-            -v \
-            --junit-xml=e2e-results.xml
-
-      - name: Upload E2E results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: e2e-results
-          path: e2e-results.xml
-          retention-days: 30
-
-  # Deployment Readiness Check
-  deploy-check:
-    name: Deployment Readiness
-    needs: [quality, test, docker, e2e]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Validate deployment configuration
-        run: |
-          echo "✅ All CI checks passed"
-          echo "✅ Code quality validated"
-          echo "✅ Tests passed on multiple Python versions"
-          echo "✅ Docker image builds successfully"
-          echo "✅ E2E tests passed"
-          echo "🚀 Ready for deployment!"

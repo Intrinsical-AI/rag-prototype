@@ -1,5 +1,6 @@
-import pytest
 from contextlib import suppress
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -11,9 +12,7 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocu
 def in_memory_db(tmp_path):
     # Crea un engine SQLite en disco temporal (evita conflictos de memoria en multihilo)
     db_file = tmp_path / "test.db"
-    engine = create_engine(
-        f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
-    )
+    engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     # Crear tablas

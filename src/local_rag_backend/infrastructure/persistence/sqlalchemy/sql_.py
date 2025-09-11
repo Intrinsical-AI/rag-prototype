@@ -24,6 +24,7 @@ def _new_session_factory_from_settings() -> sessionmaker[Session]:
     Use the global SessionLocal from base.py to avoid duplicate engines.
     """
     from local_rag_backend.infrastructure.persistence.sqlalchemy.base import SessionLocal
+
     return SessionLocal
 
 

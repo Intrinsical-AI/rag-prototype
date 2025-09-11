@@ -11,14 +11,14 @@ if TYPE_CHECKING:
 
 
 class DenseFaissRetriever(RetrieverPort):
-    def __init__(self, embedder: EmbedderPort, faiss_index: "FaissVectorStorage", doc_repo: DocumentRepoPort):
+    def __init__(
+        self, embedder: EmbedderPort, faiss_index: "FaissVectorStorage", doc_repo: DocumentRepoPort
+    ):
         self.embedder = embedder
         self.faiss_index = faiss_index
         self.doc_repo = doc_repo
 
-    def retrieve(
-        self, query: str, k: int = 5
-    ) -> tuple[Sequence[Document], Sequence[float]]:
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
         if k <= 0:
             return [], []
         q_vec = self.embedder.embed([query])[0]

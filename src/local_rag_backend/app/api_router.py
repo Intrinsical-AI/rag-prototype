@@ -4,7 +4,6 @@
 FastAPI router for the application endpoints.
 """
 
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -21,18 +20,14 @@ router = APIRouter()
 
 
 @router.post("/ask", response_model=AskResponse)
-def ask(
-    request: AskRequest, service: RagService = Depends(get_rag_service)
-) -> AskResponse:
+def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> AskResponse:
     rag_result = service.ask(question=request.question, top_k=request.k)
     docs = rag_result["docs"]
     scores = rag_result["scores"]
 
     sources = [
         QueryResult(
-            document=DocumentInDB(
-                id=doc.id, content=doc.content
-            ),  # extiende aquí si hay metadata
+            document=DocumentInDB(id=doc.id, content=doc.content),  # extiende aquí si hay metadata
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)
@@ -42,12 +37,8 @@ def ask(
 
 @router.get("/history", response_model=list[HistoryItem])
 def history(
-    limit: int = Query(
-        10, ge=1, le=100, description="Max number of history items to retrieve"
-    ),
-    offset: int = Query(
-        0, ge=0, description="Number of items to skip (useful for pagination)"
-    ),
+    limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
+    offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
     db: Session = Depends(get_db),
 ) -> list[HistoryItem]:
     """
@@ -69,7 +60,8 @@ def history(
             question=entry.question,
             answer=entry.answer,
             created_at=(
-                entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat")
+                entry.created_at.isoformat()
+                if hasattr(entry.created_at, "isoformat")
                 else str(entry.created_at)
             ),
             source_ids=entry.source_ids or [],

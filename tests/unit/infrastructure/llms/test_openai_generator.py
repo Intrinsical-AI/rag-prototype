@@ -15,9 +15,7 @@ def make_dummy_openai(should_raise=False):
                 raise Exception("boom")
 
             class DummyResp:
-                choices = [
-                    type("Msg", (), {"message": type("Cont", (), {"content": "OK"})()})
-                ]
+                choices = [type("Msg", (), {"message": type("Cont", (), {"content": "OK"})()})]
 
             return DummyResp()
 

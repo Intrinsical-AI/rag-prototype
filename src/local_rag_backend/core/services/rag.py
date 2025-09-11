@@ -7,9 +7,7 @@ from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, Retriever
 
 
 class RagService:
-    def __init__(
-        self, retriever: RetrieverPort, generator: GeneratorPort, history: QAHistoryPort
-    ):
+    def __init__(self, retriever: RetrieverPort, generator: GeneratorPort, history: QAHistoryPort):
         self.retriever = retriever
         self.generator = generator
         self.history = history

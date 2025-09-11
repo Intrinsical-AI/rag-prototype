@@ -26,7 +26,12 @@ def cli() -> None:
 @click.option("--host", default=None, help="Host IP address")
 @click.option("--port", default=None, type=int, help="Port number")
 @click.option("--reload/--no-reload", default=None, help="Enable auto-reload")
-@click.option("--log-level", default=None, type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]), help="Log level")
+@click.option(
+    "--log-level",
+    default=None,
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    help="Log level",
+)
 def server(host: str | None, port: int | None, reload: bool | None, log_level: str | None) -> None:
     """Start the RAG FastAPI server."""
     # Use CLI args or fall back to settings
@@ -45,7 +50,7 @@ def server(host: str | None, port: int | None, reload: bool | None, log_level: s
         host=server_host,
         port=server_port,
         reload=server_reload,
-        log_level=server_log_level
+        log_level=server_log_level,
     )
 
 

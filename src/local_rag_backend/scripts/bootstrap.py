@@ -2,6 +2,7 @@
 
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 # IMPORTS PARA BD DINÁMICA
 from sqlalchemy import create_engine
@@ -11,8 +12,8 @@ from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.ingestion import (
     IngestionPipeline,
     default_chunker,
-    default_preprocess,
     default_formatter,
+    default_preprocess,
 )
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -27,23 +28,22 @@ from local_rag_backend.settings import settings as default_settings
 DELIMITER = ";"
 
 
-def main(settings=None) -> None:
-    if settings is None:
-        settings = default_settings
+def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
+    if "settings" not in kwargs:
+        kwargs["settings"] = default_settings
+    settings = kwargs["settings"]
     # 1) Creamos engine y sesión basados en la URL actualizada
-    engine = create_engine(
-        settings.sqlite_url, connect_args={"check_same_thread": False}
-    )
-    SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
+    session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
     # 2) Determine CSV path (local first, then packaged)
-    csv_path = Path(settings.faq_csv)
-    if not csv_path.is_file():
+    csv_path_obj = Path(settings.faq_csv) if csv_path is None else Path(csv_path)
+    if not csv_path_obj.is_file():
         pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
-        csv_path = Path(pkg_csv)
+        csv_path_obj = Path(str(pkg_csv))
 
-    doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
+    doc_repo = SqlDocumentStorage(session_factory=session_local)
 
     if settings.retrieval_mode in ["dense", "hybrid"]:
         embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
@@ -53,28 +53,28 @@ def main(settings=None) -> None:
             dim=embedder.dim,
         )
         etl = ETLService(doc_repo, vector_repo, embedder)
-        loader = CSVLoader(csv_path, delimiter=DELIMITER, has_header=settings.csv_has_header)
+        loader = CSVLoader(csv_path_obj, delimiter=DELIMITER, has_header=settings.csv_has_header)
         pipeline = IngestionPipeline(
-            loader, 
+            loader,
             etl,
-            chunk=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+            chunk=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap),
         )
-        ids = pipeline.run()
-        print(f"[OK] Ingested {len(ids)} docs into SQL and FAISS.")
+        chunk_ids = pipeline.run()
+        print(f"[OK] Ingested {len(chunk_ids)} docs into SQL and FAISS.")
     else:
         # modo sparse: aplicar el mismo flujo de preprocesado + chunking + formateo,
         # pero almacenando únicamente en SQL (sin embeddings / FAISS)
-        loader = CSVLoader(csv_path, delimiter=DELIMITER, has_header=settings.csv_has_header)
+        loader = CSVLoader(csv_path_obj, delimiter=DELIMITER, has_header=settings.csv_has_header)
         chunk = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
 
         buf: list[str] = []
         ids: list[int] = []
-        BATCH = 128
+        batch = 128
         for item in loader.load():
-            clean = default_preprocess(item.text, item.metadata or None)
-            for c in chunk(clean):
-                buf.append(default_formatter(c, item.metadata or None))
-                if len(buf) >= BATCH:
+            clean = default_preprocess(item.text, dict(item.metadata) if item.metadata else None)
+            for c in chunk(clean, dict(item.metadata) if item.metadata else None):
+                buf.append(default_formatter(c, dict(item.metadata) if item.metadata else None))
+                if len(buf) >= batch:
                     ids += list(doc_repo.store_documents(buf))
                     buf.clear()
         if buf:

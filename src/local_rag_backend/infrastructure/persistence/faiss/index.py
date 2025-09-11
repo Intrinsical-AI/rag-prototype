@@ -1,11 +1,10 @@
-import pickle
+import pickle  # nosec B403
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import faiss
 import numpy as np
-from typing import cast
-
 from numpy.typing import NDArray
 
 
@@ -23,7 +22,7 @@ class FaissIndex:
             self.index = faiss.IndexFlatL2(self.dim)
         if self.id_map_path.exists():
             with self.id_map_path.open("rb") as f:
-                self.id_map = cast(list[int], pickle.load(f))
+                self.id_map = cast(list[int], pickle.load(f))  # nosec B301, noqa: S301
         else:
             self.id_map = []
 
@@ -31,14 +30,14 @@ class FaissIndex:
         vectors = np.asarray(embeddings, dtype="float32")
         # Validate dimensionality matches index.d to avoid FAISS errors later
         if vectors.ndim != 2 or vectors.shape[1] != self.index.d:
-            raise ValueError(
-                f"FAISS dim mismatch: index {self.index.d} vs vectors {vectors.shape}"
-            )
+            raise ValueError(f"FAISS dim mismatch: index {self.index.d} vs vectors {vectors.shape}")
         self.index.add(vectors)
         self.id_map.extend(ids)
         self.save()
 
-    def search(self, query_vector: Sequence[float], k: int) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
+    def search(
+        self, query_vector: Sequence[float], k: int
+    ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
         vectors = np.asarray([query_vector], dtype="float32")
         scores, idxs = self.index.search(vectors, k)
         return idxs[0], scores[0]

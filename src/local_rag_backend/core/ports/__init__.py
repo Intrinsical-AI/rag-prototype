@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence, Iterable
+    from collections.abc import Iterable, Sequence
 
     from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
 
@@ -23,9 +23,7 @@ class GeneratorPort(Protocol):
 
 @runtime_checkable
 class RetrieverPort(Protocol):
-    def retrieve(
-        self, query: str, k: int = 5
-    ) -> tuple[Sequence[Document], Sequence[float]]: ...
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
 
 
 @runtime_checkable

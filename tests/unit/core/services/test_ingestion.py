@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import Mock
 
 from local_rag_backend.core.domain.entities import LoadedItem
@@ -42,7 +41,7 @@ def test_default_chunker_with_split():
     chunker = default_chunker(max_chars=10, overlap=3)
     text = "This is a long text that needs chunking"
     result = chunker(text)
-    
+
     assert len(result) > 1
     assert all(len(chunk) <= 10 for chunk in result)
     # Check overlap
@@ -72,10 +71,10 @@ def test_ingestion_pipeline_single_item():
     items = [LoadedItem(text="Test content", metadata={"title": "Test"})]
     loader = DummyLoader(items)
     etl = DummyETL()
-    
+
     pipeline = IngestionPipeline(loader, etl, batch_size=1)
     ids = pipeline.run()
-    
+
     assert len(ids) == 1
     assert len(etl.ingested_texts) == 1
     assert "Title: Test" in etl.ingested_texts[0]
@@ -89,25 +88,22 @@ def test_ingestion_pipeline_multiple_items():
     ]
     loader = DummyLoader(items)
     etl = DummyETL()
-    
+
     pipeline = IngestionPipeline(loader, etl, batch_size=2)
     ids = pipeline.run()
-    
+
     assert len(ids) == 2
     assert len(etl.ingested_texts) == 2
 
 
 def test_ingestion_pipeline_batching():
-    items = [
-        LoadedItem(text=f"Content {i}", metadata={"title": f"Title {i}"})
-        for i in range(5)
-    ]
+    items = [LoadedItem(text=f"Content {i}", metadata={"title": f"Title {i}"}) for i in range(5)]
     loader = DummyLoader(items)
     etl = DummyETL()
-    
+
     pipeline = IngestionPipeline(loader, etl, batch_size=2)
     ids = pipeline.run()
-    
+
     assert len(ids) == 5
     assert len(etl.ingested_texts) == 5
 
@@ -118,11 +114,11 @@ def test_ingestion_pipeline_chunking():
     items = [LoadedItem(text=long_text, metadata=None)]
     loader = DummyLoader(items)
     etl = DummyETL()
-    
+
     chunker = default_chunker(max_chars=30, overlap=5)
     pipeline = IngestionPipeline(loader, etl, chunk=chunker)
     ids = pipeline.run()
-    
+
     # Should create multiple chunks
     assert len(etl.ingested_texts) > 1
     assert all(len(text) <= 30 for text in etl.ingested_texts)
@@ -132,19 +128,16 @@ def test_ingestion_pipeline_custom_functions():
     items = [LoadedItem(text="test", metadata={"key": "value"})]
     loader = DummyLoader(items)
     etl = DummyETL()
-    
+
     preprocess_mock = Mock(return_value="processed")
     chunk_mock = Mock(return_value=["chunk1", "chunk2"])
     format_mock = Mock(return_value="formatted")
-    
+
     pipeline = IngestionPipeline(
-        loader, etl,
-        preprocess=preprocess_mock,
-        chunk=chunk_mock,
-        format_chunk=format_mock
+        loader, etl, preprocess=preprocess_mock, chunk=chunk_mock, format_chunk=format_mock
     )
     ids = pipeline.run()
-    
+
     preprocess_mock.assert_called_once_with("test", {"key": "value"})
     chunk_mock.assert_called_once_with("processed")
     assert format_mock.call_count == 2  # Called for each chunk
@@ -154,9 +147,9 @@ def test_ingestion_pipeline_custom_functions():
 def test_ingestion_pipeline_empty_loader():
     loader = DummyLoader([])
     etl = DummyETL()
-    
+
     pipeline = IngestionPipeline(loader, etl)
     ids = pipeline.run()
-    
+
     assert ids == []
     assert etl.ingested_texts == []

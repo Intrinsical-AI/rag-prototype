@@ -66,9 +66,7 @@ def test_get_retriever_selects_correct_class(monkeypatch, mode, patched_class_na
     # Parcheamos sobre factory las clases concretas
     monkeypatch.setattr(settings, "retrieval_mode", mode, raising=False)
     monkeypatch.setattr(settings, "enable_faiss_consistency_check", False, raising=False)
-    monkeypatch.setattr(
-        factory, "SqlDocumentStorage", lambda: DummySqlDocumentStorage()
-    )
+    monkeypatch.setattr(factory, "SqlDocumentStorage", lambda: DummySqlDocumentStorage())
     monkeypatch.setattr(factory, "DenseFaissRetriever", lambda *a, **k: "DENSE")
     monkeypatch.setattr(factory, "SparseBM25Retriever", lambda *a, **k: "SPARSE")
     monkeypatch.setattr(factory, "HybridRetriever", lambda *a, **k: "HYBRID")

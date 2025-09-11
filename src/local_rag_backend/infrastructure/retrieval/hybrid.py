@@ -14,9 +14,7 @@ class HybridRetriever(RetrieverPort):
         self.sparse = sparse
         self.alpha = alpha
 
-    def retrieve(
-        self, query: str, k: int = 5
-    ) -> tuple[Sequence[Document], Sequence[float]]:
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
         dense_docs, dense_scores = self.dense.retrieve(query, k)
         sparse_docs, sparse_scores = self.sparse.retrieve(query, k)
 
@@ -33,9 +31,7 @@ class HybridRetriever(RetrieverPort):
         for doc_id in all_ids:
             d_score = dense_map.get(doc_id, (None, 0.0))[1]
             s_score = sparse_map.get(doc_id, (None, 0.0))[1]
-            doc = (
-                dense_map.get(doc_id, (None,))[0] or sparse_map.get(doc_id, (None,))[0]
-            )
+            doc = dense_map.get(doc_id, (None,))[0] or sparse_map.get(doc_id, (None,))[0]
             if doc:
                 score = (1 - self.alpha) * d_score + self.alpha * s_score
                 combined.append((doc, score))

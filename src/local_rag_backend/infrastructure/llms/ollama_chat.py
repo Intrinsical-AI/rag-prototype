@@ -1,10 +1,9 @@
 # src/adapters/generation/ollama_chat.py
 import logging
+from collections.abc import Sequence
 
 import requests
 from fastapi import HTTPException
-
-from collections.abc import Sequence
 
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.settings import (  # settings.ollama_base_url y settings.ollama_request_timeout exists
@@ -17,10 +16,7 @@ logger = logging.getLogger(__name__)
 class OllamaGenerator(GeneratorPort):
     def generate(self, question: str, contexts: Sequence[str]) -> str:
         ctx_block = "\n".join(f"- {c}" for c in contexts)
-        full_prompt = settings.ollama_prompt_template.format(
-            context=ctx_block,
-            question=question
-        )
+        full_prompt = settings.ollama_prompt_template.format(context=ctx_block, question=question)
 
         payload = {
             "model": settings.ollama_model,
@@ -33,9 +29,7 @@ class OllamaGenerator(GeneratorPort):
         api_url = f"{base_url}/api/generate"
 
         try:
-            response = requests.post(
-                api_url, json=payload, timeout=settings.ollama_request_timeout
-            )
+            response = requests.post(api_url, json=payload, timeout=settings.ollama_request_timeout)
             response.raise_for_status()  # HTTP codes 4xx/5xx
 
             response_data = response.json()
@@ -46,9 +40,7 @@ class OllamaGenerator(GeneratorPort):
             #   "model": "...", "created_at": "...", "response": "...", "done": true,
             #   "context": [...], "total_duration": ..., ...
             # }
-            if "response" in response_data and isinstance(
-                response_data["response"], str
-            ):
+            if "response" in response_data and isinstance(response_data["response"], str):
                 return response_data["response"].strip()
             else:
                 # logger.warning(f"Ollama response malformed. Data: {response_data}")
@@ -69,17 +61,13 @@ class OllamaGenerator(GeneratorPort):
         except requests.exceptions.HTTPError as err:
             error_content = err.response.text if err.response is not None else str(err)
             status_code = err.response.status_code if err.response is not None else 500
-            raise HTTPException(
-                status_code, detail=f"Ollama API error: {error_content}"
-            ) from err
+            raise HTTPException(status_code, detail=f"Ollama API error: {error_content}") from err
         except requests.exceptions.JSONDecodeError as err:
             # logger.error(f"Failed to decode Ollama JSON response. Status: {response.status_code}, Content: {response.text}")
             raise HTTPException(
                 500,
-                detail=f"Failed to decode Ollama JSON response. Original error: {str(err)}",
+                detail=f"Failed to decode Ollama JSON response. Original error: {err!s}",
             ) from err
         except Exception as e:
             # logger.exception("Unexpected error during Ollama call") # Log con traceback
-            raise HTTPException(
-                500, detail=f"Unexpected error during Ollama call: {str(e)}"
-            ) from e
+            raise HTTPException(500, detail=f"Unexpected error during Ollama call: {e!s}") from e
