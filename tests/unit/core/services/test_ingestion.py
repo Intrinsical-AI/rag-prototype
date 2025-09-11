@@ -139,7 +139,7 @@ def test_ingestion_pipeline_custom_functions():
     ids = pipeline.run()
 
     preprocess_mock.assert_called_once_with("test", {"key": "value"})
-    chunk_mock.assert_called_once_with("processed")
+    chunk_mock.assert_called_once_with("processed", {"key": "value"})
     assert format_mock.call_count == 2  # Called for each chunk
     assert len(etl.ingested_texts) == 2
 

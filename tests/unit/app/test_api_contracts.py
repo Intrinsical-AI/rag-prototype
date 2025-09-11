@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from local_rag_backend.app.main import app
 
 
-def test_ask_rejects_k_out_of_range() -> None:
+def test_ask_rejects_k_out_of_range(in_memory_sqlite) -> None:
     """Test that /api/ask rejects k values outside valid range [1, 10]."""
     client = TestClient(app)
 
@@ -28,7 +28,7 @@ def test_ask_rejects_k_out_of_range() -> None:
     assert response.status_code == 200
 
 
-def test_ask_accepts_empty_question() -> None:
+def test_ask_accepts_empty_question(in_memory_sqlite) -> None:
     """Test that /api/ask accepts empty questions (handled by business logic)."""
     client = TestClient(app)
 
@@ -41,7 +41,7 @@ def test_ask_accepts_empty_question() -> None:
     assert response.status_code == 200
 
 
-def test_history_limit_offset_bounds() -> None:
+def test_history_limit_offset_bounds(in_memory_sqlite) -> None:
     """Test that /api/history validates limit and offset parameters."""
     client = TestClient(app)
 
@@ -69,7 +69,7 @@ def test_history_limit_offset_bounds() -> None:
     assert response.status_code == 200
 
 
-def test_ask_missing_required_fields() -> None:
+def test_ask_missing_required_fields(in_memory_sqlite) -> None:
     """Test that /api/ask requires question field but k has default."""
     client = TestClient(app)
 
@@ -86,7 +86,7 @@ def test_ask_missing_required_fields() -> None:
     assert response.status_code == 422
 
 
-def test_ask_invalid_json() -> None:
+def test_ask_invalid_json(in_memory_sqlite) -> None:
     """Test that /api/ask handles invalid JSON gracefully."""
     client = TestClient(app)
 
@@ -97,7 +97,7 @@ def test_ask_invalid_json() -> None:
     assert response.status_code == 422
 
 
-def test_history_invalid_parameter_types() -> None:
+def test_history_invalid_parameter_types(in_memory_sqlite) -> None:
     """Test that /api/history validates parameter types."""
     client = TestClient(app)
 
