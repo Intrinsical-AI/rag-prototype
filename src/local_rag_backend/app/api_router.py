@@ -1,18 +1,34 @@
-# src/app/api_router.py
+# src/local_rag_backend/app/api_router.py
 
 """
 FastAPI router for the application endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Annotated, Any
+
+import requests
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from local_rag_backend.app.dependencies import get_rag_service
+from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+    SentenceTransformerEmbedder,
+)
+from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
 from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
+from local_rag_backend.infrastructure.persistence.sqlalchemy.models import (
+    Document as DbDocument,
+)
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+    SqlDocumentStorage,
+)
 from local_rag_backend.models import AskRequest, AskResponse, DocumentInDB, HistoryItem, QueryResult
+from local_rag_backend.settings import settings
 
 router = APIRouter()
 
@@ -56,6 +72,25 @@ def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str,
         return {"status": "ready"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Readiness check failed: {e!s}")
+
+
+@router.get("/health/ollama", tags=["Health"], summary="Ollama server health check")
+def ollama_health_check() -> dict[str, Any]:
+    """
+    Checks if the Ollama server is running and accessible.
+
+    Returns:
+        dict: A dictionary with the status of the Ollama server.
+    """
+    try:
+        response = requests.get(settings.ollama_base_url, timeout=5)
+        response.raise_for_status()
+        return {"status": "ok", "url": settings.ollama_base_url}
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama server not accessible at {settings.ollama_base_url}. Error: {e}",
+        )
 
 
 # ---------------------- API Endpoints ---------------------- #
@@ -115,3 +150,49 @@ def history(
         )
         for entry in history_entries
     ]
+
+
+# --- DOCS API (minimal KB) ---
+
+
+@router.get("/docs", response_model=list[DocumentInDB])
+def list_docs(
+    limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    db: Session = Depends(get_db),
+) -> list[DocumentInDB]:
+    docs = db.query(DbDocument).order_by(DbDocument.id.asc()).offset(offset).limit(limit).all()
+    return [DocumentInDB.model_validate(d) for d in docs]
+
+
+class IngestRequest(BaseModel):
+    texts: list[str] = Field(..., min_length=1, description="Raw texts to ingest")
+
+
+class IngestResponse(BaseModel):
+    count: int
+    ids: list[int]
+
+
+@router.post("/docs", response_model=IngestResponse)
+def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestResponse:
+    texts = [t.strip() for t in payload.texts if t and t.strip()]
+    if not texts:
+        return IngestResponse(count=0, ids=[])
+
+    # Repos
+    doc_repo = SqlDocumentStorage()
+
+    if settings.retrieval_mode in ("dense", "hybrid"):
+        embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        vec = FaissVectorStorage(
+            index_path=settings.index_path,
+            id_map_path=settings.id_map_path,
+            dim=embedder.dim,
+        )
+        etl = ETLService(doc_repo, vec, embedder)
+        ids = list(etl.ingest(texts))
+    else:
+        ids = list(doc_repo.store_documents(texts))
+
+    return IngestResponse(count=len(ids), ids=ids)

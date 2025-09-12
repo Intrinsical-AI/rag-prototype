@@ -101,6 +101,7 @@ rag-bootstrap
 # FastAPI server
 rag-server
 # UI: http://localhost:8000/
+# Ollama healthcheck: http://localhost:8000/api/health/
 # Docs: http://localhost:8000/docs
 ```
 
