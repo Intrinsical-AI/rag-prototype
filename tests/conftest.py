@@ -42,7 +42,7 @@ def in_memory_sqlite(monkeypatch):
     finally:
         # Ensure all sessions are closed
         with suppress(Exception):
-            TestingSessionLocal.close_all()
+            TestingSessionLocal.close_all_sessions()
         # Dispose engine to close underlying connection and avoid ResourceWarning
         engine.dispose()
 
