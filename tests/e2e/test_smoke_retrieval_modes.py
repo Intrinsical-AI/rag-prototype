@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from local_rag_backend.app.main import app
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.infrastructure.persistence.faiss.index import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base, engine
 from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import create_document
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import DocumentModel
@@ -121,15 +121,21 @@ def test_dense_retrieval_smoke(temp_db, temp_faiss_index, sample_documents):
         with patch.object(settings, 'index_path', temp_index_path):
             with patch.object(settings, 'id_map_path', temp_id_map_path):
 
-                # Initialize vector storage and add documents
-                vector_storage = FaissVectorStorage()
+                # Initialize vector storage with correct parameters
+                vector_storage = FaissVectorStorage(
+                    index_path=temp_index_path,
+                    id_map_path=temp_id_map_path,
+                    dim=384
+                )
 
-                # Add documents to FAISS index
-                for doc in sample_documents:
-                    vector_storage.add_document(doc)
+                # Add documents to FAISS index using correct API
+                # We need embeddings for the documents, so let's create dummy ones
+                import numpy as np
+                dummy_embeddings = [np.random.rand(384).tolist() for _ in sample_documents]
+                doc_ids = [doc.id for doc in sample_documents]
 
-                # Save the index
-                vector_storage.save()
+                # Use upsert method which is the correct API
+                vector_storage.upsert(doc_ids, dummy_embeddings)
 
                 # Test dense retrieval
                 with patch.object(settings, 'retrieval_mode', 'dense'):
