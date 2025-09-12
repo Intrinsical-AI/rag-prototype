@@ -116,7 +116,7 @@ def bootstrap() -> None:
     type=click.Choice(["mtime", "hash"]),
     default="mtime",
     show_default=True,
-    help="Strategy to detect changes: modified time (fast) or SHA1 hash (robust)",
+    help="Strategy to detect changes: modified time (fast) or content hash (robust)",
 )
 @click.option(
     "--state-path",
@@ -146,9 +146,7 @@ def ingest_files(
     from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
         SentenceTransformerEmbedder,
     )
-
-    # Type ignore needed because loaders are dynamically added to __all__
-    from local_rag_backend.infrastructure.ingestion.loaders import (  # type: ignore[attr-defined]
+    from local_rag_backend.infrastructure.ingestion.loaders import (
         DirectoryLoader,
         UniqueLoader,
     )
@@ -186,7 +184,7 @@ def ingest_files(
     def _get_old_hash(key: str) -> str | None:
         val = old_state_raw.get(key)
         if isinstance(val, dict):
-            h = val.get("sha1")
+            h = val.get("hash")
             return str(h) if h is not None else None
         return None
 
@@ -224,7 +222,7 @@ def ingest_files(
         click.echo("i  No files changed since last run (incremental enabled). Nothing to ingest.")
         return
 
-    loader = DirectoryLoader(root, files=files_to_process)
+    loader: DirectoryLoader | UniqueLoader = DirectoryLoader(root, files=files_to_process)
     if dedup:
         loader = UniqueLoader(loader)
     doc_repo = SqlDocumentStorage()
@@ -262,22 +260,22 @@ def ingest_files(
         new_state: dict[str, dict] = {}  # type: ignore
         for k, v in old_state_raw.items():
             if isinstance(v, dict):
-                new_state[k] = {"mtime": float(v.get("mtime", 0.0)), "sha1": str(v.get("sha1", ""))}
+                new_state[k] = {"mtime": float(v.get("mtime", 0.0)), "hash": str(v.get("hash", ""))}
             elif isinstance(v, int | float):
-                new_state[k] = {"mtime": float(v), "sha1": new_state.get(k, {}).get("sha1", "")}
+                new_state[k] = {"mtime": float(v), "hash": new_state.get(k, {}).get("hash", "")}
 
         # update only processed files
         for p in files_to_process:
             key = str(p.resolve())
             try:
                 mtime = Path(p).stat().st_mtime
-                sha1 = computed_hash.get(key)
-                if sha1 is None and incremental_strategy == "hash":
+                hash = computed_hash.get(key)
+                if hash is None and incremental_strategy == "hash":
                     # compute if missing
-                    sha1 = _sha256(Path(p))
+                    hash = _sha256(Path(p))
                 new_state[key] = {
                     "mtime": float(mtime),
-                    "sha1": sha1 or new_state.get(key, {}).get("sha1", ""),
+                    "hash": hash or new_state.get(key, {}).get("hash", ""),
                 }
             except Exception as e:
                 logger.warning("Failed to process file %s: %s", p, str(e))
@@ -323,9 +321,7 @@ def ingest_web(
     from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
         SentenceTransformerEmbedder,
     )
-
-    # Type ignore needed because loaders are dynamically added to __all__
-    from local_rag_backend.infrastructure.ingestion.loaders import (  # type: ignore[attr-defined]
+    from local_rag_backend.infrastructure.ingestion.loaders import (
         UniqueLoader,
         WebPageLoader,
     )
@@ -350,7 +346,7 @@ def ingest_web(
         click.echo("❌ Debes proporcionar al menos una URL con --url o --from-file", err=True)
         sys.exit(2)
 
-    loader = WebPageLoader(url_list, timeout=timeout, workers=workers)
+    loader: WebPageLoader | UniqueLoader = WebPageLoader(url_list, timeout=timeout, workers=workers)
     if dedup:
         loader = UniqueLoader(loader)
     doc_repo = SqlDocumentStorage()
@@ -433,39 +429,44 @@ def health_cmd() -> None:
 
 
 # Entry point functions for setuptools
+def _run_cli(args: list[str]) -> None:
+    """Helper to run CLI with proper argument parsing."""
+    cli.main(args=args, standalone_mode=False)
+
+
 def rag_server() -> None:
     """Entry point for rag-server command."""
-    cli(["server", *sys.argv[1:]])
+    _run_cli(["server", *sys.argv[1:]])
 
 
 def rag_build_index() -> None:
     """Entry point for rag-build-index command."""
-    cli(["build-index", *sys.argv[1:]])
+    _run_cli(["build-index", *sys.argv[1:]])
 
 
 def rag_bootstrap() -> None:
     """Entry point for rag-bootstrap command."""
-    cli(["bootstrap", *sys.argv[1:]])
+    _run_cli(["bootstrap", *sys.argv[1:]])
 
 
 def rag_ingest_files() -> None:
     """Entry point for rag-ingest-files command."""
-    cli(["ingest-files", *sys.argv[1:]])
+    _run_cli(["ingest-files", *sys.argv[1:]])
 
 
 def rag_ingest_web() -> None:
     """Entry point for rag-ingest-web command."""
-    cli(["ingest-web", *sys.argv[1:]])
+    _run_cli(["ingest-web", *sys.argv[1:]])
 
 
 def rag_health() -> None:
     """Entry point for rag-health command."""
-    cli(["health", *sys.argv[1:]])
+    _run_cli(["health", *sys.argv[1:]])
 
 
 def rag_status() -> None:
     """Entry point for rag-status command."""
-    cli(["status", *sys.argv[1:]])
+    _run_cli(["status", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

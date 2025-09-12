@@ -3,7 +3,7 @@ name = "intrinsical-rag-prototype"
 version = "1.0.0"
 description = "Enterprise-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }
@@ -30,7 +30,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -113,10 +112,14 @@ docs = [
     "mkdocs-mermaid2-plugin>=1.1,<2.0",
     "mkdocs-include-markdown-plugin>=6.0,<7.0",
 ]
+loaders = [
+    "trafilatura>=1.7,<2.0",
+]
 performance = [
     # NOTE: faiss-cpu is included in base deps. Do NOT install faiss-gpu together with faiss-cpu.
     # If you target GPU, uninstall faiss-cpu first and install this extra on Linux only.
-    "faiss-gpu>=1.8.0,<2.0; platform_system!='Windows'",  # GPU acceleration (align with CPU)
+    # Temporarily disabled faiss-gpu due to Windows compatibility issues
+    # "faiss-gpu>=1.8.0,<2.0; platform_system!='Windows'",  # GPU acceleration (align with CPU)
     "torch>=2.0,<3.0",  # PyTorch for advanced models
 ]
 monitoring = [
@@ -147,6 +150,7 @@ all = [
     "prometheus-client>=0.19,<1.0",
     "structlog>=23.0,<24.0",
     "sentry-sdk[fastapi]>=1.40,<2.0",
+    "trafilatura>=1.7,<2.0",
 ]
 
 [project.urls]
@@ -167,6 +171,10 @@ rag-status = "local_rag_backend.cli:rag_status"
 rag-dev = "local_rag_backend.cli:rag_dev"
 rag-health = "local_rag_backend.cli:rag_health"
 rag-migrate = "local_rag_backend.cli:rag_migrate"
+
+# New ingestion and health wrappers
+rag-ingest-files = "local_rag_backend.cli:rag_ingest_files"
+rag-ingest-web = "local_rag_backend.cli:rag_ingest_web"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

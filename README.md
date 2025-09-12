@@ -69,6 +69,7 @@
 * Python 3.11+
 * Operating system: Linux / macOS / Windows
 * For dense/hybrid mode: `faiss` and `sentence_transformers` (installed as extras or manually)
+* For web ingestion: optional extra `loaders` (installs `trafilatura`)
 
 ---
 
@@ -85,6 +86,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # Install the package (add extras if you want faiss/sentence_transformers)
 pip install -e .
+
+# (Optional) Web ingestion support (trafilatura)
+# pip install -e ".[loaders]"
 
 
 # (Optional) Install development dependencies
@@ -175,6 +179,18 @@ rag-build-index
 
 # Summarized system and files status
 rag-status
+
+
+# Ingest from filesystem (patterns, optional dedup & incremental)
+rag-ingest-files --root ./docs --pattern "**/*.md" --pattern "**/*.txt"
+
+
+# Ingest from web (requires extra [loaders])
+rag-ingest-web --url https://example.com --url https://example.org
+
+
+# Health check (wires RAG service like the API would)
+rag-health
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
@@ -205,6 +221,92 @@ curl -X POST "http://localhost:8000/api/ask" \
   -H "Content-Type: application/json" \
   -d '{"question": "What is RAG?", "k": 3}'
 ```
+
+---
+
+## Filesystem and Web ingestion via CLI
+
+These commands ingest and index content end-to-end using the same preprocessing/chunking as the CSV bootstrap.
+
+#### Filesystem examples
+
+```bash
+# Basic: all markdown and text files under a directory
+rag-ingest-files --root ./docs
+
+# Custom patterns (repeatable)
+rag-ingest-files --root . --pattern "**/*.md" --pattern "**/*.txt" --pattern "**/*.rst"
+
+# Disable in-run deduplication
+rag-ingest-files --root ./notes --no-dedup
+
+# Incremental ingestion (default): skips unchanged files using a state file
+rag-ingest-files --root ./knowledge --state-path data/.ingest_state.json
+
+# Incremental based on content hash (robust, slightly slower)
+rag-ingest-files --root ./knowledge --incremental-strategy hash
+```
+
+Notes:
+
+* Deduplication is per-run and in-memory (same text within this run is skipped). It does not persist across runs.
+* Incremental state is stored as JSON (default `data/.ingest_state.json`) with per-file `mtime` and `sha1` (if hash strategy). Delete the file to force full re-ingestion.
+
+#### Web ingestion examples (requires extra [loaders])
+
+```bash
+# Install optional dependency
+pip install -e ".[loaders]"
+
+# Single or multiple URLs
+rag-ingest-web --url https://en.wikipedia.org/wiki/Retrieval-augmented_generation \
+               --url https://en.wikipedia.org/wiki/Vector_space_model
+
+# From a file (one URL per line)
+rag-ingest-web --from-file urls.txt
+
+# Increase concurrency
+rag-ingest-web --from-file urls.txt --workers 8
+
+# Disable in-run deduplication
+rag-ingest-web --from-file urls.txt --no-dedup
+```
+
+#### Quickstart: Wikipedia/blog
+
+```bash
+cat > urls.txt << 'EOF'
+https://en.wikipedia.org/wiki/Retrieval-augmented_generation
+https://en.wikipedia.org/wiki/Vector_space_model
+https://en.wikipedia.org/wiki/FAISS
+EOF
+
+pip install -e ".[loaders]"
+rag-ingest-web --from-file urls.txt --workers 6
+
+# Start the API and ask a question
+rag-server --reload
+curl -s -X POST "http://localhost:8000/api/ask" -H 'Content-Type: application/json' \
+  -d '{"question": "What is FAISS and how is it used in RAG?", "k": 3}' | jq
+```
+
+---
+
+## Troubleshooting (ingestion)
+
+* Trafilatura missing (web ingestion): install the optional extra
+  - `pip install -e ".[loaders]"`
+  - Error message: `trafilatura is not installed. Install the 'loaders' extra: pip install intrinsical-rag-prototype[loaders]`
+* Windows: SentenceTransformers may require Microsoft Visual C++ Redistributable
+  - Ensure it is installed if you see DLL-related errors when using dense/hybrid retrieval
+* FAISS vs CPU/GPU
+  - The project uses `faiss-cpu` by default. Do not install `faiss-gpu` simultaneously. See `[project.optional-dependencies].performance` in `pyproject.toml` for GPU notes
+* Network environments
+  - `rag-ingest-web` performs HTTP requests; configure proxies via standard environment variables if needed
+  - Use `--timeout` to adjust request timeouts
+* Reset incremental state
+  - Delete `data/.ingest_state.json` (or your custom `--state-path`) to force a full re-ingestion
+  - Switch strategy with `--incremental-strategy mtime|hash`
 
 ---
 

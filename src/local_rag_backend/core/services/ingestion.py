@@ -13,6 +13,10 @@ def default_preprocess(text: str, metadata: dict[str, Any] | None = None) -> str
 def default_chunker(
     max_chars: int = 1000, overlap: int = 100
 ) -> Callable[[str, dict[str, Any] | None], list[str]]:
+    if overlap >= max_chars:
+        # Clamp overlap to prevent infinite loop
+        overlap = max_chars - 1
+
     def _chunk(t: str, metadata: dict[str, Any] | None = None) -> list[str]:  # noqa: ARG001
         if len(t) <= max_chars:
             return [t]

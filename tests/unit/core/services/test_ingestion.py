@@ -120,6 +120,7 @@ def test_ingestion_pipeline_chunking():
     ids = pipeline.run()
 
     # Should create multiple chunks
+    assert len(ids) == 4
     assert len(etl.ingested_texts) > 1
     assert all(len(text) <= 30 for text in etl.ingested_texts)
 
@@ -136,7 +137,7 @@ def test_ingestion_pipeline_custom_functions():
     pipeline = IngestionPipeline(
         loader, etl, preprocess=preprocess_mock, chunk=chunk_mock, format_chunk=format_mock
     )
-    ids = pipeline.run()
+    _ids = pipeline.run()
 
     preprocess_mock.assert_called_once_with("test", {"key": "value"})
     chunk_mock.assert_called_once_with("processed", {"key": "value"})

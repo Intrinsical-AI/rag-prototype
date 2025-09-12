@@ -1,10 +1,10 @@
-# src/app/api_router.py
+# src/local_rag_backend/app/api_router.py
 
 """
 FastAPI router for the application endpoints.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from local_rag_backend.app.dependencies import get_rag_service
@@ -16,10 +16,28 @@ from local_rag_backend.models import AskRequest, AskResponse, DocumentInDB, Hist
 router = APIRouter()
 
 
+# ---------------------- Health Endpoints ---------------------- #
+
+
+@router.get("/health", tags=["Health"])
+def health(
+    db: Session = Depends(get_db), rag_service: RagService = Depends(get_rag_service)
+) -> dict[str, str]:
+    """Health check endpoint for container orchestration."""
+    try:
+        # Test database connectivity
+        db.execute("SELECT 1")
+        # Test RAG service initialization
+        _ = rag_service
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"unhealthy: {e!s}")
+
+
 # ---------------------- API Endpoints ---------------------- #
 
 
-@router.post("/ask", response_model=AskResponse)
+@router.post("/ask", response_model=AskResponse, tags=["RAG"])
 def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> AskResponse:
     rag_result = service.ask(question=request.question, top_k=request.k)
     docs = rag_result["docs"]

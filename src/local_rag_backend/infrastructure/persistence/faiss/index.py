@@ -22,7 +22,7 @@ class FaissIndex:
             self.index = faiss.IndexFlatL2(self.dim)
         if self.id_map_path.exists():
             with self.id_map_path.open("rb") as f:
-                self.id_map = cast(list[int], pickle.load(f))  # nosec B301, noqa: S301
+                self.id_map = cast("list[int]", pickle.load(f))  # nosec B301, noqa: S301
         else:
             self.id_map = []
 

@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -131,6 +131,15 @@ class Settings(BaseSettings):
         if not v.startswith(("http://", "https://")):
             raise ValueError("Ollama URL must start with http:// or https://")
         return v.rstrip("/")
+
+    @field_validator("ingest_chunk_overlap")
+    @classmethod
+    def validate_ingest_chunk_overlap(cls, v: int, info: ValidationInfo) -> int:
+        """Validate ingest_chunk_overlap < ingest_chunk_chars."""
+        max_chars = (info.data or {}).get("ingest_chunk_chars", 1200)
+        if v >= max_chars:
+            raise ValueError("ingest_chunk_overlap must be less than ingest_chunk_chars")
+        return v
 
     def is_production(self) -> bool:
         """Check if running in production mode."""
