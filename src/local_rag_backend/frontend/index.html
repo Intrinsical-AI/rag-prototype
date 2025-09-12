@@ -322,10 +322,31 @@
       <button id="clearHistoryBtn" class="secondary">Clear History</button>
     </div>
     <div id="historyBox" class="box history" hidden></div>
+
+    <div class="row" style="justify-content:space-between; margin-top:1.2rem">
+      <h2 style="margin:0;font-size:1.25rem;color:var(--accent);">Knowledge Base</h2>
+      <div style="display:flex;gap:.6rem">
+        <button id="refreshDocsBtn" class="secondary">Refresh</button>
+      </div>
+    </div>
+
+    <div class="box" style="margin-top:.6rem">
+      <div style="display:flex;gap:.6rem;align-items:flex-start;flex-wrap:wrap">
+        <textarea id="docText" placeholder=" Paste or type a document here…" style="flex:1;min-height:4.6rem"></textarea>
+        <button id="addDocBtn" class="primary" title="Add document">Add</button>
+      </div>
+      <div class="info-note">Tip: each click ingests the textarea as <b>one</b> document (chunking interno ya activo).</div>
+    </div>
+
+    <div id="docsList" class="box" style="margin-top:.8rem;max-height:260px;overflow:auto">
+      <em style="color:var(--subtle-text)">No documents loaded yet.</em>
+    </div>
   </section>
   <script>
     const qs = (selector) => document.querySelector(selector);
     const API_URL = '/api/ask';
+    const DOCS_URL = '/api/docs';
+
     // --- DOM Elements ---
     const themeBtn = qs('#themeBtn');
     const askBtn = qs('#askBtn');
@@ -338,8 +359,13 @@
     const historyTools = qs('#historyTools');
     const clearHistoryBtn = qs('#clearHistoryBtn');
     const exampleListEl = qs('#exampleList');
+    const docTextEl = qs('#docText');
+    const addDocBtn = qs('#addDocBtn');
+    const refreshDocsBtn = qs('#refreshDocsBtn');
+    const docsListEl = qs('#docsList');
 
     statusEl.hidden = true;
+
     // --- Theme Management ---
     const applyTheme = (theme) => {
       document.documentElement.dataset.theme = theme;
@@ -351,6 +377,7 @@
     const preferredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     applyTheme(storedTheme || preferredTheme);
     themeBtn.addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+
     // --- Example Questions ---
     exampleListEl.addEventListener('click', (e) => {
         if (e.target.tagName === 'LI') {
@@ -426,6 +453,7 @@
         answerMeta.innerHTML = '';
       }
     });
+
     // --- Helper Functions ---
     function renderAnswerMeta(answerText, sources) {
       answerMeta.innerHTML = '';
@@ -479,6 +507,71 @@
       p.textContent = str;
       return p.innerHTML;
     }
+
+    addDocBtn.addEventListener('click', async () => {
+      const txt = (docTextEl.value || '').trim();
+      if (!txt) return;
+      addDocBtn.disabled = true;
+      addDocBtn.textContent = 'Adding...';
+      try {
+        const r = await fetch(DOCS_URL, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ texts: [txt] })
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json();
+        docTextEl.value = '';
+        await loadDocs();
+        toast(`✅ Ingested ${j.count} document${j.count===1?'':'s'}`);
+      } catch (e) {
+        toast(`❌ Ingest error: ${e.message||e}`, true);
+      } finally {
+        addDocBtn.disabled = false;
+        addDocBtn.textContent = 'Add';
+      }
+    });
+
+    refreshDocsBtn.addEventListener('click', loadDocs);
+
+    async function loadDocs() {
+      try {
+        const r = await fetch(DOCS_URL + '?limit=100&offset=0');
+        if (!r.ok) throw new Error(await r.text());
+        const docs = await r.json();
+        renderDocs(docs);
+      } catch (e) {
+        docsListEl.innerHTML = `<span style="color:crimson">Failed to load docs: ${escapeHTML(String(e))}</span>`;
+      }
+    }
+
+    function renderDocs(docs) {
+      if (!Array.isArray(docs) || docs.length === 0) {
+        docsListEl.innerHTML = `<em style="color:var(--subtle-text)">No documents found.</em>`;
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      docs.forEach(d => {
+        const div = document.createElement('div');
+        div.style.borderBottom = '1px dashed var(--border)';
+        div.style.padding = '.35rem 0';
+        const p = document.createElement('div');
+        const preview = (d.content || '').slice(0, 160).replace(/\s+/g,' ').trim();
+        p.innerHTML = `<strong>#${d.id}</strong> — ${escapeHTML(preview)}${d.content.length>160?'…':''}`;
+        div.appendChild(p);
+        frag.appendChild(div);
+      });
+      docsListEl.innerHTML = '';
+      docsListEl.appendChild(frag);
+    }
+
+    function toast(msg, isErr=false){
+      answerMeta.innerHTML = `<span style="color:${isErr?'crimson':'var(--accent)'}">${escapeHTML(msg)}</span>`;
+      setTimeout(()=>{answerMeta.innerHTML='';}, 2200);
+    }
+
+    // auto-load at startup
+    loadDocs();
   </script>
 </body>
 </html>
