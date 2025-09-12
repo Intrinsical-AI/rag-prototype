@@ -5,6 +5,7 @@ This module provides command-line interfaces for common operations like
 starting the server, building indices, and bootstrapping data.
 """
 
+import logging
 import sys
 from pathlib import Path
 
@@ -13,6 +14,8 @@ import uvicorn
 
 from local_rag_backend import __version__
 from local_rag_backend.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -88,6 +91,298 @@ def bootstrap() -> None:
         sys.exit(1)
 
 
+@cli.command("ingest-files")
+@click.option("--root", required=True, type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--pattern",
+    multiple=True,
+    default=["**/*.md", "**/*.txt"],
+    help="Glob patterns to include (repeatable)",
+)
+@click.option(
+    "--dedup/--no-dedup",
+    default=True,
+    show_default=True,
+    help="Deduplicate identical texts within the run",
+)
+@click.option(
+    "--incremental/--no-incremental",
+    default=True,
+    show_default=True,
+    help="Skip files unchanged since last run using a state file",
+)
+@click.option(
+    "--incremental-strategy",
+    type=click.Choice(["mtime", "hash"]),
+    default="mtime",
+    show_default=True,
+    help="Strategy to detect changes: modified time (fast) or SHA1 hash (robust)",
+)
+@click.option(
+    "--state-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Path to incremental state JSON (defaults to data/.ingest_state.json)",
+)
+def ingest_files(
+    root: str,
+    pattern: tuple[str, ...],
+    dedup: bool,
+    incremental: bool,
+    incremental_strategy: str,
+    state_path: str | None,
+) -> None:
+    """Ingesta e indexación desde un directorio."""
+    import json
+    from pathlib import Path as _Path
+
+    from local_rag_backend.core.services.etl import ETLService
+    from local_rag_backend.core.services.ingestion import (
+        IngestionPipeline,
+        default_chunker,
+        default_formatter,
+        default_preprocess,
+    )
+    from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+        SentenceTransformerEmbedder,
+    )
+
+    # Type ignore needed because loaders are dynamically added to __all__
+    from local_rag_backend.infrastructure.ingestion.loaders import (  # type: ignore[attr-defined]
+        DirectoryLoader,
+        UniqueLoader,
+    )
+    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+
+    # Build candidate file list (with optional incremental filtering)
+    root_path = _Path(root)
+    all_files: list[_Path] = []
+    seen: set[_Path] = set()
+    for pat in pattern:
+        for p in root_path.rglob(pat):
+            if p.is_file() and p not in seen:
+                seen.add(p)
+                all_files.append(p)
+
+    state_default = str(_Path(settings.data_dir) / ".ingest_state.json")
+    state_file = _Path(state_path or state_default)
+    old_state_raw: dict[str, dict[str, float | str]] | dict[str, float] = {}
+    if incremental and state_file.exists():
+        try:
+            old_state_raw = json.loads(state_file.read_text(encoding="utf-8"))
+        except Exception:
+            old_state_raw = {}
+
+    def _get_old_mtime(key: str) -> float | None:
+        val = old_state_raw.get(key)
+        if isinstance(val, dict):
+            mtime = val.get("mtime")
+            return float(mtime) if mtime is not None else None
+        if isinstance(val, int | float):
+            return float(val)
+        return None
+
+    def _get_old_hash(key: str) -> str | None:
+        val = old_state_raw.get(key)
+        if isinstance(val, dict):
+            h = val.get("sha1")
+            return str(h) if h is not None else None
+        return None
+
+    computed_hash: dict[str, str] = {}
+
+    def _sha256(path: _Path) -> str:
+        import hashlib as _hashlib
+
+        h = _hashlib.sha256()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def file_changed(p: _Path) -> bool:
+        if not incremental:
+            return True
+        key = str(p.resolve())
+        if incremental_strategy == "mtime":
+            mtime = p.stat().st_mtime
+            last_mtime = _get_old_mtime(key)
+            return last_mtime is None or mtime > float(last_mtime)
+        else:  # hash strategy
+            try:
+                h = _sha256(p)
+                computed_hash[key] = h
+            except Exception:
+                # if hashing fails, fallback to mtime
+                h = None
+            old_h = _get_old_hash(key)
+            return h is None or old_h != h
+
+    files_to_process = [p for p in all_files if file_changed(p)]
+    if not files_to_process:
+        click.echo("i  No files changed since last run (incremental enabled). Nothing to ingest.")
+        return
+
+    loader = DirectoryLoader(root, files=files_to_process)
+    if dedup:
+        loader = UniqueLoader(loader)
+    doc_repo = SqlDocumentStorage()
+
+    if settings.retrieval_mode in ["dense", "hybrid"]:
+        embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        vec = FaissVectorStorage(settings.index_path, settings.id_map_path, dim=embedder.dim)
+        etl = ETLService(doc_repo, vec, embedder)
+        pipeline = IngestionPipeline(
+            loader,
+            etl,
+            chunk=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap),
+        )
+        processed_ids = pipeline.run()
+    else:
+        # Sparse: solo SQL (igual que en bootstrap.py)
+        buf: list[str] = []
+        processed_ids = []
+        batch = 128
+        chunk = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+        for item in loader.load():
+            clean = default_preprocess(item.text, dict(item.metadata) if item.metadata else None)
+            for c in chunk(clean, dict(item.metadata) if item.metadata else None):
+                buf.append(default_formatter(c, dict(item.metadata) if item.metadata else None))
+                if len(buf) >= batch:
+                    processed_ids.extend(doc_repo.store_documents(buf))
+                    buf.clear()
+        if buf:
+            processed_ids.extend(doc_repo.store_documents(buf))
+    click.echo(f"✅ Ingested {len(processed_ids)} chunks from {len(files_to_process)} files")
+
+    # Update incremental state
+    if incremental:
+        # normalize previous state
+        new_state: dict[str, dict] = {}  # type: ignore
+        for k, v in old_state_raw.items():
+            if isinstance(v, dict):
+                new_state[k] = {"mtime": float(v.get("mtime", 0.0)), "sha1": str(v.get("sha1", ""))}
+            elif isinstance(v, int | float):
+                new_state[k] = {"mtime": float(v), "sha1": new_state.get(k, {}).get("sha1", "")}
+
+        # update only processed files
+        for p in files_to_process:
+            key = str(p.resolve())
+            try:
+                mtime = Path(p).stat().st_mtime
+                sha1 = computed_hash.get(key)
+                if sha1 is None and incremental_strategy == "hash":
+                    # compute if missing
+                    sha1 = _sha256(Path(p))
+                new_state[key] = {
+                    "mtime": float(mtime),
+                    "sha1": sha1 or new_state.get(key, {}).get("sha1", ""),
+                }
+            except Exception as e:
+                logger.warning("Failed to process file %s: %s", p, str(e))
+                continue
+        try:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text(
+                json.dumps(new_state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            click.echo(f"📝 Updated state file: {state_file}")
+        except Exception as e:
+            click.echo(f"⚠️  Could not update state file: {e}", err=True)
+
+
+@cli.command("ingest-web")
+@click.option("--url", "urls", multiple=True, help="URL a ingerir (repetir para varias)")
+@click.option(
+    "--from-file",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Fichero con URLs (una por línea)",
+)
+@click.option("--timeout", type=int, default=20, show_default=True, help="Timeout por petición")
+@click.option(
+    "--workers", type=int, default=1, show_default=True, help="Concurrencia durante la descarga"
+)
+@click.option(
+    "--dedup/--no-dedup",
+    default=True,
+    show_default=True,
+    help="Deduplicar textos idénticos en esta ejecución",
+)
+def ingest_web(
+    urls: tuple[str, ...], from_file: str | None, timeout: int, workers: int, dedup: bool
+) -> None:
+    """Ingesta e indexación desde URLs (web scraping ligero con trafilatura)."""
+    from local_rag_backend.core.services.etl import ETLService
+    from local_rag_backend.core.services.ingestion import (
+        IngestionPipeline,
+        default_chunker,
+        default_formatter,
+        default_preprocess,
+    )
+    from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+        SentenceTransformerEmbedder,
+    )
+
+    # Type ignore needed because loaders are dynamically added to __all__
+    from local_rag_backend.infrastructure.ingestion.loaders import (  # type: ignore[attr-defined]
+        UniqueLoader,
+        WebPageLoader,
+    )
+    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+
+    # Reunir URLs de CLI y/o fichero
+    url_list: list[str] = list(urls)
+    if from_file:
+        try:
+            with open(from_file, encoding="utf-8") as fh:
+                for line in fh:
+                    u = line.strip()
+                    if u:
+                        url_list.append(u)
+        except Exception as e:
+            click.echo(f"❌ No se pudo leer el fichero de URLs: {e}", err=True)
+            sys.exit(1)
+
+    # Validación básica
+    if not url_list:
+        click.echo("❌ Debes proporcionar al menos una URL con --url o --from-file", err=True)
+        sys.exit(2)
+
+    loader = WebPageLoader(url_list, timeout=timeout, workers=workers)
+    if dedup:
+        loader = UniqueLoader(loader)
+    doc_repo = SqlDocumentStorage()
+
+    if settings.retrieval_mode in ["dense", "hybrid"]:
+        embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        vec = FaissVectorStorage(settings.index_path, settings.id_map_path, dim=embedder.dim)
+        etl = ETLService(doc_repo, vec, embedder)
+        pipeline = IngestionPipeline(
+            loader,
+            etl,
+            chunk=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap),
+        )
+        processed_ids = pipeline.run()
+    else:
+        # Sparse: solo SQL
+        buf: list[str] = []
+        processed_ids = []
+        batch = 128
+        chunk = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+        for item in loader.load():
+            clean = default_preprocess(item.text, dict(item.metadata) if item.metadata else None)
+            for c in chunk(clean, dict(item.metadata) if item.metadata else None):
+                buf.append(default_formatter(c, dict(item.metadata) if item.metadata else None))
+                if len(buf) >= batch:
+                    processed_ids.extend(doc_repo.store_documents(buf))
+                    buf.clear()
+        if buf:
+            processed_ids.extend(doc_repo.store_documents(buf))
+    click.echo(f"✅ Ingested {len(processed_ids)} chunks from {len(url_list)} URLs")
+
+
 @cli.command()
 def status() -> None:
     """Show system status and configuration."""
@@ -125,6 +420,18 @@ def status() -> None:
     click.echo(f"   Sample data: {csv_status} ({csv_path})")
 
 
+@cli.command("health")
+def health_cmd() -> None:
+    from local_rag_backend.app.factory import get_rag_service
+
+    try:
+        get_rag_service()
+        click.echo("ok")
+    except Exception as e:
+        click.echo(f"error: {e}", err=True)
+        sys.exit(1)
+
+
 # Entry point functions for setuptools
 def rag_server() -> None:
     """Entry point for rag-server command."""
@@ -139,6 +446,21 @@ def rag_build_index() -> None:
 def rag_bootstrap() -> None:
     """Entry point for rag-bootstrap command."""
     cli(["bootstrap", *sys.argv[1:]])
+
+
+def rag_ingest_files() -> None:
+    """Entry point for rag-ingest-files command."""
+    cli(["ingest-files", *sys.argv[1:]])
+
+
+def rag_ingest_web() -> None:
+    """Entry point for rag-ingest-web command."""
+    cli(["ingest-web", *sys.argv[1:]])
+
+
+def rag_health() -> None:
+    """Entry point for rag-health command."""
+    cli(["health", *sys.argv[1:]])
 
 
 def rag_status() -> None:
