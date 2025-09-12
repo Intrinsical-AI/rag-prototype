@@ -104,6 +104,11 @@ class Settings(BaseSettings):
         description="Log format string",
     )
 
+    # === MONITORING ===
+    enable_monitoring: bool = Field(
+        default=False, description="Enable Prometheus metrics collection"
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )

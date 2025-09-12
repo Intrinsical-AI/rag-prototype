@@ -8,10 +8,11 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
+from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
 from local_rag_backend.settings import settings
@@ -40,8 +41,18 @@ async def lifespan(_app_instance: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
 
+if settings.enable_monitoring:
+    app.add_middleware(MetricsMiddleware)
 
 app.include_router(router, prefix="/api")
+
+
+@app.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+async def metrics_endpoint() -> PlainTextResponse:
+    """Prometheus metrics endpoint."""
+    content, content_type = get_metrics()
+    return PlainTextResponse(content=content, media_type=content_type)
+
 
 CURRENT_FILE_PATH = Path(__file__).resolve()
 SRC_APP_DIR = CURRENT_FILE_PATH.parent
