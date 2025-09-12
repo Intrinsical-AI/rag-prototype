@@ -15,11 +15,12 @@ from fastapi.testclient import TestClient
 from local_rag_backend.app.main import app
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base, engine
-from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import create_document
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import DocumentModel
-from local_rag_backend.infrastructure.retrievers.dense_faiss import DenseFaissRetriever
-from local_rag_backend.infrastructure.retrievers.sparse_bm25 import SparseBM25Retriever
+from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
+    Base,
+    add_documents,
+)
+from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
 
 
@@ -77,12 +78,17 @@ def test_sparse_retrieval_smoke(temp_db, sample_documents):
     SessionLocal = sessionmaker(bind=temp_engine)
 
     with SessionLocal() as db_session:
-        for doc in sample_documents:
-            create_document(db=db_session, document=doc)
-        db_session.commit()
+        doc_contents = [doc.content for doc in sample_documents]
+        # add_documents returns the created document IDs
+        created_ids = add_documents(db=db_session, texts=doc_contents)
+        # Recreate sample_documents with the actual IDs from the DB
+        sample_documents = [
+            Document(id=id, content=content)
+            for id, content in zip(created_ids, doc_contents, strict=True)
+        ]
 
     # Test sparse retrieval
-    with patch.object(settings, 'sqlite_url', f"sqlite:///{temp_db_path}"):
+    with patch.object(settings, "sqlite_url", f"sqlite:///{temp_db_path}"):
         with patch.object(settings, 'retrieval_mode', 'sparse'):
             retriever = SparseBM25Retriever()
 
@@ -112,25 +118,27 @@ def test_dense_retrieval_smoke(temp_db, temp_faiss_index, sample_documents):
     SessionLocal = sessionmaker(bind=temp_engine)
 
     with SessionLocal() as db_session:
-        for doc in sample_documents:
-            create_document(db=db_session, document=doc)
-        db_session.commit()
+        doc_contents = [doc.content for doc in sample_documents]
+        created_ids = add_documents(db=db_session, texts=doc_contents)
+        sample_documents = [
+            Document(id=id, content=content)
+            for id, content in zip(created_ids, doc_contents, strict=True)
+        ]
 
     # Create and populate FAISS index
-    with patch.object(settings, 'sqlite_url', f"sqlite:///{temp_db_path}"):
-        with patch.object(settings, 'index_path', temp_index_path):
-            with patch.object(settings, 'id_map_path', temp_id_map_path):
+    with patch.object(settings, "sqlite_url", f"sqlite:///{temp_db_path}"):
+        with patch.object(settings, "index_path", temp_index_path):
+            with patch.object(settings, "id_map_path", temp_id_map_path):
 
                 # Initialize vector storage with correct parameters
                 vector_storage = FaissVectorStorage(
-                    index_path=temp_index_path,
-                    id_map_path=temp_id_map_path,
-                    dim=384
+                    index_path=temp_index_path, id_map_path=temp_id_map_path, dim=384
                 )
 
                 # Add documents to FAISS index using correct API
                 # We need embeddings for the documents, so let's create dummy ones
                 import numpy as np
+
                 dummy_embeddings = [np.random.rand(384).tolist() for _ in sample_documents]
                 doc_ids = [doc.id for doc in sample_documents]
 
@@ -138,8 +146,14 @@ def test_dense_retrieval_smoke(temp_db, temp_faiss_index, sample_documents):
                 vector_storage.upsert(doc_ids, dummy_embeddings)
 
                 # Test dense retrieval
-                with patch.object(settings, 'retrieval_mode', 'dense'):
-                    retriever = DenseFaissRetriever()
+                with patch.object(settings, "retrieval_mode", "dense"):
+                    # The retriever needs an embedder, let's mock it
+                    from local_rag_backend.infrastructure.embeddings.sentence_transformer import (
+                        SentenceTransformerEmbedder,
+                    )
+
+                    embedder = SentenceTransformerEmbedder()
+                    retriever = DenseFaissRetriever(embedder=embedder)
 
                     # Test retrieval
                     results = retriever.retrieve(query="Python web development", top_k=3)
