@@ -1,6 +1,7 @@
 # tests/integration/test_build_index_sparse.py
 import csv
 import importlib
+from contextlib import suppress
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -24,15 +25,13 @@ def test_build_index_sparse(tmp_path, monkeypatch):
     from local_rag_backend.scripts import build_index
 
     importlib.reload(build_index)
-    try:
-        build_index.main()
-    except Exception:
+    with suppress(Exception):
         # If it fails, at least check the database was created
-        pass
+        build_index.main()
 
     # Check database was populated
     eng = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
-    Session = sessionmaker(bind=eng, autocommit=False, autoflush=False)
+    session_factory = sessionmaker(bind=eng, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=eng)
-    docs = SqlDocumentStorage(session_factory=Session).get_all_documents()
-    assert len(docs) >= 0  # At least database exists
+    docs = SqlDocumentStorage(session_factory=session_factory).get_all_documents()
+    assert len(docs) > 0  # At least database exists

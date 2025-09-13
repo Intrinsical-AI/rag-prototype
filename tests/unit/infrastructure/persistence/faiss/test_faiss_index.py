@@ -16,10 +16,10 @@ def test_faiss_add_and_search(tmp_path):
 
     fi = FaissIndex(index_file, idmap_file, dim=dim)
 
-    # Creamos 5 vectores – el primero es claramente distinto (todo ceros)
+    # Creamos 5 vectores - el primero es claramente distinto (todo ceros)
     vecs = [np.zeros(dim, dtype="float32")]
     vecs += [np.random.rand(dim).astype("float32") for _ in range(4)]
-    ids = [10, 11, 12, 13, 14]
+    ids = [10, 20, 30, 40, 50]
 
     fi.add_to_index(ids, vecs)
 

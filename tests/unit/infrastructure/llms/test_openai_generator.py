@@ -1,5 +1,7 @@
 # tests/unit/infrastructure/llms/test_openai_generator.py
 
+from typing import ClassVar
+
 import pytest
 from fastapi import HTTPException
 
@@ -15,7 +17,7 @@ def make_dummy_openai(should_raise=False):
                 raise Exception("boom")
 
             class DummyResp:
-                choices = [type("Msg", (), {"message": type("Cont", (), {"content": "OK"})()})]
+                choices: ClassVar = [type("Msg", (), {"message": type("Cont", (), {"content": "OK"})()})]
 
             return DummyResp()
 

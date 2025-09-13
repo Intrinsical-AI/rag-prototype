@@ -10,9 +10,9 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
 
 @pytest.mark.usefixtures("in_memory_sqlite")
 def test_add_and_get_history_basic(in_memory_sqlite):
-    Session = in_memory_sqlite
+    session_factory = in_memory_sqlite
     # Ensure tables exist on this engine (should already be created by fixture)
-    session = Session()
+    session = session_factory()
     try:
         # Insert two records
         save_qa_history(session, "Q1?", "A1", source_ids=[1, 2])

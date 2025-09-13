@@ -41,10 +41,10 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
-    SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
-    doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
+    doc_repo = SqlDocumentStorage(session_factory=session_local)
     docs = doc_repo.get_all_documents()
 
     assert len(docs) == 2
@@ -146,10 +146,10 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
-    SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
-    doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
+    doc_repo = SqlDocumentStorage(session_factory=session_local)
     docs = doc_repo.get_all_documents()
 
     # Should have multiple chunks due to small chunk size
@@ -199,10 +199,10 @@ def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
         engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
-        SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
         Base.metadata.create_all(bind=engine)
 
-        doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
+        doc_repo = SqlDocumentStorage(session_factory=session_local)
         docs = doc_repo.get_all_documents()
 
         assert len(docs) == 1

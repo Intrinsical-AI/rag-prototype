@@ -4,13 +4,11 @@
 FastAPI router for the application endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-
 from typing import Annotated, Any
+
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from local_rag_backend.app.dependencies import get_rag_service
@@ -98,9 +96,7 @@ def ollama_health_check() -> dict[str, Any]:
 # ---------------------- API Endpoints ---------------------- #
 
 
-
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
-
 def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> AskResponse:
     """
     Ask a question using Retrieval-Augmented Generation.

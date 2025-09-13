@@ -27,21 +27,21 @@ def in_memory_sqlite(monkeypatch):
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    testing_session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     # Create tables registered with Base
     db_base.Base.metadata.create_all(bind=engine)
 
     # Patch objects used in code
     monkeypatch.setattr(db_base, "engine", engine)
-    monkeypatch.setattr(db_base, "SessionLocal", TestingSessionLocal)
-    monkeypatch.setattr(sql_, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(db_base, "SessionLocal", testing_session_local)
+    monkeypatch.setattr(sql_, "SessionLocal", testing_session_local)
 
     try:
-        yield TestingSessionLocal
+        yield testing_session_local
     finally:
         with suppress(Exception):
-          TestingSessionLocal.close_all()
+          testing_session_local.close_all()
         engine.dispose()
 
 

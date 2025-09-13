@@ -78,8 +78,8 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     )
 
     engine = create_engine(settings.sqlite_url)
-    Session = sessionmaker(bind=engine)
-    doc_storage = SqlDocumentStorage(session_factory=Session)
+    session_factory = sessionmaker(bind=engine)
+    doc_storage = SqlDocumentStorage(session_factory=session_factory)
 
     docs = doc_storage.get_all_documents()
     assert len(docs) == 1 and "RAG" in docs[0].content
