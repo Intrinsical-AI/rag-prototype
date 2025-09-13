@@ -269,13 +269,13 @@ def ingest_files(
             key = str(p.resolve())
             try:
                 mtime = Path(p).stat().st_mtime
-                hash = computed_hash.get(key)
-                if hash is None and incremental_strategy == "hash":
+                content_hash = computed_hash.get(key)
+                if content_hash is None and incremental_strategy == "hash":
                     # compute if missing
-                    hash = _sha256(Path(p))
+                    content_hash = _sha256(Path(p))
                 new_state[key] = {
                     "mtime": float(mtime),
-                    "hash": hash or new_state.get(key, {}).get("hash", ""),
+                    "hash": content_hash or new_state.get(key, {}).get("hash", ""),
                 }
             except Exception as e:
                 logger.warning("Failed to process file %s: %s", p, str(e))

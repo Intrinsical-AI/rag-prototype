@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # === OPENAI CONFIGURATION ===
     openai_api_key: str | None = Field(default=None, description="OpenAI API key")
-    openai_model: str = Field(default="gpt-3.5-turbo", description="OpenAI chat model")
+    openai_model: str = Field(default="gpt-4o-mini", description="OpenAI chat model")
     openai_temperature: float = Field(
         default=0.2, ge=0.0, le=2.0, description="Sampling temperature"
     )

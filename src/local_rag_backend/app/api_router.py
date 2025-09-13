@@ -5,6 +5,7 @@ FastAPI router for the application endpoints.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from local_rag_backend.app.dependencies import get_rag_service
@@ -26,7 +27,7 @@ def health(
     """Health check endpoint for container orchestration."""
     try:
         # Test database connectivity
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         # Test RAG service initialization
         _ = rag_service
         return {"status": "ok"}

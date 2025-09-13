@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.utils import normalize_similarities_from_distances
 
 
 class FaissVectorStorage(VectorRepoPort):
@@ -35,13 +36,8 @@ class FaissVectorStorage(VectorRepoPort):
         # Filter out invalid entries (-1) before normalization
         valid_pairs = [(i, d) for i, d in zip(idxs, dists, strict=False) if i != -1]
         if valid_pairs:
-            valid_dists = [d for _, d in valid_pairs]
-            sims_raw = [1.0 / (1.0 + float(d)) for d in valid_dists]
-            min_s, max_s = min(sims_raw), max(sims_raw)
-            if max_s == min_s:
-                sims = [0.0 if max_s == 0 else 1.0] * len(sims_raw)
-            else:
-                sims = [(s - min_s) / (max_s - min_s) for s in sims_raw]
+            valid_dists = [float(d) for _, d in valid_pairs]
+            sims = normalize_similarities_from_distances(valid_dists)
         else:
             sims = []
         pairs: list[tuple[int, float]] = []

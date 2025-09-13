@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, RetrieverPort
+from local_rag_backend.utils import normalize_similarities_from_distances
 
 if TYPE_CHECKING:
     from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
@@ -28,14 +29,8 @@ class DenseFaissRetriever(RetrieverPort):
         # Filter out invalid entries (-1) before normalization
         valid_pairs = [(i, d) for i, d in zip(idxs, dists, strict=False) if i != -1]
         if valid_pairs:
-            valid_dists = [d for _, d in valid_pairs]
-            sims_raw = [1.0 / (1.0 + float(d)) for d in valid_dists]
-            # Normalize locally to [0,1] similar to BM25 retriever
-            min_s, max_s = min(sims_raw), max(sims_raw)
-            if max_s == min_s:
-                sims = [0.0 if max_s == 0 else 1.0] * len(sims_raw)
-            else:
-                sims = [(s - min_s) / (max_s - min_s) for s in sims_raw]
+            valid_dists = [float(d) for _, d in valid_pairs]
+            sims = normalize_similarities_from_distances(valid_dists)
         else:
             sims = []
         # Fix ordering bug: reconstruct (doc, score) in the order of retrieved indices

@@ -1,6 +1,5 @@
 """
-File: src/adapters/retrieval/__init__.py
-Path: src/adapters/retrieval/__init__.py
+File: src/local_rag_backend/infrastructure/retrieval/__init__.py
 Retrieval adapters for document retrieval.
 """
 

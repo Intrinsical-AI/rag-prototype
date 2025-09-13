@@ -20,4 +20,4 @@ class SentenceTransformerEmbedder(EmbedderPort):
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         embeddings = self.model.encode(list(texts))
-        return cast("Sequence[Embedding]", embeddings.tolist())
+        return cast(Sequence[Embedding], embeddings.tolist())

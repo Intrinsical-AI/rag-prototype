@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.ports import DocumentRepoPort, RetrieverPort
+from local_rag_backend.utils import normalize_similarities_from_distances
 
 
 class SparseBM25Retriever(RetrieverPort):
@@ -46,17 +47,14 @@ class SparseBM25Retriever(RetrieverPort):
         ]
         retrieved_ids = [self.doc_ids[i] for i in top_indices]
         retrieved_scores_raw = [doc_scores[i] for i in top_indices]
-        # Normalizamos
+        # Normalize using the helper function (treating BM25 scores as "distances" - higher is better, so invert)
         if not retrieved_scores_raw:
             return [], []
-        min_score = min(retrieved_scores_raw)
-        max_score = max(retrieved_scores_raw)
-        if max_score == min_score:
-            normalized_scores = [0.0 if max_score == 0 else 1.0] * len(retrieved_scores_raw)
-        else:
-            normalized_scores = [
-                (s - min_score) / (max_score - min_score) for s in retrieved_scores_raw
-            ]
+        # BM25 scores are similarities (higher is better), but our helper expects distances (lower is better)
+        # So we invert them by subtracting from max to convert to distance-like values
+        max_raw = max(retrieved_scores_raw)
+        distance_like = [max_raw - s for s in retrieved_scores_raw]
+        normalized_scores = normalize_similarities_from_distances(distance_like)
         # Fix ordering bug: reconstruct (doc, score) in the order of retrieved indices
         docs_by_id = {d.id: d for d in self.doc_repo.get(retrieved_ids)}
         ordered = []

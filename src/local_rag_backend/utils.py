@@ -25,13 +25,16 @@ def preprocess_text(text: str) -> str:
 
 def normalize_similarities_from_distances(dists: Sequence[float]) -> list[float]:
     """
-    Convert distances to normalized similarities using inverse distance mapping.
+    Convert distances to normalized similarities using linear inverse mapping.
+
+    Maps distance values to similarity scores where smaller distances result in higher similarities.
+    Uses min-max normalization to ensure output is in [0, 1] range.
 
     Args:
-        dists: Sequence of distance values
+        dists: Sequence of distance values (lower is better)
 
     Returns:
-        List of normalized similarity scores in [0, 1] range
+        List of normalized similarity scores in [0, 1] range (higher is better)
     """
     if not dists:
         return []

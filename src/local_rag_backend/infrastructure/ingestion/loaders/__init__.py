@@ -39,7 +39,10 @@ class DirectoryLoader(LoaderPort):
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
             except Exception:
-                print("Failed to read file: %s", path)
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning("Failed to read file: %s", path)
                 continue
             try:
                 rel = str(path.relative_to(self.root))
@@ -100,9 +103,14 @@ class UniqueLoader(LoaderPort):
     def load(self) -> Iterable[LoadedItem]:
         seen: set[str] = set()
         for item in self.inner.load():
-            digest = hashlib.sha1(
-                item.text.encode("utf-8", errors="ignore"), usedforsecurity=False
-            ).hexdigest()
+            try:
+                digest = hashlib.sha1(
+                    item.text.encode("utf-8", errors="ignore"), usedforsecurity=False
+                ).hexdigest()
+            except TypeError:  # platforms without 'usedforsecurity'
+                digest = hashlib.sha1(
+                    item.text.encode("utf-8", errors="ignore"), usedforsecurity=False
+                ).hexdigest()
             if digest in seen:
                 continue
             seen.add(digest)
