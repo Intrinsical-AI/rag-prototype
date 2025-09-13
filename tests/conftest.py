@@ -41,7 +41,7 @@ def in_memory_sqlite(monkeypatch):
         yield TestingSessionLocal
     finally:
         with suppress(Exception):
-            TestingSessionLocal.close_all()
+          TestingSessionLocal.close_all()
         engine.dispose()
 
 

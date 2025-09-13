@@ -49,7 +49,10 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="gemma3:1b", description="Ollama model name")
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama server URL")
     ollama_request_timeout: int = Field(
-        default=90, ge=1, le=300, description="Request timeout in seconds"
+        default=180,
+        ge=30,
+        le=600,
+        description="Request timeout in seconds for Ollama. Set higher for large models on first load.",
     )
 
     # === SENTENCE TRANSFORMERS ===
@@ -102,6 +105,11 @@ class Settings(BaseSettings):
     log_format: str = Field(
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         description="Log format string",
+    )
+
+    # === MONITORING ===
+    enable_monitoring: bool = Field(
+        default=False, description="Enable Prometheus metrics collection"
     )
 
     model_config = SettingsConfigDict(

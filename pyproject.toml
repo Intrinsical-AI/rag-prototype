@@ -112,16 +112,12 @@ docs = [
     "mkdocs-mermaid2-plugin>=1.1,<2.0",
     "mkdocs-include-markdown-plugin>=6.0,<7.0",
 ]
-loaders = [
-    "trafilatura>=1.7,<2.0",
+
+performance-cpu = [
+    "torch>=2.0,<3.0",
 ]
-performance = [
-    # NOTE: faiss-cpu is included in base deps. Do NOT install faiss-gpu together with faiss-cpu.
-    # If you target GPU, uninstall faiss-cpu first and install this extra on Linux only.
-    # Temporarily disabled faiss-gpu due to Windows compatibility issues
-    # "faiss-gpu>=1.8.0,<2.0; platform_system!='Windows'",  # GPU acceleration (align with CPU)
-    "torch>=2.0,<3.0",  # PyTorch for advanced models
-]
+
+
 monitoring = [
     "prometheus-client>=0.19,<1.0",
     "structlog>=23.0,<24.0",
