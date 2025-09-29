@@ -27,6 +27,7 @@ def test_get_rag_service_sparse_openai(monkeypatch):
             self.retriever = retriever
             self.generator = generator
             self.history_storage = history_storage
+
     monkeypatch.setattr(deps, "RagService", DummyRS)
     monkeypatch.setattr(deps, "OpenAIGenerator", lambda *a, **k: SimpleNamespace())
 
@@ -44,6 +45,7 @@ def test_get_rag_service_dense_ollama(monkeypatch):
 
     class DummyEmbedder:
         dim = 4
+
     monkeypatch.setattr(deps, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     monkeypatch.setattr(deps, "FaissVectorStorage", lambda **k: SimpleNamespace())
     monkeypatch.setattr(deps, "DenseFaissRetriever", lambda **k: SimpleNamespace())
@@ -54,6 +56,7 @@ def test_get_rag_service_dense_ollama(monkeypatch):
             self.retriever = retriever
             self.generator = generator
             self.history_storage = history_storage
+
     monkeypatch.setattr(deps, "RagService", DummyRS)
 
     svc = deps.get_rag_service()
@@ -68,6 +71,7 @@ def test_get_rag_service_hybrid_openai(monkeypatch):
 
     class DummyEmbedder:
         dim = 4
+
     monkeypatch.setattr(deps, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     monkeypatch.setattr(deps, "FaissVectorStorage", lambda **k: SimpleNamespace())
     monkeypatch.setattr(deps, "DenseFaissRetriever", lambda **k: SimpleNamespace())
@@ -79,6 +83,7 @@ def test_get_rag_service_hybrid_openai(monkeypatch):
             self.retriever = retriever
             self.generator = generator
             self.history_storage = history_storage
+
     monkeypatch.setattr(deps, "RagService", DummyRS)
 
     svc = deps.get_rag_service()

@@ -73,9 +73,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
-        SqlDocumentStorage,
-    )
+    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url)
     Session = sessionmaker(bind=engine)

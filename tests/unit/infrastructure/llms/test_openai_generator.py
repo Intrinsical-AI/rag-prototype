@@ -30,6 +30,7 @@ def make_dummy_openai(should_raise=False):
 
 # --------------------------------------------------------------------------- #
 
+
 def test_generate_success(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "DUMMY")
 

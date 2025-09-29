@@ -7,12 +7,12 @@ from local_rag_backend.core.services.ingestion import default_chunker
 @pytest.mark.parametrize(
     "text,max_chars,overlap",
     [
-        ("0123456789" * 3 + "END", 10, 10),            # overlap == max_chars
-        ("abcdefghijklmnopqrstuvwxyz", 5, 10),           # overlap > max_chars (clamped)
-        ("short", 10, 5),                                # text shorter than window
-        ("😀🚀✨ unicode test 😀", 4, 2),                 # unicode / multi-byte
-        ("", 8, 4),                                      # empty text
-        ("A" * 25, 3, 0),                                # zero overlap small window
+        ("0123456789" * 3 + "END", 10, 10),  # overlap == max_chars
+        ("abcdefghijklmnopqrstuvwxyz", 5, 10),  # overlap > max_chars (clamped)
+        ("short", 10, 5),  # text shorter than window
+        ("😀🚀✨ unicode test 😀", 4, 2),  # unicode / multi-byte
+        ("", 8, 4),  # empty text
+        ("A" * 25, 3, 0),  # zero overlap small window
     ],
 )
 def test_default_chunker_forward_progress(text, max_chars, overlap):

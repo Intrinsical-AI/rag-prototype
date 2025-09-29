@@ -28,9 +28,9 @@ def test_get_config_defaults(monkeypatch):
     r = client.get("/api/config")
     assert r.status_code == 200
     data = r.json()
-    assert set(["retrieval_mode", "hybrid_alpha", "temperature", "max_tokens", "available_providers"]).issubset(
-        data.keys()
-    )
+    assert set(
+        ["retrieval_mode", "hybrid_alpha", "temperature", "max_tokens", "available_providers"]
+    ).issubset(data.keys())
     assert data["retrieval_mode"] == settings.retrieval_mode
     assert isinstance(data["available_providers"], list)
 

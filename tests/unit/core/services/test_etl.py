@@ -54,8 +54,8 @@ def test_etl_ingest_happy_path():
     [
         ["A"],
         ["  trim  ", "   \t"],  # whitespace present (ETL stores raw; trimming happens at API)
-        ["áéíóú", "漢字"],        # unicode inputs
-        ["X" * 10000],            # very long text
+        ["áéíóú", "漢字"],  # unicode inputs
+        ["X" * 10000],  # very long text
         ["dup", "dup", "unique"],
     ],
 )

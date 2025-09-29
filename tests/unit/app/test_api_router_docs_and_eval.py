@@ -50,12 +50,14 @@ def test_post_docs_dense_uses_etl(in_memory_sqlite, monkeypatch):
     # Dummy embedder/vector store
     class DummyEmbedder:
         dim = 4
+
         def embed(self, texts):
             return np.zeros((len(texts), self.dim), dtype="float32").tolist()
 
     class DummyVec:
         def __init__(self, *a, **k):
             self.calls = []
+
         def upsert(self, ids, vectors):
             self.calls.append((list(ids), list(vectors)))
 
@@ -84,16 +86,14 @@ def test_ask_eval_sparse_success(in_memory_sqlite, monkeypatch):
     class DummyGen:
         def __init__(self, *a, **k):
             pass
+
         def generate(self, question, contexts):
             return "ans"
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(api, "OpenAIGenerator", lambda **k: DummyGen())
 
-    payload = {
-        "question": "hello?",
-        "config": {"retrieval_mode": "sparse", "k": 1}
-    }
+    payload = {"question": "hello?", "config": {"retrieval_mode": "sparse", "k": 1}}
     r = client.post("/api/ask_eval", json=payload)
     assert r.status_code == 200
     data = r.json()
@@ -111,7 +111,9 @@ def test_ready_retrieval_index_present(tmp_path, monkeypatch):
     # Provide deps
     class _Dummy:
         pass
+
     from local_rag_backend.app.dependencies import get_rag_service
+
     app.dependency_overrides[get_rag_service] = lambda: _Dummy()
     monkeypatch.setattr(settings, "openai_api_key", "x", raising=False)
 
@@ -146,6 +148,7 @@ def test_openrouter_generate_success(monkeypatch):
     class DummyClient:
         def __init__(self, *args, **kwargs):
             pass
+
         class chat:
             class completions:
                 @staticmethod
