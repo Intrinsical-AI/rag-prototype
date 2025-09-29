@@ -48,9 +48,7 @@
 
 ## Project structure
 
-```
-
-
+```bash
 .
 ├── data/                      # CSV, SQLite DB, FAISS files
 ├── frontend/                  # Simple UI (index.html) for dev
@@ -61,8 +59,6 @@
 │   ├── scripts/               # bootstrap and build_index
 │   └── frontend/              # packaged index.html to serve at /
 └── tests/                     # unit + integration + e2e
-
-
 ```
 
 ---
@@ -208,6 +204,47 @@ This pipeline is used by `scripts/bootstrap.py`.
 
 ---
 
+## LangChain loaders integration (optional)
+
+You can ingest data from any LangChain document loader via the `LangChainLoader` adapter, which implements the project's `LoaderPort`.
+
+Installation:
+
+```bash
+pip install -e ".[loaders]"
+# or when installing from PyPI:
+# pip install intrinsical-rag-prototype[loaders]
+```
+
+Quick usage example:
+
+```python
+from langchain_community.document_loaders import WebBaseLoader
+from local_rag_backend.core.services.etl import ETLService
+from local_rag_backend.core.services.ingestion import IngestionPipeline
+from local_rag_backend.infrastructure.ingestion.loaders import LangChainLoader
+
+# 1) Create/obtain your ETLService as usual (doc store, vector store, embedder)
+etl = ETLService(doc_repo, vector_repo, embedder)
+
+# 2) Wrap any LangChain loader
+lc_loader = WebBaseLoader(["https://example.com"])  # or DirectoryLoader, SitemapLoader, etc.
+loader = LangChainLoader(lc_loader, drop_empty=True, metadata_filter={"lang": "en"})
+
+# 3) Run the pipeline
+pipeline = IngestionPipeline(loader=loader, etl_service=etl)
+count = pipeline.run()
+print(f"Ingested {count} chunks")
+```
+
+Notes:
+
+- `drop_empty=True` skips whitespace-only documents.
+- `metadata_filter={...}` yields only items whose metadata includes the given key/value pairs.
+- The adapter expects each LangChain `Document` to have `page_content` and `metadata` fields. It gracefully falls back to dict-like objects or stringification when needed.
+
+---
+
 ## Run with Docker Compose (with Ollama)
 
 Prerequisites: Docker Desktop/Engine.
@@ -271,7 +308,7 @@ pytest
 pytest --cov=src --cov-report=term-missing
 ```
 
-> Tests suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. Current status: **100 tests, 85% coverage**.
+> Tests suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. Current status: **125 tests, 86.45% coverage**.
 
 ---
 
