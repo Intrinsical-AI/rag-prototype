@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from local_rag_backend.settings import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

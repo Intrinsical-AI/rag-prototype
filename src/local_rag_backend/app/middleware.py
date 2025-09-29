@@ -6,11 +6,8 @@ Middleware for observability and monitoring.
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
 
-from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
 
 try:
     from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -19,7 +16,15 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
+from typing import TYPE_CHECKING
+
 from local_rag_backend.settings import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from fastapi import Request, Response
+    from starlette.types import ASGIApp
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):

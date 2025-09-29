@@ -6,8 +6,10 @@ General utility functions: text processing, data loading..
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
-from local_rag_backend.core.ports import DocumentRepoPort
+if TYPE_CHECKING:
+    from local_rag_backend.core.ports import DocumentRepoPort
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 

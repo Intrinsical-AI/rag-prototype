@@ -5,10 +5,8 @@ SQLAlchemy-based implementation of the document and history repositories.
 
 from __future__ import annotations
 
-from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-
-from sqlalchemy.orm import Session, sessionmaker
+from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
@@ -20,6 +18,11 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
     add_history,
 )
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+
+    from sqlalchemy.orm import Session, sessionmaker
 
 
 @contextmanager

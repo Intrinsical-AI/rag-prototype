@@ -6,11 +6,14 @@ CSV loader for basic document ingestion.
 from __future__ import annotations
 
 import csv
-from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import LoadedItem
 from local_rag_backend.core.ports import LoaderPort
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class CSVLoader(LoaderPort):

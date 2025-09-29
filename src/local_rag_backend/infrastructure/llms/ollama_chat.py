@@ -6,7 +6,7 @@ Ollama generator for local Ollama server.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import requests
 from fastapi import HTTPException
@@ -15,6 +15,9 @@ from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.settings import (
     settings,  # settings.ollama_base_url y settings.ollama_request_timeout exists
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
