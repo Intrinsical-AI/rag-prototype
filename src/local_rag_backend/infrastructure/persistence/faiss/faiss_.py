@@ -5,13 +5,16 @@ Adapter for vector storage and search using FAISS.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
-import numpy as np
-from numpy.typing import NDArray
+from typing import TYPE_CHECKING
 
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+    from numpy.typing import NDArray
 
 
 class FaissVectorStorage(VectorRepoPort):

@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib import resources
-from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI
@@ -24,6 +23,10 @@ from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
 from local_rag_backend.settings import settings
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+    from importlib.resources.abc import Traversable
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)

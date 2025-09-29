@@ -5,15 +5,19 @@ Dense retriever using FAISS for vector search.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.ports import (
     DocumentRepoPort,
     EmbedderPort,
     RetrieverPort,
     VectorRepoPort,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from local_rag_backend.core.domain.entities import Document
 
 
 class DenseFaissRetriever(RetrieverPort):

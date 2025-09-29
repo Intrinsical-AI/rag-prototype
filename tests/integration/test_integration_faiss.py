@@ -19,5 +19,5 @@ def test_faiss_index_add_and_search(tmp_path):
     # Save and reload (persists well)
     idx2 = FaissIndex(index_path, id_map_path, dim=dim)
     q = vectors[0]
-    idxs, dists = idx2.search(q, k=1)
+    idxs, _dists = idx2.search(q, k=1)
     assert idx2.id_map[idxs[0]] == ids[0]

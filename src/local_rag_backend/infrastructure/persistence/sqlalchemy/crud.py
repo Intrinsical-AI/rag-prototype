@@ -5,11 +5,14 @@ CRUD operations for SQLAlchemy models.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document, QaHistory
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.orm import Session
 
 
 def get_documents(db: Session, ids: list[int]) -> Sequence[Document]:

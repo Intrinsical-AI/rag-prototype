@@ -22,7 +22,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Centralized application configuration."""
+    """Centralized application configuration.
+
+    All fields have default values, so the class can be instantiated without arguments.
+    """
+
+    # This block is only for telling mypy that all fields have default values
+    if False:
+
+        def __init__(self, **kwargs: Any) -> None: ...
 
     # --- Core --- #
     app_host: str = Field("127.0.0.1", description="Server host IP.")

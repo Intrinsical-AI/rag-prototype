@@ -5,9 +5,10 @@ RAG service for retrieval-augmented generation.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
+if TYPE_CHECKING:
+    from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
 
 
 class RagService:

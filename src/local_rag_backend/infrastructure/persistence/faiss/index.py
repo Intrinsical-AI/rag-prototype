@@ -6,12 +6,16 @@ Adapter for vector storage and search using FAISS.
 from __future__ import annotations
 
 import pickle  # nosec B403
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import faiss
 import numpy as np
-from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from numpy.typing import NDArray
 
 
 class FaissIndex:
