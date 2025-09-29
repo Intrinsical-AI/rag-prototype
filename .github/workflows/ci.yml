@@ -132,6 +132,7 @@ jobs:
           --cov=src
           --cov-report=xml
           --cov-report=term-missing
+          --cov-context=test
           --junit-xml=pytest-results.xml
           --numprocesses=auto
           --dist=worksteal
@@ -172,6 +173,9 @@ jobs:
             **/pyproject.toml
             **/uv.lock
           cache-suffix: security
+
+      - name: Create virtualenv
+        run: uv venv
 
       - name: Install security tools
         run: uv pip install "bandit[toml]" safety
