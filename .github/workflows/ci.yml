@@ -19,19 +19,16 @@ on:
       - 'CHANGELOG*'
   workflow_dispatch:
 
-# Evita colas inútiles por rama/PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Endurece permisos por defecto
 permissions:
   contents: read
 
 env:
   PYTHON_VERSION: '3.11'
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
-  UV_CACHE_DIR: .uv-cache
 
 jobs:
   lint:
@@ -46,19 +43,24 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v3
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          # Invalida cuando cambie pyproject/uv.lock y separa clave para este job
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: lint
 
-      - name: Create virtualenv (uv)
+      - name: Create virtualenv
         run: uv venv
 
-      - name: Install lint deps
-        run: |
-          uv pip install -e ".[lint]"
+      # Solo herramientas; no instalamos el proyecto para acelerar
+      - name: Install lint deps (extras)
+        run: uv sync --frozen --extra lint --no-install-project --no-dev
 
-      - name: Ruff (lint)
+      - name: Ruff
         run: uv run ruff check .
 
       - name: Black (check)
@@ -76,15 +78,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: astral-sh/setup-uv@v3
+
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: typing
 
-      - name: Create virtualenv (uv)
+      - name: Create virtualenv
         run: uv venv
-      - name: Install typing deps
-        run: |
-          uv pip install -e ".[lint]"
+
+      - name: Install typing deps (extras lint)
+        run: uv sync --frozen --extra lint --no-install-project --no-dev
+
       - name: mypy
         run: uv run mypy .
 
@@ -101,16 +110,21 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: astral-sh/setup-uv@v3
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: test
 
-      - name: Create virtualenv (uv)
+      - name: Create virtualenv
         run: uv venv
 
-      - name: Install dependencies
-        run: |
-          uv pip install -e ".[dev,test]"
+      # Proyecto + extras dev/test
+      - name: Install deps
+        run: uv sync --frozen --extra dev --extra test
 
       - name: Run tests
         run: >
@@ -126,7 +140,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}  # opcional en repos públicos
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}  # necesario en repos privados
         with:
           files: ./coverage.xml
           flags: unittests
@@ -146,18 +160,21 @@ jobs:
     timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: astral-sh/setup-uv@v3
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: security
 
       - name: Install security tools
-        run: |
-          uv pip install "bandit[toml]" safety
+        run: uv pip install "bandit[toml]" safety
 
       - name: Run security scans
         run: |
@@ -190,14 +207,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      # Si vas a publicar en GHCR, descomenta el login:
-      # - name: Log in to GHCR
-      #   uses: docker/login-action@v3
-      #   with:
-      #     registry: ghcr.io
-      #     username: ${{ github.actor }}
-      #     password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build (cache to GHA)
         uses: docker/build-push-action@v6
