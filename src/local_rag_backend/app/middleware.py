@@ -1,13 +1,16 @@
+# src/app/middleware.py
 """
 Middleware for observability and monitoring.
 """
 
+from __future__ import annotations
+
 import time
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 try:
     from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -20,67 +23,39 @@ from local_rag_backend.settings import settings
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
-    """HTTP metrics middleware for Prometheus monitoring."""
+    """HTTP metrics middleware for Prometheus if available and enabled."""
 
-    def __init__(self, app: Any, *args: Any, **kwargs: Any) -> None:
-        super().__init__(app, *args, **kwargs)
-
-        if PROMETHEUS_AVAILABLE and settings.enable_monitoring:
-            # HTTP request counter
-            self.http_requests_total = Counter(
-                "http_requests_total", "Total HTTP requests", ["method", "endpoint", "status_code"]
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+        self.is_active = PROMETHEUS_AVAILABLE and settings.enable_monitoring
+        if self.is_active:
+            self.requests = Counter(
+                "http_requests_total", "Total HTTP requests", ["method", "path", "status_code"]
             )
-
-            # HTTP request duration histogram
-            self.http_request_duration_seconds = Histogram(
-                "http_request_duration_seconds",
-                "HTTP request duration in seconds",
-                ["method", "endpoint"],
+            self.latencies = Histogram(
+                "http_request_duration_seconds", "Request latency", ["method", "path"]
             )
-        else:
-            self.http_requests_total = None
-            self.http_request_duration_seconds = None
 
     async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Response]
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        if not (PROMETHEUS_AVAILABLE and settings.enable_monitoring):
+        if not self.is_active:
             return await call_next(request)
 
-        # Record start time
         start_time = time.time()
-
-        # Get endpoint pattern (remove query params)
-        endpoint = request.url.path
-        method = request.method
-
-        # Process request
         response = await call_next(request)
+        latency = time.time() - start_time
 
-        # Record metrics
-        duration = time.time() - start_time
-        status_code = str(response.status_code)
-
-        if self.http_requests_total:
-            self.http_requests_total.labels(
-                method=method, endpoint=endpoint, status_code=status_code
-            ).inc()
-
-        if self.http_request_duration_seconds:
-            self.http_request_duration_seconds.labels(method=method, endpoint=endpoint).observe(
-                duration
-            )
+        self.latencies.labels(method=request.method, path=request.url.path).observe(latency)
+        self.requests.labels(
+            method=request.method, path=request.url.path, status_code=response.status_code
+        ).inc()
 
         return response
 
 
 def get_metrics() -> tuple[str, str]:
-    """
-    Get Prometheus metrics in text format.
-    Returns:
-        tuple: (metrics_content, content_type)
-    """
+    """Get Prometheus metrics in text format if monitoring is active."""
     if not (PROMETHEUS_AVAILABLE and settings.enable_monitoring):
-        return "# Monitoring not enabled or prometheus-client not installed\n", "text/plain"
-
+        return "# Monitoring disabled or prometheus-client not installed\n", "text/plain"
     return generate_latest().decode("utf-8"), CONTENT_TYPE_LATEST

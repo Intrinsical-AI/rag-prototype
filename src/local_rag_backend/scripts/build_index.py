@@ -5,6 +5,8 @@ Script to initialize the database from the FAQ CSV and build necessary indexes.
 It uses a dedicated database engine and session for this process.
 """
 
+from __future__ import annotations
+
 import logging
 from importlib import resources
 from pathlib import Path
@@ -13,7 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-# Importar el embedder que se usará para la indexación si es modo denso
+# Import the embedder that will be used for indexing if dense mode
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
@@ -21,12 +23,12 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 # Import models to ensure they are registered with Base.metadata
 from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
 
-# Para asegurar la creación de tablas
+# To ensure table creation
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 from local_rag_backend.settings import settings
 
 logger = logging.getLogger(__name__)
-# Configurar el logging para que se vea la salida del script y de data_loader
+# Configure logging to see script and data_loader output
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -39,8 +41,8 @@ def main() -> None:
     """
     logger.info("Starting build_index script...")
 
-    # 1. Crear un engine y SessionLocal exclusivos para este script
-    #    Esto evita interferencias con el engine de la aplicación principal.
+    # 1. Create a dedicated engine and SessionLocal for this script
+    #    This avoids conflicts with the main app engine.
     logger.info(f"Using database URL: {settings.sqlite_url}")
     is_in_memory = "mode=memory" in settings.sqlite_url or ":memory:" in settings.sqlite_url
     pool_kwargs = {"poolclass": StaticPool} if is_in_memory else {}
@@ -51,16 +53,16 @@ def main() -> None:
     )
     script_session_local = sessionmaker(bind=script_engine, autocommit=False, autoflush=False)
 
-    # 2. Asegurar que el esquema de la BBDD (tablas) existe
+    # 2. Ensure the database schema exists
     logger.info(f"Ensuring database schema exists at {script_engine.url}...")
     try:
         AppDeclarativeBase.metadata.create_all(bind=script_engine)
         logger.info("Database schema ensured (tables created if they didn't exist).")
     except Exception as e:
         logger.error(f"Failed to ensure database schema: {e}", exc_info=True)
-        return  # Salir si no se pueden crear las tablas
+        return  # Exit if tables can't be created
 
-    # 3. Embedder (para dense o hybrid mode)
+    # 3. Embedder (for dense or hybrid mode)
     embedder_for_indexing = None
     if settings.retrieval_mode in ["dense", "hybrid"]:
         logger.info(
@@ -68,7 +70,7 @@ def main() -> None:
         )
         embedder_for_indexing = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
 
-    # 4. Usar la lógica de ETL directamente (similar a bootstrap.py)
+    # 4. Use ETL logic directly (similar to bootstrap.py)
     try:
         import csv
 
@@ -76,7 +78,7 @@ def main() -> None:
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
-        # Leer CSV
+        # Read CSV
         csv_path = Path(settings.faq_csv)
         texts = []
         if csv_path.is_file():
@@ -126,7 +128,7 @@ def main() -> None:
             ids = etl.ingest(texts)
             logger.info(f"Ingested {len(ids)} docs into SQL and FAISS.")
         else:
-            # Solo SQL para sparse mode
+            # SQL only for sparse mode
             ids = doc_repo.store_documents(texts)
             logger.info(f"Ingested {len(ids)} docs into SQL only (sparse mode).")
 
@@ -134,7 +136,7 @@ def main() -> None:
 
     except FileNotFoundError as e:
         logger.error(f"Halting script: {e}")
-    except ValueError as e:  # Por ejemplo, el mismatch de dimensiones del embedder
+    except ValueError as e:  # For example, dimension mismatch of embedder
         logger.error(f"Halting script due to value error: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"An unexpected error occurred during build_index: {e}", exc_info=True)

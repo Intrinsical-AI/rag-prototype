@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  rag-backend:
+    build:
+      context: .
+      target: production
+    image: intrinsical/rag-prototype:latest
+    container_name: rag-backend
+    environment:
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - RETRIEVAL_MODE=hybrid
+      # OpenAI (optional)
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # OpenRouter (optional)
+      # - OPENROUTER_ENABLED=true
+      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Ollama integration
+      - OLLAMA_ENABLED=true
+      - OLLAMA_BASE_URL=http://ollama:11434
+    ports:
+      - "8000:8000"
+    volumes:
+      - rag_data:/app/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Optionally pre-pull models on first run:
+    # command: ["/bin/sh","-c","/bin/ollama serve & sleep 5 && ollama pull gemma:2b && tail -f /dev/null"]
+
+volumes:
+  rag_data:
+  ollama_data:

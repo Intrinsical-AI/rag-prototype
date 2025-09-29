@@ -1,4 +1,10 @@
 # src/adapters/generation/ollama_chat.py
+"""
+Ollama generator for local Ollama server.
+"""
+
+from __future__ import annotations
+
 import logging
 from collections.abc import Sequence
 
@@ -6,68 +12,55 @@ import requests
 from fastapi import HTTPException
 
 from local_rag_backend.core.ports import GeneratorPort
-from local_rag_backend.settings import (  # settings.ollama_base_url y settings.ollama_request_timeout exists
-    settings,
+from local_rag_backend.settings import (
+    settings,  # settings.ollama_base_url y settings.ollama_request_timeout exists
 )
 
 logger = logging.getLogger(__name__)
 
 
 class OllamaGenerator(GeneratorPort):
+    """Generator using a local Ollama server."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        prompt_template: str | None = None,
+        temperature: float | None = None,
+    ):
+        self.model = model or settings.ollama_model
+        self.prompt_template = prompt_template or settings.ollama_prompt_template
+        self.temperature = temperature
+        self.api_url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
+
     def generate(self, question: str, contexts: Sequence[str]) -> str:
-        ctx_block = "\n".join(f"- {c}" for c in contexts)
-        full_prompt = settings.ollama_prompt_template.format(context=ctx_block, question=question)
+        """Generate a response from the Ollama server."""
+        context_str = "\n".join(f"- {c}" for c in contexts)
+        prompt = self.prompt_template.format(context=context_str, question=question)
 
-        payload = {
-            "model": settings.ollama_model,
-            "prompt": full_prompt,
-            "stream": False,  # Ollama by default returns the full response if stream equals false
-            # "options": {"temperature": 0.7} #  OPTIONAL
-        }
-
-        base_url = settings.ollama_base_url.rstrip("/")
-        api_url = f"{base_url}/api/generate"
+        payload = {"model": self.model, "prompt": prompt, "stream": False}
+        if self.temperature is not None:
+            payload["options"] = {"temperature": self.temperature}
 
         try:
-            response = requests.post(api_url, json=payload, timeout=settings.ollama_request_timeout)
-            response.raise_for_status()  # HTTP codes 4xx/5xx
-
+            response = requests.post(
+                self.api_url, json=payload, timeout=settings.ollama_request_timeout
+            )
+            response.raise_for_status()
             response_data = response.json()
 
-            # The endpoint /api/generate retuns a JSON where every line it's a JSON if stream = True (default), else only 1 json with full answer:
-            # when stream=False:
-            # {
-            #   "model": "...", "created_at": "...", "response": "...", "done": true,
-            #   "context": [...], "total_duration": ..., ...
-            # }
             if "response" in response_data and isinstance(response_data["response"], str):
                 return response_data["response"].strip()
-            else:
-                # logger.warning(f"Ollama response malformed. Data: {response_data}")
-                raise HTTPException(
-                    500,
-                    detail="Ollama response malformed: 'response' key missing or not a string.",
-                )
+            raise HTTPException(500, "Ollama response malformed")
 
-        except requests.exceptions.Timeout as err:
-            raise HTTPException(
-                504,
-                detail=f"Ollama request timed out after {settings.ollama_request_timeout}s: {api_url}",
-            ) from err
-        except requests.exceptions.ConnectionError as err:
-            raise HTTPException(
-                503, detail=f"Could not connect to Ollama server at {api_url}"
-            ) from err
-        except requests.exceptions.HTTPError as err:
-            error_content = err.response.text if err.response is not None else str(err)
-            status_code = err.response.status_code if err.response is not None else 500
-            raise HTTPException(status_code, detail=f"Ollama API error: {error_content}") from err
-        except requests.exceptions.JSONDecodeError as err:
-            # logger.error(f"Failed to decode Ollama JSON response. Status: {response.status_code}, Content: {response.text}")
-            raise HTTPException(
-                500,
-                detail=f"Failed to decode Ollama JSON response. Original error: {err!s}",
-            ) from err
+        except requests.exceptions.Timeout as e:
+            raise HTTPException(504, f"Ollama request timed out to {self.api_url}") from e
+        except requests.exceptions.ConnectionError as e:
+            raise HTTPException(503, f"Could not connect to Ollama at {self.api_url}") from e
+        except requests.exceptions.RequestException as e:
+            status = e.response.status_code if e.response is not None else 500
+            detail = e.response.text if e.response is not None else str(e)
+            raise HTTPException(status, f"Ollama API error: {detail}") from e
         except Exception as e:
-            # logger.exception("Unexpected error during Ollama call") # Log con traceback
-            raise HTTPException(500, detail=f"Unexpected error during Ollama call: {e!s}") from e
+            logger.error(f"Unexpected error calling Ollama: {e}", exc_info=True)
+            raise HTTPException(500, f"Unexpected error calling Ollama: {e!s}") from e

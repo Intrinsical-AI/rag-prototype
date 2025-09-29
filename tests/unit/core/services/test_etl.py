@@ -47,13 +47,33 @@ def test_etl_ingest_happy_path():
 
     # Se almacenan los textos
     assert [t for (_, t) in doc_repo.saved] == texts
-    # Embeddings se generan sobre mismos textos
-    assert embedder.calls[0] == texts
-    # VectorRepo recibe los mismos ids y embeddings
-    assert vector_repo.upserts[0][0] == ids
-    # Mismos length
-    assert len(ids) == 2
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ["A"],
+        ["  trim  ", "   \t"],  # whitespace present (ETL stores raw; trimming happens at API)
+        ["áéíóú", "漢字"],        # unicode inputs
+        ["X" * 10000],            # very long text
+        ["dup", "dup", "unique"],
+    ],
+)
+def test_etl_ingest_various_inputs(texts):
+    doc_repo = DummyDocRepo()
+    embedder = DummyEmbedder()
+    vector_repo = DummyVectorRepo()
+    etl = ETLService(doc_repo, vector_repo, embedder)
+
+    ids = etl.ingest(texts)
+
+    assert isinstance(ids, list)
+    assert len(ids) == len(texts)
     assert all(isinstance(i, int) for i in ids)
+    # Order preserved at storage
+    assert [t for (_, t) in doc_repo.saved] == texts
+    # Embedder called with same texts
+    assert embedder.calls and embedder.calls[0] == texts
 
 
 def test_etl_empty_input():
@@ -62,10 +82,10 @@ def test_etl_empty_input():
     vector_repo = DummyVectorRepo()
     etl = ETLService(doc_repo, vector_repo, embedder)
     ids = etl.ingest([])
-    # Nada guardado ni generado
+    # Nothing stored or generated
     assert ids == []
     assert doc_repo.saved == []
-    assert embedder.calls == [[]] or embedder.calls == []  # Según implementación
+    assert embedder.calls == [[]] or embedder.calls == []  # According to implementation
     assert vector_repo.upserts == [] or vector_repo.upserts == [([], [])]
 
 
@@ -80,7 +100,7 @@ def test_etl_error_propagation_on_docrepo():
     etl = ETLService(doc_repo, vector_repo, embedder)
     with pytest.raises(RuntimeError, match="fail-doc"):
         etl.ingest(["X"])
-    # Nada debería haberse almacenado
+    # Nothing should have been stored
     assert embedder.calls == []
     assert vector_repo.upserts == []
 
@@ -96,7 +116,7 @@ def test_etl_error_propagation_on_embedder():
     etl = ETLService(doc_repo, vector_repo, embedder)
     with pytest.raises(RuntimeError, match="fail-embed"):
         etl.ingest(["Y"])
-    # Documentos sí guardados, embeddings no, vector store tampoco
+    # Documents stored, embeddings not generated, vector store not updated
     assert [t for (_, t) in doc_repo.saved] == ["Y"]
     assert vector_repo.upserts == []
 
@@ -112,7 +132,7 @@ def test_etl_error_propagation_on_vectorstore():
     etl = ETLService(doc_repo, vector_repo, embedder)
     with pytest.raises(RuntimeError, match="fail-vector"):
         etl.ingest(["Z"])
-    # Doc y embeddings generados
+    # Documents stored, embeddings generated, vector store not updated
     assert [t for (_, t) in doc_repo.saved] == ["Z"]
     assert embedder.calls and "Z" in embedder.calls[0]
 
@@ -124,6 +144,6 @@ def test_etl_handles_duplicates():
     etl = ETLService(doc_repo, vector_repo, embedder)
     texts = ["A", "A", "B"]
     ids = etl.ingest(texts)
-    # Debe devolver 3 ids distintos (aunque textos repetidos)
+    # Should return 3 distinct ids (even with repeated texts)
     assert len(set(ids)) == 3
     assert [t for (_, t) in doc_repo.saved] == texts

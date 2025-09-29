@@ -1,7 +1,7 @@
-"""
-File: src/db/base.py
-SQLAlchemy database connection configuration.
-"""
+# src/infrastructure/persistence/sqlalchemy/base.py
+"""SQLAlchemy engine, session, and base class setup."""
+
+from __future__ import annotations
 
 from collections.abc import Generator
 
@@ -16,6 +16,7 @@ Base = declarative_base()
 
 
 def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency to provide a transactional database session."""
     db = SessionLocal()
     try:
         yield db

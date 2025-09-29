@@ -1,77 +1,65 @@
-# src/adapters/storage/sql_crud.py
+# src/infrastructure/persistence/sqlalchemy/sql_.py
+"""
+SQLAlchemy-based implementation of the document and history repositories.
+"""
 
-from collections.abc import Sequence
+from __future__ import annotations
+
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import (
-    Base,
     SessionLocal,
 )
 from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
     add_documents,
-    save_qa_history,
+    add_history,
 )
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 
-# src/infrastructure/persistence/sqlalchemy/sql_.py
 
-
-def _new_session_factory_from_settings() -> sessionmaker[Session]:
-    """
-    Use the global SessionLocal from base.py to avoid duplicate engines.
-    """
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.base import SessionLocal
-
-    return SessionLocal
+@contextmanager
+def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
+    """Provide a transactional scope around a series of operations."""
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 class SqlDocumentStorage(DocumentRepoPort):
+    """SQL-based implementation of the document repository port."""
+
     def __init__(self, session_factory: sessionmaker[Session] | None = None):
-        # If no factory is provided, create one dynamically from current settings
-        self._session_factory = (
-            session_factory if session_factory is not None else _new_session_factory_from_settings()
-        )
+        self._session_factory = session_factory or SessionLocal
 
     def store_documents(self, texts: Sequence[str]) -> list[int]:
-        session = self._session_factory()
-        try:
-            # Ensure metadata is created on this connection (idempotent)
-            Base.metadata.create_all(bind=session.get_bind())
+        """Store documents in the database."""
+        with get_session(self._session_factory) as session:
             return add_documents(session, list(texts))
-        finally:
-            # Close session; DO NOT dispose engine here (breaks in-memory SQLite and pooling)
-            session.close()
 
     def get(self, ids: Sequence[int]) -> Sequence[DomainDocument]:
-        session = self._session_factory()
-        try:
-            # Ensure metadata is created on this connection (idempotent)
-            Base.metadata.create_all(bind=session.get_bind())
+        """Retrieve documents by their IDs."""
+        with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).filter(DbDocument.id.in_(ids)).all()
             return [DomainDocument(id=d.id, content=d.content) for d in db_docs]
-        finally:
-            session.close()
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
-        session = self._session_factory()
-        try:
-            # Ensure metadata is created on this connection (idempotent)
-            Base.metadata.create_all(bind=session.get_bind())
+        """Retrieve all documents from the database."""
+        with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).order_by(DbDocument.id).all()
             return [DomainDocument(id=d.id, content=d.content) for d in db_docs]
-        finally:
-            session.close()
-
-    save = store_documents
 
 
 class HistorySqlStorage(QAHistoryPort):
+    """SQL-based implementation of the history repository port."""
+
     def save(self, q: str, a: str, source_ids: Sequence[int]) -> None:
-        session = SessionLocal()
-        try:
-            save_qa_history(session, q, a, source_ids=list(source_ids))
-        finally:
-            session.close()
+        """Save a question-answer pair to the history table."""
+        with get_session(SessionLocal) as session:
+            add_history(session, q, a, source_ids=list(source_ids))

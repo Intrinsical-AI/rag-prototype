@@ -1,3 +1,4 @@
+# src/infrastructure/embeddings/openai.py
 """
 OpenAI embeddings implementation.
 """
@@ -25,7 +26,7 @@ DEFAULT_DIM = _MODEL_DIM.get(DEFAULT_MODEL, 1536)
 
 
 class OpenAIEmbedder(EmbedderPort):
-    dim: int  # requerido por el puerto
+    dim: int  # required by the port
 
     def __init__(self, model: str | None = None):
         self.model = model or settings.openai_embedding_model
@@ -36,7 +37,7 @@ class OpenAIEmbedder(EmbedderPort):
         try:
             resp = self.client.embeddings.create(model=self.model, input=list(texts))
         except Exception as err:
-            # Be robust to different SDK exception classes
+            # Robust to different SDK exception classes
             raise RuntimeError(
                 f"OpenAI embeddings error: {getattr(err, 'message', str(err))}"
             ) from err

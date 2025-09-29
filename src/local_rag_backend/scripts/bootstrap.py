@@ -1,10 +1,15 @@
 # scripts/bootstrap.py
+"""
+Bootstrap script for ingesting CSV data into the database and FAISS index.
+"""
+
+from __future__ import annotations
 
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
-# IMPORTS PARA BD DINÁMICA
+# IMPORTS FOR DYNAMIC DB
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -32,7 +37,7 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
     if "settings" not in kwargs:
         kwargs["settings"] = default_settings
     settings = kwargs["settings"]
-    # 1) Creamos engine y sesión basados en la URL actualizada
+    # 1) Create engine and session based on the updated URL
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
@@ -57,13 +62,13 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
         pipeline = IngestionPipeline(
             loader,
             etl,
-            chunk=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap),
+            chunk_fn=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap),
         )
-        chunk_ids = pipeline.run()
-        print(f"[OK] Ingested {len(chunk_ids)} docs into SQL and FAISS.")
+        chunk_count = pipeline.run()
+        print(f"[OK] Ingested {chunk_count} docs into SQL and FAISS.")
     else:
-        # modo sparse: aplicar el mismo flujo de preprocesado + chunking + formateo,
-        # pero almacenando únicamente en SQL (sin embeddings / FAISS)
+        # sparse mode: apply the same preprocessing + chunking + formatting pipeline,
+        # but storing only in SQL (no embeddings / FAISS)
         loader = CSVLoader(csv_path_obj, delimiter=DELIMITER, has_header=settings.csv_has_header)
         chunk = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
 

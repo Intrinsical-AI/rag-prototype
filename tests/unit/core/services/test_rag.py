@@ -38,11 +38,11 @@ def test_rag_service_flow():
     rag = RagService(retriever, generator, history)
 
     resp = rag.ask("¿Qué es esto?", top_k=1)
-    # Comprobamos respuesta
+    # Check response
     assert resp["answer"].startswith("dummy-answer-for")
     assert resp["docs"] == [doc]
     assert resp["scores"] == [0.85]
-    # ¿Se guardó en history?
+    # Check history
     assert history.saved == [("¿Qué es esto?", resp["answer"], [1])]
 
 

@@ -1,4 +1,8 @@
 # src/core/etl.py
+"""
+ETL service for document ingestion, embedding, and storage.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -14,12 +18,7 @@ if TYPE_CHECKING:
 
 
 class ETLService:
-    """
-    Encapsula la lógica de ingestión:
-      1) almacenar docs en SQL
-      2) generar embeddings
-      3) almacenar embeddings en FAISS (u otro motor vectorial)
-    """
+    """Orchestrates document ingestion, embedding, and storage."""
 
     def __init__(
         self,
@@ -32,13 +31,22 @@ class ETLService:
         self._embedder = embedder
 
     def ingest(self, texts: Sequence[str]) -> Sequence[int]:
+        """
+        Processes and stores a sequence of texts.
+
+        Returns:
+            A sequence of unique integer IDs for the stored documents.
+        """
         if not texts:
             return []
-        # 1) SQL
-        ids = self._doc_store.store_documents(texts)
 
-        # 2) Embeddings y vector store
+        # Store documents and get their IDs
+        doc_ids = self._doc_store.store_documents(texts)
+
+        # Generate and store vector embeddings
         embeddings = self._embedder.embed(texts)
-        self._vec_store.upsert(ids, embeddings)
 
-        return ids
+        # Upsert embeddings into vector store
+        self._vec_store.upsert(doc_ids, embeddings)
+
+        return doc_ids

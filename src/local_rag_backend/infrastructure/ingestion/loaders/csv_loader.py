@@ -1,3 +1,10 @@
+# src/infrastructure/ingestion/loaders/csv_loader.py
+"""
+CSV loader for basic document ingestion.
+"""
+
+from __future__ import annotations
+
 import csv
 from collections.abc import Iterable
 from pathlib import Path

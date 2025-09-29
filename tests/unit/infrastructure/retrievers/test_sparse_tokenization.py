@@ -12,7 +12,7 @@ class Repo:
 
 
 def test_sparse_preprocess_and_norm(monkeypatch):
-    # fuerza BM25 real a estar presente; si no está, simula
+    # Force BM25 real to be present; if not, simulate
     try:
         import rank_bm25  # noqa
     except Exception:
