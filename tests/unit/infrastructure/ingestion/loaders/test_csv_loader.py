@@ -171,7 +171,9 @@ def test_csv_loader_empty_file():
 
 def test_csv_loader_windows_newlines():
     csv_content = "Title;Content\r\nHello;World\r\n"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8", newline="") as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, encoding="utf-8", newline=""
+    ) as f:
         f.write(csv_content)
         temp_path = f.name
     try:

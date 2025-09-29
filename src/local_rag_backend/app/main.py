@@ -20,8 +20,10 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import (
+    Base as AppDeclarativeBase,
+    engine as global_app_engine,
+)
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:

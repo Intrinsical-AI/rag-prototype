@@ -17,6 +17,7 @@ def test_health_db_failure(monkeypatch):
     class DummyConn:
         def __enter__(self):
             raise Boom("db down")
+
         def __exit__(self, exc_type, exc, tb):
             return False
 
@@ -31,6 +32,7 @@ def test_ready_not_ready_db_and_no_llm(monkeypatch):
     class DummyConn:
         def __enter__(self):
             raise RuntimeError("no db")
+
         def __exit__(self, *a):
             return False
 
@@ -47,7 +49,10 @@ def test_ready_not_ready_db_and_no_llm(monkeypatch):
         assert detail["status"] == "not_ready"
         checks = detail["checks"]
         assert checks.get("database", "").startswith("failed")
-        assert checks.get("rag_service", "").startswith("failed") or checks.get("rag_service") == "failed: not initialized"
+        assert (
+            checks.get("rag_service", "").startswith("failed")
+            or checks.get("rag_service") == "failed: not initialized"
+        )
         assert checks.get("llm_providers", "").startswith("failed")
     finally:
         app.dependency_overrides.pop(api.get_rag_service, None)
