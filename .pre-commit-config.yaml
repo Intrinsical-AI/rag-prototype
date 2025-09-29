@@ -20,7 +20,7 @@ repos:
     hooks:
       - id: mypy
         name: "Type check Python code (MyPy)"
-        additional_dependencies: [types-requests, types-setuptools]
+        additional_dependencies: [types-requests, types-setuptools, pydantic]
         args: ["--ignore-missing-imports", "--strict-optional", "--disable-error-code=no-any-return"]
         exclude: "^tests/"
 
