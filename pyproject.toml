@@ -256,7 +256,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["faiss.*","rank_bm25.*","sentence_transformers.*"]
+module = ["faiss.*","rank_bm25.*","sentence_transformers.*","prometheus_client.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -297,7 +297,6 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["src"]
-dynamic_context = "test_function"
 omit = [
   "tests/*",
   "*/__init__.py",
