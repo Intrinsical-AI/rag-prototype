@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Tests](https://img.shields.io/badge/tests-125%20passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
+[![Tests](https://img.shields.io/badge/tests-133%20passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
 [![Coverage](https://img.shields.io/badge/coverage-85%25-green.svg)](https://github.com/Intrinsical-AI/rag-prototype)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/r/intrinsical/rag-prototype)
 [![PyPI](https://img.shields.io/pypi/v/intrinsical-rag-prototype.svg)](https://pypi.org/project/intrinsical-rag-prototype/)
@@ -308,7 +308,7 @@ pytest
 pytest --cov=src --cov-report=term-missing
 ```
 
-> Tests suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. Current status: **125 tests, 86.45% coverage**.
+> Tests suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. Current status: **133 tests, 86.45% coverage**.
 
 ---
 
