@@ -51,18 +51,21 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Create virtualenv (uv)
+        run: uv venv
+
       - name: Install lint deps
         run: |
           uv pip install -e ".[lint]"
 
       - name: Ruff (lint)
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Black (check)
-        run: black --check .
+        run: uv run black --check .
 
       - name: isort (check-only)
-        run: isort --check-only .
+        run: uv run isort --check-only .
 
   typing:
     name: Typing (mypy)
@@ -76,11 +79,14 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+
+      - name: Create virtualenv (uv)
+        run: uv venv
       - name: Install typing deps
         run: |
           uv pip install -e ".[lint]"
       - name: mypy
-        run: mypy .
+        run: uv run mypy .
 
   test:
     name: Tests (Ubuntu)
@@ -99,13 +105,16 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Create virtualenv (uv)
+        run: uv venv
+
       - name: Install dependencies
         run: |
           uv pip install -e ".[dev,test]"
 
       - name: Run tests
         run: >
-          pytest
+          uv run pytest
           --cov=src
           --cov-report=xml
           --cov-report=term-missing
@@ -152,8 +161,8 @@ jobs:
 
       - name: Run security scans
         run: |
-          bandit -r src/ -f json -o bandit-report.json || true
-          safety check --full-report --json --output safety-report.json ${SAFETY_API_KEY:+--key $SAFETY_API_KEY} || true
+          uv run bandit -r src/ -f json -o bandit-report.json || true
+          uv run safety check --full-report --json --output safety-report.json ${SAFETY_API_KEY:+--key $SAFETY_API_KEY} || true
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
 
