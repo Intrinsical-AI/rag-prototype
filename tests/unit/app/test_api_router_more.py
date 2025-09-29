@@ -97,14 +97,17 @@ def test_ask_eval_invalid_config(monkeypatch):
 @pytest.mark.parametrize(
     "config,expected_status",
     [
-        ({"retrieval_mode": "invalid", "k": 3}, 400),                 # invalid mode (runtime validation)
-        ({"retrieval_mode": "sparse", "k": 0}, 422),                  # k too small (schema)
-        ({"retrieval_mode": "dense", "k": 11}, 422),                  # k too large (schema)
+        ({"retrieval_mode": "invalid", "k": 3}, 400),  # invalid mode (runtime validation)
+        ({"retrieval_mode": "sparse", "k": 0}, 422),  # k too small (schema)
+        ({"retrieval_mode": "dense", "k": 11}, 422),  # k too large (schema)
         ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": -0.1}, 422),  # schema
-        ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": 1.1}, 422),   # schema
-        ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 400),   # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 400),    # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 0}, 400),       # runtime validation (we clamp via validate_rag_config)
+        ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": 1.1}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 400),  # runtime validation
+        ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 400),  # runtime validation
+        (
+            {"retrieval_mode": "sparse", "k": 3, "max_tokens": 0},
+            400,
+        ),  # runtime validation (we clamp via validate_rag_config)
         ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 999999}, 400),  # runtime validation
     ],
 )

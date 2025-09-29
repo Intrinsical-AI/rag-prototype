@@ -24,12 +24,12 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
-from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import (
-    Document as DbDocument,
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import (
+    engine as global_app_engine,
+    get_db,
 )
+from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
+from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
     HistorySqlStorage,
     SqlDocumentStorage,

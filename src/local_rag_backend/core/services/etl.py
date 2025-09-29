@@ -10,11 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from local_rag_backend.core.ports import (
-        DocumentRepoPort,
-        EmbedderPort,
-        VectorRepoPort,
-    )
+    from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
 
 class ETLService:

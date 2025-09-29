@@ -10,13 +10,8 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import (
-    SessionLocal,
-)
-from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
-    add_documents,
-    add_history,
-)
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import SessionLocal
+from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import add_documents, add_history
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 
 if TYPE_CHECKING:

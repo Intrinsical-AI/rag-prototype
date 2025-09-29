@@ -1,89 +1,107 @@
-# Intrinsical RAG Prototype - Continuous Integration
-
 name: CI
 
 on:
   push:
     branches: [ main, master, develop ]
     paths-ignore:
-      - '*.md'
+      - '**/*.md'
       - 'docs/**'
       - '.gitignore'
+      - 'LICENSE'
+      - 'CHANGELOG*'
   pull_request:
     branches: [ main, master, develop ]
     paths-ignore:
-      - '*.md'
+      - '**/*.md'
       - 'docs/**'
       - '.gitignore'
+      - 'LICENSE'
+      - 'CHANGELOG*'
   workflow_dispatch:
+
+# Evita colas inútiles por rama/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Endurece permisos por defecto
+permissions:
+  contents: read
 
 env:
   PYTHON_VERSION: '3.11'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  UV_CACHE_DIR: .uv-cache
 
 jobs:
   lint:
     name: Lint (ruff, black, isort)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
       - name: Install lint deps
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[lint]"
-      - name: Ruff
+          uv pip install -e ".[lint]"
+
+      - name: Ruff (lint)
         run: ruff check .
+
       - name: Black (check)
         run: black --check .
+
       - name: isort (check-only)
         run: isort --check-only .
 
   typing:
     name: Typing (mypy)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
       - name: Install typing deps
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[lint]"
+          uv pip install -e ".[lint]"
       - name: mypy
         run: mypy .
 
-  # Combined quality and tests for faster feedback
   test:
-    name: Tests (Ubuntu, Python 3.11)
+    name: Tests (Ubuntu, Python ${{ env.PYTHON_VERSION }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,test]"
+          uv pip install -e ".[dev,test]"
 
       - name: Run tests
         run: >
@@ -96,49 +114,52 @@ jobs:
           --dist=worksteal
           -v
 
-      - name: Upload coverage
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}  # opcional en repos públicos
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           flags: unittests
+          fail_ci_if_error: true
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: test-results-ubuntu-py311
           path: pytest-results.xml
           retention-days: 7
 
-  # Security scan (Ubuntu only)
   security:
-    name: Security Scan
+    name: Security Scan (bandit + safety)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-
+    timeout-minutes: 7
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
 
       - name: Install security tools
         run: |
-          python -m pip install --upgrade pip
-          pip install bandit[toml] safety
+          uv pip install "bandit[toml]" safety
 
       - name: Run security scans
         run: |
           bandit -r src/ -f json -o bandit-report.json || true
-          safety check --json --output safety-report.json || true
+          safety check --full-report --json --output safety-report.json ${SAFETY_API_KEY:+--key $SAFETY_API_KEY} || true
+        env:
+          SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
 
       - name: Upload security reports
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
@@ -146,23 +167,31 @@ jobs:
             safety-report.json
           retention-days: 7
 
-  # Docker build (only on master branch)
   docker:
     name: Docker Build
     needs: [lint, typing, test, security]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
-    timeout-minutes: 10
-
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
+      # Si vas a publicar en GHCR, descomenta el login:
+      # - name: Log in to GHCR
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (cache to GHA)
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
