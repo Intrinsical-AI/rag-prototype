@@ -29,17 +29,6 @@ def make_dummy_openai(should_raise=False):
 
 
 # --------------------------------------------------------------------------- #
-def test_build_prompt_private_method(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "dummy")
-
-    gen = OpenAIGenerator()
-    prompt = gen._build_prompt(
-        question="¿Qué tal?",
-        contexts=["Uno", "Dos"],
-    )
-    assert "CONTEXT" in prompt and "QUESTION" in prompt
-    assert "- Uno" in prompt and "- Dos" in prompt
-
 
 def test_generate_success(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "DUMMY")

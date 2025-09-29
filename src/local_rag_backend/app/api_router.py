@@ -1,15 +1,19 @@
 # src/local_rag_backend/app/api_router.py
-
 """
 FastAPI router for the application endpoints.
 """
 
-from typing import Annotated, Any
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any
 
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from openai import OpenAI
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.core.services.etl import ETLService
@@ -17,6 +21,8 @@ from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
+from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
+from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
@@ -25,53 +31,117 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.models import (
     Document as DbDocument,
 )
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+    HistorySqlStorage,
     SqlDocumentStorage,
 )
-from local_rag_backend.models import AskRequest, AskResponse, DocumentInDB, HistoryItem, QueryResult
+from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
+from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
+from local_rag_backend.models import (
+    AskEvalConfig,
+    AskEvalRequest,
+    AskEvalResponse,
+    AskRequest,
+    AskResponse,
+    DocumentInDB,
+    HistoryItem,
+    QueryResult,
+)
 from local_rag_backend.settings import settings
+from local_rag_backend.utils import get_corpus_and_ids
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from local_rag_backend.core.ports import DocumentRepoPort, GeneratorPort, RetrieverPort
+
+# ---------------------- Validation Utilities ---------------------- #
+
+
+def validate_rag_config(config: AskEvalConfig) -> list[str]:
+    """Validate RAG configuration and return list of errors."""
+    errors = []
+    if config.retrieval_mode not in ["sparse", "dense", "hybrid"]:
+        errors.append(f"Invalid retrieval_mode: {config.retrieval_mode}")
+    if not (1 <= config.k <= 10):
+        errors.append(f"Invalid k value: {config.k}. Must be between 1 and 10")
+    if config.retrieval_mode == "hybrid" and not (0.0 <= (config.hybrid_alpha or 0.5) <= 1.0):
+        errors.append(f"Invalid hybrid_alpha: {config.hybrid_alpha}. Must be between 0.0 and 1.0")
+    if config.temperature is not None and not (0.0 <= config.temperature <= 2.0):
+        errors.append(f"Invalid temperature: {config.temperature}. Must be between 0.0 and 2.0")
+    if config.max_tokens is not None and not (1 <= config.max_tokens <= 4096):
+        errors.append(f"Invalid max_tokens: {config.max_tokens}. Must be between 1 and 4096")
+    return errors
+
+
+def get_available_llm_providers() -> dict[str, str]:
+    """Check available LLM providers based on settings."""
+    providers = {}
+    if settings.openai_api_key:
+        providers["openai"] = "configured"
+    if settings.ollama_enabled:
+        providers["ollama"] = "enabled"
+    if getattr(settings, "openrouter_enabled", False) and getattr(
+        settings, "openrouter_api_key", None
+    ):
+        providers["openrouter"] = "configured"
+    return providers
+
 
 router = APIRouter()
 
-
-# ---------------------- Health Check Endpoints ---------------------- #
+# --- Health & Readiness --- #
 
 
 @router.get("/health", tags=["Health"], summary="Health check endpoint")
 def health_check() -> dict[str, str]:
-    """
-    Basic health check endpoint for Docker/K8s monitoring.
-    Returns:
-        dict: Simple health status
-    """
+    """Basic health check for service availability (e.g., Docker/K8s)."""
     try:
-        # Test database connectivity
         with global_app_engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         return {"status": "healthy"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Health check failed: {e!s}")
+        raise HTTPException(status_code=503, detail=f"Database connection failed: {e!s}")
 
 
 @router.get("/ready", tags=["Health"], summary="Readiness check endpoint")
-def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str, str]:
-    """
-    Readiness check endpoint for Docker/K8s monitoring.
-    Verifies that the service is ready to handle requests.
-    Returns:
-        dict: Readiness status
-    """
+def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str, Any]:
+    """Check if all dependencies are ready to handle requests."""
+    checks: dict[str, Any] = {}
+    is_ready = True
+
+    # 1. Database connectivity
     try:
-        # Test database connectivity
         with global_app_engine.connect() as conn:
-            conn.execute("SELECT 1")
-
-        # Test RAG service availability
-        if service is None:
-            raise HTTPException(status_code=500, detail="RAG service not initialized")
-
-        return {"status": "ready"}
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Readiness check failed: {e!s}")
+        checks["database"] = f"failed: {e!s}"
+        is_ready = False
+
+    # 2. RAG service
+    checks["rag_service"] = "ok" if service else "failed: not initialized"
+    if not service:
+        is_ready = False
+
+    # 3. LLM providers
+    llm_providers = get_available_llm_providers()
+    if not llm_providers:
+        checks["llm_providers"] = "failed: no providers configured"
+        is_ready = False
+    else:
+        checks["llm_providers"] = llm_providers
+
+    # 4. Retrieval index (for dense/hybrid modes)
+    if settings.retrieval_mode in ["dense", "hybrid"]:
+        checks["retrieval_index"] = (
+            "ok" if Path(settings.index_path).exists() else "warning: not found"
+        )
+
+    response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
+    if not is_ready:
+        raise HTTPException(status_code=503, detail=response_payload)
+    return response_payload
 
 
 @router.get("/health/ollama", tags=["Health"], summary="Ollama server health check")
@@ -111,7 +181,7 @@ def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> 
 
     sources = [
         QueryResult(
-            document=DocumentInDB(id=doc.id, content=doc.content),  # extiende aquí si hay metadata
+            document=DocumentInDB(id=doc.id, content=doc.content),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)
@@ -196,3 +266,289 @@ def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestResponse:
         ids = list(doc_repo.store_documents(texts))
 
     return IngestResponse(count=len(ids), ids=ids)
+
+
+def _build_retriever_from_config(
+    cfg: AskEvalConfig,
+    doc_repo: DocumentRepoPort,
+    corpus: list[str],
+    doc_ids: list[int],
+) -> RetrieverPort:
+    """Build a retriever instance based on dynamic configuration."""
+    if cfg.retrieval_mode == "sparse":
+        return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+
+    embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+    faiss_storage = FaissVectorStorage(
+        index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
+    )
+    dense_retriever = DenseFaissRetriever(
+        embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo
+    )
+
+    if cfg.retrieval_mode == "dense":
+        return dense_retriever
+
+    if cfg.retrieval_mode == "hybrid":
+        sparse_retriever = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+        alpha = (
+            cfg.hybrid_alpha if cfg.hybrid_alpha is not None else settings.hybrid_retrieval_alpha
+        )
+        return HybridRetriever(dense=dense_retriever, sparse=sparse_retriever, alpha=alpha)
+
+    raise HTTPException(status_code=400, detail=f"Unsupported retrieval_mode: {cfg.retrieval_mode}")
+
+
+def _build_generator_from_config(cfg: AskEvalConfig) -> GeneratorPort:
+    """Build a generator instance based on dynamic configuration."""
+    available_providers = get_available_llm_providers()
+    provider = cfg.llm_provider or next(iter(available_providers), None)
+
+    if not provider:
+        raise HTTPException(status_code=500, detail="No LLM provider available.")
+
+    if provider not in available_providers:
+        raise HTTPException(
+            status_code=400, detail=f"LLM provider '{provider}' is not available or configured."
+        )
+
+    # Note: use explicit keyword args to satisfy static typing
+
+    if provider == "openrouter":
+        headers: dict[str, str] = {}
+        if settings.openrouter_site_url is not None:
+            headers["HTTP-Referer"] = settings.openrouter_site_url
+        if settings.openrouter_app_title is not None:
+            headers["X-Title"] = settings.openrouter_app_title
+        return OpenAIGenerator(
+            model=(cfg.model or settings.openrouter_model),
+            temperature=cfg.temperature,
+            top_p=cfg.top_p,
+            max_tokens=cfg.max_tokens,
+            prompt_template=cfg.prompt_template,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            extra_headers=headers or None,
+        )
+    if provider == "openai":
+        return OpenAIGenerator(
+            model=cfg.model,
+            temperature=cfg.temperature,
+            top_p=cfg.top_p,
+            max_tokens=cfg.max_tokens,
+            prompt_template=cfg.prompt_template,
+        )
+    if provider == "ollama":
+        return OllamaGenerator(
+            model=cfg.model, temperature=cfg.temperature, prompt_template=cfg.prompt_template
+        )
+
+    raise HTTPException(status_code=400, detail=f"Unsupported llm_provider: {provider}")
+
+
+@router.post(
+    "/ask_eval",
+    response_model=AskEvalResponse,
+    tags=["RAG"],
+    summary="Ask a question with per-request ephemeral RAG configuration",
+)
+def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
+    """Execute a RAG query with per-request configuration."""
+    cfg = payload.config
+
+    # Validate configuration
+    if validation_errors := validate_rag_config(cfg):
+        raise HTTPException(
+            status_code=400, detail=f"Invalid config: {'; '.join(validation_errors)}"
+        )
+
+    # Build components on the fly
+    doc_repo = SqlDocumentStorage()
+    corpus, doc_ids = get_corpus_and_ids(doc_repo)
+    retriever = _build_retriever_from_config(cfg, doc_repo, corpus, doc_ids)
+    generator = _build_generator_from_config(cfg)
+
+    # Execute RAG ask
+    history_storage = HistorySqlStorage()
+    service = RagService(retriever, generator, history_storage)
+    t0 = time.perf_counter()
+    rag_result = service.ask(question=payload.question, top_k=cfg.k)
+    latency_ms = int((time.perf_counter() - t0) * 1000)
+    docs = rag_result["docs"]
+    scores = rag_result["scores"]
+    sources = [
+        QueryResult(
+            document=DocumentInDB(id=doc.id, content=doc.content),
+            score=score,
+        )
+        for doc, score in zip(docs, scores, strict=False)
+    ]
+    return AskEvalResponse(answer=rag_result["answer"], sources=sources, latency_ms=latency_ms)
+
+
+# ---------------------- OpenRouter Proxy (CodeArena) ---------------------- #
+
+
+class OpenRouterUsage(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class OpenRouterGenerateRequest(BaseModel):
+    model: str | None = Field(
+        default=None, description="OpenRouter model ID, e.g., 'openai/gpt-4o-mini'"
+    )
+    system_instruction: str
+    user_content: str
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
+
+
+class OpenRouterGenerateResponse(BaseModel):
+    text: str
+    usage: OpenRouterUsage | None = None
+
+
+@router.post(
+    "/openrouter/generate",
+    response_model=OpenRouterGenerateResponse,
+    tags=["LLM"],
+    summary="Proxy completion via OpenRouter (OpenAI-compatible)",
+)
+def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterGenerateResponse:
+    if not (
+        getattr(settings, "openrouter_enabled", False)
+        and getattr(settings, "openrouter_api_key", None)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="OpenRouter is not configured (set OPENROUTER_ENABLED and OPENROUTER_API_KEY)",
+        )
+
+    headers: dict[str, str] = {}
+    if settings.openrouter_site_url is not None:
+        headers["HTTP-Referer"] = settings.openrouter_site_url
+    if settings.openrouter_app_title is not None:
+        headers["X-Title"] = settings.openrouter_app_title
+
+    client = OpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.openrouter_base_url,
+        default_headers=headers or None,
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=(payload.model or settings.openrouter_model),
+            temperature=payload.temperature,
+            top_p=payload.top_p,
+            max_tokens=payload.max_tokens,
+            messages=[
+                {"role": "system", "content": payload.system_instruction},
+                {"role": "user", "content": payload.user_content},
+            ],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
+
+    text = resp.choices[0].message.content or ""
+    usage = getattr(resp, "usage", None)
+    usage_obj = None
+    if usage is not None:
+        usage_obj = OpenRouterUsage(
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            total_tokens=getattr(usage, "total_tokens", 0) or 0,
+        )
+
+    return OpenRouterGenerateResponse(text=text, usage=usage_obj)
+
+
+# ---------------------- Templates API ---------------------- #
+
+
+class TemplateResponse(BaseModel):
+    name: str
+    template: str
+    description: str
+
+
+@router.get(
+    "/templates",
+    response_model=list[TemplateResponse],
+    tags=["RAG"],
+    summary="Get available prompt templates",
+)
+def get_templates() -> list[TemplateResponse]:
+    """
+    Get available prompt templates for RAG queries.
+    Returns:
+        List[TemplateResponse]: Available prompt templates with descriptions
+    """
+    templates = [
+        TemplateResponse(
+            name="default",
+            template=settings.openai_prompt_template,
+            description="Default template for OpenAI/OpenRouter models",
+        ),
+        TemplateResponse(
+            name="ollama",
+            template=settings.ollama_prompt_template,
+            description="Template optimized for Ollama models",
+        ),
+        TemplateResponse(
+            name="concise",
+            template="Based on the context below, provide a concise answer.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nANSWER:",
+            description="Concise template for brief responses",
+        ),
+        TemplateResponse(
+            name="detailed",
+            template="You are an expert Q&A system. Your task is to answer the user's question based on the provided sources. Synthesize the information from the sources into a coherent, detailed answer.\n\nSources:\n{context}\n\nQuestion: {question}\n\nAnswer:",
+            description="Detailed template for comprehensive responses",
+        ),
+    ]
+    return templates
+
+
+# ---------------------- Configuration API ---------------------- #
+
+
+class ConfigResponse(BaseModel):
+    retrieval_mode: str
+    hybrid_alpha: float
+    temperature: float
+    max_tokens: int
+    available_providers: list[str]
+
+
+@router.get(
+    "/config",
+    response_model=ConfigResponse,
+    tags=["RAG"],
+    summary="Get backend configuration defaults",
+)
+def get_config() -> ConfigResponse:
+    """
+    Get backend configuration defaults.
+    Returns:
+        ConfigResponse: Current backend configuration defaults
+    """
+    available_providers = []
+    if settings.openai_api_key:
+        available_providers.append("openai")
+    if settings.ollama_enabled:
+        available_providers.append("ollama")
+    if getattr(settings, "openrouter_enabled", False) and getattr(
+        settings, "openrouter_api_key", None
+    ):
+        available_providers.append("openrouter")
+
+    return ConfigResponse(
+        retrieval_mode=settings.retrieval_mode,
+        hybrid_alpha=settings.hybrid_retrieval_alpha,
+        temperature=settings.openai_temperature,
+        max_tokens=settings.openai_max_tokens,
+        available_providers=available_providers,
+    )

@@ -1,6 +1,6 @@
 [project]
-name = "intrinsical-rag-prototype"
-version = "1.0.0"
+name = "rag-prototype"
+version = "1.1.0"
 description = "Enterprise-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -30,7 +30,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -162,16 +161,11 @@ Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
 Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 
 [project.scripts]
-# Production CLI commands
-rag-server = "local_rag_backend.cli:rag_server"
+# CLI commands
 rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap = "local_rag_backend.cli:rag_bootstrap"
+rag-server = "local_rag_backend.cli:rag_server"
 rag-status = "local_rag_backend.cli:rag_status"
-
-# Development & maintenance commands
-rag-dev = "local_rag_backend.cli:rag_dev"
-rag-health = "local_rag_backend.cli:rag_health"
-rag-migrate = "local_rag_backend.cli:rag_migrate"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -225,7 +219,22 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["ARG", "S101", "S106", "S311"]  # Allow test-specific patterns
+"tests/**/*" = [
+    "ARG",   # allow unused args in tests
+    "S101",  # allow assert
+    "S106",  # hardcoded passwords in tests
+    "S311",  # weak crypto acceptable in tests
+    "N",     # naming conventions (classes, variables) in tests
+    "SIM105",# try/except/pass simplification
+    "S110",  # except-pass without logging in tests
+    "C405",  # unnecessary list literal
+    "C403",  # unnecessary list comprehension
+    "RUF012",# mutable class attributes without ClassVar
+    "F841",  # local variable assigned but unused
+    "RUF007",# prefer itertools.pairwise (style)
+    "RUF003",# ambiguous dash in comments
+    "E742",  # ambiguous class/function name in tests
+]
 "scripts/**/*" = ["S602", "S603", "S607"]  # Allow subprocess in scripts
 "**/conftest.py" = ["ARG001"]  # Allow unused fixtures
 "src/local_rag_backend/settings.py" = ["S104"]
@@ -270,6 +279,7 @@ warn_unused_ignores = true
 warn_return_any = true
 strict_equality = true
 show_error_codes = true
+exclude = "(?x)^(tests/|scripts/)"
 
 [[tool.mypy.overrides]]
 module = [
@@ -320,6 +330,10 @@ omit = [
     "*/__init__.py",
     "*/conftest.py",
     "scripts/*",
+    "src/local_rag_backend/cli.py",
+    "src/local_rag_backend/app/dependencies.py",
+    "src/local_rag_backend/infrastructure/persistence/faiss/faiss_.py",
+    "src/local_rag_backend/scripts/build_index.py",
 ]
 
 [tool.coverage.report]

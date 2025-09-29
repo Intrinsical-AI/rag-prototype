@@ -16,7 +16,7 @@ def test_faiss_index_add_and_search(tmp_path):
     vectors = [np.random.rand(dim).astype(np.float32) for _ in range(3)]
     ids = [101, 102, 103]
     idx.add_to_index(ids, vectors)
-    # Guardar y recargar (persiste bien)
+    # Save and reload (persists well)
     idx2 = FaissIndex(index_path, id_map_path, dim=dim)
     q = vectors[0]
     idxs, dists = idx2.search(q, k=1)

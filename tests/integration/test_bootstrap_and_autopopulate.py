@@ -11,12 +11,12 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
         def embed(self, texts):
             return [[0.0] * self.dim for _ in texts]
 
-    # Mock FAISS Index para asegurar dim consistente
+    # Mock FAISS Index to ensure consistent dim
     class DummyFaissIndex:
         def __init__(self, index_path, id_map_path, dim=None):  # <-- Aquí el cambio
             self.index_path = index_path
             self.id_map_path = id_map_path
-            self.dim = 4  # igual a DummyEmbedder
+            self.dim = 4  # same as DummyEmbedder
             self.id_map = []
 
         def add_to_index(self, ids, vecs):
@@ -34,13 +34,13 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
         lambda model_name=None: DummyEmbedder(),
         raising=True,
     )
-    # Parcheamos la clase en el módulo donde la usa FaissVectorStorage
+    # Patch the class in the module where FaissVectorStorage uses it
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
         DummyFaissIndex,
     )
 
-    # CSV temporal y settings
+    # Temporary CSV and settings
     csv_file = tmp_path / "faq.csv"
     with csv_file.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh, delimiter=";")
@@ -53,7 +53,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
-    # Resetear singleton si hace falta
+    # Reset singleton if needed
     try:
         from local_rag_backend.app import factory
 

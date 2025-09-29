@@ -28,7 +28,7 @@ class DummyRagSvcWithDocs:
         }
 
 
-# ---------- override dependencia --------------------------------------------
+# ---------- override dependency --------------------------------------------
 app.dependency_overrides = {}
 app.dependency_overrides[get_rag_service] = lambda: DummyRagSvc()
 
@@ -45,13 +45,13 @@ def test_post_ask_endpoint():
 
 
 def test_get_root_frontend_not_found(tmp_path, monkeypatch):
-    # Simulamos que no existe index.html ni en paquete ni en repo
-    # 1) Forzar fallo al buscar recursos empaquetados
+    # Simulate that index.html does not exist neither in package nor in repo
+    # 1) Force failure when searching for packaged resources
     monkeypatch.setattr(
         "local_rag_backend.app.main.resources.files",
-        lambda *a, **k: object(),  # objeto sin .joinpath -> provocará excepción y fallback
+        lambda *a, **k: object(),  # object without .joinpath -> will raise exception and fallback
     )
-    # 2) Fallback del repo apunta a carpeta vacía
+    # 2) Fallback points to empty directory
     monkeypatch.setattr("local_rag_backend.app.main.FRONTEND_DIR", tmp_path)
     resp = client.get("/")
     assert resp.status_code == 404

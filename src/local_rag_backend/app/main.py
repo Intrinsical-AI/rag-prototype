@@ -1,13 +1,21 @@
 # src/app/main.py
+"""
+FastAPI application entry point.
+"""
+
+from __future__ import annotations
+
 import logging
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from local_rag_backend.app.api_router import router
@@ -17,29 +25,34 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import engine as global_app_engine
 from local_rag_backend.settings import settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s",
-    stream=sys.stdout,
-)
-logger = logging.getLogger(__name__)  # logger after de basicConfig
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger(__name__)
+
+# Frontend directory for testing
+FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend"
 
 
-# --- Lifespan Context Manager ---
 @asynccontextmanager
-async def lifespan(_app_instance: FastAPI) -> AsyncGenerator[None, None]:
-    logger.info("Lifespan startup: Checking/Creating database tables...")
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    """Manage application startup and shutdown events."""
+    logger.info("Initializing RAG service...")
     AppDeclarativeBase.metadata.create_all(bind=global_app_engine)
-    logger.info("Lifespan startup: Database tables checked/created.")
-
-    logger.info("Lifespan startup: Initializing RAG service...")
-    get_rag_service()
-    logger.info("Lifespan startup: RAG service initialized.")
+    get_rag_service()  # Pre-load the RAG service
+    logger.info("Service initialized.")
     yield
-    logger.info("Lifespan shutdown: Cleaning up resources (if any)...")
+    logger.info("Shutting down.")
 
 
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
+
+# Enable permissive CORS for development and integration with external frontends
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if settings.enable_monitoring:
     app.add_middleware(MetricsMiddleware)
@@ -54,42 +67,36 @@ async def metrics_endpoint() -> PlainTextResponse:
     return PlainTextResponse(content=content, media_type=content_type)
 
 
-CURRENT_FILE_PATH = Path(__file__).resolve()
-SRC_APP_DIR = CURRENT_FILE_PATH.parent
-SRC_DIR = SRC_APP_DIR.parent
-PROJECT_ROOT_DIR = SRC_DIR.parent
-FRONTEND_DIR = PROJECT_ROOT_DIR / "frontend"
-
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root(_request: Request) -> HTMLResponse:
-    # 1) Try to serve packaged frontend (installed package)
+def get_frontend_path() -> Traversable | Path | None:
+    """Try to find the index.html file, first in package resources, then in repo structure."""
     try:
-        pkg_index = resources.files("local_rag_backend.frontend").joinpath("index.html")
-        if pkg_index.is_file():
-            with pkg_index.open("r", encoding="utf-8") as f:
-                html_content = f.read()
-            return HTMLResponse(content=html_content, status_code=200)
-    except Exception as e:
-        # Log error and fallback to repository frontend
-        logger.warning(f"Failed to load packaged frontend: {e}")
+        # 1. Packaged resource (for installed distributions)
+        pkg_path = resources.files("local_rag_backend.frontend").joinpath("index.html")
+        if pkg_path.is_file():
+            return pkg_path
+    except (ImportError, AttributeError):
+        pass  # Fallback to repo structure
 
-    # 2) Fallback: serve from repository root (developer mode)
-    index_html_path = FRONTEND_DIR / "index.html"
-    if not index_html_path.is_file():
-        logger.error(f"Frontend file not found at {index_html_path}")
-        return HTMLResponse(
-            content="<h1>Frontend not found</h1><p>Please check server configuration.</p>",
-            status_code=404,
-        )
+    # 2. Repo structure (for development)
+    repo_path = FRONTEND_DIR / "index.html"
+    if repo_path.is_file():
+        return repo_path
+    return None
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def serve_frontend() -> HTMLResponse:
+    """Serve the single-page frontend application."""
+    index_path = get_frontend_path()
+    if not index_path:
+        return HTMLResponse("<h1>Frontend not found</h1>", status_code=404)
 
     try:
-        with open(index_html_path, encoding="utf-8") as f:
-            html_content = f.read()
-        return HTMLResponse(content=html_content, status_code=200)
+        html_content = index_path.read_text(encoding="utf-8")
+        return HTMLResponse(content=html_content)
     except Exception as e:
-        logger.error(f"Could not read frontend file {index_html_path}: {e}", exc_info=True)
-        return HTMLResponse(content="<h1>Error serving frontend</h1>", status_code=500)
+        logger.error(f"Error reading frontend file: {e}")
+        return HTMLResponse("<h1>Failed to load frontend</h1>", status_code=500)
 
 
 if __name__ == "__main__":

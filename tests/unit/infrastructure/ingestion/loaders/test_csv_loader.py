@@ -140,3 +140,44 @@ def test_csv_loader_file_not_found():
     with pytest.raises(FileNotFoundError):
         loader = CSVLoader("nonexistent.csv")
         list(loader.load())
+
+
+def test_csv_loader_extra_columns():
+    csv_content = "Title;Content;Extra\nT;C;E"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        f.write(csv_content)
+        temp_path = f.name
+    try:
+        loader = CSVLoader(temp_path, delimiter=";", has_header=True)
+        items = list(loader.load())
+        assert len(items) == 1
+        # Only first two columns considered
+        assert items[0].text == "T\n\nC"
+        assert items[0].metadata == {"title": "T"}
+    finally:
+        Path(temp_path).unlink()
+
+
+def test_csv_loader_empty_file():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        temp_path = f.name
+    try:
+        loader = CSVLoader(temp_path, delimiter=";", has_header=True)
+        items = list(loader.load())
+        assert items == []
+    finally:
+        Path(temp_path).unlink()
+
+
+def test_csv_loader_windows_newlines():
+    csv_content = "Title;Content\r\nHello;World\r\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8", newline="") as f:
+        f.write(csv_content)
+        temp_path = f.name
+    try:
+        loader = CSVLoader(temp_path, delimiter=";", has_header=True)
+        items = list(loader.load())
+        assert len(items) == 1
+        assert items[0].text == "Hello\n\nWorld"
+    finally:
+        Path(temp_path).unlink()

@@ -31,7 +31,7 @@ class DummyDocRepo:
 class DummyFaissIndex:
     def __init__(self):
         self.id_map = [1, 2]
-        # Para query=[1,0], devuelve idx=0 (Doc A), query=[0,1], idx=1 (Doc B)
+        # To query=[1,0], returns idx=0 (Doc A), to query=[0,1], returns idx=1 (Doc B)
 
     def search(self, query_vec, k):
         if query_vec == [1, 0]:  # closest: idx 0
@@ -40,6 +40,15 @@ class DummyFaissIndex:
             return np.array([1]), np.array([0.0])
         else:
             return np.array([0]), np.array([999.0])
+
+    def similar(self, vector, k):
+        # Return (doc_id, similarity_score) pairs
+        if vector == [1, 0]:  # closest: Doc A (id=1)
+            return [(1, 1.0)]
+        elif vector == [0, 1]:  # closest: Doc B (id=2)
+            return [(2, 1.0)]
+        else:
+            return [(1, 0.5)]
 
 
 def test_dense_faiss_retriever_basic():
@@ -64,7 +73,7 @@ def test_sparse_bm25_retriever_basic():
             pass
 
         def get_scores(self, query):
-            # Devuelve 1.0 si “a” está en query, 0.0 si no.
+            # Returns 1.0 if "a" is in query, 0.0 if not.
             return [1.0, 0.0] if "a" in query else [0.0, 1.0]
 
     class DummySparse(SparseBM25Retriever):
@@ -90,7 +99,7 @@ def test_sparse_bm25_retriever_basic():
 
 
 def test_hybrid_retriever_merges_and_ranks():
-    # Los dense y sparse producen 1 doc cada uno, se fusionan, ambos deben salir en top-2
+    # Dense and sparse retrievers produce 1 doc each, they are merged, both must appear in top-2
     class DummyRetriever:
         def __init__(self, docs, scores):
             self._docs, self._scores = docs, scores
