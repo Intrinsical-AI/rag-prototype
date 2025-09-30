@@ -12,7 +12,7 @@ from local_rag_backend.app.main import app
 class _MockRagService:
     """Mock RAG service with minimal methods for contract testing."""
 
-    async def ask(self, question: str, k: int = 3):
+    def ask(self, question: str, top_k: int = 3):
         """Mock ask method that returns a minimal valid response."""
         return {
             "answer": "mock answer",
