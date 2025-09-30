@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from local_rag_backend.settings import settings
+
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
 
@@ -78,7 +80,7 @@ class RagService:
 
         # --- Handle Empty Results ---
         if not docs:
-            answer = "No hay documentos indexados para responder a tu pregunta."
+            answer = settings.no_documents_message
             self.history_storage.save(validated_question, answer, [])
             return {"answer": answer, "docs": [], "scores": []}
 

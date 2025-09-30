@@ -100,6 +100,12 @@ class Settings(BaseSettings):
         "Based on the context, answer the question.\nIf the context is not enough, say so.\n\nCONTEXT:\n{context}\n\nQUESTION:\n{question}"
     )
 
+    # --- User Messages --- #
+    no_documents_message: str = Field(
+        "No documents are available to answer your question.",
+        description="Message shown when no documents are found for a query."
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )

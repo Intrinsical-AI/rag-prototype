@@ -118,6 +118,6 @@ def test_rag_service_empty_docs():
     resp = rag.ask("vacío", top_k=2)
 
     # --- Verify Empty Response Handling ---
-    assert resp["answer"].startswith("No hay documentos indexados")
+    assert resp["answer"] == "No documents are available to answer your question."
     assert resp["docs"] == []
     assert resp["scores"] == []
