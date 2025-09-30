@@ -12,7 +12,6 @@ class _DummyDoc:
 
 
 class _DummyLoaderList:
-
     def __init__(self, docs: list[Any]) -> None:
         self._docs = docs
 

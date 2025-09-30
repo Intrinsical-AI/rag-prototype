@@ -2,9 +2,18 @@
 API contract validation tests for parameter bounds and validation.
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 from local_rag_backend.app.main import app
+from local_rag_backend.settings import settings
+
+
+@pytest.fixture(autouse=True)
+def _mock_llm(monkeypatch):
+    """Mock LLM configuration for all tests in this module."""
+    monkeypatch.setattr(settings, "openai_api_key", "test-key", raising=False)
+    monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
 
 def test_ask_rejects_k_out_of_range(in_memory_sqlite) -> None:
