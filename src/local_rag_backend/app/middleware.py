@@ -10,12 +10,7 @@ import time
 from starlette.middleware.base import BaseHTTPMiddleware
 
 try:
-    from prometheus_client import (
-        CONTENT_TYPE_LATEST,
-        Counter,
-        Histogram,
-        generate_latest,
-    )
+    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
     PROMETHEUS_AVAILABLE = True
 except ImportError:
