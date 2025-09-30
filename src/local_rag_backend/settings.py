@@ -103,7 +103,15 @@ class Settings(BaseSettings):
     # --- User Messages --- #
     no_documents_message: str = Field(
         "No documents are available to answer your question.",
-        description="Message shown when no documents are found for a query."
+        description="Message shown when no documents are found for a query.",
+    )
+
+    # --- History Management --- #
+    enable_history: bool = Field(
+        True, description="Whether to save Q&A interactions to history storage."
+    )
+    max_history_entries: int = Field(
+        1000, description="Maximum number of history entries to keep. Set to 0 for unlimited."
     )
 
     model_config = SettingsConfigDict(
@@ -130,6 +138,14 @@ class Settings(BaseSettings):
         if not v.startswith(("http://", "https://")):
             raise ValueError("Ollama URL must start with http:// or https://")
         return v.rstrip("/")
+
+    @field_validator("max_history_entries")
+    @classmethod
+    def _validate_max_history_entries(cls, v: int) -> int:
+        """Validate max_history_entries is non-negative."""
+        if v < 0:
+            raise ValueError("max_history_entries must be non-negative (0 for unlimited)")
+        return v
 
     @model_validator(mode="after")
     def _validate_chunking(self) -> Settings:

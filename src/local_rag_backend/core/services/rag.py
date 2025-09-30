@@ -81,7 +81,7 @@ class RagService:
         # --- Handle Empty Results ---
         if not docs:
             answer = settings.no_documents_message
-            self.history_storage.save(validated_question, answer, [])
+            self._save_to_history_if_enabled(validated_question, answer, [])
             return {"answer": answer, "docs": [], "scores": []}
 
         # --- Answer Generation Phase ---
@@ -90,55 +90,95 @@ class RagService:
 
         # --- History Management ---
         source_ids = [doc.id for doc in docs]
-        self.history_storage.save(validated_question, answer, source_ids)
+        self._save_to_history_if_enabled(validated_question, answer, source_ids)
 
         return {"answer": answer, "docs": docs, "scores": scores}
 
+    def _save_to_history_if_enabled(
+        self, question: str, answer: str, source_ids: list[int]
+    ) -> None:
+        """Save interaction to history if enabled and manage size limits.
+
+        Args:
+            question: The user's question
+            answer: The generated answer
+            source_ids: IDs of source documents used
+        """
+        if not settings.enable_history:
+            return
+
+        # Save the interaction
+        self.history_storage.save(question, answer, source_ids)
+
+        # Manage history size if limit is set
+        if settings.max_history_entries > 0:
+            self._cleanup_history_if_needed()
+
+    def _cleanup_history_if_needed(self) -> None:
+        """Clean up old history entries if limit is exceeded.
+
+        This is a best-effort cleanup. If the history storage doesn't support
+        cleanup operations, this will be a no-op.
+        """
+        # Check if history storage supports cleanup operations
+        if hasattr(self.history_storage, 'cleanup_old_entries'):
+            self.history_storage.cleanup_old_entries(settings.max_history_entries)
+        elif hasattr(self.history_storage, 'get_entry_count') and hasattr(self.history_storage, 'delete_oldest_entries'):
+            # Alternative cleanup method
+            try:
+                current_count = self.history_storage.get_entry_count()
+                if current_count > settings.max_history_entries:
+                    excess = current_count - settings.max_history_entries
+                    self.history_storage.delete_oldest_entries(excess)
+            except Exception:
+                # If cleanup fails, continue without error to maintain service availability
+                pass
+
     def _validate_and_sanitize_question(self, question: str | None) -> str:
         """Validate and sanitize the input question.
-        
+
         Args:
             question: Raw question input to validate
-            
+
         Returns:
             Sanitized question string
-            
+
         Raises:
             ValueError: If question is invalid
         """
         if question is None:
             raise ValueError("Question cannot be None")
-        
+
         if not isinstance(question, str):
             raise ValueError(f"Question must be a string, got {type(question).__name__}")
-        
+
         sanitized = question.strip()
         if not sanitized:
             raise ValueError("Question cannot be empty or whitespace-only")
-        
+
         return sanitized
 
     def _validate_top_k(self, top_k: int) -> int:
         """Validate the top_k parameter.
-        
+
         Args:
             top_k: Number of documents to retrieve
-            
+
         Returns:
             Validated top_k value
-            
+
         Raises:
             ValueError: If top_k is invalid
         """
         if not isinstance(top_k, int):
             raise ValueError(f"top_k must be an integer, got {type(top_k).__name__}")
-        
+
         if top_k <= 0:
             raise ValueError(f"top_k must be positive, got {top_k}")
-        
+
         # Reasonable upper limit to prevent performance issues
-        MAX_TOP_K = 50
-        if top_k > MAX_TOP_K:
-            raise ValueError(f"top_k cannot exceed {MAX_TOP_K}, got {top_k}")
-        
+        max_top_k = 50
+        if top_k > max_top_k:
+            raise ValueError(f"top_k cannot exceed {max_top_k}, got {top_k}")
+
         return top_k

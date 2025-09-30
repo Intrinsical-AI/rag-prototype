@@ -5,11 +5,12 @@ This module tests the critical bug fixes for input validation
 in the RAG service to prevent crashes and ensure robust behavior.
 """
 
-import pytest
 from unittest.mock import Mock
 
-from local_rag_backend.core.services.rag import RagService
+import pytest
+
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.services.rag import RagService
 
 
 class TestRagValidation:
@@ -92,7 +93,7 @@ class TestRagValidation:
     def test_valid_top_k_range(self, rag_service, valid_top_k):
         """Test that valid top_k values are accepted."""
         result = rag_service.ask("Valid question", top_k=valid_top_k)
-        
+
         # Should not raise and should return proper structure
         assert isinstance(result, dict)
         assert "answer" in result
@@ -108,7 +109,7 @@ class TestRagValidation:
     def test_question_sanitization(self, rag_service, mock_retriever, question, expected_sanitized):
         """Test that questions are properly sanitized."""
         rag_service.ask(question, top_k=3)
-        
+
         # Verify retriever was called with sanitized question
         mock_retriever.retrieve.assert_called_once_with(expected_sanitized, 3)
 
@@ -116,14 +117,14 @@ class TestRagValidation:
         """Test successful ask flow after validation."""
         question = "  What is the answer?  "  # With whitespace
         top_k = 5
-        
+
         result = rag_service.ask(question, top_k=top_k)
-        
+
         # Verify validation and sanitization occurred
         mock_retriever.retrieve.assert_called_once_with("What is the answer?", 5)
         mock_generator.generate.assert_called_once_with("What is the answer?", ["Test document"])
         mock_history_storage.save.assert_called_once_with("What is the answer?", "Generated answer", [1])
-        
+
         # Verify result structure
         assert result == {
             "answer": "Generated answer",
@@ -135,14 +136,14 @@ class TestRagValidation:
         """Test ask behavior when no documents are found."""
         # Mock retriever to return empty results
         mock_retriever.retrieve.return_value = ([], [])
-        
+
         result = rag_service.ask("Valid question", top_k=3)
-        
+
         # Should return default message
         assert result["answer"] == "No documents are available to answer your question."
         assert result["docs"] == []
         assert result["scores"] == []
-        
+
         # Should still save to history
         mock_history_storage.save.assert_called_once_with("Valid question", result["answer"], [])
 
@@ -150,19 +151,19 @@ class TestRagValidation:
         """Test validation methods directly."""
         # Test question validation
         assert rag_service._validate_and_sanitize_question("  valid  ") == "valid"
-        
+
         with pytest.raises(ValueError, match="Question cannot be None"):
             rag_service._validate_and_sanitize_question(None)
-        
+
         with pytest.raises(ValueError, match="Question cannot be empty"):
             rag_service._validate_and_sanitize_question("   ")
-        
+
         # Test top_k validation
         assert rag_service._validate_top_k(5) == 5
-        
+
         with pytest.raises(ValueError, match="top_k must be positive"):
             rag_service._validate_top_k(0)
-        
+
         with pytest.raises(ValueError, match="top_k cannot exceed 50"):
             rag_service._validate_top_k(51)
 
@@ -172,7 +173,7 @@ class TestRagValidation:
         with pytest.raises(ValueError) as exc_info:
             rag_service.ask(None, top_k=3)
         assert "Question cannot be None" in str(exc_info.value)
-        
+
         # top_k validation error
         with pytest.raises(ValueError) as exc_info:
             rag_service.ask("Valid question", top_k=0)
@@ -183,14 +184,14 @@ class TestRagValidation:
         # Test with typical valid inputs
         question = "What is machine learning?"
         top_k = 3
-        
+
         result = rag_service.ask(question, top_k)
-        
+
         # All components should be called as before
         mock_retriever.retrieve.assert_called_once_with(question, top_k)
         mock_generator.generate.assert_called_once()
         mock_history_storage.save.assert_called_once()
-        
+
         # Result structure should be unchanged
         assert "answer" in result
         assert "docs" in result
@@ -204,10 +205,10 @@ class TestRagValidation:
             "机器学习是什么？",
             "Что такое ИИ?",
         ]
-        
+
         for question in unicode_questions:
             result = rag_service.ask(question, top_k=3)
-            
+
             # Should handle unicode gracefully
             assert isinstance(result, dict)
             mock_retriever.retrieve.assert_called_with(question, 3)
@@ -217,7 +218,7 @@ class TestRagValidation:
         # Should accept exactly 50
         result = rag_service.ask("Valid question", top_k=50)
         assert isinstance(result, dict)
-        
+
         # Should reject 51
         with pytest.raises(ValueError, match="top_k cannot exceed 50"):
             rag_service.ask("Valid question", top_k=51)
@@ -226,11 +227,11 @@ class TestRagValidation:
         """Test that validation doesn't significantly impact performance."""
         # This is a basic test - in real scenarios you'd measure timing
         question = "Performance test question"
-        
+
         # Multiple calls should all succeed
         for _ in range(10):
             result = rag_service.ask(question, top_k=5)
             assert isinstance(result, dict)
-        
+
         # Verify all calls went through
         assert mock_retriever.retrieve.call_count == 10

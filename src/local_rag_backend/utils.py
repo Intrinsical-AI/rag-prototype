@@ -46,14 +46,14 @@ def preprocess_text(text: str | None) -> str:
     # --- Input Validation ---
     if text is None:
         return ""
-    
+
     if not isinstance(text, str):
         # Convert to string if possible, otherwise return empty
         try:
             text = str(text)
         except Exception:
             return ""
-    
+
     # --- Text Normalization ---
     text = text.lower().strip()
     text = _HTML_TAG_RE.sub(" ", text)  # Replace tags with spaces

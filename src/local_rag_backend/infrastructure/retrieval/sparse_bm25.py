@@ -48,16 +48,16 @@ class SparseBM25Retriever(RetrieverPort):
 
     def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
         """Retrieve documents using BM25 scores.
-        
+
         Args:
             query: The search query text to find similar documents for
             k: Maximum number of documents to retrieve
-            
+
         Returns:
             Tuple containing:
                 - List of Document objects ordered by relevance
                 - List of similarity scores corresponding to each document
-                
+
         Note:
             Returns empty lists if k <= 0, query is invalid, or no BM25 index exists.
         """
@@ -105,10 +105,10 @@ class SparseBM25Retriever(RetrieverPort):
 
     def _is_valid_query(self, query: str | None) -> bool:
         """Validate that query is suitable for processing.
-        
+
         Args:
             query: Query string to validate
-            
+
         Returns:
             True if query is valid, False otherwise
         """
@@ -116,6 +116,4 @@ class SparseBM25Retriever(RetrieverPort):
             return False
         if not isinstance(query, str):
             return False
-        if not query.strip():
-            return False
-        return True
+        return bool(query.strip())
