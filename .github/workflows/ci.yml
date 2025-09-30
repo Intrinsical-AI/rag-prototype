@@ -63,9 +63,6 @@ jobs:
       - name: Ruff
         run: uv run ruff check .
 
-      - name: Black (check)
-        run: uv run black --check .
-
       - name: isort (check-only)
         run: uv run isort --check-only .
 
