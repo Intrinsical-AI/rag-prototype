@@ -1,4 +1,3 @@
-# src/infrastructure/embeddings/openai.py
 """
 OpenAI embeddings implementation.
 """

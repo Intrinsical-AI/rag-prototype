@@ -1,10 +1,10 @@
-# src/infrastructure/llms/openai_chat.py
 """
-OpenAI Chat completion generator (compatible con API v1)
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
 
-* Instantiated with `OpenAI(api_key=…)`.
-* `generate()` builds prompt exactly as expected by asserts.
-* Handles `APIError` and converts it to `HTTPException 502`.
+Module: OpenAI LLM Generator
+Purpose: Cloud-based text generation using OpenAI's Chat Completions API.
+         Provides high-quality language model integration with GPT models.
 """
 
 from __future__ import annotations
@@ -24,7 +24,17 @@ __all__ = ["OpenAIGenerator"]
 
 
 class OpenAIGenerator(GeneratorPort):
-    """Generator using the OpenAI chat completions API."""
+    """Cloud-based text generator using OpenAI's Chat Completions API.
+
+    This generator provides high-quality text generation using OpenAI's GPT models.
+    Supports advanced parameters like temperature, top_p, and custom prompt templates.
+
+    Features:
+    - State-of-the-art language models (GPT-4, GPT-3.5)
+    - Configurable generation parameters
+    - Custom base URLs for OpenAI-compatible APIs
+    - Robust error handling and retry logic
+    """
 
     def __init__(
         self,
@@ -37,6 +47,18 @@ class OpenAIGenerator(GeneratorPort):
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
     ):
+        """Initialize OpenAI generator with configuration.
+
+        Args:
+            model: OpenAI model name (e.g., 'gpt-4o-mini')
+            temperature: Sampling temperature (0.0 to 2.0)
+            top_p: Nucleus sampling parameter (0.0 to 1.0)
+            max_tokens: Maximum tokens to generate
+            prompt_template: Custom prompt template
+            api_key: OpenAI API key (defaults to settings)
+            base_url: Custom API base URL (for OpenAI-compatible APIs)
+            extra_headers: Additional HTTP headers
+        """
         self.model = model or settings.openai_model
         self.temperature = temperature if temperature is not None else settings.openai_temperature
         self.top_p = top_p if top_p is not None else settings.openai_top_p

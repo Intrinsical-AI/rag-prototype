@@ -1,4 +1,3 @@
-# src/local_rag_backend/infrastructure/ingestion/loaders/langchain_adapter.py
 """
 Adapter to use LangChain loaders as `LoaderPort` implementations.
 

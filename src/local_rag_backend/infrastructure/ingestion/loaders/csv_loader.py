@@ -1,4 +1,3 @@
-# src/infrastructure/ingestion/loaders/csv_loader.py
 """
 CSV loader for basic document ingestion.
 """

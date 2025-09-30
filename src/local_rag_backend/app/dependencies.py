@@ -1,6 +1,10 @@
-# src/app/dependencies.py
 """
-Dependencies for the application.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: Dependency Injection
+Purpose: FastAPI dependency injection for RAG service components.
+         Implements singleton pattern and configurable service composition.
 """
 
 from __future__ import annotations
@@ -41,48 +45,80 @@ if TYPE_CHECKING:
 
 @lru_cache(maxsize=1)
 def get_rag_service() -> RagService:
-    """Build and return a singleton RagService instance based on settings."""
+    """Build and return a singleton RAG service instance.
+
+    Creates the complete RAG service with all dependencies based on configuration.
+    Uses singleton pattern to ensure consistent service instance across requests.
+
+    Returns:
+        Configured RagService instance ready for query processing
+
+    Raises:
+        RuntimeError: If no LLM provider is configured
+    """
     logger.info(f"Creating RAG service with retrieval mode: '{settings.retrieval_mode}'")
 
-    # 1. Persistence Ports
+    # --- Document Storage ---
     doc_repo: DocumentRepoPort = SqlDocumentStorage()
 
-    # 2. Retriever Port
-    if settings.retrieval_mode == "sparse":
-        corpus, doc_ids = get_corpus_and_ids(doc_repo)
-        retriever: RetrieverPort = SparseBM25Retriever(
-            documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
-        )
-    else:
-        embedder: EmbedderPort = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-        vector_repo: VectorRepoPort = FaissVectorStorage(
-            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
-        )
-        dense_retriever = DenseFaissRetriever(
-            embedder=embedder, faiss_index=vector_repo, doc_repo=doc_repo
-        )
-        if settings.retrieval_mode == "dense":
-            retriever = dense_retriever
-        else:  # hybrid
-            corpus, doc_ids = get_corpus_and_ids(doc_repo)
-            sparse_retriever = SparseBM25Retriever(
-                documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
-            )
-            retriever = HybridRetriever(
-                dense=dense_retriever,
-                sparse=sparse_retriever,
-                alpha=settings.hybrid_retrieval_alpha,
-            )
+    # --- Retrieval Strategy ---
+    retriever = _build_retriever(doc_repo)
 
-    # 3. Generator Port
-    generator: GeneratorPort
+    # --- LLM Generator ---
+    generator = _build_generator()
+
+    # --- History Storage ---
+    history_repo: QAHistoryPort = HistorySqlStorage()
+
+    return RagService(retriever=retriever, generator=generator, history_storage=history_repo)
+
+
+def _build_retriever(doc_repo: DocumentRepoPort) -> RetrieverPort:
+    """Build retriever based on configured retrieval mode."""
+    mode = settings.retrieval_mode
+
+    if mode == "sparse":
+        return _build_sparse_retriever(doc_repo)
+    elif mode == "dense":
+        return _build_dense_retriever(doc_repo)
+    elif mode == "hybrid":
+        return _build_hybrid_retriever(doc_repo)
+    else:
+        raise ValueError(f"Unknown retrieval mode: {mode}")
+
+
+def _build_sparse_retriever(doc_repo: DocumentRepoPort) -> SparseBM25Retriever:
+    """Build BM25-based sparse retriever."""
+    corpus, doc_ids = get_corpus_and_ids(doc_repo)
+    return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+
+
+def _build_dense_retriever(doc_repo: DocumentRepoPort) -> DenseFaissRetriever:
+    """Build FAISS-based dense retriever."""
+    embedder: EmbedderPort = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+    vector_repo: VectorRepoPort = FaissVectorStorage(
+        index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
+    )
+    return DenseFaissRetriever(embedder=embedder, faiss_index=vector_repo, doc_repo=doc_repo)
+
+
+def _build_hybrid_retriever(doc_repo: DocumentRepoPort) -> HybridRetriever:
+    """Build hybrid retriever combining dense and sparse approaches."""
+    dense_retriever = _build_dense_retriever(doc_repo)
+    sparse_retriever = _build_sparse_retriever(doc_repo)
+
+    return HybridRetriever(
+        dense=dense_retriever,
+        sparse=sparse_retriever,
+        alpha=settings.hybrid_retrieval_alpha,
+    )
+
+
+def _build_generator() -> GeneratorPort:
+    """Build LLM generator based on configuration."""
     if settings.ollama_enabled:
-        generator = OllamaGenerator()
+        return OllamaGenerator()
     elif settings.openai_api_key:
-        generator = OpenAIGenerator()
+        return OpenAIGenerator()
     else:
         raise RuntimeError("No LLM configured. Set OPENAI_API_KEY or enable OLLAMA_ENABLED.")
-
-    # 4. History Storage
-    history_repo: QAHistoryPort = HistorySqlStorage()
-    return RagService(retriever=retriever, generator=generator, history_storage=history_repo)

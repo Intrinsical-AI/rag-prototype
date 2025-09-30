@@ -1,6 +1,10 @@
-# src/adapters/generation/ollama_chat.py
 """
-Ollama generator for local Ollama server.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: Ollama LLM Generator
+Purpose: Local LLM text generation using Ollama server.
+         Provides privacy-focused, self-hosted language model integration.
 """
 
 from __future__ import annotations
@@ -23,7 +27,18 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaGenerator(GeneratorPort):
-    """Generator using a local Ollama server."""
+    """Local LLM text generator using Ollama server.
+
+    This generator provides privacy-focused text generation by connecting to
+    a local Ollama server. Supports various open-source models like Llama,
+    Gemma, and others available through Ollama.
+
+    Benefits:
+    - Complete data privacy (no external API calls)
+    - No usage costs after initial setup
+    - Customizable models and parameters
+    - Offline operation capability
+    """
 
     def __init__(
         self,
@@ -31,13 +46,31 @@ class OllamaGenerator(GeneratorPort):
         prompt_template: str | None = None,
         temperature: float | None = None,
     ):
+        """Initialize Ollama generator with configuration.
+
+        Args:
+            model: Ollama model name (defaults to settings)
+            prompt_template: Custom prompt template (defaults to settings)
+            temperature: Generation temperature (optional override)
+        """
         self.model = model or settings.ollama_model
         self.prompt_template = prompt_template or settings.ollama_prompt_template
         self.temperature = temperature
         self.api_url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
 
     def generate(self, question: str, contexts: Sequence[str]) -> str:
-        """Generate a response from the Ollama server."""
+        """Generate answer using local Ollama server.
+
+        Args:
+            question: User question to answer
+            contexts: Retrieved document contexts for grounding
+
+        Returns:
+            Generated answer text
+
+        Raises:
+            HTTPException: For various Ollama server errors (timeout, connection, etc.)
+        """
         context_str = "\n".join(f"- {c}" for c in contexts)
         prompt = self.prompt_template.format(context=context_str, question=question)
 

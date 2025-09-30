@@ -9,7 +9,7 @@ class DummyDocRepo:
         self.next_id = 1
 
     def store_documents(self, texts):
-        # Simula devolver IDs únicos por orden de textos
+        """Simula devolver IDs únicos por orden de textos"""
         ids = list(range(self.next_id, self.next_id + len(texts)))
         self.saved.extend(zip(ids, texts, strict=False))
         self.next_id += len(texts)

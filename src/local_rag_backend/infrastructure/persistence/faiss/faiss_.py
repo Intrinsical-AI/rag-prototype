@@ -1,4 +1,3 @@
-# src/infrastructure/persistence/faiss/faiss_.py
 """
 Adapter for vector storage and search using FAISS.
 """

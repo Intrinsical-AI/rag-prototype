@@ -1,6 +1,10 @@
-# src/core/ports/__init__.py
 """
-Application Ports (Hex Architecture / Ports & Adapters).
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: Core Ports
+Purpose: Defines port interfaces for hexagonal architecture implementation.
+         Provides abstractions for external dependencies and infrastructure adapters.
 """
 
 from __future__ import annotations
@@ -13,57 +17,72 @@ if TYPE_CHECKING:
     from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
 
 
-# -------- Ports --------
+# --- Port Interfaces ---
+
+
 @runtime_checkable
 class EmbedderPort(Protocol):
-    """Interface for embedding text into vector representations."""
+    """Port for converting text to vector embeddings."""
 
     dim: int
+    """Vector dimension produced by this embedder."""
 
-    def embed(self, texts: Sequence[str]) -> Sequence[Embedding]: ...
+    def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
+        """Convert text sequences to vector embeddings."""
 
 
 @runtime_checkable
 class GeneratorPort(Protocol):
-    """Interface for generating text based on a question and context."""
+    """Port for LLM-based text generation."""
 
-    def generate(self, question: str, contexts: Sequence[str]) -> str: ...
+    def generate(self, question: str, contexts: Sequence[str]) -> str:
+        """Generate answer from question and context documents."""
 
 
 @runtime_checkable
 class RetrieverPort(Protocol):
-    """Interface for retrieving relevant documents for a given query."""
+    """Port for document retrieval based on query similarity."""
 
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
+        """Retrieve top-k documents with similarity scores."""
 
 
 @runtime_checkable
 class DocumentRepoPort(Protocol):
-    """Interface for storing and retrieving documents by ID."""
+    """Port for document storage and retrieval operations."""
 
-    def store_documents(self, contents: Sequence[str]) -> Sequence[int]: ...
-    def get(self, ids: Sequence[int]) -> Sequence[Document]: ...
-    def get_all_documents(self) -> Sequence[Document]: ...
+    def store_documents(self, contents: Sequence[str]) -> Sequence[int]:
+        """Store documents and return assigned IDs."""
+
+    def get(self, ids: Sequence[int]) -> Sequence[Document]:
+        """Retrieve documents by their IDs."""
+
+    def get_all_documents(self) -> Sequence[Document]:
+        """Retrieve all stored documents."""
 
 
 @runtime_checkable
 class VectorRepoPort(Protocol):
-    """Interface for storing and searching vector embeddings."""
+    """Port for vector storage and similarity search operations."""
 
-    def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
+    def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None:
+        """Insert or update vectors in the index."""
+
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]:
-        """Find similar vectors, returning (ID, normalized_similarity_score)."""
+        """Find similar vectors, returning (ID, similarity_score) pairs."""
 
 
 @runtime_checkable
 class QAHistoryPort(Protocol):
-    """Interface for persisting question-answer interactions."""
+    """Port for persisting question-answer interaction history."""
 
-    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None: ...
+    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None:
+        """Save Q&A interaction with source document references."""
 
 
 @runtime_checkable
 class LoaderPort(Protocol):
-    """Interface for loading data from a source into a standard format."""
+    """Port for loading data from external sources."""
 
-    def load(self) -> Iterable[LoadedItem]: ...
+    def load(self) -> Iterable[LoadedItem]:
+        """Load and yield data items from the source."""

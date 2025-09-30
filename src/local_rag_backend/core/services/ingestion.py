@@ -1,4 +1,3 @@
-# src/core/services/ingestion.py
 """
 Ingestion service for document processing.
 """

@@ -1,6 +1,10 @@
-# src/app/middleware.py
 """
-Middleware for observability and monitoring.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: HTTP Middleware
+Purpose: Observability middleware for request metrics and monitoring.
+         Provides Prometheus-compatible metrics when enabled.
 """
 
 from __future__ import annotations

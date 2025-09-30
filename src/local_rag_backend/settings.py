@@ -1,14 +1,14 @@
-# src/settings.py
 """
-Configuration management for Intrinsical RAG Prototype.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
 
-This module provides centralized configuration using Pydantic Settings with
-environment variable support and validation. All settings can be overridden
-via environment variables or .env file.
+Module: Application Settings
+Purpose: Centralized configuration management using Pydantic Settings.
+         Provides environment variable support, validation, and type safety.
 
 Example:
-    export OPENAI_API_KEY=\"your-key-here\"
-    export RETRIEVAL_MODE=\"hybrid\"
+    export OPENAI_API_KEY="your-key-here"
+    export RETRIEVAL_MODE="hybrid"
     python -m local_rag_backend.app.main
 """
 

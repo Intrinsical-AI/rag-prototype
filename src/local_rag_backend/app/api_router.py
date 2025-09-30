@@ -1,6 +1,10 @@
-# src/local_rag_backend/app/api_router.py
 """
-FastAPI router for the application endpoints.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: API Router
+Purpose: FastAPI endpoints for RAG operations, health checks, and system management.
+         Provides REST API interface for document queries and system monitoring.
 """
 
 from __future__ import annotations

@@ -1,6 +1,10 @@
-# src/app/main.py
 """
-FastAPI application entry point.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: FastAPI Application Entry Point
+Purpose: Main application factory and configuration for the RAG API server.
+         Handles application lifecycle, middleware setup, and route registration.
 """
 
 from __future__ import annotations
@@ -30,30 +34,46 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from importlib.resources.abc import Traversable
 
+# --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
-# Frontend directory for testing
+# --- Constants ---
 FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend"
+"""Directory containing the frontend static files for development."""
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application startup and shutdown events."""
+    """Manage application startup and shutdown lifecycle events.
+
+    This context manager handles:
+    - Database schema creation on startup
+    - RAG service initialization and dependency injection
+    - Graceful shutdown procedures
+
+    Args:
+        _app: FastAPI application instance (unused but required by interface)
+
+    Yields:
+        None: Control back to FastAPI during application runtime
+    """
     logger.info("Initializing RAG service...")
     AppDeclarativeBase.metadata.create_all(bind=global_app_engine)
-    get_rag_service()  # Pre-load the RAG service
+    get_rag_service()  # Pre-load the RAG service for faster first requests
     logger.info("Service initialized.")
     yield
     logger.info("Shutting down.")
 
 
+# --- FastAPI Application Factory ---
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
 
+# --- CORS Configuration ---
 # Enable permissive CORS for development and integration with external frontends
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # TODO: Restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

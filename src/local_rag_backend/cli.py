@@ -1,9 +1,10 @@
-# src/cli.py
 """
-CLI entry points for Intrinsical RAG Prototype.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
 
-This module provides command-line interfaces for common operations like
-starting the server, building indices, and bootstrapping data.
+Module: Command Line Interface
+Purpose: Provides CLI commands for server management, data ingestion, and system operations.
+         Implements user-friendly commands with progress indicators and status reporting.
 """
 
 from __future__ import annotations

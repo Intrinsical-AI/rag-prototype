@@ -1,6 +1,10 @@
-# src/infrastructure/retrieval/sparse_bm25.py
 """
-Sparse retriever using BM25.
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
+
+Module: Sparse BM25 Retriever
+Purpose: Implements sparse keyword-based document retrieval using the BM25 algorithm.
+         Provides traditional information retrieval capabilities based on term frequency.
 """
 
 from __future__ import annotations

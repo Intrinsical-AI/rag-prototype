@@ -1,6 +1,15 @@
-# src/infrastructure/persistence/sqlalchemy/models.py
+"""
+Intrinsical-AI RAG Prototype
+Copyright (c) 2025 Intrinsical-AI
 
-import datetime
+Module: SQLAlchemy ORM Models
+Purpose: Defines database models for document storage and Q&A history persistence.
+         Implements the data layer using SQLAlchemy ORM with proper typing support.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -8,9 +17,20 @@ from sqlalchemy.types import JSON
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 
+if TYPE_CHECKING:
+    import datetime
+
 
 class Document(Base):
-    """ORM model for a text document."""
+    """ORM model representing a text document in the database.
+
+    This model stores the core document content that can be indexed and retrieved
+    during RAG operations. Each document has a unique identifier and text content.
+
+    Attributes:
+        id: Primary key, auto-incrementing unique identifier
+        content: Full text content of the document (stored as TEXT for large content)
+    """
 
     __tablename__ = "documents"
 
@@ -19,7 +39,18 @@ class Document(Base):
 
 
 class QaHistory(Base):
-    """ORM model for a question-answer interaction history."""
+    """ORM model for storing question-answer interaction history.
+
+    This model provides audit trail and analytics capabilities by persisting
+    all user interactions with the RAG system, including source document references.
+
+    Attributes:
+        id: Primary key, auto-incrementing unique identifier
+        question: The user's original question text
+        answer: The generated response from the RAG system
+        created_at: Timestamp of the interaction (timezone-aware, server default)
+        source_ids: JSON array of document IDs used to generate the answer
+    """
 
     __tablename__ = "qa_history"
 
