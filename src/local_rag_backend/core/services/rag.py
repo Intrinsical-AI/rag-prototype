@@ -43,16 +43,17 @@ class RagService:
         self.history_storage = history_storage
 
     def ask(self, question: str, top_k: int = 3) -> dict[str, Any]:
-        """Process a question through the complete RAG pipeline.
+        """Process a question through the complete RAG pipeline with robust validation.
 
-        This method implements the core RAG workflow:
-        1. Retrieve relevant documents using semantic similarity
-        2. Generate an answer based on retrieved context
-        3. Store the interaction in history for audit purposes
+        This method implements the core RAG workflow with comprehensive input validation:
+        1. Validate and sanitize input parameters
+        2. Retrieve relevant documents using semantic similarity
+        3. Generate an answer based on retrieved context
+        4. Store the interaction in history for audit purposes
 
         Args:
             question: The user's question to be answered
-            top_k: Maximum number of documents to retrieve for context
+            top_k: Maximum number of documents to retrieve for context (1-50)
 
         Returns:
             Dictionary containing:
@@ -60,25 +61,82 @@ class RagService:
                 - docs: List of source documents used
                 - scores: Relevance scores for each document
 
+        Raises:
+            ValueError: If question is invalid (None, empty, or whitespace-only)
+            ValueError: If top_k is invalid (not positive or exceeds limits)
+
         Note:
-            If no documents are found, returns a default message in Spanish
-            to maintain consistency with the application's language.
+            If no documents are found after validation, returns a configurable
+            default message to maintain consistency.
         """
+        # --- Input Validation ---
+        validated_question = self._validate_and_sanitize_question(question)
+        validated_top_k = self._validate_top_k(top_k)
+
         # --- Document Retrieval Phase ---
-        docs, scores = self.retriever.retrieve(question, top_k)
+        docs, scores = self.retriever.retrieve(validated_question, validated_top_k)
 
         # --- Handle Empty Results ---
         if not docs:
             answer = "No hay documentos indexados para responder a tu pregunta."
-            self.history_storage.save(question, answer, [])
+            self.history_storage.save(validated_question, answer, [])
             return {"answer": answer, "docs": [], "scores": []}
 
         # --- Answer Generation Phase ---
         contexts = [doc.content for doc in docs]
-        answer = self.generator.generate(question, contexts)
+        answer = self.generator.generate(validated_question, contexts)
 
         # --- History Management ---
         source_ids = [doc.id for doc in docs]
-        self.history_storage.save(question, answer, source_ids)
+        self.history_storage.save(validated_question, answer, source_ids)
 
         return {"answer": answer, "docs": docs, "scores": scores}
+
+    def _validate_and_sanitize_question(self, question: str | None) -> str:
+        """Validate and sanitize the input question.
+        
+        Args:
+            question: Raw question input to validate
+            
+        Returns:
+            Sanitized question string
+            
+        Raises:
+            ValueError: If question is invalid
+        """
+        if question is None:
+            raise ValueError("Question cannot be None")
+        
+        if not isinstance(question, str):
+            raise ValueError(f"Question must be a string, got {type(question).__name__}")
+        
+        sanitized = question.strip()
+        if not sanitized:
+            raise ValueError("Question cannot be empty or whitespace-only")
+        
+        return sanitized
+
+    def _validate_top_k(self, top_k: int) -> int:
+        """Validate the top_k parameter.
+        
+        Args:
+            top_k: Number of documents to retrieve
+            
+        Returns:
+            Validated top_k value
+            
+        Raises:
+            ValueError: If top_k is invalid
+        """
+        if not isinstance(top_k, int):
+            raise ValueError(f"top_k must be an integer, got {type(top_k).__name__}")
+        
+        if top_k <= 0:
+            raise ValueError(f"top_k must be positive, got {top_k}")
+        
+        # Reasonable upper limit to prevent performance issues
+        MAX_TOP_K = 50
+        if top_k > MAX_TOP_K:
+            raise ValueError(f"top_k cannot exceed {MAX_TOP_K}, got {top_k}")
+        
+        return top_k
