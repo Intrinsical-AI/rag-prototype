@@ -1,6 +1,7 @@
 """
-Intrinsical-AI RAG Prototype
-Copyright (c) 2025 Intrinsical-AI
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
 
 Module: Sparse BM25 Retriever
 Purpose: Implements sparse keyword-based document retrieval using the BM25 algorithm.

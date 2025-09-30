@@ -1,6 +1,7 @@
 """
-Intrinsical-AI RAG Prototype
-Copyright (c) 2025 Intrinsical-AI
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
 
 Module: ETL Service
 Purpose: Orchestrates the Extract-Transform-Load pipeline for document ingestion.

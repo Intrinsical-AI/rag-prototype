@@ -1,6 +1,7 @@
 """
-Intrinsical-AI RAG Prototype
-Copyright (c) 2025 Intrinsical-AI
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
 
 Module: RAG Service
 Purpose: Core service orchestrating the retrieval-augmented generation pipeline.

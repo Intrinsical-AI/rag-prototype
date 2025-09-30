@@ -1,6 +1,7 @@
 """
-Intrinsical-AI RAG Prototype
-Copyright (c) 2025 Intrinsical-AI
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
 
 Module: Command Line Interface
 Purpose: Provides CLI commands for server management, data ingestion, and system operations.

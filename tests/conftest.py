@@ -1,6 +1,7 @@
 """
-Intrinsical-AI RAG Prototype
-Copyright (c) 2025 Intrinsical-AI
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
 
 Module: Pytest Configuration and Fixtures
 Purpose: Provides shared test fixtures and configuration for the test suite.

@@ -1,5 +1,8 @@
-# src/infrastructure/persistence/sqlalchemy/sql_.py
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 SQLAlchemy-based implementation of the document and history repositories.
 """
 

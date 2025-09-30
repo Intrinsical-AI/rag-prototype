@@ -1,4 +1,8 @@
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 Adapter for vector storage and search using FAISS.
 """
 

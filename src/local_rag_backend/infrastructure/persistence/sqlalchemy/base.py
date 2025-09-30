@@ -1,5 +1,10 @@
-# src/infrastructure/persistence/sqlalchemy/base.py
-"""SQLAlchemy engine, session, and base class setup."""
+"""
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
+SQLAlchemy engine, session, and base class setup.
+"""
 
 from __future__ import annotations
 

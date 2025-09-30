@@ -1,5 +1,8 @@
-# src/infrastructure/retrieval/__init__.py
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 Retrieval adapters for document retrieval.
 """
 

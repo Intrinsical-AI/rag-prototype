@@ -1,5 +1,8 @@
-# src/infrastructure/persistence/sqlalchemy/crud.py
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 CRUD operations for SQLAlchemy models.
 """
 

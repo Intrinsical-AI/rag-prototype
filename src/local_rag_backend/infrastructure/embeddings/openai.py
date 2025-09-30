@@ -1,4 +1,8 @@
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 OpenAI embeddings implementation.
 """
 
