@@ -5,15 +5,28 @@ API contract validation tests for parameter bounds and validation.
 import pytest
 from fastapi.testclient import TestClient
 
+from local_rag_backend.app import dependencies as deps
 from local_rag_backend.app.main import app
-from local_rag_backend.settings import settings
+
+
+class _MockRagService:
+    """Mock RAG service with minimal methods for contract testing."""
+
+    async def ask(self, question: str, k: int = 3):
+        """Mock ask method that returns a minimal valid response."""
+        return {
+            "answer": "mock answer",
+            "sources": [],
+            "conversation_id": "mock-id",
+        }
 
 
 @pytest.fixture(autouse=True)
-def _mock_llm(monkeypatch):
-    """Mock LLM configuration for all tests in this module."""
-    monkeypatch.setattr(settings, "openai_api_key", "test-key", raising=False)
-    monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
+def _mock_rag_service():
+    """Override RAG service dependency for all tests in this module."""
+    app.dependency_overrides[deps.get_rag_service] = lambda: _MockRagService()
+    yield
+    app.dependency_overrides.pop(deps.get_rag_service, None)
 
 
 def test_ask_rejects_k_out_of_range(in_memory_sqlite) -> None:
