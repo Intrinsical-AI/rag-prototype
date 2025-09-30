@@ -139,7 +139,7 @@ class TestRagValidation:
         result = rag_service.ask("Valid question", top_k=3)
         
         # Should return default message
-        assert result["answer"] == "No hay documentos indexados para responder a tu pregunta."
+        assert result["answer"] == "No documents are available to answer your question."
         assert result["docs"] == []
         assert result["scores"] == []
         
