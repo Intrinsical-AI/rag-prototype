@@ -69,6 +69,9 @@ def test_get_rag_service_hybrid_openai(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
+    # Mock DB access for sparse retriever in hybrid mode
+    monkeypatch.setattr(deps, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+
     class DummyEmbedder:
         dim = 4
 

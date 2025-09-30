@@ -133,7 +133,7 @@ def test_openrouter_generate_not_configured(monkeypatch):
     assert r.status_code == 400
 
 
-def test_dependencies_no_llm(monkeypatch):
+def test_dependencies_no_llm(monkeypatch, in_memory_sqlite):
     deps.get_rag_service.cache_clear()
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
