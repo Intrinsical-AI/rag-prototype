@@ -7,8 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 # Import models to ensure they are registered with Base.metadata
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy import sql_
+from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base, sql_
 
 
 @pytest.fixture()

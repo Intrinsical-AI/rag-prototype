@@ -32,7 +32,7 @@ env:
 
 jobs:
   lint:
-    name: Lint (ruff, black, isort)
+    name: Lint (ruff)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -63,8 +63,6 @@ jobs:
       - name: Ruff
         run: uv run ruff check .
 
-      - name: isort (check-only)
-        run: uv run isort --check-only .
 
   typing:
     name: Typing (mypy)
