@@ -13,11 +13,15 @@ class _MockRagService:
     """Mock RAG service with minimal methods for contract testing."""
 
     def ask(self, question: str, top_k: int = 3):
-        """Mock ask method that returns a minimal valid response."""
+        """Mock ask method that returns a minimal valid response.
+
+        Must match the real RagService.ask() return structure:
+        {"answer": str, "docs": list[Document], "scores": list[float]}
+        """
         return {
             "answer": "mock answer",
-            "sources": [],
-            "conversation_id": "mock-id",
+            "docs": [],
+            "scores": [],
         }
 
 
