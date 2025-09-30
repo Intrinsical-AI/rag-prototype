@@ -22,21 +22,39 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 """Compiled regex for HTML tag removal."""
 
 
-def preprocess_text(text: str) -> str:
-    """Normalize text for consistent processing.
+def preprocess_text(text: str | None) -> str:
+    """Normalize text for consistent processing with robust input validation.
 
     Applies standard text normalization:
+    - Validates input type and handles None gracefully
     - Converts to lowercase
     - Removes HTML tags (replaced with spaces to prevent word concatenation)
     - Collapses multiple whitespace characters
     - Strips leading/trailing whitespace
 
     Args:
-        text: Raw text to normalize
+        text: Raw text to normalize (can be None)
 
     Returns:
-        Normalized text ready for tokenization or embedding
+        Normalized text ready for tokenization or embedding.
+        Returns empty string if input is None or invalid.
+
+    Note:
+        This function is designed to be defensive and never crash,
+        making it safe to use in pipelines where text might be None.
     """
+    # --- Input Validation ---
+    if text is None:
+        return ""
+    
+    if not isinstance(text, str):
+        # Convert to string if possible, otherwise return empty
+        try:
+            text = str(text)
+        except Exception:
+            return ""
+    
+    # --- Text Normalization ---
     text = text.lower().strip()
     text = _HTML_TAG_RE.sub(" ", text)  # Replace tags with spaces
     text = re.sub(r"\s+", " ", text).strip()  # Collapse whitespace
