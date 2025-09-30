@@ -75,7 +75,12 @@ class SparseBM25Retriever(RetrieverPort):
         docs = self.doc_repo.get(retrieved_ids)
         docs_by_id = {doc.id: doc for doc in docs}
 
-        # Ensure correct order
-        ordered_docs = [docs_by_id[doc_id] for doc_id in retrieved_ids if doc_id in docs_by_id]
+        # Ensure correct order and maintain docs-scores consistency
+        ordered_docs = []
+        filtered_scores = []
+        for i, doc_id in enumerate(retrieved_ids):
+            if doc_id in docs_by_id:
+                ordered_docs.append(docs_by_id[doc_id])
+                filtered_scores.append(normalized_scores[i])
 
-        return ordered_docs, normalized_scores
+        return ordered_docs, filtered_scores

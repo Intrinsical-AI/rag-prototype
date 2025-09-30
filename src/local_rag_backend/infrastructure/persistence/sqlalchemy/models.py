@@ -10,16 +10,13 @@ Purpose: Defines database models for document storage and Q&A history persistenc
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import datetime
 
 from sqlalchemy import DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-
-if TYPE_CHECKING:
-    import datetime
 
 
 class Document(Base):

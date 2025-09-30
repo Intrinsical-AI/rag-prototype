@@ -82,9 +82,13 @@ class DenseFaissRetriever(RetrieverPort):
         doc_ids, scores = zip(*id_score_pairs, strict=False)
         docs = self.doc_repo.get(list(doc_ids))
 
-        # --- Maintain Relevance Order ---
-        # Ensure documents are returned in the same order as FAISS results
+        # --- Maintain Relevance Order and Docs-Scores Consistency ---
         docs_by_id = {doc.id: doc for doc in docs}
-        ordered_docs = [docs_by_id[doc_id] for doc_id in doc_ids if doc_id in docs_by_id]
+        ordered_docs = []
+        filtered_scores = []
+        for i, doc_id in enumerate(doc_ids):
+            if doc_id in docs_by_id:
+                ordered_docs.append(docs_by_id[doc_id])
+                filtered_scores.append(scores[i])
 
-        return ordered_docs, list(scores)
+        return ordered_docs, filtered_scores
