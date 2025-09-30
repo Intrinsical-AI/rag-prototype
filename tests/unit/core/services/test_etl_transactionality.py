@@ -5,8 +5,9 @@ This module tests the critical bug fixes for transactional safety
 in the ETL pipeline, ensuring consistency between document and vector storage.
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
 
 from local_rag_backend.core.services.etl import ETLService
 
@@ -42,14 +43,14 @@ class TestETLTransactionality:
     def test_successful_ingestion_flow(self, etl_service, mock_doc_storage, mock_vec_storage, mock_embedder):
         """Test successful end-to-end ingestion."""
         texts = ["Document 1", "Document 2", "Document 3"]
-        
+
         result = etl_service.ingest(texts)
-        
+
         # Verify all phases executed
         mock_doc_storage.store_documents.assert_called_once_with(texts)
         mock_embedder.embed.assert_called_once_with(texts)
         mock_vec_storage.upsert.assert_called_once_with([1, 2, 3], [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
-        
+
         assert result == [1, 2, 3]
 
     @pytest.mark.parametrize("input_texts,expected_filtered", [
@@ -65,7 +66,7 @@ class TestETLTransactionality:
     ):
         """Test input validation and empty text filtering."""
         result = etl_service.ingest(input_texts)
-        
+
         if expected_filtered:
             mock_doc_storage.store_documents.assert_called_once_with(expected_filtered)
         else:
@@ -79,13 +80,13 @@ class TestETLTransactionality:
         texts = ["Document 1", "Document 2"]
         mock_doc_storage.store_documents.return_value = [1, 2]
         mock_embedder.embed.side_effect = Exception("Embedding service down")
-        
+
         # Mock rollback capability
         mock_doc_storage.delete_documents = Mock()
-        
+
         with pytest.raises(RuntimeError, match="ETL pipeline failed during processing"):
             etl_service.ingest(texts)
-        
+
         # Verify rollback was attempted
         mock_doc_storage.delete_documents.assert_called_once_with([1, 2])
 
@@ -97,13 +98,13 @@ class TestETLTransactionality:
         mock_doc_storage.store_documents.return_value = [1, 2]
         mock_embedder.embed.return_value = [[0.1, 0.2], [0.3, 0.4]]
         mock_vec_storage.upsert.side_effect = Exception("FAISS index corrupted")
-        
+
         # Mock rollback capability
         mock_doc_storage.delete_documents = Mock()
-        
+
         with pytest.raises(RuntimeError, match="ETL pipeline failed during processing"):
             etl_service.ingest(texts)
-        
+
         # Verify rollback was attempted
         mock_doc_storage.delete_documents.assert_called_once_with([1, 2])
 
@@ -115,13 +116,13 @@ class TestETLTransactionality:
         mock_doc_storage.store_documents.return_value = [1, 2, 3]
         # Return wrong number of embeddings
         mock_embedder.embed.return_value = [[0.1, 0.2], [0.3, 0.4]]  # Only 2 embeddings for 3 docs
-        
+
         # Mock rollback capability
         mock_doc_storage.delete_documents = Mock()
-        
+
         with pytest.raises(RuntimeError, match="Embedding count mismatch"):
             etl_service.ingest(texts)
-        
+
         # Verify rollback was attempted
         mock_doc_storage.delete_documents.assert_called_once_with([1, 2, 3])
 
@@ -131,10 +132,10 @@ class TestETLTransactionality:
         """Test handling when document storage returns empty IDs."""
         texts = ["Document 1"]
         mock_doc_storage.store_documents.return_value = []
-        
+
         with pytest.raises(RuntimeError, match="Document storage failed: no IDs returned"):
             etl_service.ingest(texts)
-        
+
         # Should not proceed to embedding
         mock_embedder.embed.assert_not_called()
         mock_vec_storage.upsert.assert_not_called()
@@ -146,13 +147,13 @@ class TestETLTransactionality:
         texts = ["Document 1"]
         mock_doc_storage.store_documents.return_value = [1]
         mock_embedder.embed.side_effect = Exception("Original embedding error")
-        
+
         # Mock rollback that also fails
         mock_doc_storage.delete_documents = Mock(side_effect=Exception("Rollback failed"))
-        
+
         with pytest.raises(RuntimeError) as exc_info:
             etl_service.ingest(texts)
-        
+
         error_msg = str(exc_info.value)
         assert "Original embedding error" in error_msg
         assert "Rollback also failed" in error_msg
@@ -165,12 +166,12 @@ class TestETLTransactionality:
         texts = ["Document 1"]
         mock_doc_storage.store_documents.return_value = [1]
         mock_embedder.embed.side_effect = Exception("Embedding failed")
-        
+
         # Don't add delete_documents method to mock (no deletion support)
-        
+
         with pytest.raises(RuntimeError, match="ETL pipeline failed during processing"):
             etl_service.ingest(texts)
-        
+
         # Should not crash even without rollback capability
 
     @pytest.mark.parametrize("failure_stage,setup_mocks", [
@@ -183,7 +184,7 @@ class TestETLTransactionality:
     ):
         """Test that errors are properly propagated with helpful context."""
         texts = ["Document 1"]
-        
+
         # Setup specific failure
         if failure_stage == "doc_storage":
             mock_doc_storage.store_documents.side_effect = Exception("DB error")
@@ -196,10 +197,10 @@ class TestETLTransactionality:
             mock_embedder.embed.return_value = [[0.1, 0.2]]
             mock_vec_storage.upsert.side_effect = Exception("Vector error")
             mock_doc_storage.delete_documents = Mock()
-        
+
         with pytest.raises(RuntimeError) as exc_info:
             etl_service.ingest(texts)
-        
+
         # Verify error contains helpful context
         if failure_stage == "doc_storage":
             assert "DB error" in str(exc_info.value)
@@ -210,17 +211,17 @@ class TestETLTransactionality:
         """Test that ETL service handles concurrent ingestion safely."""
         # This is a basic test - full concurrency testing would require threading
         etl_service = ETLService(mock_doc_storage, mock_vec_storage, mock_embedder)
-        
+
         texts1 = ["Doc 1", "Doc 2"]
         texts2 = ["Doc 3", "Doc 4"]
-        
+
         # Mock different return values for different calls
         mock_doc_storage.store_documents.side_effect = [[1, 2], [3, 4]]
         mock_embedder.embed.side_effect = [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6], [0.7, 0.8]]]
-        
+
         result1 = etl_service.ingest(texts1)
         result2 = etl_service.ingest(texts2)
-        
+
         assert result1 == [1, 2]
         assert result2 == [3, 4]
         assert mock_doc_storage.store_documents.call_count == 2

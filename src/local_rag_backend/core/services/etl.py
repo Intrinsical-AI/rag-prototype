@@ -76,24 +76,24 @@ class ETLService:
         # --- Input Validation ---
         if not texts:
             return []
-        
+
         # Filter out empty or whitespace-only texts
         valid_texts = [text.strip() for text in texts if text and text.strip()]
         if not valid_texts:
             return []
 
         doc_ids: Sequence[int] = []
-        
+
         try:
             # --- Document Storage Phase ---
             doc_ids = self._doc_store.store_documents(valid_texts)
-            
+
             if not doc_ids:
                 raise RuntimeError("Document storage failed: no IDs returned")
 
             # --- Embedding Generation Phase ---
             embeddings = self._embedder.embed(valid_texts)
-            
+
             # Validate embedding consistency
             if len(embeddings) != len(doc_ids):
                 raise RuntimeError(
@@ -119,20 +119,19 @@ class ETLService:
                         f"Rollback also failed: {rollback_error}. "
                         f"Database may be in inconsistent state."
                     ) from e
-            
+
             # Re-raise original error with context
             raise RuntimeError(f"ETL pipeline failed during processing: {e}") from e
 
     def _rollback_documents(self, doc_ids: Sequence[int]) -> None:
         """Attempt to remove documents to maintain consistency.
-        
+
         This is a best-effort rollback mechanism. If the document repository
-        doesn't support deletion, this will be a no-op.
-        
+
         Args:
             doc_ids: Document IDs to remove
         """
         # Check if document repository supports deletion
         if hasattr(self._doc_store, 'delete_documents'):
-            self._doc_store.delete_documents(doc_ids)  # type: ignore
+            self._doc_store.delete_documents(doc_ids)
         # If no deletion support, we can't rollback - this is logged in the exception

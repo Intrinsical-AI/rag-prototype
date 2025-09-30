@@ -5,8 +5,9 @@ This module tests the critical bug fixes for array length mismatches
 between documents and scores in retrieval operations.
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
 
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever

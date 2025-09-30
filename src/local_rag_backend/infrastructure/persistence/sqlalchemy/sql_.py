@@ -46,35 +46,35 @@ class SqlDocumentStorage(DocumentRepoPort):
 
     def get(self, ids: Sequence[int]) -> Sequence[DomainDocument]:
         """Retrieve documents by their IDs in the same order as requested.
-        
+
         Args:
             ids: Sequence of document IDs to retrieve
-            
+
         Returns:
             Sequence of documents in the same order as input IDs.
             Missing documents are skipped (not included in result).
-            
+
         Note:
             Preserves the order of input IDs, which is critical for maintaining
             correspondence with scores in retrieval operations.
         """
         if not ids:
             return []
-            
+
         with get_session(self._session_factory) as session:
             # Query all documents at once for efficiency
             db_docs = session.query(DbDocument).filter(DbDocument.id.in_(ids)).all()
-            
+
             # Create a mapping for O(1) lookup
             docs_by_id = {doc.id: doc for doc in db_docs}
-            
+
             # Return documents in the same order as input IDs, skipping missing ones
             ordered_docs = []
             for doc_id in ids:
                 if doc_id in docs_by_id:
                     db_doc = docs_by_id[doc_id]
                     ordered_docs.append(DomainDocument(id=db_doc.id, content=db_doc.content))
-            
+
             return ordered_docs
 
     def get_all_documents(self) -> Sequence[DomainDocument]:

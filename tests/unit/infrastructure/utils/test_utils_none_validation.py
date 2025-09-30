@@ -36,7 +36,7 @@ class TestUtilsNoneValidation:
         class UnconvertibleObject:
             def __str__(self):
                 raise Exception("Cannot convert to string")
-        
+
         obj = UnconvertibleObject()
         result = preprocess_text(obj)
         assert result == ""
@@ -60,12 +60,12 @@ class TestUtilsNoneValidation:
         html_text = "This is <b>bold</b> and <i>italic</i> text"
         result = preprocess_text(html_text)
         assert result == "this is bold and italic text"
-        
+
         # Test whitespace normalization
         spaced_text = "Multiple    spaces   and\ttabs\nand\nnewlines"
         result = preprocess_text(spaced_text)
         assert result == "multiple spaces and tabs and newlines"
-        
+
         # Test case conversion
         mixed_case = "MiXeD CaSe TeXt"
         result = preprocess_text(mixed_case)
@@ -79,7 +79,7 @@ class TestUtilsNoneValidation:
             ("Здравствуй мир", "здравствуй мир"),
             ("🤖 AI Robot", "🤖 ai robot"),
         ]
-        
+
         for input_text, expected in unicode_texts:
             result = preprocess_text(input_text)
             assert result == expected
@@ -92,7 +92,7 @@ class TestUtilsNoneValidation:
             ("Math: 2+2=4", "math: 2+2=4"),
             ("Symbols: !@#$%^&*()", "symbols: !@#$%^&*()"),
         ]
-        
+
         for input_text, expected in special_texts:
             result = preprocess_text(input_text)
             assert result == expected
@@ -110,7 +110,7 @@ class TestUtilsNoneValidation:
             object(),
             lambda x: x,  # Function object
         ]
-        
+
         for test_input in test_inputs:
             result = preprocess_text(test_input)
             assert isinstance(result, str), f"Failed for input: {test_input}"
@@ -125,7 +125,7 @@ class TestUtilsNoneValidation:
             ("\r\n", ""),
             ("  \t\n\r  ", ""),
         ]
-        
+
         for input_text, expected in empty_cases:
             result = preprocess_text(input_text)
             assert result == expected
@@ -139,7 +139,7 @@ class TestUtilsNoneValidation:
             ("<script>alert('xss')</script>Clean", "alert('xss') clean"),
             ("<!-- comment -->Visible", "visible"),
         ]
-        
+
         for input_html, expected in complex_html_cases:
             result = preprocess_text(input_html)
             assert result == expected
@@ -148,9 +148,9 @@ class TestUtilsNoneValidation:
         """Test performance doesn't degrade significantly with large inputs."""
         # Create a large text input
         large_text = "This is a test sentence. " * 1000  # ~25KB of text
-        
+
         result = preprocess_text(large_text)
-        
+
         # Should still process correctly
         assert result.startswith("this is a test sentence.")
         assert len(result) > 0
@@ -163,7 +163,7 @@ class TestUtilsNoneValidation:
             ("start<b></b>end", "start end"),  # Empty tags should create space
             ("multiple<i>tags</i>here", "multiple tags here"),
         ]
-        
+
         for input_text, expected in boundary_cases:
             result = preprocess_text(input_text)
             assert result == expected
@@ -173,7 +173,7 @@ class TestUtilsNoneValidation:
         # This test ensures the type annotation is correct
         string_result = preprocess_text("test string")
         none_result = preprocess_text(None)
-        
+
         assert isinstance(string_result, str)
         assert isinstance(none_result, str)
         assert string_result == "test string"
@@ -189,7 +189,7 @@ class TestUtilsNoneValidation:
             ("<br/>", ""),  # Self-closing HTML tags
             ("a<b>c", "a c"),  # Unclosed tags
         ]
-        
+
         for input_text, expected in regression_cases:
             result = preprocess_text(input_text)
-            assert result == expected, f"Regression detected for input: {repr(input_text)}"
+            assert result == expected, f"Regression detected for input: {input_text!r}"

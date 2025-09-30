@@ -74,7 +74,7 @@ class DenseFaissRetriever(RetrieverPort):
         # --- Input Validation ---
         if k <= 0:
             return [], []
-            
+
         if not self._is_valid_query(query):
             return [], []
 
@@ -82,11 +82,11 @@ class DenseFaissRetriever(RetrieverPort):
             # --- Query Embedding Phase ---
             normalized_query = query.strip()
             embeddings = self.embedder.embed([normalized_query])
-            
+
             if not embeddings:
                 # Embedder returned empty list - treat as no results
                 return [], []
-                
+
             query_embedding = embeddings[0]
 
             # --- Vector Similarity Search ---
@@ -108,7 +108,7 @@ class DenseFaissRetriever(RetrieverPort):
                     filtered_scores.append(scores[i])
 
             return ordered_docs, filtered_scores
-            
+
         except Exception as e:
             # Log the error but return empty results rather than crashing
             # This ensures the retrieval system remains robust
@@ -116,10 +116,10 @@ class DenseFaissRetriever(RetrieverPort):
 
     def _is_valid_query(self, query: str | None) -> bool:
         """Validate that query is suitable for processing.
-        
+
         Args:
             query: Query string to validate
-            
+
         Returns:
             True if query is valid, False otherwise
         """
@@ -127,6 +127,4 @@ class DenseFaissRetriever(RetrieverPort):
             return False
         if not isinstance(query, str):
             return False
-        if not query.strip():
-            return False
-        return True
+        return bool(query.strip())
