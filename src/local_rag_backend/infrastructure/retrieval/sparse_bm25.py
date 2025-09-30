@@ -47,13 +47,31 @@ class SparseBM25Retriever(RetrieverPort):
         return re.findall(r"\w+", preprocess_text(text))
 
     def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
-        """Retrieve documents using BM25 scores."""
+        """Retrieve documents using BM25 scores.
+        
+        Args:
+            query: The search query text to find similar documents for
+            k: Maximum number of documents to retrieve
+            
+        Returns:
+            Tuple containing:
+                - List of Document objects ordered by relevance
+                - List of similarity scores corresponding to each document
+                
+        Note:
+            Returns empty lists if k <= 0, query is invalid, or no BM25 index exists.
+        """
+        # --- Input Validation ---
         if k <= 0:
             return [], []
-        if not self.bm25 or not query:
+        if not self.bm25:
+            return [], []
+        if not self._is_valid_query(query):
             return [], []
 
-        query_tokens = self._tokenize(query)
+        # --- Query Tokenization ---
+        normalized_query = query.strip()
+        query_tokens = self._tokenize(normalized_query)
         if not query_tokens:
             return [], []
 
@@ -84,3 +102,20 @@ class SparseBM25Retriever(RetrieverPort):
                 filtered_scores.append(normalized_scores[i])
 
         return ordered_docs, filtered_scores
+
+    def _is_valid_query(self, query: str | None) -> bool:
+        """Validate that query is suitable for processing.
+        
+        Args:
+            query: Query string to validate
+            
+        Returns:
+            True if query is valid, False otherwise
+        """
+        if query is None:
+            return False
+        if not isinstance(query, str):
+            return False
+        if not query.strip():
+            return False
+        return True

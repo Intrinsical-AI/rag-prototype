@@ -63,32 +63,70 @@ class DenseFaissRetriever(RetrieverPort):
                 - List of Document objects ordered by relevance
                 - List of similarity scores corresponding to each document
 
+        Raises:
+            ValueError: If query is invalid (None, empty, or whitespace-only)
+            RuntimeError: If embedding generation fails
+
         Note:
             Returns empty lists if k <= 0 or no similar documents are found.
             Documents are returned in the same order as FAISS similarity results.
         """
+        # --- Input Validation ---
         if k <= 0:
             return [], []
-
-        # --- Query Embedding Phase ---
-        query_embedding = self.embedder.embed([query])[0]
-
-        # --- Vector Similarity Search ---
-        id_score_pairs = self.faiss_index.similar(query_embedding, k)
-        if not id_score_pairs:
+            
+        if not self._is_valid_query(query):
             return [], []
 
-        # --- Document Retrieval Phase ---
-        doc_ids, scores = zip(*id_score_pairs, strict=False)
-        docs = self.doc_repo.get(list(doc_ids))
+        try:
+            # --- Query Embedding Phase ---
+            normalized_query = query.strip()
+            embeddings = self.embedder.embed([normalized_query])
+            
+            if not embeddings:
+                # Embedder returned empty list - treat as no results
+                return [], []
+                
+            query_embedding = embeddings[0]
 
-        # --- Maintain Relevance Order and Docs-Scores Consistency ---
-        docs_by_id = {doc.id: doc for doc in docs}
-        ordered_docs = []
-        filtered_scores = []
-        for i, doc_id in enumerate(doc_ids):
-            if doc_id in docs_by_id:
-                ordered_docs.append(docs_by_id[doc_id])
-                filtered_scores.append(scores[i])
+            # --- Vector Similarity Search ---
+            id_score_pairs = self.faiss_index.similar(query_embedding, k)
+            if not id_score_pairs:
+                return [], []
 
-        return ordered_docs, filtered_scores
+            # --- Document Retrieval Phase ---
+            doc_ids, scores = zip(*id_score_pairs, strict=False)
+            docs = self.doc_repo.get(list(doc_ids))
+
+            # --- Maintain Relevance Order and Docs-Scores Consistency ---
+            docs_by_id = {doc.id: doc for doc in docs}
+            ordered_docs = []
+            filtered_scores = []
+            for i, doc_id in enumerate(doc_ids):
+                if doc_id in docs_by_id:
+                    ordered_docs.append(docs_by_id[doc_id])
+                    filtered_scores.append(scores[i])
+
+            return ordered_docs, filtered_scores
+            
+        except Exception as e:
+            # Log the error but return empty results rather than crashing
+            # This ensures the retrieval system remains robust
+            raise RuntimeError(f"Dense retrieval failed for query '{query}': {e}") from e
+
+    def _is_valid_query(self, query: str | None) -> bool:
+        """Validate that query is suitable for processing.
+        
+        Args:
+            query: Query string to validate
+            
+        Returns:
+            True if query is valid, False otherwise
+        """
+        if query is None:
+            return False
+        if not isinstance(query, str):
+            return False
+        if not query.strip():
+            return False
+        return True
