@@ -50,16 +50,16 @@ def test_etl_ingest_happy_path():
 
 
 @pytest.mark.parametrize(
-    "texts",
+    "texts,expected_filtered",
     [
-        ["A"],
-        ["  trim  ", "   \t"],  # whitespace present (ETL stores raw; trimming happens at API)
-        ["áéíóú", "漢字"],  # unicode inputs
-        ["X" * 10000],  # very long text
-        ["dup", "dup", "unique"],
+        (["A"], ["A"]),
+        (["  trim  ", "   \t"], ["trim"]),  # whitespace filtered and trimmed
+        (["áéíóú", "漢字"], ["áéíóú", "漢字"]),  # unicode inputs
+        (["X" * 10000], ["X" * 10000]),  # very long text
+        (["dup", "dup", "unique"], ["dup", "dup", "unique"]),
     ],
 )
-def test_etl_ingest_various_inputs(texts):
+def test_etl_ingest_various_inputs(texts, expected_filtered):
     doc_repo = DummyDocRepo()
     embedder = DummyEmbedder()
     vector_repo = DummyVectorRepo()
@@ -68,12 +68,12 @@ def test_etl_ingest_various_inputs(texts):
     ids = etl.ingest(texts)
 
     assert isinstance(ids, list)
-    assert len(ids) == len(texts)
+    assert len(ids) == len(expected_filtered)
     assert all(isinstance(i, int) for i in ids)
-    # Order preserved at storage
-    assert [t for (_, t) in doc_repo.saved] == texts
-    # Embedder called with same texts
-    assert embedder.calls and embedder.calls[0] == texts
+    # Order preserved at storage (after filtering)
+    assert [t for (_, t) in doc_repo.saved] == expected_filtered
+    # Embedder called with filtered texts
+    assert embedder.calls and embedder.calls[0] == expected_filtered
 
 
 def test_etl_empty_input():
