@@ -135,12 +135,13 @@ jobs:
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
+        continue-on-error: true  # Don't fail CI if Codecov upload fails
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}  # necesario en repos privados
         with:
           files: ./coverage.xml
           flags: unittests
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
       - name: Upload test results
         if: always()
