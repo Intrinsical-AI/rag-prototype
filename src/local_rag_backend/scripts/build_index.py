@@ -1,6 +1,8 @@
-# scripts/build_index.py
-
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 Script to initialize the database from the FAQ CSV and build necessary indexes.
 It uses a dedicated database engine and session for this process.
 """

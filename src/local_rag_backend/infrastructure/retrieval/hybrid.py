@@ -64,12 +64,17 @@ class HybridRetriever(RetrieverPort):
         dense_docs, dense_scores = self.dense.retrieve(query, k)
         sparse_docs, sparse_scores = self.sparse.retrieve(query, k)
 
+        # --- Score Normalization ---
+        # Normalize scores to [0,1] range for fair fusion
+        normalized_dense_scores = self._normalize_scores(dense_scores)
+        normalized_sparse_scores = self._normalize_scores(sparse_scores)
+
         # --- Score Mapping ---
         dense_scores_by_id = {
-            doc.id: score for doc, score in zip(dense_docs, dense_scores, strict=False)
+            doc.id: score for doc, score in zip(dense_docs, normalized_dense_scores, strict=False)
         }
         sparse_scores_by_id = {
-            doc.id: score for doc, score in zip(sparse_docs, sparse_scores, strict=False)
+            doc.id: score for doc, score in zip(sparse_docs, normalized_sparse_scores, strict=False)
         }
 
         # --- Document Union ---
@@ -92,3 +97,24 @@ class HybridRetriever(RetrieverPort):
 
         docs, scores = zip(*top_results, strict=False)
         return list(docs), list(scores)
+
+    def _normalize_scores(self, scores: Sequence[float]) -> list[float]:
+        """Normalize scores to [0,1] range using min-max normalization.
+
+        Args:
+            scores: Raw scores to normalize
+
+        Returns:
+            Normalized scores in [0,1] range
+        """
+        if not scores:
+            return []
+
+        if len(scores) == 1:
+            return [1.0]
+
+        min_score, max_score = min(scores), max(scores)
+        if max_score == min_score:
+            return [1.0] * len(scores)
+
+        return [(score - min_score) / (max_score - min_score) for score in scores]

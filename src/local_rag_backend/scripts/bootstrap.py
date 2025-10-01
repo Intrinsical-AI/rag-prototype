@@ -1,5 +1,8 @@
-# scripts/bootstrap.py
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 Bootstrap script for ingesting CSV data into the database and FAISS index.
 """
 

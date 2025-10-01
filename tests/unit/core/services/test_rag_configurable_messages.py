@@ -47,18 +47,16 @@ class TestRagConfigurableMessages:
         assert result["answer"] == expected_message
 
         # Should save to history with the configured message
-        mock_history_storage.save.assert_called_once_with(
-            "test question", expected_message, []
-        )
+        mock_history_storage.save.assert_called_once_with("test question", expected_message, [])
 
-    def test_custom_no_documents_message_via_settings(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_custom_no_documents_message_via_settings(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test that custom message can be configured via settings."""
         # Create custom settings with different message
-        custom_settings = Settings(
-            no_documents_message="Custom message: No docs found!"
-        )
+        custom_settings = Settings(no_documents_message="Custom message: No docs found!")
 
-        with patch('local_rag_backend.core.services.rag.settings', custom_settings):
+        with patch("local_rag_backend.core.services.rag.settings", custom_settings):
             rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
             result = rag_service.ask("test question", top_k=3)
 
@@ -67,30 +65,36 @@ class TestRagConfigurableMessages:
                 "test question", "Custom message: No docs found!", []
             )
 
-    def test_spanish_message_configuration(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_spanish_message_configuration(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test configuration with Spanish message for backward compatibility."""
         # Configure Spanish message like the original
         spanish_settings = Settings(
             no_documents_message="No hay documentos indexados para responder a tu pregunta."
         )
 
-        with patch('local_rag_backend.core.services.rag.settings', spanish_settings):
+        with patch("local_rag_backend.core.services.rag.settings", spanish_settings):
             rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
             result = rag_service.ask("test question", top_k=3)
 
             assert result["answer"] == "No hay documentos indexados para responder a tu pregunta."
 
-    def test_empty_message_configuration(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_empty_message_configuration(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test that empty message is handled correctly."""
         empty_settings = Settings(no_documents_message="")
 
-        with patch('local_rag_backend.core.services.rag.settings', empty_settings):
+        with patch("local_rag_backend.core.services.rag.settings", empty_settings):
             rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
             result = rag_service.ask("test question", top_k=3)
 
             assert result["answer"] == ""
 
-    def test_unicode_message_configuration(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_unicode_message_configuration(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test that unicode messages work correctly."""
         unicode_messages = [
             "没有找到相关文档。",  # Chinese
@@ -102,7 +106,7 @@ class TestRagConfigurableMessages:
         for message in unicode_messages:
             unicode_settings = Settings(no_documents_message=message)
 
-            with patch('local_rag_backend.core.services.rag.settings', unicode_settings):
+            with patch("local_rag_backend.core.services.rag.settings", unicode_settings):
                 rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
                 result = rag_service.ask("test question", top_k=3)
 
@@ -118,39 +122,43 @@ class TestRagConfigurableMessages:
 
         long_settings = Settings(no_documents_message=long_message)
 
-        with patch('local_rag_backend.core.services.rag.settings', long_settings):
+        with patch("local_rag_backend.core.services.rag.settings", long_settings):
             rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
             result = rag_service.ask("test question", top_k=3)
 
             assert result["answer"] == long_message
 
-    def test_message_with_special_characters(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_message_with_special_characters(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test messages with special characters and formatting."""
         special_messages = [
             "No documents found.\nPlease try again.",  # With newlines
             "Error: No docs available (code: 404)",  # With symbols
             "¡No hay documentos disponibles!",  # With Spanish punctuation
-            "\"No documents\" - System Message",  # With quotes
+            '"No documents" - System Message',  # With quotes
         ]
 
         for message in special_messages:
             special_settings = Settings(no_documents_message=message)
 
-            with patch('local_rag_backend.core.services.rag.settings', special_settings):
+            with patch("local_rag_backend.core.services.rag.settings", special_settings):
                 rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
                 result = rag_service.ask("test question", top_k=3)
 
                 assert result["answer"] == message
 
-    def test_message_configuration_via_environment(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_message_configuration_via_environment(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test that message can be configured via environment variables."""
         env_message = "Environment configured message"
 
-        with patch.dict('os.environ', {'NO_DOCUMENTS_MESSAGE': env_message}):
+        with patch.dict("os.environ", {"NO_DOCUMENTS_MESSAGE": env_message}):
             # Create new settings instance to pick up environment variable
             env_settings = Settings()
 
-            with patch('local_rag_backend.core.services.rag.settings', env_settings):
+            with patch("local_rag_backend.core.services.rag.settings", env_settings):
                 rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
                 result = rag_service.ask("test question", top_k=3)
 
@@ -197,14 +205,16 @@ class TestRagConfigurableMessages:
             settings = Settings(no_documents_message=message)
             assert settings.no_documents_message == message
 
-    def test_backward_compatibility_with_original_behavior(self, mock_retriever, mock_generator, mock_history_storage):
+    def test_backward_compatibility_with_original_behavior(
+        self, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test that the fix maintains backward compatibility."""
         # The original hardcoded message should still work if configured
         original_message = "No hay documentos indexados para responder a tu pregunta."
 
         original_settings = Settings(no_documents_message=original_message)
 
-        with patch('local_rag_backend.core.services.rag.settings', original_settings):
+        with patch("local_rag_backend.core.services.rag.settings", original_settings):
             rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
             result = rag_service.ask("test question", top_k=3)
 
@@ -213,22 +223,21 @@ class TestRagConfigurableMessages:
             assert result["docs"] == []
             assert result["scores"] == []
 
-    def test_message_configuration_doesnt_affect_successful_queries(self, mock_generator, mock_history_storage):
+    def test_message_configuration_doesnt_affect_successful_queries(
+        self, mock_generator, mock_history_storage
+    ):
         """Test that message configuration doesn't affect successful queries."""
         from local_rag_backend.core.domain.entities import Document
 
         # Mock retriever that returns documents
         mock_retriever = Mock()
-        mock_retriever.retrieve.return_value = (
-            [Document(id=1, content="Test document")],
-            [0.9]
-        )
+        mock_retriever.retrieve.return_value = ([Document(id=1, content="Test document")], [0.9])
 
         mock_generator.generate.return_value = "Generated answer"
 
         custom_settings = Settings(no_documents_message="Custom no docs message")
 
-        with patch('local_rag_backend.core.services.rag.settings', custom_settings):
+        with patch("local_rag_backend.core.services.rag.settings", custom_settings):
             rag_service = RagService(mock_retriever, mock_generator, mock_history_storage)
             result = rag_service.ask("test question", top_k=3)
 

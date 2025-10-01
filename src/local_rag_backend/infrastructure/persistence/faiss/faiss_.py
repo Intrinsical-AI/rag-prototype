@@ -40,11 +40,11 @@ class FaissVectorStorage(VectorRepoPort):
         """Find similar items and return their IDs and normalized similarity scores."""
         indices, distances = self.search(vector, k)
 
-        # Filter out invalid indices (-1)
+        # Filter out invalid indices (-1) and out-of-bounds indices
         valid_results = [
             (self.faiss_index.id_map[i], float(d))
             for i, d in zip(indices, distances, strict=False)
-            if i != -1
+            if i != -1 and 0 <= i < len(self.faiss_index.id_map)
         ]
         if not valid_results:
             return []

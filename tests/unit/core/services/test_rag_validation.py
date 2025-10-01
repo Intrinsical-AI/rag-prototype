@@ -20,10 +20,7 @@ class TestRagValidation:
     def mock_retriever(self):
         """Mock retriever."""
         retriever = Mock()
-        retriever.retrieve.return_value = (
-            [Document(id=1, content="Test document")],
-            [0.9]
-        )
+        retriever.retrieve.return_value = ([Document(id=1, content="Test document")], [0.9])
         return retriever
 
     @pytest.fixture
@@ -43,47 +40,59 @@ class TestRagValidation:
         """RAG service with mocked dependencies."""
         return RagService(mock_retriever, mock_generator, mock_history_storage)
 
-    @pytest.mark.parametrize("invalid_question", [
-        None,  # None question
-        "",    # Empty string
-        "   ", # Whitespace only
-        "\t\n", # Tab and newline only
-        "     \t   \n   ",  # Mixed whitespace
-    ])
+    @pytest.mark.parametrize(
+        "invalid_question",
+        [
+            None,  # None question
+            "",  # Empty string
+            "   ",  # Whitespace only
+            "\t\n",  # Tab and newline only
+            "     \t   \n   ",  # Mixed whitespace
+        ],
+    )
     def test_invalid_question_validation(self, rag_service, invalid_question):
         """Test that invalid questions raise ValueError."""
         with pytest.raises(ValueError, match="Question cannot be"):
             rag_service.ask(invalid_question, top_k=3)
 
-    @pytest.mark.parametrize("invalid_question,expected_error", [
-        (123, "Question must be a string, got int"),
-        ([], "Question must be a string, got list"),
-        ({}, "Question must be a string, got dict"),
-        (object(), "Question must be a string, got object"),
-    ])
+    @pytest.mark.parametrize(
+        "invalid_question,expected_error",
+        [
+            (123, "Question must be a string, got int"),
+            ([], "Question must be a string, got list"),
+            ({}, "Question must be a string, got dict"),
+            (object(), "Question must be a string, got object"),
+        ],
+    )
     def test_non_string_question_validation(self, rag_service, invalid_question, expected_error):
         """Test that non-string questions raise appropriate ValueError."""
         with pytest.raises(ValueError, match=expected_error):
             rag_service.ask(invalid_question, top_k=3)  # type: ignore
 
-    @pytest.mark.parametrize("invalid_top_k", [
-        0,     # Zero
-        -1,    # Negative
-        -10,   # More negative
-        51,    # Exceeds max limit
-        100,   # Way over limit
-    ])
+    @pytest.mark.parametrize(
+        "invalid_top_k",
+        [
+            0,  # Zero
+            -1,  # Negative
+            -10,  # More negative
+            51,  # Exceeds max limit
+            100,  # Way over limit
+        ],
+    )
     def test_invalid_top_k_validation(self, rag_service, invalid_top_k):
         """Test that invalid top_k values raise ValueError."""
         with pytest.raises(ValueError):
             rag_service.ask("Valid question", top_k=invalid_top_k)
 
-    @pytest.mark.parametrize("invalid_top_k,expected_error", [
-        (3.14, "top_k must be an integer, got float"),
-        ("5", "top_k must be an integer, got str"),
-        ([], "top_k must be an integer, got list"),
-        (None, "top_k must be an integer, got NoneType"),
-    ])
+    @pytest.mark.parametrize(
+        "invalid_top_k,expected_error",
+        [
+            (3.14, "top_k must be an integer, got float"),
+            ("5", "top_k must be an integer, got str"),
+            ([], "top_k must be an integer, got list"),
+            (None, "top_k must be an integer, got NoneType"),
+        ],
+    )
     def test_non_integer_top_k_validation(self, rag_service, invalid_top_k, expected_error):
         """Test that non-integer top_k values raise appropriate ValueError."""
         with pytest.raises(ValueError, match=expected_error):
@@ -100,12 +109,15 @@ class TestRagValidation:
         assert "docs" in result
         assert "scores" in result
 
-    @pytest.mark.parametrize("question,expected_sanitized", [
-        ("  hello world  ", "hello world"),
-        ("\ttest question\n", "test question"),
-        ("   mixed   spaces   ", "mixed   spaces"),
-        ("normal question", "normal question"),
-    ])
+    @pytest.mark.parametrize(
+        "question,expected_sanitized",
+        [
+            ("  hello world  ", "hello world"),
+            ("\ttest question\n", "test question"),
+            ("   mixed   spaces   ", "mixed   spaces"),
+            ("normal question", "normal question"),
+        ],
+    )
     def test_question_sanitization(self, rag_service, mock_retriever, question, expected_sanitized):
         """Test that questions are properly sanitized."""
         rag_service.ask(question, top_k=3)
@@ -113,7 +125,9 @@ class TestRagValidation:
         # Verify retriever was called with sanitized question
         mock_retriever.retrieve.assert_called_once_with(expected_sanitized, 3)
 
-    def test_successful_ask_flow_with_validation(self, rag_service, mock_retriever, mock_generator, mock_history_storage):
+    def test_successful_ask_flow_with_validation(
+        self, rag_service, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test successful ask flow after validation."""
         question = "  What is the answer?  "  # With whitespace
         top_k = 5
@@ -123,13 +137,15 @@ class TestRagValidation:
         # Verify validation and sanitization occurred
         mock_retriever.retrieve.assert_called_once_with("What is the answer?", 5)
         mock_generator.generate.assert_called_once_with("What is the answer?", ["Test document"])
-        mock_history_storage.save.assert_called_once_with("What is the answer?", "Generated answer", [1])
+        mock_history_storage.save.assert_called_once_with(
+            "What is the answer?", "Generated answer", [1]
+        )
 
         # Verify result structure
         assert result == {
             "answer": "Generated answer",
             "docs": [Document(id=1, content="Test document")],
-            "scores": [0.9]
+            "scores": [0.9],
         }
 
     def test_ask_with_no_documents_found(self, rag_service, mock_retriever, mock_history_storage):
@@ -179,7 +195,9 @@ class TestRagValidation:
             rag_service.ask("Valid question", top_k=0)
         assert "top_k must be positive" in str(exc_info.value)
 
-    def test_validation_preserves_original_behavior(self, rag_service, mock_retriever, mock_generator, mock_history_storage):
+    def test_validation_preserves_original_behavior(
+        self, rag_service, mock_retriever, mock_generator, mock_history_storage
+    ):
         """Test that validation doesn't break original functionality."""
         # Test with typical valid inputs
         question = "What is machine learning?"
@@ -202,7 +220,7 @@ class TestRagValidation:
         unicode_questions = [
             "¿Qué es la inteligencia artificial?",
             "What is AI? 🤖",
-            "机器学习是什么？",
+            "机器学习是什么?",  # Chinese with ASCII question mark
             "Что такое ИИ?",
         ]
 

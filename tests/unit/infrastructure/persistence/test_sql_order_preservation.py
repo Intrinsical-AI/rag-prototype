@@ -27,7 +27,7 @@ class TestSqlOrderPreservation:
             "Second document content",
             "Third document content",
             "Fourth document content",
-            "Fifth document content"
+            "Fifth document content",
         ]
 
     def test_order_preservation_basic(self, storage, sample_docs_data):
@@ -85,7 +85,14 @@ class TestSqlOrderPreservation:
         stored_ids = storage.store_documents(sample_docs_data[:3])
 
         # Request with duplicates
-        requested_ids = [stored_ids[0], stored_ids[1], stored_ids[0], stored_ids[2], stored_ids[1], stored_ids[0]]
+        requested_ids = [
+            stored_ids[0],
+            stored_ids[1],
+            stored_ids[0],
+            stored_ids[2],
+            stored_ids[1],
+            stored_ids[0],
+        ]
         result = storage.get(requested_ids)
         result_ids = [doc.id for doc in result]
 
@@ -128,8 +135,8 @@ class TestSqlOrderPreservation:
 
         # Verify they have the expected attributes
         for doc in result:
-            assert hasattr(doc, 'id')
-            assert hasattr(doc, 'content')
+            assert hasattr(doc, "id")
+            assert hasattr(doc, "content")
             assert isinstance(doc.id, int)
             assert isinstance(doc.content, str)
 

@@ -27,7 +27,15 @@ def test_get_metrics_enabled(monkeypatch):
 
 def test_middleware_dispatch_active(monkeypatch):
     # Build a small FastAPI app and attach the middleware explicitly
+    from unittest.mock import Mock
+
+    # Create mock prometheus objects
+    mock_counter = Mock()
+    mock_histogram = Mock()
+
     monkeypatch.setattr(mw, "PROMETHEUS_AVAILABLE", True, raising=False)
+    monkeypatch.setattr(mw, "Counter", Mock(return_value=mock_counter), raising=False)
+    monkeypatch.setattr(mw, "Histogram", Mock(return_value=mock_histogram), raising=False)
     monkeypatch.setattr(settings, "enable_monitoring", True, raising=False)
 
     app = FastAPI()

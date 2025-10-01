@@ -77,6 +77,29 @@ class SqlDocumentStorage(DocumentRepoPort):
 
             return ordered_docs
 
+    def get_with_missing_validation(self, ids: Sequence[int]) -> Sequence[DomainDocument]:
+        """Retrieve documents with validation that all IDs exist.
+
+        Args:
+            ids: Sequence of document IDs to retrieve
+
+        Returns:
+            Sequence of documents in the same order as input IDs
+
+        Raises:
+            ValueError: If any requested document ID is not found
+        """
+        if not ids:
+            return []
+
+        docs = self.get(ids)
+        if len(docs) != len(ids):
+            found_ids = {doc.id for doc in docs}
+            missing_ids = [doc_id for doc_id in ids if doc_id not in found_ids]
+            raise ValueError(f"Documents not found for IDs: {missing_ids}")
+
+        return docs
+
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
         with get_session(self._session_factory) as session:

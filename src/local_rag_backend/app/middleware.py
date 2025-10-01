@@ -20,6 +20,11 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
+    # Define stub classes to avoid NameError when prometheus is not available
+    Counter = None
+    Histogram = None
+    generate_latest = None
+    CONTENT_TYPE_LATEST = "text/plain"
 
 from typing import TYPE_CHECKING
 
@@ -39,6 +44,11 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.is_active = PROMETHEUS_AVAILABLE and settings.enable_monitoring
         if self.is_active:
+            # Check that prometheus classes are actually available (not None)
+            if Counter is None or Histogram is None:
+                self.is_active = False
+                return
+
             self.requests = Counter(
                 "http_requests_total", "Total HTTP requests", ["method", "path", "status_code"]
             )
