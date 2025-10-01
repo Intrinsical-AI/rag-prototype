@@ -1,4 +1,8 @@
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 Adapter to use LangChain loaders as `LoaderPort` implementations.
 
 Usage example (requires optional extra `loaders`):

@@ -18,30 +18,29 @@
 ## Features
 
 * **Clean architecture**
-
   * Hexagonal (Ports & Adapters): domain decoupled from infrastructure.
   * Explicit typing and domain models.
-* **Retrieval**
 
+* **Retrieval**
   * Sparse: BM25 (offline).
   * Dense: FAISS + SentenceTransformers.
   * Hybrid: dense + BM25 combination with configurable weight.
-* **LLMs**
 
+* **LLMs**
   * OpenAI Chat (via API key).
   * Local Ollama (over HTTP). Current clients are synchronous.
-* **Persistence**
 
+* **Persistence**
   * SQLite via SQLAlchemy: documents and Q\&A history.
   * FAISS on disk for dense/hybrid mode.
-* **API**
 
+* **API**
   * FastAPI with validation and OpenAPI at `/docs`.
   * Health: `/api/health`, Readiness: `/api/ready`, Ollama health: `/api/health/ollama`.
   * Config: `/api/config`, Templates: `/api/templates`.
   * OpenRouter proxy (OpenAI-compatible): `POST /api/openrouter/generate`.
-* **Tests**
 
+* **Tests**
   * Unit, integration, and E2E with `pytest`.
 
 ---
@@ -77,15 +76,12 @@
 git clone https://github.com/Intrinsical-AI/rag-prototype.git
 cd rag-prototype
 
-
 python -m venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
 
-
 # Install the package (add extras if you want faiss/sentence_transformers)
 pip install -e .
-
 
 # (Optional) Install development dependencies
 # pip install -e ".[dev]"
@@ -96,7 +92,6 @@ Initialize sample data and start:
 ```bash
 # Load sample CSV into SQLite and, if applicable, build FAISS
 rag-bootstrap
-
 
 # FastAPI server
 rag-server
@@ -186,7 +181,7 @@ rag-bootstrap
 rag-build-index
 
 
-# Summarized system and files status
+# Summary of system and files
 rag-status
 ```
 
@@ -204,7 +199,7 @@ This pipeline is used by `scripts/bootstrap.py`.
 
 ---
 
-## LangChain loaders integration (optional)
+## LangChain Loaders Integration (optional)
 
 You can ingest data from any LangChain document loader via the `LangChainLoader` adapter, which implements the project's `LoaderPort`.
 
@@ -324,7 +319,6 @@ pytest --cov=src --cov-report=term-missing
 
 ## Runtime considerations
 
-* **Singleton per process**: `RagService` is initialized as a singleton in `factory`. With `uvicorn --workers N`, each process loads its own instance (and its FAISS). Align deployment and warm-up as needed.
 * **Metrics**: if `ENABLE_MONITORING=true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
 * **Dense/Hybrid**: must use the same embedding model for indexing and querying (`ST_EMBEDDING_MODEL`).
 

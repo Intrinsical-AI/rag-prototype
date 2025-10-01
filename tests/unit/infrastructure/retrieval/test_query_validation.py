@@ -53,13 +53,16 @@ class TestQueryValidation:
         doc_ids = [1, 2]
         return SparseBM25Retriever(corpus, doc_ids, mock_doc_repo)
 
-    @pytest.mark.parametrize("invalid_query", [
-        None,  # None query
-        "",    # Empty string
-        "   ", # Whitespace only
-        "\t\n", # Tab and newline only
-        "     \t   \n   ",  # Mixed whitespace
-    ])
+    @pytest.mark.parametrize(
+        "invalid_query",
+        [
+            None,  # None query
+            "",  # Empty string
+            "   ",  # Whitespace only
+            "\t\n",  # Tab and newline only
+            "     \t   \n   ",  # Mixed whitespace
+        ],
+    )
     def test_dense_retriever_invalid_queries(self, dense_retriever, invalid_query):
         """Test dense retriever handles invalid queries gracefully."""
         docs, scores = dense_retriever.retrieve(invalid_query, k=5)
@@ -68,13 +71,16 @@ class TestQueryValidation:
         assert scores == []
         assert len(docs) == len(scores)
 
-    @pytest.mark.parametrize("invalid_query", [
-        None,  # None query
-        "",    # Empty string
-        "   ", # Whitespace only
-        "\t\n", # Tab and newline only
-        "     \t   \n   ",  # Mixed whitespace
-    ])
+    @pytest.mark.parametrize(
+        "invalid_query",
+        [
+            None,  # None query
+            "",  # Empty string
+            "   ",  # Whitespace only
+            "\t\n",  # Tab and newline only
+            "     \t   \n   ",  # Mixed whitespace
+        ],
+    )
     def test_sparse_retriever_invalid_queries(self, sparse_retriever, invalid_query):
         """Test sparse retriever handles invalid queries gracefully."""
         docs, scores = sparse_retriever.retrieve(invalid_query, k=5)
@@ -83,7 +89,9 @@ class TestQueryValidation:
         assert scores == []
         assert len(docs) == len(scores)
 
-    def test_dense_retriever_embedder_returns_empty(self, mock_embedder, mock_faiss_index, mock_doc_repo):
+    def test_dense_retriever_embedder_returns_empty(
+        self, mock_embedder, mock_faiss_index, mock_doc_repo
+    ):
         """Test dense retriever when embedder returns empty list."""
         mock_embedder.embed.return_value = []  # Empty embeddings
 
@@ -104,11 +112,14 @@ class TestQueryValidation:
         with pytest.raises(RuntimeError, match="Dense retrieval failed for query"):
             retriever.retrieve("valid query", k=5)
 
-    @pytest.mark.parametrize("query,expected_normalized", [
-        ("  hello world  ", "hello world"),
-        ("\ttest query\n", "test query"),
-        ("   mixed   spaces   ", "mixed   spaces"),
-    ])
+    @pytest.mark.parametrize(
+        "query,expected_normalized",
+        [
+            ("  hello world  ", "hello world"),
+            ("\ttest query\n", "test query"),
+            ("   mixed   spaces   ", "mixed   spaces"),
+        ],
+    )
     def test_dense_retriever_query_normalization(
         self, mock_embedder, mock_faiss_index, mock_doc_repo, query, expected_normalized
     ):
@@ -119,14 +130,15 @@ class TestQueryValidation:
         # Verify embedder was called with normalized query
         mock_embedder.embed.assert_called_once_with([expected_normalized])
 
-    @pytest.mark.parametrize("query,expected_normalized", [
-        ("  hello world  ", "hello world"),
-        ("\ttest query\n", "test query"),
-        ("   mixed   spaces   ", "mixed   spaces"),
-    ])
-    def test_sparse_retriever_query_normalization(
-        self, mock_doc_repo, query, expected_normalized
-    ):
+    @pytest.mark.parametrize(
+        "query,expected_normalized",
+        [
+            ("  hello world  ", "hello world"),
+            ("\ttest query\n", "test query"),
+            ("   mixed   spaces   ", "mixed   spaces"),
+        ],
+    )
+    def test_sparse_retriever_query_normalization(self, mock_doc_repo, query, expected_normalized):
         """Test that queries are properly normalized in sparse retriever."""
         corpus = ["hello world document", "test query document"]
         doc_ids = [1, 2]
@@ -201,7 +213,9 @@ class TestQueryValidation:
         assert sparse_retriever._is_valid_query("   ") is False
         assert sparse_retriever._is_valid_query(123) is False  # type: ignore
 
-    def test_dense_retriever_error_context_preservation(self, mock_embedder, mock_faiss_index, mock_doc_repo):
+    def test_dense_retriever_error_context_preservation(
+        self, mock_embedder, mock_faiss_index, mock_doc_repo
+    ):
         """Test that error context is preserved in dense retriever."""
         mock_embedder.embed.side_effect = ValueError("Invalid embedding input")
 

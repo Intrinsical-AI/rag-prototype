@@ -76,6 +76,7 @@ def in_memory_sqlite(monkeypatch):
 
 # --- Test Utilities ---
 
+
 class DummyFaissIndex:
     """Mock FAISS index implementation for testing purposes.
 

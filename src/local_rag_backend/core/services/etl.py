@@ -77,8 +77,16 @@ class ETLService:
         if not texts:
             return []
 
-        # Filter out empty or whitespace-only texts
-        valid_texts = [text.strip() for text in texts if text and text.strip()]
+        # Filter out empty, whitespace-only texts, and non-string types
+        valid_texts = []
+        for text in texts:
+            # Type check: ensure text is a string
+            if not isinstance(text, str):
+                continue
+            # Skip empty or whitespace-only
+            if text and text.strip():
+                valid_texts.append(text.strip())
+
         if not valid_texts:
             return []
 
@@ -94,12 +102,15 @@ class ETLService:
             # --- Embedding Generation Phase ---
             embeddings = self._embedder.embed(valid_texts)
 
-            # Validate embedding consistency
+            # Validate embedding count consistency
             if len(embeddings) != len(doc_ids):
                 raise RuntimeError(
                     f"Embedding count mismatch: {len(embeddings)} embeddings "
                     f"for {len(doc_ids)} documents"
                 )
+
+            # Validate embedding quality (detect NaN, inf, empty embeddings)
+            self._validate_embeddings(embeddings)
 
             # --- Vector Index Update Phase ---
             self._vec_store.upsert(doc_ids, embeddings)
@@ -123,6 +134,42 @@ class ETLService:
             # Re-raise original error with context
             raise RuntimeError(f"ETL pipeline failed during processing: {e}") from e
 
+    def _validate_embeddings(self, embeddings: Sequence[Sequence[float]]) -> None:
+        """Validate embedding quality to detect corrupted data.
+
+        Args:
+            embeddings: Sequence of embedding vectors to validate
+
+        Raises:
+            RuntimeError: If embeddings contain NaN, inf, or are malformed
+        """
+        import math
+
+        if not embeddings:
+            return
+
+        # Check dimension consistency
+        expected_dim = len(embeddings[0]) if embeddings else 0
+
+        for idx, embedding in enumerate(embeddings):
+            # Check for empty embeddings
+            if not embedding or len(embedding) == 0:
+                raise RuntimeError(f"Embedding {idx} is empty or has zero dimensions")
+
+            # Check dimension consistency
+            if len(embedding) != expected_dim:
+                raise RuntimeError(
+                    f"Embedding {idx} has inconsistent dimensions: "
+                    f"expected {expected_dim}, got {len(embedding)}"
+                )
+
+            # Check for NaN or infinite values
+            for dim_idx, value in enumerate(embedding):
+                if math.isnan(value):
+                    raise RuntimeError(f"Embedding {idx} contains NaN at dimension {dim_idx}")
+                if math.isinf(value):
+                    raise RuntimeError(f"Embedding {idx} contains inf at dimension {dim_idx}")
+
     def _rollback_documents(self, doc_ids: Sequence[int]) -> None:
         """Attempt to remove documents to maintain consistency.
 
@@ -132,6 +179,6 @@ class ETLService:
             doc_ids: Document IDs to remove
         """
         # Check if document repository supports deletion
-        if hasattr(self._doc_store, 'delete_documents'):
+        if hasattr(self._doc_store, "delete_documents"):
             self._doc_store.delete_documents(doc_ids)
         # If no deletion support, we can't rollback - this is logged in the exception

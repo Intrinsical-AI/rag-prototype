@@ -75,9 +75,7 @@ def test_langchain_loader_metadata_filter_matches_all_keys():
         _DummyDoc("B", {"lang": "es", "type": "web"}),
         _DummyDoc("C", {"lang": "en", "type": "pdf"}),
     ]
-    loader = LangChainLoader(
-        _DummyLoaderList(docs), metadata_filter={"lang": "en", "type": "web"}
-    )
+    loader = LangChainLoader(_DummyLoaderList(docs), metadata_filter={"lang": "en", "type": "web"})
 
     items = list(loader.load())
     assert [it.text for it in items] == ["A"]

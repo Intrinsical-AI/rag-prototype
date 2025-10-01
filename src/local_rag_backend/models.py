@@ -1,5 +1,8 @@
-# src/models.py
 """
+RAG Prototype - Intrinsical-AI (c) 2025
+Author: Pablo Pintor
+License: MIT
+
 Models for the application.
 """
 
@@ -19,7 +22,6 @@ class QueryResult(BaseModel):
     score: float
 
 
-# API
 class AskRequest(BaseModel):
     """Request schema for the `/ask` endpoint."""
 

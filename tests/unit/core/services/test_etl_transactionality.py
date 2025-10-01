@@ -40,7 +40,9 @@ class TestETLTransactionality:
         """ETL service with mocked dependencies."""
         return ETLService(mock_doc_storage, mock_vec_storage, mock_embedder)
 
-    def test_successful_ingestion_flow(self, etl_service, mock_doc_storage, mock_vec_storage, mock_embedder):
+    def test_successful_ingestion_flow(
+        self, etl_service, mock_doc_storage, mock_vec_storage, mock_embedder
+    ):
         """Test successful end-to-end ingestion."""
         texts = ["Document 1", "Document 2", "Document 3"]
 
@@ -49,18 +51,23 @@ class TestETLTransactionality:
         # Verify all phases executed
         mock_doc_storage.store_documents.assert_called_once_with(texts)
         mock_embedder.embed.assert_called_once_with(texts)
-        mock_vec_storage.upsert.assert_called_once_with([1, 2, 3], [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
+        mock_vec_storage.upsert.assert_called_once_with(
+            [1, 2, 3], [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+        )
 
         assert result == [1, 2, 3]
 
-    @pytest.mark.parametrize("input_texts,expected_filtered", [
-        ([], []),  # Empty input
-        ([""], []),  # Empty string
-        (["   "], []),  # Whitespace only
-        (["", "  ", "valid"], ["valid"]),  # Mixed empty and valid
-        (["doc1", "", "doc2"], ["doc1", "doc2"]),  # Valid with empty in middle
-        (["  doc1  ", "doc2"], ["doc1", "doc2"]),  # Texts with whitespace
-    ])
+    @pytest.mark.parametrize(
+        "input_texts,expected_filtered",
+        [
+            ([], []),  # Empty input
+            ([""], []),  # Empty string
+            (["   "], []),  # Whitespace only
+            (["", "  ", "valid"], ["valid"]),  # Mixed empty and valid
+            (["doc1", "", "doc2"], ["doc1", "doc2"]),  # Valid with empty in middle
+            (["  doc1  ", "doc2"], ["doc1", "doc2"]),  # Texts with whitespace
+        ],
+    )
     def test_input_validation_and_filtering(
         self, etl_service, mock_doc_storage, input_texts, expected_filtered
     ):
@@ -174,13 +181,35 @@ class TestETLTransactionality:
 
         # Should not crash even without rollback capability
 
-    @pytest.mark.parametrize("failure_stage,setup_mocks", [
-        ("doc_storage", lambda mocks: mocks[0].store_documents.side_effect.__setitem__(0, Exception("DB error"))),
-        ("embedder", lambda mocks: mocks[2].embed.side_effect.__setitem__(0, Exception("Embedding error"))),
-        ("vec_storage", lambda mocks: mocks[1].upsert.side_effect.__setitem__(0, Exception("Vector error"))),
-    ])
+    @pytest.mark.parametrize(
+        "failure_stage,setup_mocks",
+        [
+            (
+                "doc_storage",
+                lambda mocks: mocks[0].store_documents.side_effect.__setitem__(
+                    0, Exception("DB error")
+                ),
+            ),
+            (
+                "embedder",
+                lambda mocks: mocks[2].embed.side_effect.__setitem__(
+                    0, Exception("Embedding error")
+                ),
+            ),
+            (
+                "vec_storage",
+                lambda mocks: mocks[1].upsert.side_effect.__setitem__(0, Exception("Vector error")),
+            ),
+        ],
+    )
     def test_error_propagation_with_context(
-        self, etl_service, mock_doc_storage, mock_vec_storage, mock_embedder, failure_stage, setup_mocks
+        self,
+        etl_service,
+        mock_doc_storage,
+        mock_vec_storage,
+        mock_embedder,
+        failure_stage,
+        setup_mocks,
     ):
         """Test that errors are properly propagated with helpful context."""
         texts = ["Document 1"]

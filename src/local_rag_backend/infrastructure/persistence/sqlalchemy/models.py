@@ -10,7 +10,7 @@ Purpose: Defines database models for document storage and Q&A history persistenc
 
 from __future__ import annotations
 
-import datetime
+import datetime  # noqa: TCH003  # SQLAlchemy needs this at runtime for Mapped[] annotations
 
 from sqlalchemy import DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column

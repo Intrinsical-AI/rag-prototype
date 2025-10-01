@@ -18,14 +18,17 @@ class TestUtilsNoneValidation:
         result = preprocess_text(None)
         assert result == ""
 
-    @pytest.mark.parametrize("non_string_input,expected_result", [
-        (123, "123"),  # Integer
-        (45.67, "45.67"),  # Float
-        (True, "true"),  # Boolean
-        ([], "[]"),  # List
-        ({}, "{}"),  # Dict
-        ((1, 2), "(1, 2)"),  # Tuple
-    ])
+    @pytest.mark.parametrize(
+        "non_string_input,expected_result",
+        [
+            (123, "123"),  # Integer
+            (45.67, "45.67"),  # Float
+            (True, "true"),  # Boolean
+            ([], "[]"),  # List
+            ({}, "{}"),  # Dict
+            ((1, 2), "(1, 2)"),  # Tuple
+        ],
+    )
     def test_preprocess_text_with_non_string_types(self, non_string_input, expected_result):
         """Test that non-string types are converted to strings."""
         result = preprocess_text(non_string_input)
@@ -33,6 +36,7 @@ class TestUtilsNoneValidation:
 
     def test_preprocess_text_with_unconvertible_object(self):
         """Test handling of objects that can't be converted to string."""
+
         class UnconvertibleObject:
             def __str__(self):
                 raise Exception("Cannot convert to string")
@@ -41,14 +45,17 @@ class TestUtilsNoneValidation:
         result = preprocess_text(obj)
         assert result == ""
 
-    @pytest.mark.parametrize("valid_text,expected_result", [
-        ("Hello World", "hello world"),
-        ("  TRIM ME  ", "trim me"),
-        ("HTML<b>bold</b>text", "html bold text"),
-        ("Multiple   spaces", "multiple spaces"),
-        ("", ""),  # Empty string
-        ("   ", ""),  # Whitespace only
-    ])
+    @pytest.mark.parametrize(
+        "valid_text,expected_result",
+        [
+            ("Hello World", "hello world"),
+            ("  TRIM ME  ", "trim me"),
+            ("HTML<b>bold</b>text", "html bold text"),
+            ("Multiple   spaces", "multiple spaces"),
+            ("", ""),  # Empty string
+            ("   ", ""),  # Whitespace only
+        ],
+    )
     def test_preprocess_text_with_valid_strings(self, valid_text, expected_result):
         """Test that valid strings are processed correctly."""
         result = preprocess_text(valid_text)
@@ -184,8 +191,8 @@ class TestUtilsNoneValidation:
         # These are edge cases that might break in future changes
         regression_cases = [
             (None, ""),  # The original bug
-            ("", ""),    # Empty string handling
-            ("   ", ""), # Whitespace-only handling
+            ("", ""),  # Empty string handling
+            ("   ", ""),  # Whitespace-only handling
             ("<br/>", ""),  # Self-closing HTML tags
             ("a<b>c", "a c"),  # Unclosed tags
         ]

@@ -15,6 +15,7 @@ from local_rag_backend.core.services.rag import RagService
 
 # --- Test Doubles ---
 
+
 class DummyRetriever:
     """Mock retriever for testing RAG service behavior."""
 

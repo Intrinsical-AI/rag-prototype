@@ -25,9 +25,6 @@ class RagService:
     - Document retrieval based on semantic similarity
     - Answer generation using retrieved context
     - Interaction history management for audit and analysis
-
-    The service follows the hexagonal architecture pattern, depending only on port
-    abstractions rather than concrete implementations.
     """
 
     def __init__(
@@ -121,18 +118,20 @@ class RagService:
         cleanup operations, this will be a no-op.
         """
         # Check if history storage supports cleanup operations
-        if hasattr(self.history_storage, 'cleanup_old_entries'):
+        if hasattr(self.history_storage, "cleanup_old_entries"):
             self.history_storage.cleanup_old_entries(settings.max_history_entries)
-        elif hasattr(self.history_storage, 'get_entry_count') and hasattr(self.history_storage, 'delete_oldest_entries'):
-            # Alternative cleanup method
+        elif hasattr(self.history_storage, "get_entry_count") and hasattr(
+            self.history_storage, "delete_oldest_entries"
+        ):
             try:
                 current_count = self.history_storage.get_entry_count()
                 if current_count > settings.max_history_entries:
                     excess = current_count - settings.max_history_entries
                     self.history_storage.delete_oldest_entries(excess)
-            except Exception:
+            except Exception:  # noqa: S110
                 # If cleanup fails, continue without error to maintain service availability
-                pass
+                # This is intentional to prevent history cleanup failures from breaking the service
+                pass  # nosec B110
 
     def _validate_and_sanitize_question(self, question: str | None) -> str:
         """Validate and sanitize the input question.

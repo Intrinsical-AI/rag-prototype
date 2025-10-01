@@ -45,7 +45,29 @@ class FaissIndex:
 
     def add_to_index(self, ids: list[int], embeddings: list[Sequence[float]]) -> None:
         """Add new vectors to the index and save."""
+        # Early return only if BOTH are empty
+        if not embeddings and not ids:
+            return  # Nothing to add
+
+        # Validate count match BEFORE array conversion
+        if len(ids) != len(embeddings):
+            raise ValueError(
+                f"ID count ({len(ids)}) must match embedding count ({len(embeddings)})"
+            )
+
         vectors = np.asarray(embeddings, dtype="float32")
+
+        # Handle 1D array case (single flat embedding passed incorrectly)
+        if vectors.ndim == 1:
+            # Check if this is a single vector or malformed input
+            if len(ids) == 1 and vectors.shape[0] == self.index.d:
+                # Single vector case - reshape to 2D
+                vectors = vectors.reshape(1, -1)
+            else:
+                raise ValueError(f"Embeddings must be 2D array, got shape {vectors.shape}")
+        elif vectors.ndim != 2:
+            raise ValueError(f"Embeddings must be 2D array, got shape {vectors.shape}")
+
         if vectors.shape[1] != self.index.d:
             raise ValueError(
                 f"FAISS dim mismatch: vector dimension {vectors.shape[1]} != index dimension {self.index.d}"
