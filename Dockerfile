@@ -32,6 +32,7 @@ RUN pip install uv
 # Install runtime dependencies (and project) with uv
 WORKDIR /tmp/app
 COPY pyproject.toml ./
+COPY README.md LICENSE MANIFEST.in ./
 COPY src/ ./src/
 ARG RAG_EXTRAS=""
 RUN if [ -n "$RAG_EXTRAS" ]; then uv pip install --system ".[${RAG_EXTRAS}]"; else uv pip install --system .; fi
@@ -45,7 +46,7 @@ COPY . .
 
 # Install development/test/lint extras in editable mode (project already present)
 ARG RAG_EXTRAS=""
-RUN pip install uv && if [ -n "$RAG_EXTRAS" ]; then uv pip install --system -e ".[${RAG_EXTRAS},dev,test,lint]"; else uv pip install --system -e ".[dev,test,lint]"; fi
+RUN if [ -n "$RAG_EXTRAS" ]; then uv pip install --system -e ".[${RAG_EXTRAS},dev,test,lint]"; else uv pip install --system -e ".[dev,test,lint]"; fi
 
 # Create necessary directories
 RUN mkdir -p data logs && \
@@ -59,19 +60,12 @@ CMD ["uvicorn", "local_rag_backend.app.main:app", "--host", "0.0.0.0", "--port",
 # --- Stage 4: Production Environment ---
 FROM python-base as production
 
-# Copy installed dependencies from deps stage
-COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=deps /usr/local/bin /usr/local/bin
+# Copy installed dependencies (including the installed project) from deps stage.
+# This avoids rebuilding the package (and potentially fetching build requirements) in this stage.
+COPY --from=deps /usr/local /usr/local
 
 # Set working directory
 WORKDIR /app
-
-# Copy application code
-COPY src/ ./src/
-COPY pyproject.toml ./
-
-# Install the package metadata (no deps, they are already copied)
-RUN pip install --no-deps -e .
 
 # Create necessary directories and set permissions
 RUN mkdir -p data logs && \
@@ -102,4 +96,4 @@ FROM development as testing
 RUN uv pip install --system --no-deps -e ".[test]"
 
 # Run tests
-CMD ["pytest", "-v", "--cov=src", "--cov-report=term-missing"]
+CMD ["pytest", "-v"]

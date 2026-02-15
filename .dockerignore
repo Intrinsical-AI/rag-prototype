@@ -1,0 +1,33 @@
+.git
+.github
+
+# Virtualenvs and dependency caches
+.venv
+env
+venv
+.uv-cache
+.mypy_cache
+.ruff_cache
+.pytest_cache
+__pycache__
+*.py[cod]
+
+# Build / packaging outputs
+build
+dist
+*.egg-info
+
+# Tests and local reports
+htmlcov
+.coverage
+coverage.xml
+
+# Local data and logs (keep sample CSV + gitkeep)
+data/*
+!data/faq.csv
+!data/.gitkeep
+logs
+
+# Misc
+.env
+.env.*
