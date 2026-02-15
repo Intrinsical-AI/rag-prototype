@@ -88,6 +88,29 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 "http_request_duration_seconds", "Request latency", ["method", "path"]
             )
 
+    @staticmethod
+    def _path_label(request: Request, response_status: int) -> str:
+        """
+        Derive a low-cardinality label for request paths.
+
+        High-cardinality labels (e.g., `/assets/<hash>.js` or random 404 paths) can lead to
+        unbounded time-series growth and memory DoS in `prometheus_client`.
+        """
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", None)
+        if isinstance(route_path, str) and route_path:
+            return route_path
+
+        # Unmatched routes (usually 404) should not create a new series per random path.
+        if response_status == 404:
+            return "<unmatched>"
+
+        # Best-effort fallback. Keep this as stable as possible.
+        raw_path = request.url.path
+        if raw_path.startswith("/assets/"):
+            return "/assets/*"
+        return raw_path
+
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
@@ -98,9 +121,10 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         latency = time.time() - start_time
 
-        self.latencies.labels(method=request.method, path=request.url.path).observe(latency)
+        path_label = self._path_label(request, response.status_code)
+        self.latencies.labels(method=request.method, path=path_label).observe(latency)
         self.requests.labels(
-            method=request.method, path=request.url.path, status_code=response.status_code
+            method=request.method, path=path_label, status_code=response.status_code
         ).inc()
 
         return response
