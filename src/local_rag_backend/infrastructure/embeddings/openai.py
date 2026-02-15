@@ -18,9 +18,6 @@ _MODEL_DIM: dict[str, int] = {
     "text-embedding-ada-002": 1536,
 }
 
-DEFAULT_MODEL = settings.openai_embedding_model
-DEFAULT_DIM = _MODEL_DIM.get(DEFAULT_MODEL, 1536)
-
 Embedding = Sequence[float]
 
 
@@ -29,12 +26,17 @@ class OpenAIEmbedder(EmbedderPort):
 
     def __init__(self, model: str | None = None):
         self.model = model or settings.openai_embedding_model
-        self.dim = _MODEL_DIM.get(self.model, DEFAULT_DIM)
+        # Default to a widely used OpenAI embedding dimensionality when unknown.
+        # Don't depend on import-time settings for this fallback.
+        self.dim = _MODEL_DIM.get(self.model, 1536)
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required to use OpenAI embeddings.")
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
+        if not texts:
+            # Avoid calling the API with empty input (some providers reject it).
+            return []
         try:
             resp = self.client.embeddings.create(model=self.model, input=list(texts))
         except Exception as err:
