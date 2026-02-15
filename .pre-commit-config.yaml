@@ -8,11 +8,11 @@ repos:
     hooks:
       - id: ruff
         name: "Lint Python code (Ruff)"
-        args: ["--fix"]
-        files: "^src/"
+        args: ["--fix", "--exit-non-zero-on-fix"]
+        files: "^(src|tests)/"
       - id: ruff-format
         name: "Format Python code (Ruff)"
-        files: "^src/"
+        files: "^(src|tests)/"
 
   # Type Checking
   - repo: https://github.com/pre-commit/mirrors-mypy
@@ -20,8 +20,7 @@ repos:
     hooks:
       - id: mypy
         name: "Type check Python code (MyPy)"
-        additional_dependencies: [types-requests, types-setuptools, pydantic]
-        args: ["--ignore-missing-imports", "--strict-optional", "--disable-error-code=no-any-return"]
+        additional_dependencies: [types-requests, types-setuptools, pydantic, pydantic-settings]
         exclude: "^tests/"
 
   # Essential File Quality Checks
