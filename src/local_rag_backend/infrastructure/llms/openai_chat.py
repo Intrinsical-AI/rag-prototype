@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from openai import OpenAI
 
 from local_rag_backend.core.ports import GeneratorPort
+from local_rag_backend.prompting import render_prompt_template
 from local_rag_backend.settings import settings
 
 __all__ = ["OpenAIGenerator"]
@@ -56,7 +57,7 @@ class OpenAIGenerator(GeneratorPort):
     def _build_prompt(self, question: str, contexts: Sequence[str]) -> str:
         """Build the prompt string for the OpenAI API."""
         context_str = "\n".join(f"- {c}" for c in contexts)
-        return self.prompt_template.format(context=context_str, question=question)
+        return render_prompt_template(self.prompt_template, context=context_str, question=question)
 
     def generate(self, question: str, contexts: Sequence[str]) -> str:
         """Generate a response from the OpenAI API."""

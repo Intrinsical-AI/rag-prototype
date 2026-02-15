@@ -12,6 +12,7 @@ import requests
 from fastapi import HTTPException
 
 from local_rag_backend.core.ports import GeneratorPort
+from local_rag_backend.prompting import render_prompt_template
 from local_rag_backend.settings import (
     settings,  # settings.ollama_base_url y settings.ollama_request_timeout exists
 )
@@ -39,7 +40,9 @@ class OllamaGenerator(GeneratorPort):
     def generate(self, question: str, contexts: Sequence[str]) -> str:
         """Generate a response from the Ollama server."""
         context_str = "\n".join(f"- {c}" for c in contexts)
-        prompt = self.prompt_template.format(context=context_str, question=question)
+        prompt = render_prompt_template(
+            self.prompt_template, context=context_str, question=question
+        )
 
         payload = {"model": self.model, "prompt": prompt, "stream": False}
         if self.temperature is not None:
