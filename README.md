@@ -235,6 +235,10 @@ rag-rebuild-index
 rag-delete-docs 1 2 3
 
 
+# Upsert documents by external_id (idempotent)
+rag-upsert-docs --external-id doc-1 --content "hello"
+
+
 # Summarized system and files status
 rag-status
 ```
@@ -333,6 +337,7 @@ Notes:
   * Response: list of `{ id, question, answer, created_at, source_ids[] }`
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
+* `POST /api/docs/upsert` (idempotent upsert by `external_id`)
 * `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
 * `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
