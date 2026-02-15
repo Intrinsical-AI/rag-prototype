@@ -37,6 +37,10 @@ class OpenAIGenerator(GeneratorPort):
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
     ):
+        resolved_key = api_key or settings.openai_api_key
+        if not resolved_key:
+            raise RuntimeError("OPENAI_API_KEY is required to use the OpenAI generator.")
+
         self.model = model or settings.openai_model
         self.temperature = temperature if temperature is not None else settings.openai_temperature
         self.top_p = top_p if top_p is not None else settings.openai_top_p
@@ -44,7 +48,7 @@ class OpenAIGenerator(GeneratorPort):
         self.prompt_template = prompt_template or settings.openai_prompt_template
 
         self.client = OpenAI(
-            api_key=(api_key or settings.openai_api_key),
+            api_key=resolved_key,
             base_url=base_url,
             default_headers=extra_headers,
         )

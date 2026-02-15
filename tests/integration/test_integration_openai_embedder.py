@@ -54,7 +54,18 @@ def test_openai_embedder_returns_vectors(monkeypatch):
 @pytest.mark.integration
 def test_openai_embedder_empty_input(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(openai_embedder_mod, "OpenAI", _DummyOpenAI, raising=True)
+    monkeypatch.setattr(settings, "openai_embedding_model", "dummy-4", raising=False)
+    monkeypatch.setattr(openai_embedder_mod, "_MODEL_DIM", {"dummy-4": 4}, raising=False)
+
+    class _NoCallEmbeddingsAPI:
+        def create(self, **_):  # pragma: no cover
+            raise AssertionError("embeddings.create() should not be called for empty input")
+
+    class _NoCallOpenAI:
+        def __init__(self, api_key):
+            self.embeddings = _NoCallEmbeddingsAPI()
+
+    monkeypatch.setattr(openai_embedder_mod, "OpenAI", _NoCallOpenAI, raising=True)
 
     emb = OpenAIEmbedder(model="dummy-4")
     assert emb.embed([]) == []

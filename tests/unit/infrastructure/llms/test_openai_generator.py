@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
+from local_rag_backend.settings import settings
 
 
 # --------------------------------------------------------------------------- #
@@ -32,7 +33,7 @@ def make_dummy_openai(should_raise=False):
 
 
 def test_generate_success(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "DUMMY")
+    monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
 
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.llms.openai_chat.OpenAI", make_dummy_openai()
@@ -43,7 +44,7 @@ def test_generate_success(monkeypatch):
 
 
 def test_generate_api_error(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "DUMMY")
+    monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
 
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.llms.openai_chat.OpenAI",
@@ -53,3 +54,9 @@ def test_generate_api_error(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         gen.generate("fallará", ["ctx"])
     assert exc.value.status_code == 502
+
+
+def test_generator_requires_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        OpenAIGenerator()
