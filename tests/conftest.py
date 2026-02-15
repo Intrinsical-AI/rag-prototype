@@ -55,6 +55,11 @@ class DummyFaissIndex:
     def add_to_index(self, ids, vecs):
         self.id_map.extend(ids)
 
+    def delete_ids(self, ids):
+        to_delete = set(ids)
+        self.id_map = [x for x in self.id_map if x not in to_delete]
+        return 0
+
     def search(self, q, k):
         return ([0], [0.0])
 

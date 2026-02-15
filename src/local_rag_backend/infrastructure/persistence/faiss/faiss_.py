@@ -20,12 +20,20 @@ if TYPE_CHECKING:
 class FaissVectorStorage(VectorRepoPort):
     """Adapter for vector storage and search using FAISS."""
 
-    def __init__(self, index_path: str, id_map_path: str, dim: int = 384):
+    def __init__(self, index_path: str, id_map_path: str, dim: int | None = 384):
         self.faiss_index = FaissIndex(index_path, id_map_path, dim)
 
     def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         """Add vectors to the FAISS index."""
         self.faiss_index.add_to_index(list(ids), list(vectors))
+
+    def delete(self, ids: Sequence[int]) -> None:
+        """Delete vectors from the index (may rebuild the underlying index)."""
+        self.faiss_index.delete_ids(list(ids))
+
+    def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
+        """Rebuild the full index from scratch (idempotent)."""
+        self.faiss_index.rebuild(ids, vectors)
 
     def search(
         self, query_vector: Sequence[float], k: int
@@ -37,11 +45,13 @@ class FaissVectorStorage(VectorRepoPort):
         """Find similar items and return their IDs and normalized similarity scores."""
         indices, distances = self.search(vector, k)
 
-        # Filter out invalid indices (-1)
+        # Filter out invalid indices (-1) and guard against id_map/index mismatches.
+        # A mismatch can happen if files are manually edited/corrupted; don't crash retrieval.
+        id_map = self.faiss_index.id_map
         valid_results = [
-            (self.faiss_index.id_map[i], float(d))
+            (id_map[i], float(d))
             for i, d in zip(indices, distances, strict=False)
-            if i != -1
+            if i != -1 and 0 <= int(i) < len(id_map)
         ]
         if not valid_results:
             return []

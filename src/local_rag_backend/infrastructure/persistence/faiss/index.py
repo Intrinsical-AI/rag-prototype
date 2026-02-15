@@ -16,7 +16,7 @@ import json
 import os
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +24,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from typing import Any
 
     from numpy.typing import NDArray
 
@@ -64,55 +65,58 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
     locked = False
     try:
         try:  # POSIX
-            import fcntl  # type: ignore
+            import fcntl
 
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             locked = True
         except Exception:  # pragma: no cover
             locked = False
 
-        if not locked:
-            try:  # Windows
-                import msvcrt  # type: ignore
+        if not locked:  # pragma: no cover
+            try:  # Windows  # pragma: no cover
+                import msvcrt  # pragma: no cover
+
+                msvcrt_any: Any = msvcrt  # pragma: no cover
 
                 # Ensure the file has at least one byte to lock.
-                f.seek(0, os.SEEK_END)
-                if f.tell() == 0:
-                    f.write(b"0")
-                    f.flush()
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-                locked = True
+                f.seek(0, os.SEEK_END)  # pragma: no cover
+                if f.tell() == 0:  # pragma: no cover
+                    f.write(b"0")  # pragma: no cover
+                    f.flush()  # pragma: no cover
+                f.seek(0)  # pragma: no cover
+                msvcrt_any.locking(  # pragma: no cover
+                    f.fileno(), getattr(msvcrt_any, "LK_LOCK", 1), 1
+                )
+                locked = True  # pragma: no cover
             except Exception:  # pragma: no cover
-                locked = False
+                locked = False  # pragma: no cover
 
         yield
     finally:
         if locked:
-            try:  # POSIX
-                import fcntl  # type: ignore
+            with suppress(Exception):  # pragma: no cover
+                import fcntl
 
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            except Exception:  # pragma: no cover
-                pass
 
-            try:  # Windows
-                import msvcrt  # type: ignore
+            with suppress(Exception):  # pragma: no cover
+                import msvcrt  # pragma: no cover
 
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-            except Exception:  # pragma: no cover
-                pass
+                msvcrt_mod: Any = msvcrt  # pragma: no cover
+                f.seek(0)  # pragma: no cover
+                msvcrt_mod.locking(  # pragma: no cover
+                    f.fileno(), getattr(msvcrt_mod, "LK_UNLCK", 0), 1
+                )
         f.close()
 
 
 class FaissIndex:
     """Manages a FAISS index (or numpy fallback) and its corresponding ID map."""
 
-    def __init__(self, index_path: str | Path, id_map_path: str | Path, dim: int = 384):
+    def __init__(self, index_path: str | Path, id_map_path: str | Path, dim: int | None = 384):
         self.index_path = Path(index_path)
         self.id_map_path = Path(id_map_path)
-        self.dim = dim
+        self.dim = dim if dim is not None else 0
 
         self._faiss = None
         self._vectors: NDArray[np.float32] | None = None  # numpy fallback when FAISS isn't present
@@ -126,12 +130,36 @@ class FaissIndex:
         except ImportError:
             self._faiss = None
 
+        if dim is None:
+            self.dim = self._infer_dim_or_raise()
         self._load_or_initialize()
 
+    def _infer_dim_or_raise(self) -> int:
+        if not self.index_path.exists():
+            raise ValueError("dim is required when creating a new index (no existing index file).")
+
+        # If FAISS is available and the file is a FAISS index, prefer it.
+        if self._faiss is not None:
+            idx = self._faiss.read_index(str(self.index_path))
+            d = int(getattr(idx, "d", 0) or 0)
+            if d <= 0:
+                raise ValueError("Invalid FAISS index dim.")
+            return d
+
+        # Numpy fallback: load array header.
+        try:
+            with self.index_path.open("rb") as f:
+                arr = np.load(f, allow_pickle=False)
+        except Exception as e:
+            raise RuntimeError("Unable to infer index dim from existing index file.") from e
+        vectors = np.asarray(arr, dtype="float32")
+        if vectors.ndim != 2 or vectors.shape[1] <= 0:
+            raise ValueError("Invalid on-disk vectors shape for dim inference.")
+        return int(vectors.shape[1])
+
     def _load_or_initialize(self) -> None:
-        with self._state_lock:
-            with _exclusive_file_lock(self._lock_path):
-                self._load_or_initialize_locked()
+        with self._state_lock, _exclusive_file_lock(self._lock_path):
+            self._load_or_initialize_locked()
 
     def _load_or_initialize_locked(self) -> None:
         """(Re)load on-disk state. Expects locks to be held."""
@@ -200,11 +228,10 @@ class FaissIndex:
         if vectors.ndim != 2:
             raise ValueError("Embeddings must be a 2D array-like (n, dim)")
 
-        with self._state_lock:
-            with _exclusive_file_lock(self._lock_path):
-                # Reload under the lock so multi-worker ingestion appends to the latest state.
-                self._load_or_initialize_locked()
-
+        with self._state_lock, _exclusive_file_lock(self._lock_path):
+            # Reload under the lock so multi-worker ingestion appends to the latest state.
+            self._load_or_initialize_locked()
+            try:
                 if self._faiss is not None:
                     if vectors.shape[1] != self.index.d:
                         raise ValueError(
@@ -223,6 +250,86 @@ class FaissIndex:
 
                 self.id_map.extend(ids)
                 self._save_locked()
+            except Exception:
+                # Critical: if persistence fails after mutating the in-memory index/id_map,
+                # keep the process consistent by reloading the last known on-disk state.
+                with suppress(Exception):  # pragma: no cover
+                    self._load_or_initialize_locked()
+                raise
+
+    def delete_ids(self, ids: Sequence[int]) -> int:
+        """
+        Delete vectors for given document IDs.
+
+        Notes:
+        - This may rebuild the underlying index (O(n)).
+        - Deletes all occurrences if an ID is present multiple times in the id_map.
+        """
+        to_delete = {int(x) for x in ids}
+        if not to_delete:
+            return 0
+
+        with self._state_lock, _exclusive_file_lock(self._lock_path):
+            self._load_or_initialize_locked()
+
+            if not self.id_map:
+                return 0
+
+            keep_positions = [i for i, doc_id in enumerate(self.id_map) if doc_id not in to_delete]
+            deleted = len(self.id_map) - len(keep_positions)
+            if deleted <= 0:
+                return 0
+
+            # Rebuild vectors/index from the kept positions.
+            if self._faiss is not None:
+                # Reconstruct vectors from the flat index. IndexFlatL2 supports reconstruct.
+                # Prefer reconstruct_n when available.
+                if hasattr(self.index, "reconstruct_n"):
+                    all_vecs = self.index.reconstruct_n(0, self.index.ntotal)
+                else:  # pragma: no cover
+                    all_vecs = np.vstack(
+                        [self.index.reconstruct(i) for i in range(self.index.ntotal)]
+                    ).astype("float32", copy=False)
+
+                kept_vecs = np.asarray(all_vecs[keep_positions], dtype="float32")
+                new_index = self._faiss.IndexFlatL2(self.dim)
+                if len(kept_vecs):
+                    new_index.add(kept_vecs)
+                self.index = new_index
+            else:
+                assert self._vectors is not None
+                self._vectors = np.asarray(self._vectors[keep_positions], dtype="float32")
+
+            self.id_map = [self.id_map[i] for i in keep_positions]
+            self._save_locked()
+            return deleted
+
+    def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
+        """Rebuild the full index from scratch (idempotent)."""
+        if len(ids) != len(vectors):
+            raise ValueError(f"ids/vectors length mismatch: {len(ids)} != {len(vectors)}")
+        vecs = np.asarray(list(vectors), dtype="float32")
+        if vecs.ndim != 2 and len(ids):
+            raise ValueError("Vectors must be a 2D array-like (n, dim)")
+        if len(ids) and vecs.shape[1] != self.dim:
+            raise ValueError(
+                f"Dim mismatch: vectors have dim {vecs.shape[1]} but index dim is {self.dim}"
+            )
+
+        with self._state_lock, _exclusive_file_lock(self._lock_path):
+            if self._faiss is not None:
+                self.index = self._faiss.IndexFlatL2(self.dim)
+                if len(ids):
+                    self.index.add(vecs)
+            else:
+                self._vectors = (
+                    np.asarray(vecs, dtype="float32")
+                    if len(ids)
+                    else np.empty((0, self.dim), dtype="float32")
+                )
+
+            self.id_map = [int(x) for x in ids]
+            self._save_locked()
 
     def search(
         self, query_vector: Sequence[float], k: int
@@ -262,9 +369,8 @@ class FaissIndex:
 
     def save(self) -> None:
         """Save the index and ID map to disk."""
-        with self._state_lock:
-            with _exclusive_file_lock(self._lock_path):
-                self._save_locked()
+        with self._state_lock, _exclusive_file_lock(self._lock_path):
+            self._save_locked()
 
     def _save_locked(self) -> None:
         """Same as `save`, but expects locks to already be held."""
@@ -290,4 +396,3 @@ class FaissIndex:
             os.replace(tmp_path, self.index_path)
 
         _atomic_write_text(self.id_map_path, json.dumps(list(self.id_map)))
-
