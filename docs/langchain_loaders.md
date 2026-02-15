@@ -7,7 +7,7 @@ This document explains how to ingest content from LangChain document loaders usi
 Install optional extras for loaders:
 
 ```bash
-pip install -e ".[loaders]"
+uv sync --frozen --extra loaders
 # Or
 # pip install intrinsical-rag-prototype[loaders]
 ```

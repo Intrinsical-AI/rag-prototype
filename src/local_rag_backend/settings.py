@@ -43,7 +43,9 @@ class Settings(BaseSettings):
 
     # --- Retrieval --- #
     retrieval_mode: Literal["sparse", "dense", "hybrid"] = Field(
-        "hybrid", description="Retrieval strategy."
+        # Default to sparse to keep the base installation lightweight; dense/hybrid require extra deps.
+        "sparse",
+        description="Retrieval strategy.",
     )
     hybrid_retrieval_alpha: float = Field(
         0.5, ge=0.0, le=1.0, description="Weight of sparse vs. dense in hybrid mode."

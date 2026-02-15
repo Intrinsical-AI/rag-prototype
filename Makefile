@@ -1,17 +1,26 @@
 # Simple developer helpers
 
-.PHONY: lint type test sec docker-build compose-up compose-down
+.PHONY: venv sync lint type test sec docker-build compose-up compose-down
+
+venv:
+	uv venv .venv
+
+sync: venv
+	uv sync --frozen --extra test --extra lint
 
 lint:
-	uv run ruff check .
-	uv run black --check .
-	uv run isort --check-only .
+	$(MAKE) sync
+	.venv/bin/ruff check .
+	.venv/bin/black --check .
+	.venv/bin/isort --check-only .
 
 type:
-	uv run mypy .
+	$(MAKE) sync
+	.venv/bin/mypy .
 
 test:
-	uv run python -m pytest -q
+	$(MAKE) sync
+	.venv/bin/python -m pytest -q
 
 sec:
 	- bandit -r src/ -q
