@@ -66,8 +66,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dense = [
-  "sentence-transformers>=2.7,<3.0",
   "faiss-cpu>=1.8.0,<2.0"
+]
+dense-st = [
+  # Heavy dependency chain (torch/transformers). Prefer OpenAI embeddings when possible.
+  "sentence-transformers>=2.7,<3.0"
 ]
 dev = [
   # Testing
@@ -130,8 +133,8 @@ monitoring = [
   "sentry-sdk[fastapi]>=1.40,<2.0"
 ]
 all = [
-  "sentence-transformers>=2.7,<3.0",
   "faiss-cpu>=1.8.0,<2.0",
+  "sentence-transformers>=2.7,<3.0",
   "pytest>=8.2,<9.0",
   "pytest-cov>=6.1.1,<7.0",
   "pytest-asyncio>=0.23,<1.0",
@@ -253,9 +256,8 @@ exclude = "(?x)^(tests/|scripts/)"
 
 plugins = ["pydantic.mypy"]
 
-# Afinado del plugin de Pydantic 2
-[mypy.plugins.dummy]  # sección ficticia para TOML válidas; el plugin lee vía [tool.mypy]
-# (Opciones del plugin se pasan igual bajo [tool.mypy])
+# Afinado del plugin de Pydantic (config en pyproject)
+[tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true

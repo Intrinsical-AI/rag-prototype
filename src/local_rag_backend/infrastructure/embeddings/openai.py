@@ -5,14 +5,11 @@ OpenAI embeddings implementation.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from collections.abc import Sequence
 
 from openai import OpenAI
 
-from local_rag_backend.core.ports import EmbedderPort, Embedding
+from local_rag_backend.core.ports import EmbedderPort
 from local_rag_backend.settings import settings
 
 _MODEL_DIM: dict[str, int] = {
@@ -24,6 +21,8 @@ _MODEL_DIM: dict[str, int] = {
 DEFAULT_MODEL = settings.openai_embedding_model
 DEFAULT_DIM = _MODEL_DIM.get(DEFAULT_MODEL, 1536)
 
+Embedding = Sequence[float]
+
 
 class OpenAIEmbedder(EmbedderPort):
     dim: int  # required by the port
@@ -31,6 +30,8 @@ class OpenAIEmbedder(EmbedderPort):
     def __init__(self, model: str | None = None):
         self.model = model or settings.openai_embedding_model
         self.dim = _MODEL_DIM.get(self.model, DEFAULT_DIM)
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required to use OpenAI embeddings.")
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:

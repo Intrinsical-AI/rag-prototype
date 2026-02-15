@@ -10,12 +10,13 @@ from __future__ import annotations
 import logging
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-# Import the embedder that will be used for indexing if dense mode
+from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+if TYPE_CHECKING:
+    from local_rag_backend.core.ports import EmbedderPort
 
 
 def main() -> None:
@@ -63,12 +67,15 @@ def main() -> None:
         return  # Exit if tables can't be created
 
     # 3. Embedder (for dense or hybrid mode)
-    embedder_for_indexing = None
+    embedder_for_indexing: EmbedderPort | None = None
     if settings.retrieval_mode in ["dense", "hybrid"]:
         logger.info(
             f"{settings.retrieval_mode.title()} retrieval mode detected. Initializing embedder for indexing."
         )
-        embedder_for_indexing = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        if settings.openai_api_key:
+            embedder_for_indexing = OpenAIEmbedder()
+        else:
+            embedder_for_indexing = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
 
     # 4. Use ETL logic directly (similar to bootstrap.py)
     try:

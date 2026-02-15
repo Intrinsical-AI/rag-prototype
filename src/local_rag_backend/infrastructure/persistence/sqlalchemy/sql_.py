@@ -57,7 +57,10 @@ class SqlDocumentStorage(DocumentRepoPort):
 class HistorySqlStorage(QAHistoryPort):
     """SQL-based implementation of the history repository port."""
 
+    def __init__(self, session_factory: sessionmaker[Session] | None = None):
+        self._session_factory = session_factory or SessionLocal
+
     def save(self, q: str, a: str, source_ids: Sequence[int]) -> None:
         """Save a question-answer pair to the history table."""
-        with get_session(SessionLocal) as session:
+        with get_session(self._session_factory) as session:
             add_history(session, q, a, source_ids=list(source_ids))
