@@ -1,30 +1,32 @@
-# Simple developer helpers
+# Simple developer helpers (uv-first).
 
 .PHONY: venv sync lint type test sec docker-build compose-up compose-down
 
+# Keep uv cache local to the repo so it's always writable (and it's already ignored).
+UV_CACHE_DIR ?= .uv-cache
+UV := UV_CACHE_DIR=$(UV_CACHE_DIR) uv
+
 venv:
-	uv venv .venv
+	$(UV) venv .venv
 
 sync: venv
-	uv sync --frozen --extra test --extra lint
+	$(UV) sync --frozen --extra test --extra lint
 
-lint:
-	$(MAKE) sync
-	.venv/bin/ruff check .
-	.venv/bin/black --check .
-	.venv/bin/isort --check-only .
+lint: sync
+	$(UV) run --active --no-sync ruff check .
+	$(UV) run --active --no-sync black --check .
+	$(UV) run --active --no-sync isort --check-only .
 
-type:
-	$(MAKE) sync
-	.venv/bin/mypy .
+type: sync
+	$(UV) run --active --no-sync mypy .
 
-test:
-	$(MAKE) sync
-	.venv/bin/python -m pytest -q
+test: sync
+	$(UV) run --active --no-sync pytest -q
 
 sec:
-	- bandit -r src/ -q
-	- safety check -q
+	- $(UV) pip install bandit safety
+	- $(UV) run bandit -r src/ -q
+	- $(UV) run safety check -q
 
 docker-build:
 	docker build -t intrinsical-rag-prototype:latest --target production .
