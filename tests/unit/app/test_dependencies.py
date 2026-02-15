@@ -1,7 +1,7 @@
 # tests/unit/app/test_dependencies.py
 from types import SimpleNamespace
 
-from local_rag_backend.app import dependencies as deps
+from local_rag_backend.app import dependencies as deps, factory
 from local_rag_backend.settings import settings
 
 
@@ -16,8 +16,8 @@ async def test_get_rag_service_sparse_openai(monkeypatch):
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
     # Minimal dummies
-    monkeypatch.setattr(deps, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
-    monkeypatch.setattr(deps, "SparseBM25Retriever", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+    monkeypatch.setattr(factory, "SparseBM25Retriever", lambda **k: SimpleNamespace())
 
     class DummyRS:
         def __init__(self, retriever, generator, history_storage):
@@ -25,8 +25,8 @@ async def test_get_rag_service_sparse_openai(monkeypatch):
             self.generator = generator
             self.history_storage = history_storage
 
-    monkeypatch.setattr(deps, "RagService", DummyRS)
-    monkeypatch.setattr(deps, "OpenAIGenerator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "RagService", DummyRS)
+    monkeypatch.setattr(factory, "OpenAIGenerator", lambda *a, **k: SimpleNamespace())
 
     svc1 = await deps.get_rag_service()
     svc2 = await deps.get_rag_service()
@@ -43,10 +43,10 @@ async def test_get_rag_service_dense_ollama(monkeypatch):
     class DummyEmbedder:
         dim = 4
 
-    monkeypatch.setattr(deps, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(deps, "FaissVectorStorage", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(deps, "DenseFaissRetriever", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(deps, "OllamaGenerator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "DenseFaissRetriever", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "OllamaGenerator", lambda *a, **k: SimpleNamespace())
 
     class DummyRS:
         def __init__(self, retriever, generator, history_storage):
@@ -54,7 +54,7 @@ async def test_get_rag_service_dense_ollama(monkeypatch):
             self.generator = generator
             self.history_storage = history_storage
 
-    monkeypatch.setattr(deps, "RagService", DummyRS)
+    monkeypatch.setattr(factory, "RagService", DummyRS)
 
     svc = await deps.get_rag_service()
     assert hasattr(svc, "retriever")
@@ -67,16 +67,16 @@ async def test_get_rag_service_hybrid_openai(monkeypatch):
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
     # Mock DB access for sparse retriever in hybrid mode
-    monkeypatch.setattr(deps, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+    monkeypatch.setattr(factory, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
 
     class DummyEmbedder:
         dim = 4
 
-    monkeypatch.setattr(deps, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(deps, "FaissVectorStorage", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(deps, "DenseFaissRetriever", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(deps, "HybridRetriever", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(deps, "OpenAIGenerator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "DenseFaissRetriever", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "HybridRetriever", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "OpenAIGenerator", lambda *a, **k: SimpleNamespace())
 
     class DummyRS:
         def __init__(self, retriever, generator, history_storage):
@@ -84,7 +84,7 @@ async def test_get_rag_service_hybrid_openai(monkeypatch):
             self.generator = generator
             self.history_storage = history_storage
 
-    monkeypatch.setattr(deps, "RagService", DummyRS)
+    monkeypatch.setattr(factory, "RagService", DummyRS)
 
     svc = await deps.get_rag_service()
     assert hasattr(svc, "retriever")
