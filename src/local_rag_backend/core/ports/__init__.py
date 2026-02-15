@@ -53,6 +53,7 @@ class VectorRepoPort(Protocol):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]:
         """Find similar vectors, returning (ID, normalized_similarity_score)."""
+        ...
 
 
 @runtime_checkable

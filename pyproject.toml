@@ -185,6 +185,7 @@ include = ["local_rag_backend*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.txt","*.md","*.yml","*.yaml","*.json","*.toml"]
+"local_rag_backend" = ["py.typed"]
 "local_rag_backend.frontend" = ["*.html","*.css","*.js","*.ico"]
 "local_rag_backend.data" = ["*.csv","*.json","*.parquet"]
 "local_rag_backend.config" = ["*.yaml","*.json"]
