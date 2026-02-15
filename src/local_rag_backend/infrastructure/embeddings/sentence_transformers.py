@@ -21,8 +21,8 @@ class SentenceTransformerEmbedder(EmbedderPort):
             from sentence_transformers import SentenceTransformer
         except ImportError as e:  # pragma: no cover
             raise RuntimeError(
-                "sentence-transformers is not installed. Install the 'dense' extra "
-                "(e.g. `uv sync --extra dense`) or switch RETRIEVAL_MODE=sparse."
+                "sentence-transformers is not installed. Install the 'dense-st' extra "
+                "(e.g. `uv sync --extra dense-st`) or switch RETRIEVAL_MODE=sparse."
             ) from e
 
         self.model = SentenceTransformer(model_name)
