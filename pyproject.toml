@@ -168,6 +168,8 @@ Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 [project.scripts]
 rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
+rag-delete-docs = "local_rag_backend.cli:rag_delete_docs"
+rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
 rag-server      = "local_rag_backend.cli:rag_server"
 rag-status      = "local_rag_backend.cli:rag_status"
 

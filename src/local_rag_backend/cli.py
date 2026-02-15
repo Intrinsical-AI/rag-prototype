@@ -59,6 +59,91 @@ def build_index() -> None:
         sys.exit(1)
 
 
+@cli.command("rebuild-index")
+def rebuild_index() -> None:
+    """Rebuild FAISS index from the current SQLite documents (idempotent)."""
+    try:
+        from local_rag_backend.app.factory import reset_rag_service
+        from local_rag_backend.core.services.maintenance import rebuild_index_from_db
+        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+            SentenceTransformerEmbedder,
+        )
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+
+        if settings.retrieval_mode not in ("dense", "hybrid"):
+            raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
+
+        doc_repo = SqlDocumentStorage()
+        embedder = (
+            OpenAIEmbedder()
+            if settings.openai_api_key
+            else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        )
+        vec = FaissVectorStorage(
+            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
+        )
+        n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+        reset_rag_service()
+        click.echo(f"[OK] Rebuilt index with {n} vectors.")
+    except Exception as e:
+        click.echo(f"[ERROR] Error rebuilding index: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command("delete-docs")
+@click.argument("ids", nargs=-1, type=int)
+def delete_docs(ids: tuple[int, ...]) -> None:
+    """Delete documents by ID from SQLite (and FAISS in dense/hybrid mode)."""
+    if not ids:
+        click.echo("[ERROR] Provide one or more document IDs.", err=True)
+        sys.exit(2)
+
+    try:
+        from local_rag_backend.app.factory import reset_rag_service
+        from local_rag_backend.core.services.maintenance import delete_documents_multi_store
+        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+            SentenceTransformerEmbedder,
+        )
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+
+        doc_repo = SqlDocumentStorage()
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            # For deletion, avoid loading the embedder just to infer dim if the index already exists.
+            vec = FaissVectorStorage(
+                index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
+            )
+            embedder = (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+            deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+                doc_repo=doc_repo,
+                vec_repo=vec,
+                embedder=embedder,
+                ids=list(ids),
+                rebuild_on_index_failure=True,
+            )
+            reset_rag_service()
+            click.echo(
+                f"[OK] Deleted {deleted_sql} docs from SQL. "
+                f"Index delete={'ok' if deleted_index is not None else 'n/a'} "
+                f"rebuilt={rebuilt}."
+            )
+            return
+
+        deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=list(ids))
+        reset_rag_service()
+        click.echo(f"[OK] Deleted {deleted_sql} docs from SQL.")
+    except Exception as e:
+        click.echo(f"[ERROR] Error deleting docs: {e}", err=True)
+        sys.exit(1)
+
+
 @cli.command()
 def bootstrap() -> None:
     """Bootstrap database with sample data."""
@@ -146,6 +231,16 @@ def rag_bootstrap() -> None:
 def rag_status() -> None:
     """Entry point for rag-status command."""
     cli.main(args=["status", *sys.argv[1:]], standalone_mode=False)
+
+
+def rag_rebuild_index() -> None:
+    """Entry point for rag-rebuild-index command."""
+    cli.main(args=["rebuild-index", *sys.argv[1:]], standalone_mode=False)
+
+
+def rag_delete_docs() -> None:
+    """Entry point for rag-delete-docs command."""
+    cli.main(args=["delete-docs", *sys.argv[1:]], standalone_mode=False)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 from local_rag_backend.app import api_router as api
-from local_rag_backend.app.main import app
 from local_rag_backend.settings import settings
 
 
@@ -36,25 +35,21 @@ async def test_ready_not_ready_db_and_no_llm(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
-    # RAG service missing
     async def _override():
         return None
 
-    app.dependency_overrides[api.get_rag_service] = _override
-    try:
-        r = await asgi_client.get("/api/ready")
-        assert r.status_code == 503
-        detail = r.json()["detail"]
-        assert detail["status"] == "not_ready"
-        checks = detail["checks"]
-        assert checks.get("database", "").startswith("failed")
-        assert (
-            checks.get("rag_service", "").startswith("failed")
-            or checks.get("rag_service") == "failed: not initialized"
-        )
-        assert checks.get("llm_providers", "").startswith("failed")
-    finally:
-        app.dependency_overrides.pop(api.get_rag_service, None)
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    r = await asgi_client.get("/api/ready")
+    assert r.status_code == 503
+    detail = r.json()["detail"]
+    assert detail["status"] == "not_ready"
+    checks = detail["checks"]
+    assert checks.get("database", "").startswith("failed")
+    assert (
+        checks.get("rag_service", "").startswith("failed")
+        or checks.get("rag_service") == "failed: not initialized"
+    )
+    assert checks.get("llm_providers", "").startswith("failed")
 
 
 async def test_ollama_health_ok(asgi_client, monkeypatch):

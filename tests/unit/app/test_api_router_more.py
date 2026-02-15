@@ -2,8 +2,7 @@
 
 import pytest
 
-from local_rag_backend.app import dependencies as deps
-from local_rag_backend.app.main import app
+from local_rag_backend.app import api_router as api, dependencies as deps
 from local_rag_backend.settings import settings
 
 
@@ -25,17 +24,14 @@ async def test_ready_endpoint_ok(asgi_client, monkeypatch):
     async def _override():
         return _Dummy()
 
-    app.dependency_overrides[deps.get_rag_service] = _override
-    try:
-        r = await asgi_client.get("/api/ready")
-        assert r.status_code == 200
-        data = r.json()
-        assert data["status"] == "ready"
-        assert "database" in data["checks"]
-        assert "rag_service" in data["checks"]
-        assert "llm_providers" in data["checks"]
-    finally:
-        app.dependency_overrides.pop(deps.get_rag_service, None)
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    r = await asgi_client.get("/api/ready")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ready"
+    assert "database" in data["checks"]
+    assert "rag_service" in data["checks"]
+    assert "llm_providers" in data["checks"]
 
 
 async def test_ready_endpoint_not_ready_no_llm(asgi_client, monkeypatch):
@@ -50,15 +46,12 @@ async def test_ready_endpoint_not_ready_no_llm(asgi_client, monkeypatch):
     async def _override():
         return _Dummy()
 
-    app.dependency_overrides[deps.get_rag_service] = _override
-    try:
-        r = await asgi_client.get("/api/ready")
-        assert r.status_code == 503
-        payload = r.json()
-        assert payload["detail"]["status"] == "not_ready"
-        assert "llm_providers" in payload["detail"]["checks"]
-    finally:
-        app.dependency_overrides.pop(deps.get_rag_service, None)
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    r = await asgi_client.get("/api/ready")
+    assert r.status_code == 503
+    payload = r.json()
+    assert payload["detail"]["status"] == "not_ready"
+    assert "llm_providers" in payload["detail"]["checks"]
 
 
 async def test_templates_endpoint(asgi_client):

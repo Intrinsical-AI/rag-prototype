@@ -73,7 +73,9 @@ async def test_get_root_frontend_packaged_ok(asgi_client, monkeypatch):
 async def test_get_frontend_assets_packaged_ok(asgi_client, monkeypatch):
     tmpdir = tempfile.TemporaryDirectory()
     base = Path(tmpdir.name)
-    (base / "index.html").write_text("<!doctype html><html><body>ok</body></html>", encoding="utf-8")
+    (base / "index.html").write_text(
+        "<!doctype html><html><body>ok</body></html>", encoding="utf-8"
+    )
     (base / "styles.css").write_text("body{background:#fff}", encoding="utf-8")
     (base / "app.js").write_text("console.log('ok')", encoding="utf-8")
 

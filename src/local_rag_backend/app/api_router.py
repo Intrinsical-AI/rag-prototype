@@ -15,8 +15,13 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from local_rag_backend.app.blocking import run_blocking
 from local_rag_backend.app.dependencies import get_rag_service, reset_rag_service
 from local_rag_backend.core.services.etl import ETLService
+from local_rag_backend.core.services.maintenance import (
+    delete_documents_multi_store,
+    rebuild_index_from_db,
+)
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -42,10 +47,14 @@ from local_rag_backend.models import (
     AskEvalResponse,
     AskRequest,
     AskResponse,
+    DeleteDocsRequest,
+    DeleteDocsResponse,
     DocumentInDB,
     HistoryItem,
     QueryResult,
+    RebuildIndexResponse,
 )
+from local_rag_backend.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.settings import settings
 from local_rag_backend.utils import get_corpus_and_ids
 
@@ -75,6 +84,11 @@ def validate_rag_config(config: AskEvalConfig) -> list[str]:
         errors.append(f"Invalid temperature: {config.temperature}. Must be between 0.0 and 2.0")
     if config.max_tokens is not None and not (1 <= config.max_tokens <= 4096):
         errors.append(f"Invalid max_tokens: {config.max_tokens}. Must be between 1 and 4096")
+    if config.prompt_template is not None:
+        try:
+            validate_prompt_template(config.prompt_template)
+        except PromptTemplateError as e:
+            errors.append(f"Invalid prompt_template: {e}")
     return errors
 
 
@@ -90,6 +104,21 @@ def get_available_llm_providers() -> dict[str, str]:
     ):
         providers["openrouter"] = "configured"
     return providers
+
+
+def _build_embedder_for_dense() -> EmbedderPort:
+    if settings.openai_api_key:
+        return OpenAIEmbedder()
+    try:
+        return SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Dense/hybrid operations require an embeddings backend. "
+                "Set OPENAI_API_KEY or install the 'dense-st' extra."
+            ),
+        ) from e
 
 
 router = APIRouter()
@@ -109,7 +138,7 @@ async def health_check() -> dict[str, str]:
 
 
 @router.get("/ready", tags=["Health"], summary="Readiness check endpoint")
-async def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str, Any]:
+async def readiness_check() -> dict[str, Any]:
     """Check if all dependencies are ready to handle requests."""
     checks: dict[str, Any] = {}
     is_ready = True
@@ -123,9 +152,14 @@ async def readiness_check(service: RagService = Depends(get_rag_service)) -> dic
         checks["database"] = f"failed: {e!s}"
         is_ready = False
 
-    # 2. RAG service
-    checks["rag_service"] = "ok" if service else "failed: not initialized"
-    if not service:
+    # 2. RAG service (best-effort: do not fail the endpoint before reporting readiness)
+    try:
+        service = await get_rag_service()
+        checks["rag_service"] = "ok" if service else "failed: not initialized"
+        if not service:
+            is_ready = False
+    except Exception as e:
+        checks["rag_service"] = f"failed: {e!s}"
         is_ready = False
 
     # 3. LLM providers
@@ -160,8 +194,7 @@ async def ollama_health_check() -> dict[str, Any]:
         dict: A dictionary with the status of the Ollama server.
     """
     try:
-        # NOTE: This is a blocking HTTP call. In production, prefer an async client (httpx).
-        response = requests.get(settings.ollama_base_url, timeout=5)
+        response = await run_blocking(requests.get, settings.ollama_base_url, timeout=5)
         response.raise_for_status()
         return {"status": "ok", "url": settings.ollama_base_url}
     except requests.exceptions.RequestException as e:
@@ -183,7 +216,8 @@ async def ask(request: AskRequest, service: RagService = Depends(get_rag_service
     Returns:
         AskResponse: Generated answer with source documents
     """
-    rag_result = service.ask(question=request.question, top_k=request.k)
+    # Avoid blocking the event loop: the RAG pipeline is synchronous (DB/FAISS + network I/O).
+    rag_result = await run_blocking(service.ask, request.question, request.k)
     docs = rag_result["docs"]
     scores = rag_result["scores"]
 
@@ -263,38 +297,96 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     if not texts:
         return IngestResponse(count=0, ids=[])
 
-    # Repos
-    doc_repo = SqlDocumentStorage()
+    try:
 
-    if settings.retrieval_mode in ("dense", "hybrid"):
-        # Explicit annotation: depending on config we may use OpenAI or sentence-transformers.
-        embedder: EmbedderPort
-        if settings.openai_api_key:
-            embedder = OpenAIEmbedder()
-        else:
-            try:
-                embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            except RuntimeError as e:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Dense/hybrid ingestion requires an embeddings backend. "
-                        "Set OPENAI_API_KEY or install the 'dense-st' extra."
-                    ),
-                ) from e
+        def _ingest_sync() -> list[int]:
+            doc_repo = SqlDocumentStorage()
+            if settings.retrieval_mode in ("dense", "hybrid"):
+                embedder: EmbedderPort
+                if settings.openai_api_key:
+                    embedder = OpenAIEmbedder()
+                else:
+                    embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+                vec = FaissVectorStorage(
+                    index_path=settings.index_path,
+                    id_map_path=settings.id_map_path,
+                    dim=embedder.dim,
+                )
+                etl = ETLService(doc_repo, vec, embedder)
+                return list(etl.ingest(texts))
+            return list(doc_repo.store_documents(texts))
+
+        ids = await run_blocking(_ingest_sync)
+    except RuntimeError as e:
+        # Surface missing optional deps as a client error (dense-st not installed).
+        if "sentence-transformers" in str(e) or "Dense/hybrid" in str(e):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Dense/hybrid ingestion requires an embeddings backend. "
+                    "Set OPENAI_API_KEY or install the 'dense-st' extra."
+                ),
+            ) from e
+        raise
+
+    # The RAG service is cached; reset it so subsequent queries see the updated DB / index.
+    reset_rag_service()
+    return IngestResponse(count=len(ids), ids=ids)
+
+
+@router.post("/docs/delete", response_model=DeleteDocsResponse)
+async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> DeleteDocsResponse:
+    ids = [int(i) for i in payload.ids]
+    if not ids:
+        return DeleteDocsResponse(deleted_sql=0, deleted_index=0, rebuilt_index=False)
+
+    def _delete_sync() -> DeleteDocsResponse:
+        doc_repo = SqlDocumentStorage()
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            vec = FaissVectorStorage(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=None,  # infer from existing index when possible
+            )
+            embedder = _build_embedder_for_dense()
+            deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+                doc_repo=doc_repo,
+                vec_repo=vec,
+                embedder=embedder,
+                ids=ids,
+                rebuild_on_index_failure=True,
+            )
+            return DeleteDocsResponse(
+                deleted_sql=deleted_sql, deleted_index=deleted_index, rebuilt_index=rebuilt
+            )
+
+        deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=ids)
+        return DeleteDocsResponse(deleted_sql=deleted_sql, deleted_index=None, rebuilt_index=False)
+
+    resp = await run_blocking(_delete_sync)
+    reset_rag_service()
+    return resp
+
+
+@router.post("/index/rebuild", response_model=RebuildIndexResponse)
+async def rebuild_index() -> RebuildIndexResponse:
+    if settings.retrieval_mode not in ("dense", "hybrid"):
+        raise HTTPException(status_code=400, detail="Index rebuild requires dense or hybrid mode.")
+
+    def _rebuild_sync() -> RebuildIndexResponse:
+        doc_repo = SqlDocumentStorage()
+        embedder = _build_embedder_for_dense()
         vec = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
             dim=embedder.dim,
         )
-        etl = ETLService(doc_repo, vec, embedder)
-        ids = list(etl.ingest(texts))
-    else:
-        ids = list(doc_repo.store_documents(texts))
+        n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+        return RebuildIndexResponse(indexed=n)
 
-    # The RAG service is cached; reset it so subsequent queries see the updated DB / index.
+    resp = await run_blocking(_rebuild_sync)
     reset_rag_service()
-    return IngestResponse(count=len(ids), ids=ids)
+    return resp
 
 
 def _build_retriever_from_config(
@@ -395,18 +487,20 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
             status_code=400, detail=f"Invalid config: {'; '.join(validation_errors)}"
         )
 
-    # Build components on the fly
-    doc_repo = SqlDocumentStorage()
-    corpus, doc_ids = get_corpus_and_ids(doc_repo)
-    retriever = _build_retriever_from_config(cfg, doc_repo, corpus, doc_ids)
-    generator = _build_generator_from_config(cfg)
+    def _run_eval_sync() -> tuple[dict[str, Any], int]:
+        doc_repo = SqlDocumentStorage()
+        corpus, doc_ids = get_corpus_and_ids(doc_repo)
+        retriever = _build_retriever_from_config(cfg, doc_repo, corpus, doc_ids)
+        generator = _build_generator_from_config(cfg)
 
-    # Execute RAG ask
-    history_storage = HistorySqlStorage()
-    service = RagService(retriever, generator, history_storage)
-    t0 = time.perf_counter()
-    rag_result = service.ask(question=payload.question, top_k=cfg.k)
-    latency_ms = int((time.perf_counter() - t0) * 1000)
+        history_storage = HistorySqlStorage()
+        service = RagService(retriever, generator, history_storage)
+        t0 = time.perf_counter()
+        rag_result = service.ask(question=payload.question, top_k=cfg.k)
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        return rag_result, latency_ms
+
+    rag_result, latency_ms = await run_blocking(_run_eval_sync)
     docs = rag_result["docs"]
     scores = rag_result["scores"]
     sources = [
@@ -466,27 +560,25 @@ async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterG
     if settings.openrouter_app_title is not None:
         headers["X-Title"] = settings.openrouter_app_title
 
-    client = OpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
-        default_headers=headers or None,
-    )
+    def _create_sync() -> Any:
+        client = OpenAI(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            default_headers=headers or None,
+        )
+        return client.chat.completions.create(
+            model=(payload.model or settings.openrouter_model),
+            temperature=payload.temperature,
+            top_p=payload.top_p,
+            max_tokens=payload.max_tokens,
+            messages=[
+                {"role": "system", "content": payload.system_instruction},
+                {"role": "user", "content": payload.user_content},
+            ],
+        )
 
     try:
-
-        def _create() -> Any:
-            return client.chat.completions.create(
-                model=(payload.model or settings.openrouter_model),
-                temperature=payload.temperature,
-                top_p=payload.top_p,
-                max_tokens=payload.max_tokens,
-                messages=[
-                    {"role": "system", "content": payload.system_instruction},
-                    {"role": "user", "content": payload.user_content},
-                ],
-            )
-
-        resp = _create()
+        resp = await run_blocking(_create_sync)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
 

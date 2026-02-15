@@ -1,6 +1,5 @@
 # tests/unit/app/test_health_endpoints.py
-from local_rag_backend.app.dependencies import get_rag_service
-from local_rag_backend.app.main import app
+from local_rag_backend.app import api_router as api
 from local_rag_backend.settings import settings
 
 
@@ -20,34 +19,28 @@ async def test_ready_endpoint_503_without_llm(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
-    # Service should be available
     async def _override():
         return _DummyRag()
 
-    app.dependency_overrides[get_rag_service] = _override
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
 
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 503
     assert r.json()["detail"]["status"] == "not_ready"
-
-    app.dependency_overrides.clear()
 
 
 async def test_ready_endpoint_200_with_openai(asgi_client, monkeypatch):
     # Configure OpenAI so at least one provider is available
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
 
-    # Service should be available
     async def _override():
         return _DummyRag()
 
-    app.dependency_overrides[get_rag_service] = _override
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
 
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 200
     assert r.json()["status"] == "ready"
-
-    app.dependency_overrides.clear()
 
 
 async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path, monkeypatch):
@@ -59,10 +52,9 @@ async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path
     async def _override():
         return _DummyRag()
 
-    app.dependency_overrides[get_rag_service] = _override
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 503
     detail = r.json()["detail"]
     assert detail["status"] == "not_ready"
     assert detail["checks"]["retrieval_index"].startswith("failed")
-    app.dependency_overrides.clear()

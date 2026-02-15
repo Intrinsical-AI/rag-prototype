@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from local_rag_backend.app import api_router as api
-from local_rag_backend.app.main import app
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
@@ -100,6 +99,25 @@ async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatc
     assert isinstance(data.get("sources", []), list)
 
 
+async def test_ask_eval_rejects_unsafe_prompt_template(asgi_client, in_memory_sqlite, monkeypatch):
+    # Ensure provider is "available" so we exercise config validation path deterministically.
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
+
+    payload = {
+        "question": "hi?",
+        "config": {
+            "retrieval_mode": "sparse",
+            "k": 1,
+            # Would be a memory-DoS vector with str.format; must be rejected.
+            "prompt_template": "{question:100000000}",
+        },
+    }
+    r = await asgi_client.post("/api/ask_eval", json=payload)
+    assert r.status_code == 400
+    assert "prompt_template" in r.json().get("detail", "")
+
+
 async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch):
     # Create dummy index file
     idx = tmp_path / "index.faiss"
@@ -114,21 +132,16 @@ async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch)
     class _Dummy:
         pass
 
-    from local_rag_backend.app.dependencies import get_rag_service
-
     async def _override():
         return _Dummy()
 
-    app.dependency_overrides[get_rag_service] = _override
+    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
     monkeypatch.setattr(settings, "openai_api_key", "x", raising=False)
 
-    try:
-        r = await asgi_client.get("/api/ready")
-        assert r.status_code == 200
-        checks = r.json()["checks"]
-        assert checks.get("retrieval_index") == "ok"
-    finally:
-        app.dependency_overrides.pop(get_rag_service, None)
+    r = await asgi_client.get("/api/ready")
+    assert r.status_code == 200
+    checks = r.json()["checks"]
+    assert checks.get("retrieval_index") == "ok"
 
 
 async def test_openrouter_generate_success(asgi_client, monkeypatch):

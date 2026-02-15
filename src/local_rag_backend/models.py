@@ -83,3 +83,17 @@ class AskEvalRequest(BaseModel):
 
 class AskEvalResponse(AskResponse):
     latency_ms: int | None = Field(default=None, description="Server-side latency in ms")
+
+
+class DeleteDocsRequest(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=1000)
+
+
+class DeleteDocsResponse(BaseModel):
+    deleted_sql: int
+    deleted_index: int | None = None
+    rebuilt_index: bool = False
+
+
+class RebuildIndexResponse(BaseModel):
+    indexed: int
