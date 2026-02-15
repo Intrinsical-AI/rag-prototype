@@ -19,7 +19,7 @@ from local_rag_backend.settings import settings
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="intrinsical-rag-prototype")
+@click.version_option(version=__version__, prog_name="rag-prototype")
 def cli() -> None:
     """Intrinsical RAG Prototype - Production-ready RAG system with hexagonal architecture."""
     pass
@@ -71,7 +71,8 @@ def bootstrap() -> None:
             bootstrap_main()
             bar.update(1)
         click.echo("[OK] Bootstrap completed successfully!")
-    except Exception:
+    except Exception as e:
+        click.echo(f"[ERROR] Error bootstrapping: {e}", err=True)
         sys.exit(1)
 
 
@@ -107,8 +108,10 @@ def status() -> None:
         click.echo(f"    {click.style('URL:', fg=key_fg, bold=True)} {settings.ollama_base_url}")
         click.echo(f"    {click.style('Model:', fg=key_fg, bold=True)} {settings.ollama_model}")
     click.echo(
-        f"  {click.style('OpenAI Model:', fg=key_fg, bold=True)} {settings.openai_model or 'Not set'}"
+        f"  {click.style('OpenAI Enabled:', fg=key_fg, bold=True)} {'✅' if bool(settings.openai_api_key) else '❌'}"
     )
+    if settings.openai_api_key:
+        click.echo(f"    {click.style('Model:', fg=key_fg, bold=True)} {settings.openai_model}")
     click.echo()
 
     # File status
