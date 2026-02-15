@@ -5,7 +5,6 @@ FastAPI router for the application endpoints.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -161,7 +160,8 @@ async def ollama_health_check() -> dict[str, Any]:
         dict: A dictionary with the status of the Ollama server.
     """
     try:
-        response = await asyncio.to_thread(requests.get, settings.ollama_base_url, timeout=5)
+        # NOTE: This is a blocking HTTP call. In production, prefer an async client (httpx).
+        response = requests.get(settings.ollama_base_url, timeout=5)
         response.raise_for_status()
         return {"status": "ok", "url": settings.ollama_base_url}
     except requests.exceptions.RequestException as e:
@@ -486,7 +486,7 @@ async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterG
                 ],
             )
 
-        resp = await asyncio.to_thread(_create)
+        resp = _create()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
 
