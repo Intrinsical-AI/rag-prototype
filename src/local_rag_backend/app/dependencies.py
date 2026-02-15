@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=1)
-def get_rag_service() -> RagService:
+def _build_rag_service() -> RagService:
     """Build and return a singleton RagService instance based on settings."""
     logger.info(f"Creating RAG service with retrieval mode: '{settings.retrieval_mode}'")
 
@@ -54,7 +54,16 @@ def get_rag_service() -> RagService:
             documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
         )
     else:
-        embedder: EmbedderPort = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        try:
+            embedder: EmbedderPort = SentenceTransformerEmbedder(
+                model_name=settings.st_embedding_model
+            )
+        except RuntimeError as e:
+            raise RuntimeError(
+                "Dense/hybrid retrieval requires optional dependencies. "
+                "Install the 'dense' extra (e.g. `uv sync --extra dense`) "
+                "or set RETRIEVAL_MODE=sparse."
+            ) from e
         vector_repo: VectorRepoPort = FaissVectorStorage(
             index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
         )
@@ -86,3 +95,13 @@ def get_rag_service() -> RagService:
     # 4. History Storage
     history_repo: QAHistoryPort = HistorySqlStorage()
     return RagService(retriever=retriever, generator=generator, history_storage=history_repo)
+
+
+async def get_rag_service() -> RagService:
+    """FastAPI dependency wrapper (async to avoid anyio threadpool for sync callables)."""
+    return _build_rag_service()
+
+
+def reset_rag_service() -> None:
+    """Clear the cached singleton (useful for tests)."""
+    _build_rag_service.cache_clear()

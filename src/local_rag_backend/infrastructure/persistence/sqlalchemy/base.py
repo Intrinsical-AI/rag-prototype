@@ -11,14 +11,14 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import AsyncGenerator
 
 engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
-def get_db() -> Generator[Session, None, None]:
+async def get_db() -> AsyncGenerator[Session, None]:
     """FastAPI dependency to provide a transactional database session."""
     db = SessionLocal()
     try:

@@ -258,12 +258,19 @@ class SparseBM25Retriever(RetrieverPort):
 
 ```python
 # src/local_rag_backend/app/factory.py
-def get_rag_service(force_reload=False) -> RagService:
-    global _rag_service
-    if force_reload or _rag_service is None:
-        retriever = get_retriever()   # sparse | dense | hybrid
-        generator = get_generator()   # openai | ollama
-        history_storage = HistorySqlStorage()
-        _rag_service = RagService(retriever, generator, history_storage)
-    return _rag_service
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def _build_rag_service() -> RagService:
+    retriever = get_retriever()   # sparse | dense | hybrid
+    generator = get_generator()   # openai | ollama
+    history_storage = HistorySqlStorage()
+    return RagService(retriever, generator, history_storage)
+
+async def get_rag_service() -> RagService:
+    # Async wrapper avoids anyio threadpool for sync callables.
+    return _build_rag_service()
+
+def reset_rag_service() -> None:
+    _build_rag_service.cache_clear()
 ```

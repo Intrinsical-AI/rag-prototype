@@ -20,10 +20,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import (
-    Base as AppDeclarativeBase,
-    engine as global_app_engine,
-)
+from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
@@ -33,16 +30,22 @@ if TYPE_CHECKING:
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
-# Frontend directory for testing
-FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend"
+# Frontend directory in the source tree (works for editable installs / running from repo)
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown events."""
     logger.info("Initializing RAG service...")
-    AppDeclarativeBase.metadata.create_all(bind=global_app_engine)
-    get_rag_service()  # Pre-load the RAG service
+    # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
+    db_base.Base.metadata.create_all(bind=db_base.engine)
+    # Best-effort preload: don't prevent the API from starting just because an LLM
+    # provider isn't configured yet (readiness endpoint should report not_ready).
+    try:
+        await get_rag_service()
+    except Exception as e:
+        logger.warning("RAG service preload failed (will initialize lazily): %s", e)
     logger.info("Service initialized.")
     yield
     logger.info("Shutting down.")

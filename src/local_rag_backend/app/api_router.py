@@ -5,6 +5,7 @@ FastAPI router for the application endpoints.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -24,10 +25,8 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import (
-    engine as global_app_engine,
-    get_db,
-)
+from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
 from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
@@ -94,10 +93,10 @@ router = APIRouter()
 
 
 @router.get("/health", tags=["Health"], summary="Health check endpoint")
-def health_check() -> dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Basic health check for service availability (e.g., Docker/K8s)."""
     try:
-        with global_app_engine.connect() as conn:
+        with db_base.engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return {"status": "healthy"}
     except Exception as e:
@@ -105,14 +104,14 @@ def health_check() -> dict[str, str]:
 
 
 @router.get("/ready", tags=["Health"], summary="Readiness check endpoint")
-def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str, Any]:
+async def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str, Any]:
     """Check if all dependencies are ready to handle requests."""
     checks: dict[str, Any] = {}
     is_ready = True
 
     # 1. Database connectivity
     try:
-        with global_app_engine.connect() as conn:
+        with db_base.engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as e:
@@ -145,7 +144,7 @@ def readiness_check(service: RagService = Depends(get_rag_service)) -> dict[str,
 
 
 @router.get("/health/ollama", tags=["Health"], summary="Ollama server health check")
-def ollama_health_check() -> dict[str, Any]:
+async def ollama_health_check() -> dict[str, Any]:
     """
     Checks if the Ollama server is running and accessible.
 
@@ -153,7 +152,7 @@ def ollama_health_check() -> dict[str, Any]:
         dict: A dictionary with the status of the Ollama server.
     """
     try:
-        response = requests.get(settings.ollama_base_url, timeout=5)
+        response = await asyncio.to_thread(requests.get, settings.ollama_base_url, timeout=5)
         response.raise_for_status()
         return {"status": "ok", "url": settings.ollama_base_url}
     except requests.exceptions.RequestException as e:
@@ -167,7 +166,7 @@ def ollama_health_check() -> dict[str, Any]:
 
 
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
-def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> AskResponse:
+async def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> AskResponse:
     """
     Ask a question using Retrieval-Augmented Generation.
     Args:
@@ -190,7 +189,7 @@ def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> 
 
 
 @router.get("/history", response_model=list[HistoryItem], tags=["RAG"], summary="Get query history")
-def history(
+async def history(
     limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
     offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
     db: Session = Depends(get_db),
@@ -226,7 +225,7 @@ def history(
 
 
 @router.get("/docs", response_model=list[DocumentInDB])
-def list_docs(
+async def list_docs(
     limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     db: Session = Depends(get_db),
@@ -245,7 +244,7 @@ class IngestResponse(BaseModel):
 
 
 @router.post("/docs", response_model=IngestResponse)
-def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestResponse:
+async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestResponse:
     texts = [t.strip() for t in payload.texts if t and t.strip()]
     if not texts:
         return IngestResponse(count=0, ids=[])
@@ -352,7 +351,7 @@ def _build_generator_from_config(cfg: AskEvalConfig) -> GeneratorPort:
     tags=["RAG"],
     summary="Ask a question with per-request ephemeral RAG configuration",
 )
-def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
+async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
     """Execute a RAG query with per-request configuration."""
     cfg = payload.config
 
@@ -417,7 +416,7 @@ class OpenRouterGenerateResponse(BaseModel):
     tags=["LLM"],
     summary="Proxy completion via OpenRouter (OpenAI-compatible)",
 )
-def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterGenerateResponse:
+async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterGenerateResponse:
     if not (
         getattr(settings, "openrouter_enabled", False)
         and getattr(settings, "openrouter_api_key", None)
@@ -440,16 +439,20 @@ def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterGenerat
     )
 
     try:
-        resp = client.chat.completions.create(
-            model=(payload.model or settings.openrouter_model),
-            temperature=payload.temperature,
-            top_p=payload.top_p,
-            max_tokens=payload.max_tokens,
-            messages=[
-                {"role": "system", "content": payload.system_instruction},
-                {"role": "user", "content": payload.user_content},
-            ],
-        )
+
+        def _create() -> Any:
+            return client.chat.completions.create(
+                model=(payload.model or settings.openrouter_model),
+                temperature=payload.temperature,
+                top_p=payload.top_p,
+                max_tokens=payload.max_tokens,
+                messages=[
+                    {"role": "system", "content": payload.system_instruction},
+                    {"role": "user", "content": payload.user_content},
+                ],
+            )
+
+        resp = await asyncio.to_thread(_create)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
 
@@ -481,7 +484,7 @@ class TemplateResponse(BaseModel):
     tags=["RAG"],
     summary="Get available prompt templates",
 )
-def get_templates() -> list[TemplateResponse]:
+async def get_templates() -> list[TemplateResponse]:
     """
     Get available prompt templates for RAG queries.
     Returns:
@@ -529,7 +532,7 @@ class ConfigResponse(BaseModel):
     tags=["RAG"],
     summary="Get backend configuration defaults",
 )
-def get_config() -> ConfigResponse:
+async def get_config() -> ConfigResponse:
     """
     Get backend configuration defaults.
     Returns:
