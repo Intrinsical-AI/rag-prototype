@@ -44,6 +44,8 @@ def main() -> None:
     Initializes DB and optionally FAISS index using functionality from data_loader.
     """
     logger.info("Starting build_index script...")
+    # Ensure data dir exists before touching SQLite.
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Create a dedicated engine and SessionLocal for this script
     #    This avoids conflicts with the main app engine.

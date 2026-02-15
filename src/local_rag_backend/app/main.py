@@ -27,7 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from importlib.resources.abc import Traversable
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+_LOG_LEVEL = getattr(logging, settings.log_level, logging.INFO)
+logging.basicConfig(level=_LOG_LEVEL, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # Frontend directory in the source tree (works for editable installs / running from repo)
@@ -38,6 +39,8 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown events."""
     logger.info("Initializing RAG service...")
+    # Ensure the data directory exists (SQLite cannot create parent directories).
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
     db_base.Base.metadata.create_all(bind=db_base.engine)
     # Best-effort preload: don't prevent the API from starting just because an LLM

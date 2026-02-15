@@ -18,3 +18,16 @@ def test_chunk_overlap_lt_chars_validator():
     """Ensure overlap must be strictly less than chunk size."""
     with pytest.raises(ValueError):
         Settings(ingest_chunk_chars=100, ingest_chunk_overlap=100)
+
+
+def test_log_level_is_normalized_to_uppercase():
+    s = Settings(log_level="debug")
+    assert s.log_level == "DEBUG"
+
+
+def test_data_dir_is_not_created_as_a_side_effect(tmp_path):
+    d = tmp_path / "new-data-dir"
+    assert not d.exists()
+    s = Settings(data_dir=d)
+    assert s.data_dir == d
+    assert not d.exists()

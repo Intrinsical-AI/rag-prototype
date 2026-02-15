@@ -105,12 +105,19 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
 
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, v: Any) -> Any:
+        # Make env/config more forgiving while keeping a strict Literal type.
+        if isinstance(v, str):
+            return v.upper()
+        return v
+
     @field_validator("data_dir", mode="before")
     @classmethod
-    def _ensure_data_dir_exists(cls, v: Any) -> Path:
-        path = Path(v)
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+    def _normalize_data_dir(cls, v: Any) -> Path:
+        # Keep Settings side-effect free; callers are responsible for creating directories.
+        return Path(v)
 
     @field_validator("sqlite_url")
     @classmethod
