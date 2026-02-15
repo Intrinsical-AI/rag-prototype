@@ -72,10 +72,14 @@ The composition root `app/factory.py` chooses specific adapters (BM25/FAISS/Hybr
 
 ## Key Ports (Core Interfaces)
 
+Source of truth: `src/local_rag_backend/core/ports/__init__.py`.
+
 ```python
 # src/local_rag_backend/core/ports/__init__.py
-from typing import Protocol, Sequence, runtime_checkable
-from local_rag_backend.core.domain.entities import Document, Embedding
+from collections.abc import Iterable, Sequence
+from typing import Protocol, runtime_checkable
+
+from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
 
 @runtime_checkable
 class EmbedderPort(Protocol):
@@ -107,7 +111,7 @@ class QAHistoryPort(Protocol):
 
 @runtime_checkable
 class LoaderPort(Protocol):
-    def load(self): ...
+    def load(self) -> Iterable[LoadedItem]: ...
 ```
 
 ---
@@ -141,10 +145,10 @@ All of these implement the ports above and can be swapped at composition time.
 
 ## Composition Root (Factory)
 
-`app/factory.py` wires the system from configuration:
+`app/factory.py` wires the system from configuration (source of truth: `src/local_rag_backend/app/factory.py`):
 
 * Chooses **retriever** by `settings.retrieval_mode` (`sparse`, `dense`, `hybrid`)
-* Chooses **generator**: OpenAI (if `OPENAI_API_KEY`) or Ollama (if `OLLAMA_ENABLED`)
+* Chooses **generator**: Ollama (if `OLLAMA_ENABLED`) or OpenAI (if `OPENAI_API_KEY`)
 * Instantiates `RagService(retriever, generator, history_storage)`
 * Provides a process-local singleton via `get_rag_service()` (and `reset_rag_service()` for tests)
 
@@ -176,6 +180,21 @@ sequenceDiagram
 ```
 
 `/api/history` reads persisted Q\&A with pagination.
+
+---
+
+## HTTP API Surface
+
+The FastAPI router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`).
+In addition to `/api/ask` and `/api/history`, the project exposes:
+
+* `POST /api/docs` and `GET /api/docs` (ingest/list documents)
+* `POST /api/ask_eval` (ephemeral per-request RAG configuration)
+* `POST /api/openrouter/generate` (OpenRouter proxy when configured)
+* `GET /api/config` and `GET /api/templates`
+* `GET /api/health`, `GET /api/ready`, `GET /api/health/ollama`
+
+For current request/response shapes, prefer the OpenAPI schema at `GET /openapi.json` (or `GET /docs` in dev).
 
 ---
 
@@ -234,7 +253,9 @@ class RagService:
     def ask(self, question: str, top_k: int = 3):
         docs, scores = self.retriever.retrieve(question, top_k)
         if not docs:
-            return {"answer": "No hay documentos indexados para responder a tu pregunta.", "docs": [], "scores": []}
+            answer = "No hay documentos indexados para responder a tu pregunta."
+            self.history.save(question, answer, [])
+            return {"answer": answer, "docs": [], "scores": []}
         answer = self.generator.generate(question, [d.content for d in docs])
         self.history.save(question, answer, [d.id for d in docs])
         return {"answer": answer, "docs": docs, "scores": scores}
@@ -254,23 +275,4 @@ class SparseBM25Retriever(RetrieverPort):
         ...
 ```
 
-**Factory wiring (excerpt):**
-
-```python
-# src/local_rag_backend/app/factory.py
-from functools import lru_cache
-
-@lru_cache(maxsize=1)
-def _build_rag_service() -> RagService:
-    retriever = get_retriever()   # sparse | dense | hybrid
-    generator = get_generator()   # openai | ollama
-    history_storage = HistorySqlStorage()
-    return RagService(retriever, generator, history_storage)
-
-async def get_rag_service() -> RagService:
-    # Async wrapper avoids anyio threadpool for sync callables.
-    return _build_rag_service()
-
-def reset_rag_service() -> None:
-    _build_rag_service.cache_clear()
-```
+**Factory wiring:** see `src/local_rag_backend/app/factory.py` (kept as the single source of truth to avoid drift).
