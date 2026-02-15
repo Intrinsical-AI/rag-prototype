@@ -5,10 +5,13 @@ RAG service for retrieval-augmented generation.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
+
+logger = logging.getLogger(__name__)
 
 
 class RagService:
@@ -37,7 +40,10 @@ class RagService:
         # 2. Handle empty retrieval results
         if not docs:
             answer = "No hay documentos indexados para responder a tu pregunta."
-            self.history_storage.save(question, answer, [])
+            try:
+                self.history_storage.save(question, answer, [])
+            except Exception as e:  # pragma: no cover
+                logger.warning("History persistence failed (ignored): %s", e)
             return {"answer": answer, "docs": [], "scores": []}
 
         # 3. Generate an answer using the retrieved contexts
@@ -46,6 +52,9 @@ class RagService:
 
         # 4. Record the interaction in history
         source_ids = [doc.id for doc in docs]
-        self.history_storage.save(question, answer, source_ids)
+        try:
+            self.history_storage.save(question, answer, source_ids)
+        except Exception as e:  # pragma: no cover
+            logger.warning("History persistence failed (ignored): %s", e)
 
         return {"answer": answer, "docs": docs, "scores": scores}
