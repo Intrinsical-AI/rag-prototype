@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
-## [Unreleased] - 2025-09-29
+## [Unreleased]
 
 ### Added
 - LangChain loaders integration via `LangChainLoader` adapter implementing `LoaderPort`.
@@ -22,3 +22,8 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Chore / Build
 - Updated `uv.lock` due to new optional extras.
 - Ran `ruff`, `black`, and `isort` across the repo; committed resulting formatting/import changes.
+- CI: added `ruff format --check`, set `UV_CACHE_DIR`, and aligned Docker image tag with compose.
+- Tests/Coverage: scope coverage to `local_rag_backend` and stop generating HTML/XML reports by default (CI still uploads XML).
+- Dockerfile: production stage now reuses the installed project from the deps stage (avoids rebuilding in the final image).
+- Settings: keep `Settings` side-effect free (no mkdir on import); create the data dir at startup/scripts/bootstrap instead.
+- Dev tooling: pre-commit mypy hook now includes `pydantic-settings`.
