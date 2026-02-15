@@ -75,7 +75,9 @@ def main() -> None:
         if settings.openai_api_key:
             embedder_for_indexing = OpenAIEmbedder()
         else:
-            embedder_for_indexing = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            embedder_for_indexing = SentenceTransformerEmbedder(
+                model_name=settings.st_embedding_model
+            )
 
     # 4. Use ETL logic directly (similar to bootstrap.py)
     try:

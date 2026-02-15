@@ -56,8 +56,10 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
 
     if settings.retrieval_mode in ["dense", "hybrid"]:
         embedder: EmbedderPort
-        embedder = OpenAIEmbedder() if settings.openai_api_key else SentenceTransformerEmbedder(
-            model_name=settings.st_embedding_model
+        embedder = (
+            OpenAIEmbedder()
+            if settings.openai_api_key
+            else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
         )
         vector_repo = FaissVectorStorage(
             index_path=settings.index_path,

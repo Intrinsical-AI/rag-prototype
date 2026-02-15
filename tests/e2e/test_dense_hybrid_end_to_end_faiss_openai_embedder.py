@@ -83,7 +83,9 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     history_repo = HistorySqlStorage(session_factory=SessionLocal)
 
     embedder = OpenAIEmbedder(model="dummy-4")
-    vec_repo = FaissVectorStorage(index_path=str(index_path), id_map_path=str(id_map_path), dim=embedder.dim)
+    vec_repo = FaissVectorStorage(
+        index_path=str(index_path), id_map_path=str(id_map_path), dim=embedder.dim
+    )
 
     etl = ETLService(doc_repo, vec_repo, embedder)
     ids = etl.ingest(["alpha alpha alpha", "zzzz zzzz zzzz"])

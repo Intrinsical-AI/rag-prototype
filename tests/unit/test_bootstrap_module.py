@@ -20,4 +20,3 @@ async def test_bootstrap_rag_service_builds(monkeypatch, in_memory_sqlite):
     assert hasattr(svc, "ask")
     resp = svc.ask("hello", top_k=1)
     assert "answer" in resp
-
