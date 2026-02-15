@@ -77,6 +77,8 @@ git clone https://github.com/Intrinsical-AI/rag-prototype.git
 cd rag-prototype
 
 # Recommended: uv-managed local venv + lockfile installs
+# If your environment has a non-writable home directory, keep uv cache local:
+# export UV_CACHE_DIR=.uv-cache
 uv venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
@@ -308,11 +310,15 @@ curl -X POST "http://localhost:8000/api/ask" \
 
 ```bash
 pytest
-# Coverage
-pytest --cov=src --cov-report=term-missing
+# Coverage (already enabled by default via pyproject.toml)
+# pytest --cov-report=xml:coverage.xml
+# pytest --cov-report=html:htmlcov
+
+# If your environment has a read-only/non-writable home directory, prefer:
+make test
 ```
 
-> Tests suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. Current status: **133 tests, 86.45% coverage**.
+> Test suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 
 ---
 

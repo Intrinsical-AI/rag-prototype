@@ -273,11 +273,9 @@ addopts = [
   "-ra",
   "--strict-markers",
   "--strict-config",
-  "--cov=src",
+  "--cov=local_rag_backend",
   "--cov-branch",
   "--cov-report=term-missing:skip-covered",
-  "--cov-report=html:htmlcov",
-  "--cov-report=xml",
   "--cov-fail-under=85",
   "--tb=short",
   "--durations=10"
@@ -304,16 +302,15 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["src"]
+source = ["local_rag_backend"]
 omit = [
   "tests/*",
   "*/__init__.py",
   "*/conftest.py",
   "scripts/*",
-  "src/local_rag_backend/cli.py",
-  "src/local_rag_backend/app/dependencies.py",
-  "src/local_rag_backend/infrastructure/persistence/faiss/faiss_.py",
-  "src/local_rag_backend/scripts/build_index.py"
+  "*/local_rag_backend/cli.py",
+  "*/local_rag_backend/app/dependencies.py",
+  "*/local_rag_backend/scripts/build_index.py"
 ]
 
 [tool.coverage.report]
