@@ -8,6 +8,7 @@ starting the server, building indices, and bootstrapping data.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -146,6 +147,125 @@ def delete_docs(ids: tuple[int, ...]) -> None:
         click.echo(f"[OK] Deleted {deleted_sql} docs from SQL.")
     except Exception as e:
         click.echo(f"[ERROR] Error deleting docs: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command("upsert-docs")
+@click.option(
+    "--json",
+    "json_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=False,
+    help="Path to a JSON file containing a list of {external_id, content, source_id?, metadata?}.",
+)
+@click.option("--external-id", type=str, required=False, help="External ID for a single document.")
+@click.option("--content", type=str, required=False, help="Content for a single document.")
+@click.option("--source-id", type=str, required=False, help="Optional source identifier.")
+@click.option(
+    "--metadata-json",
+    type=str,
+    required=False,
+    help="Optional metadata as JSON string for a single document.",
+)
+def upsert_docs(
+    json_path: Path | None,
+    external_id: str | None,
+    content: str | None,
+    source_id: str | None,
+    metadata_json: str | None,
+) -> None:
+    """Upsert documents by external_id (idempotent)."""
+    try:
+        from typing import Any, cast
+
+        from local_rag_backend.app.factory import reset_rag_service
+        from local_rag_backend.core.services.maintenance import rebuild_index_from_db
+        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+            SentenceTransformerEmbedder,
+        )
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+
+        docs_payload: list[dict[str, object]] = []
+        if json_path is not None:
+            docs_payload = json.loads(json_path.read_text(encoding="utf-8"))
+            if not isinstance(docs_payload, list):
+                raise ValueError("--json must contain a JSON list of documents")
+        else:
+            if not external_id or not content:
+                raise ValueError(
+                    "Provide --json or both --external-id and --content for a single document."
+                )
+            md_single = None
+            if metadata_json:
+                md_single = json.loads(metadata_json)
+                if not isinstance(md_single, dict):
+                    raise ValueError("--metadata-json must be a JSON object")
+            docs_payload = [
+                {
+                    "external_id": external_id,
+                    "content": content,
+                    "source_id": source_id,
+                    "metadata": md_single,
+                }
+            ]
+
+        items = []
+        for d in docs_payload:
+            if not isinstance(d, dict):
+                raise ValueError("Each document must be a JSON object")
+            md_obj = d.get("metadata")
+            md: dict[str, Any] | None = (
+                cast("dict[str, Any]", md_obj) if isinstance(md_obj, dict) else None
+            )
+            items.append(
+                SqlDocumentStorage.UpsertDoc(
+                    external_id=str(d.get("external_id") or "").strip(),
+                    content=str(d.get("content") or "").strip(),
+                    source_id=(str(d.get("source_id")) if d.get("source_id") is not None else None),
+                    metadata=md,
+                )
+            )
+
+        doc_repo = SqlDocumentStorage()
+        results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+            items
+        )
+
+        inserted = sum(1 for r in results if r.action == "inserted")
+        updated = sum(1 for r in results if r.action == "updated")
+        unchanged = sum(1 for r in results if r.action == "unchanged")
+
+        rebuilt = False
+        if settings.retrieval_mode in ("dense", "hybrid") and changed_content:
+            embedder = (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+            vec = FaissVectorStorage(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=embedder.dim,
+            )
+            ids = [doc_id for doc_id, _ in changed_content]
+            texts = [text for _, text in changed_content]
+            vectors = embedder.embed(texts)
+            try:
+                if updated_content_ids:
+                    vec.delete(updated_content_ids)
+                vec.upsert(ids, vectors)
+            except Exception:
+                n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+                rebuilt = n >= 0
+
+        reset_rag_service()
+        click.echo(
+            f"[OK] Upserted docs. inserted={inserted} updated={updated} unchanged={unchanged} rebuilt_index={rebuilt}"
+        )
+    except Exception as e:
+        click.echo(f"[ERROR] Error upserting docs: {e}", err=True)
         sys.exit(1)
 
 
@@ -297,6 +417,11 @@ def rag_rebuild_index() -> None:
 def rag_delete_docs() -> None:
     """Entry point for rag-delete-docs command."""
     cli.main(args=["delete-docs", *sys.argv[1:]], standalone_mode=False)
+
+
+def rag_upsert_docs() -> None:
+    """Entry point for rag-upsert-docs command."""
+    cli.main(args=["upsert-docs", *sys.argv[1:]], standalone_mode=False)
 
 
 if __name__ == "__main__":

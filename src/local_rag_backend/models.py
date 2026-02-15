@@ -5,6 +5,8 @@ Models for the application.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -97,3 +99,45 @@ class DeleteDocsResponse(BaseModel):
 
 class RebuildIndexResponse(BaseModel):
     indexed: int
+
+
+class UpsertDocItem(BaseModel):
+    external_id: str = Field(..., min_length=1, max_length=512)
+    content: str = Field(..., min_length=1, max_length=20000)
+    source_id: str | None = Field(default=None, max_length=1024)
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("external_id")
+    @classmethod
+    def _external_id_not_blank(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("external_id must not be blank")
+        return v2
+
+    @field_validator("content")
+    @classmethod
+    def _content_not_blank(cls, v: str) -> str:
+        v2 = v.strip()
+        if not v2:
+            raise ValueError("content must not be blank")
+        return v2
+
+
+class UpsertDocsRequest(BaseModel):
+    docs: list[UpsertDocItem] = Field(..., min_length=1, max_length=64)
+
+
+class UpsertDocResult(BaseModel):
+    external_id: str
+    id: int
+    action: str
+    content_changed: bool
+
+
+class UpsertDocsResponse(BaseModel):
+    inserted: int
+    updated: int
+    unchanged: int
+    rebuilt_index: bool = False
+    results: list[UpsertDocResult]

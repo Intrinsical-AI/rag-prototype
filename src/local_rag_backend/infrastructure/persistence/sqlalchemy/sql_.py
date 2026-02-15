@@ -5,7 +5,9 @@ SQLAlchemy-based implementation of the document and history repositories.
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
@@ -19,7 +21,8 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Generator, Mapping, Sequence
+    from typing import Any, Literal
 
     from sqlalchemy.orm import Session, sessionmaker
 
@@ -91,6 +94,129 @@ class SqlDocumentStorage(DocumentRepoPort):
                 )
                 for d in db_docs
             ]
+
+    @dataclass(frozen=True)
+    class UpsertDoc:
+        external_id: str
+        content: str
+        source_id: str | None = None
+        metadata: Mapping[str, Any] | None = None
+
+    @dataclass(frozen=True)
+    class UpsertResult:
+        external_id: str
+        id: int
+        action: Literal["inserted", "updated", "unchanged"]
+        content_changed: bool
+
+    def upsert_documents_by_external_id(
+        self, items: Sequence[UpsertDoc]
+    ) -> tuple[list[UpsertResult], list[tuple[int, str]], list[int]]:
+        """
+        Upsert documents by `external_id` (idempotent).
+
+        Returns:
+            (results, changed_content, updated_content_ids)
+
+        Where:
+            - results: per-item action summary
+            - changed_content: list[(doc_id, new_content)] for inserts + content updates
+            - updated_content_ids: list[doc_id] that existed and had content changed (for index delete)
+        """
+        items_list = list(items)
+        if not items_list:
+            return [], [], []
+
+        ext_ids = [i.external_id.strip() for i in items_list]
+        if any(not x for x in ext_ids):
+            raise ValueError("external_id must not be blank")
+        if len(set(ext_ids)) != len(ext_ids):
+            raise ValueError("external_id values must be unique within the request")
+
+        results: list[SqlDocumentStorage.UpsertResult] = []
+        changed_content: list[tuple[int, str]] = []
+        updated_content_ids: list[int] = []
+
+        with get_session(self._session_factory) as session:
+            existing = session.query(DbDocument).filter(DbDocument.external_id.in_(ext_ids)).all()
+            by_external_id = {d.external_id: d for d in existing if d.external_id is not None}
+
+            for item in items_list:
+                external_id = item.external_id.strip()
+                content = item.content.strip()
+                if not content:
+                    raise ValueError("content must not be blank")
+                sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+                db_doc = by_external_id.get(external_id)
+                if db_doc is None:
+                    new_doc = DbDocument(
+                        content=content,
+                        external_id=external_id,
+                        source_id=item.source_id,
+                        metadata_=dict(item.metadata) if item.metadata is not None else None,
+                        content_sha256=sha,
+                    )
+                    session.add(new_doc)
+                    session.flush()  # allocate PK
+                    assert new_doc.id is not None
+                    results.append(
+                        SqlDocumentStorage.UpsertResult(
+                            external_id=external_id,
+                            id=int(new_doc.id),
+                            action="inserted",
+                            content_changed=True,
+                        )
+                    )
+                    changed_content.append((int(new_doc.id), content))
+                    continue
+
+                old_sha = getattr(db_doc, "content_sha256", None) or ""
+                content_changed = (old_sha != sha) or (getattr(db_doc, "content", "") != content)
+
+                metadata_changed = False
+                if item.metadata is not None:
+                    current_md = getattr(db_doc, "metadata_", None)
+                    metadata_changed = dict(item.metadata) != (current_md or {})
+
+                source_changed = False
+                if item.source_id is not None:
+                    source_changed = item.source_id != getattr(db_doc, "source_id", None)
+
+                if not (content_changed or metadata_changed or source_changed):
+                    results.append(
+                        SqlDocumentStorage.UpsertResult(
+                            external_id=external_id,
+                            id=int(db_doc.id),
+                            action="unchanged",
+                            content_changed=False,
+                        )
+                    )
+                    continue
+
+                if content_changed:
+                    db_doc.content = content
+                    db_doc.content_sha256 = sha
+                    updated_content_ids.append(int(db_doc.id))
+                    changed_content.append((int(db_doc.id), content))
+
+                if item.source_id is not None:
+                    db_doc.source_id = item.source_id
+                if item.metadata is not None:
+                    db_doc.metadata_ = dict(item.metadata)
+
+                results.append(
+                    SqlDocumentStorage.UpsertResult(
+                        external_id=external_id,
+                        id=int(db_doc.id),
+                        action="updated",
+                        content_changed=content_changed,
+                    )
+                )
+
+            session.commit()
+
+        return results, changed_content, updated_content_ids
 
 
 class HistorySqlStorage(QAHistoryPort):

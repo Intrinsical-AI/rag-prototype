@@ -60,6 +60,9 @@ from local_rag_backend.models import (
     HistoryItem,
     QueryResult,
     RebuildIndexResponse,
+    UpsertDocResult,
+    UpsertDocsRequest,
+    UpsertDocsResponse,
 )
 from local_rag_backend.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.settings import settings
@@ -431,6 +434,79 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
         return DeleteDocsResponse(deleted_sql=deleted_sql, deleted_index=None, rebuilt_index=False)
 
     resp = await run_blocking(_delete_sync)
+    reset_rag_service()
+    return resp
+
+
+@router.post("/docs/upsert", response_model=UpsertDocsResponse)
+async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> UpsertDocsResponse:
+    # Validate uniqueness early for deterministic behavior.
+    ext_ids = [d.external_id for d in payload.docs]
+    if len(set(ext_ids)) != len(ext_ids):
+        raise HTTPException(
+            status_code=400, detail="external_id values must be unique per request."
+        )
+
+    def _upsert_sync() -> UpsertDocsResponse:
+        doc_repo = SqlDocumentStorage()
+        items = [
+            SqlDocumentStorage.UpsertDoc(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata=d.metadata,
+            )
+            for d in payload.docs
+        ]
+
+        results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+            items
+        )
+        inserted = sum(1 for r in results if r.action == "inserted")
+        updated = sum(1 for r in results if r.action == "updated")
+        unchanged = sum(1 for r in results if r.action == "unchanged")
+
+        rebuilt_index = False
+        if settings.retrieval_mode in ("dense", "hybrid") and changed_content:
+            embedder = _build_embedder_for_dense()
+            vec = FaissVectorStorage(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=embedder.dim,
+            )
+
+            ids = [doc_id for doc_id, _ in changed_content]
+            texts = [text for _, text in changed_content]
+            vectors = embedder.embed(texts)
+            try:
+                # Updates must remove the old vector for that doc_id first.
+                if updated_content_ids:
+                    vec.delete(updated_content_ids)
+                vec.upsert(ids, vectors)
+            except Exception:
+                # Recovery: rebuild full index from DB.
+                rebuilt_index_from_db = rebuild_index_from_db(
+                    doc_repo=doc_repo, vec_repo=vec, embedder=embedder
+                )
+                rebuilt_index = rebuilt_index_from_db >= 0
+
+        return UpsertDocsResponse(
+            inserted=inserted,
+            updated=updated,
+            unchanged=unchanged,
+            rebuilt_index=rebuilt_index,
+            results=[
+                UpsertDocResult(
+                    external_id=r.external_id,
+                    id=r.id,
+                    action=r.action,
+                    content_changed=r.content_changed,
+                )
+                for r in results
+            ],
+        )
+
+    resp = await run_blocking(_upsert_sync)
     reset_rag_service()
     return resp
 
