@@ -101,7 +101,7 @@ class Settings(BaseSettings):
         None, description="Application title for OpenRouter usage headers."
     )
     ollama_enabled: bool = Field(False, description="Enable Ollama integration.")
-    ollama_model: str = Field("gemma3:1b", description="Default Ollama model.")
+    ollama_model: str = Field("gemma3:4b", description="Default Ollama model.")
     ollama_base_url: str = Field("http://localhost:11434", description="Ollama server URL.")
     ollama_request_timeout: int = Field(180, description="Ollama request timeout in seconds.")
 

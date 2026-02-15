@@ -41,7 +41,7 @@ services:
       - ollama_data:/root/.ollama
     restart: unless-stopped
     # Optionally pre-pull models on first run:
-    # command: ["/bin/sh","-c","/bin/ollama serve & sleep 5 && ollama pull gemma:2b && tail -f /dev/null"]
+    # command: ["/bin/sh","-c","/bin/ollama serve & sleep 5 && ollama pull gemma3:4b && tail -f /dev/null"]
 
 volumes:
   rag_data:

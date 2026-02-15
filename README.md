@@ -163,7 +163,7 @@ Key variables (non-exhaustive):
 | `OPENAI_TEMPERATURE`             | `0.2`                     | OpenAI       | Temperature                                            |
 | `OPENAI_MAX_TOKENS`              | `256`                     | OpenAI       | Max tokens                                             |
 | `OLLAMA_ENABLED`                 | `false`                   | Ollama       | Enable Ollama                                          |
-| `OLLAMA_MODEL`                   | `gemma3:1b`               | Ollama       | Model served by Ollama                                 |
+| `OLLAMA_MODEL`                   | `gemma3:4b`               | Ollama       | Model served by Ollama                                 |
 | `OLLAMA_BASE_URL`                | `http://localhost:11434`  | Ollama       | Server URL                                             |
 | `OLLAMA_REQUEST_TIMEOUT`         | `180`                     | Ollama       | Timeout (s)                                            |
 
@@ -291,7 +291,7 @@ Prerequisites: Docker Desktop/Engine.
 docker compose up -d --build
 
 # (Optional) Pull a model into Ollama once the service is up
-docker exec -it ollama ollama pull gemma3:1b
+docker exec -it ollama ollama pull gemma3:4b
 
 # Verify services
 curl http://localhost:8000/api/health
