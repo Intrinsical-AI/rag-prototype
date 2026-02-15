@@ -175,3 +175,59 @@ python run_query.py
 ```
 
 ¡Y eso es todo! Siguiendo estos pasos, puedes usar este proyecto como una potente librería para construir sistemas RAG a medida, integrando tus propias fuentes de datos y aprovechando modelos locales con Ollama.
+
+---
+
+## Mantenimiento (dense/hybrid): borrado y rebuild idempotente del índice
+
+En modos `dense`/`hybrid`, el índice FAISS es **estado derivado** de SQLite. Si borras filas manualmente en SQL o editas ficheros del índice a mano, puedes provocar **deriva** (IDs en FAISS que ya no existen en SQL, o documentos en SQL sin vector).
+
+Opciones recomendadas:
+
+### 1) CLI
+
+```bash
+# Borrar documentos por ID (SQL + FAISS cuando aplique)
+rag-delete-docs 10 11 12
+
+# Rebuild completo del índice desde SQLite (idempotente; dense/hybrid)
+rag-rebuild-index
+```
+
+### 2) API (FastAPI)
+
+```bash
+# Borrar por IDs
+curl -X POST "http://localhost:8000/api/docs/delete" \
+  -H "Content-Type: application/json" \
+  -d '{"ids":[10,11,12]}'
+
+# Rebuild del índice (dense/hybrid)
+curl -X POST "http://localhost:8000/api/index/rebuild"
+```
+
+Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"` a las llamadas.
+
+### 3) Como librería (flujo programático)
+
+Si orquestas tu propio pipeline y necesitas mantenimiento consistente entre stores:
+
+```python
+from local_rag_backend.core.services.maintenance import (
+    delete_documents_multi_store,
+    rebuild_index_from_db,
+)
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+
+doc_repo = SqlDocumentStorage()
+vec_repo = FaissVectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=None)
+embedder = OpenAIEmbedder()
+
+# 1) Borrado consistente
+delete_documents_multi_store(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder, ids=[10, 11, 12])
+
+# 2) Rebuild idempotente desde SQLite
+rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
+```

@@ -215,6 +215,14 @@ rag-bootstrap
 rag-build-index
 
 
+# Rebuild FAISS from the current SQLite documents (idempotent; dense/hybrid only)
+rag-rebuild-index
+
+
+# Delete documents by ID from SQLite (and FAISS in dense/hybrid mode)
+rag-delete-docs 1 2 3
+
+
 # Summarized system and files status
 rag-status
 ```
@@ -313,12 +321,15 @@ Notes:
   * Response: list of `{ id, question, answer, created_at, source_ids[] }`
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
+* `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
+* `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
 
 Notes:
 
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources.
+* In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete` (or `rag-delete-docs`) instead of deleting rows manually.
 
 Example:
 

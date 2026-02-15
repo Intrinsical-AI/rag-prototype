@@ -97,12 +97,15 @@ class RetrieverPort(Protocol):
 @runtime_checkable
 class DocumentRepoPort(Protocol):
     def store_documents(self, contents: Sequence[str]) -> Sequence[int]: ...
+    def delete_documents(self, ids: Sequence[int]) -> None: ...
     def get(self, ids: Sequence[int]) -> Sequence[Document]: ...
     def get_all_documents(self) -> Sequence[Document]: ...
 
 @runtime_checkable
 class VectorRepoPort(Protocol):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
+    def delete(self, ids: Sequence[int]) -> None: ...
+    def rebuild(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]: ...
 
 @runtime_checkable
@@ -183,12 +186,35 @@ sequenceDiagram
 
 ---
 
+## Multi-Store Consistency (SQLite + FAISS)
+
+In dense/hybrid retrieval, the system has **two stores**:
+
+* **SQLite** (`documents` table) is the source of truth for document text.
+* **FAISS** (`INDEX_PATH` + `ID_MAP_PATH`) is derived state: it maps `document_id -> embedding vector`.
+
+The invariants that matter:
+
+* Document IDs must be stable (SQLite uses `AUTOINCREMENT` to avoid ID reuse after deletes).
+* Writes must keep SQL and FAISS consistent, or fall back to a safe recovery path.
+
+Maintenance logic lives in `src/local_rag_backend/core/services/maintenance.py`:
+
+* `delete_documents_multi_store(...)`: delete from SQLite, attempt to delete vectors, and optionally rebuild the full index if index deletion fails.
+* `rebuild_index_from_db(...)`: idempotent rebuild of FAISS from the current SQLite docs.
+
+Because the application caches a process-local singleton `RagService`, API/CLI maintenance operations call `reset_rag_service()` after mutating the DB and/or index so subsequent queries see the updated state.
+
+---
+
 ## HTTP API Surface
 
 The FastAPI router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`).
 In addition to `/api/ask` and `/api/history`, the project exposes:
 
 * `POST /api/docs` and `GET /api/docs` (ingest/list documents)
+* `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
+* `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/ask_eval` (ephemeral per-request RAG configuration)
 * `POST /api/openrouter/generate` (OpenRouter proxy when configured)
 * `GET /api/config` and `GET /api/templates`
