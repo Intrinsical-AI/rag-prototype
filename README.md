@@ -119,7 +119,7 @@ rag-server
 ```
 
 > If you prefer to invoke scripts directly:
-> `python -m local_rag_backend.scripts.bootstrap` and
+> `python scripts/bootstrap.py` (repo) or `rag-bootstrap` (installed), and
 > `uvicorn local_rag_backend.app.main:app --reload`.
 
 ---
@@ -137,6 +137,8 @@ Key variables (non-exhaustive):
 | `APP_PORT`                       | `8000`                    | server       | Service port                                           |
 | `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
 | `LOG_LEVEL`                      | `INFO`                    | server       | Logging level                                          |
+| `API_KEY`                        | —                         | security     | If set, require `X-API-Key: <API_KEY>` for `/api/*` and `/metrics` |
+| `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, FAISS paths)       |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
@@ -145,7 +147,7 @@ Key variables (non-exhaustive):
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
-| `ID_MAP_PATH`                    | `data/id_map.pkl`         | dense/hybrid | FAISS ID map                                           |
+| `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
 | `ENABLE_MONITORING`              | `false`                   | monitoring   | Enable metrics middleware and `/metrics` endpoint      |
 | `OPENAI_TOP_P`                   | `1.0`                     | OpenAI       | top-p parameter                                        |
 | `OPENROUTER_ENABLED`             | `false`                  | OpenRouter   | Enable OpenRouter proxy                                |
@@ -366,7 +368,7 @@ mkdocs serve
 
 * Synchronous LLM clients (requests/OpenAI SDK); migration to async is straightforward but not included.
 * Minimal UI without front-end tests.
-* No authentication/rate limiting or exported metrics (logging and status CLI are included).
+* Minimal API-key auth is available (`API_KEY`), but there is no user/role authZ or rate limiting.
 * FAISS index type `IndexFlatL2` (simple). For large volumes, consider IVF/HNSW or other backends.
 
 ---

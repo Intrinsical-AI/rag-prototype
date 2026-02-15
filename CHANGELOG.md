@@ -6,7 +6,15 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- Optional API key auth via `API_KEY` (clients must send `X-API-Key`) to protect `/api/*` and `/metrics`.
+- Production-safe CORS allowlist via `CORS_ALLOW_ORIGINS` when `DEBUG=false`.
+- Metrics: low-cardinality Prometheus path labels to prevent time-series explosion on dynamic/404 paths.
+- Cross-worker cache invalidation for the cached RAG service via a reload token in the data directory.
+
+### Fixed
+- FAISS persistence: ID map is now JSON (`id_map.json`) with atomic writes and best-effort locks; unsafe pickle maps are refused.
+- API: request size limits for key endpoints to reduce DoS/cost-amplification risk.
 
 ## [1.1.1] - 2026-02-15
 
@@ -18,7 +26,7 @@ _Nothing yet._
 ### Fixed
 - API: reset cached RAG service after ingestion; make readiness fail when dense index/id-map are missing.
 - OpenAI: avoid embeddings calls for empty input; generator requires API key.
-- FAISS: validate `id_map.pkl` shape; guard ids/embeddings length mismatch.
+- FAISS: validate `id_map.json` format; guard ids/embeddings length mismatch.
 - Settings: avoid side effects at import-time; create data dir at startup/scripts.
 
 ### Documentation

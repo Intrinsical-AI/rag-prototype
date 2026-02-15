@@ -10,6 +10,9 @@ services:
     environment:
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
+      # Security (recommended when exposing beyond localhost)
+      # - API_KEY=${API_KEY}
+      # - CORS_ALLOW_ORIGINS=["http://localhost:5173"]
       # Default to sparse to keep the image lightweight. For dense/hybrid, install the `dense`
       # extra in the image and set RETRIEVAL_MODE accordingly.
       - RETRIEVAL_MODE=sparse
