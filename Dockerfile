@@ -33,7 +33,8 @@ RUN pip install uv
 WORKDIR /tmp/app
 COPY pyproject.toml ./
 COPY src/ ./src/
-RUN uv pip install --system .
+ARG RAG_EXTRAS=""
+RUN if [ -n "$RAG_EXTRAS" ]; then uv pip install --system ".[${RAG_EXTRAS}]"; else uv pip install --system .; fi
 
 # --- Stage 3: Development Environment ---
 FROM deps as development
@@ -43,7 +44,8 @@ WORKDIR /app
 COPY . .
 
 # Install development/test/lint extras in editable mode (project already present)
-RUN pip install uv && uv pip install --system -e ".[dev,test,lint]"
+ARG RAG_EXTRAS=""
+RUN pip install uv && if [ -n "$RAG_EXTRAS" ]; then uv pip install --system -e ".[${RAG_EXTRAS},dev,test,lint]"; else uv pip install --system -e ".[dev,test,lint]"; fi
 
 # Create necessary directories
 RUN mkdir -p data logs && \

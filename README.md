@@ -51,7 +51,6 @@
 ```bash
 .
 ├── data/                      # CSV, SQLite DB, FAISS files
-├── frontend/                  # Simple UI (index.html) for dev
 ├── src/local_rag_backend/
 │   ├── app/                   # FastAPI (main, routers, DI, factory)
 │   ├── core/                  # domain, ports and services (ETL, RAG)
@@ -67,7 +66,7 @@
 
 * Python 3.11+
 * Operating system: Linux / macOS / Windows
-* For dense/hybrid mode: `faiss` and `sentence_transformers` (installed as extras or manually)
+* For dense/hybrid mode: install the `dense` extra (FAISS + SentenceTransformers)
 
 ---
 
@@ -77,18 +76,19 @@
 git clone https://github.com/Intrinsical-AI/rag-prototype.git
 cd rag-prototype
 
-
-python -m venv .venv
+# Recommended: uv-managed local venv + lockfile installs
+uv venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
 
+# Install runtime deps (uses uv.lock)
+uv sync --frozen
 
-# Install the package (add extras if you want faiss/sentence_transformers)
-pip install -e .
+# (Optional) Dense/Hybrid deps (FAISS + SentenceTransformers)
+# uv sync --frozen --extra dense
 
-
-# (Optional) Install development dependencies
-# pip install -e ".[dev]"
+# (Optional) Dev/Test deps
+# uv sync --frozen --extra dev --extra test
 ```
 
 Initialize sample data and start:
@@ -118,10 +118,10 @@ rag-server
 
 | Variable                         | Default                   | Scope        | Description                                            |
 | -------------------------------- | ------------------------- | ------------ | ------------------------------------------------------ |
-| `APP_HOST`                       | `0.0.0.0`                 | server       | Service host                                           |
+| `APP_HOST`                       | `127.0.0.1`               | server       | Service host                                           |
 | `APP_PORT`                       | `8000`                    | server       | Service port                                           |
 | `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
-| `RETRIEVAL_MODE`                 | `hybrid`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
+| `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
 | `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
@@ -129,7 +129,7 @@ rag-server
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
 | `ID_MAP_PATH`                    | `data/id_map.pkl`         | dense/hybrid | FAISS ID map                                           |
 | `ENABLE_MONITORING`              | `false`                   | monitoring   | Enable metrics middleware and `/metrics` endpoint      |
-| `OPENAI_TOP_P`                   | `1.0`                    | OpenAI       | top-p parameter                                        |
+| `OPENAI_TOP_P`                   | `1.0`                     | OpenAI       | top-p parameter                                        |
 | `OPENROUTER_ENABLED`             | `false`                  | OpenRouter   | Enable OpenRouter proxy                                |
 | `OPENROUTER_API_KEY`             | —                        | OpenRouter   | API key                                                |
 | `OPENROUTER_BASE_URL`            | `https://openrouter.ai/api/v1` | OpenRouter | Base URL                                          |
@@ -211,7 +211,7 @@ You can ingest data from any LangChain document loader via the `LangChainLoader`
 Installation:
 
 ```bash
-pip install -e ".[loaders]"
+uv sync --frozen --extra loaders
 # or when installing from PyPI:
 # pip install intrinsical-rag-prototype[loaders]
 ```
@@ -265,12 +265,13 @@ Notes:
 - Backend listens on `8000`, Ollama on `11434`.
 - Configure providers via `.env` or environment variables (see `.env.example`).
 - In `docker-compose.yml`, `OLLAMA_ENABLED=true` and `OLLAMA_BASE_URL=http://ollama:11434` are set.
+- `docker-compose.yml` defaults to `RETRIEVAL_MODE=sparse` for a lightweight image; install/build with the `dense` extra for dense/hybrid.
 
 ---
 
 ## API
 
-* `GET /` → Serves packaged `index.html` or the repo’s `frontend/index.html`.
+* `GET /` → Serves packaged `index.html` or the source tree `src/local_rag_backend/frontend/index.html`.
 * `GET /api/health` and `GET /api/ready`
 * `GET /api/health/ollama`
 * `GET /api/config` and `GET /api/templates`
