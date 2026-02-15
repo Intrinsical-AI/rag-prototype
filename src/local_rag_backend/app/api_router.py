@@ -259,8 +259,10 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     doc_repo = SqlDocumentStorage()
 
     if settings.retrieval_mode in ("dense", "hybrid"):
-        embedder: EmbedderPort = OpenAIEmbedder() if settings.openai_api_key else SentenceTransformerEmbedder(
-            model_name=settings.st_embedding_model
+        embedder: EmbedderPort = (
+            OpenAIEmbedder()
+            if settings.openai_api_key
+            else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
         )
         vec = FaissVectorStorage(
             index_path=settings.index_path,
@@ -285,8 +287,10 @@ def _build_retriever_from_config(
     if cfg.retrieval_mode == "sparse":
         return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
 
-    embedder: EmbedderPort = OpenAIEmbedder() if settings.openai_api_key else SentenceTransformerEmbedder(
-        model_name=settings.st_embedding_model
+    embedder: EmbedderPort = (
+        OpenAIEmbedder()
+        if settings.openai_api_key
+        else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
     )
     faiss_storage = FaissVectorStorage(
         index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim

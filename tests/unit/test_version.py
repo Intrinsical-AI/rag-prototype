@@ -6,4 +6,3 @@ def test_package_version_matches_dist_metadata():
 
     assert local_rag_backend.__version__ == version("rag-prototype")
     assert local_rag_backend.__version__ != "0.0.0"
-

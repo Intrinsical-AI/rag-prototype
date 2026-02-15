@@ -58,4 +58,3 @@ def test_openai_embedder_empty_input(monkeypatch):
 
     emb = OpenAIEmbedder(model="dummy-4")
     assert emb.embed([]) == []
-
