@@ -64,12 +64,20 @@ class FaissIndex:
 
         if self.id_map_path.exists():
             with self.id_map_path.open("rb") as f:
-                self.id_map = pickle.load(f)  # nosec B301
+                loaded = pickle.load(f)  # nosec B301
+            # Defensive validation: the id-map must be a plain list[int].
+            if not isinstance(loaded, list) or not all(isinstance(x, int) for x in loaded):
+                raise ValueError("Invalid id_map format: expected a list[int].")
+            self.id_map = loaded
         else:
             self.id_map = []
 
     def add_to_index(self, ids: list[int], embeddings: list[Sequence[float]]) -> None:
         """Add new vectors to the index and save."""
+        if len(ids) != len(embeddings):
+            raise ValueError(
+                f"ids/embeddings length mismatch: {len(ids)} ids != {len(embeddings)} embeddings"
+            )
         vectors = np.asarray(embeddings, dtype="float32")
         if vectors.ndim != 2:
             raise ValueError("Embeddings must be a 2D array-like (n, dim)")
@@ -137,4 +145,4 @@ class FaissIndex:
                 # Persist as .npy into the configured path (extension agnostic).
                 np.save(f, self._vectors, allow_pickle=False)
         with self.id_map_path.open("wb") as f:
-            pickle.dump(self.id_map, f)
+            pickle.dump(list(self.id_map), f)
