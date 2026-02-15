@@ -118,12 +118,13 @@ async def test_ask_eval_rejects_unsafe_prompt_template(asgi_client, in_memory_sq
     assert "prompt_template" in r.json().get("detail", "")
 
 
-async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch):
-    # Create dummy index file
+async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_path, monkeypatch):
+    # Create a minimal valid on-disk index + id-map.
+    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+
     idx = tmp_path / "index.faiss"
-    idx.write_text("")
     id_map = tmp_path / "id_map.json"
-    id_map.write_bytes(b"")  # only need to exist for readiness
+    FaissIndex(idx, id_map, dim=4).rebuild([], [])
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
