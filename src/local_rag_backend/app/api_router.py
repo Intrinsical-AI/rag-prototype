@@ -19,6 +19,7 @@ from sqlalchemy import text
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
@@ -52,7 +53,12 @@ from local_rag_backend.utils import get_corpus_and_ids
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-    from local_rag_backend.core.ports import DocumentRepoPort, GeneratorPort, RetrieverPort
+    from local_rag_backend.core.ports import (
+        DocumentRepoPort,
+        EmbedderPort,
+        GeneratorPort,
+        RetrieverPort,
+    )
 
 # ---------------------- Validation Utilities ---------------------- #
 
@@ -253,7 +259,9 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     doc_repo = SqlDocumentStorage()
 
     if settings.retrieval_mode in ("dense", "hybrid"):
-        embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        embedder: EmbedderPort = OpenAIEmbedder() if settings.openai_api_key else SentenceTransformerEmbedder(
+            model_name=settings.st_embedding_model
+        )
         vec = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
@@ -277,7 +285,9 @@ def _build_retriever_from_config(
     if cfg.retrieval_mode == "sparse":
         return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
 
-    embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+    embedder: EmbedderPort = OpenAIEmbedder() if settings.openai_api_key else SentenceTransformerEmbedder(
+        model_name=settings.st_embedding_model
+    )
     faiss_storage = FaissVectorStorage(
         index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
     )

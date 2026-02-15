@@ -20,19 +20,17 @@ def test_build_index_sparse(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "faq_csv", str(f), raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
-    # Just test that build_index runs without error and creates database
+    # build_index should run without error and populate the DB.
     from local_rag_backend.scripts import build_index
 
     importlib.reload(build_index)
-    try:
-        build_index.main()
-    except Exception:
-        # If it fails, at least check the database was created
-        pass
+    build_index.main()
 
     # Check database was populated
     eng = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     Session = sessionmaker(bind=eng, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=eng)
     docs = SqlDocumentStorage(session_factory=Session).get_all_documents()
-    assert len(docs) >= 0  # At least database exists
+    assert len(docs) == 1
+    assert "T" in docs[0].content
+    assert "C" in docs[0].content

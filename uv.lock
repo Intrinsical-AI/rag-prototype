@@ -3336,6 +3336,8 @@ all = [
 ]
 dense = [
     { name = "faiss-cpu" },
+]
+dense-st = [
     { name = "sentence-transformers" },
 ]
 dev = [
@@ -3454,7 +3456,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4,<1.0" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.4,<1.0" },
     { name = "sentence-transformers", marker = "extra == 'all'", specifier = ">=2.7,<3.0" },
-    { name = "sentence-transformers", marker = "extra == 'dense'", specifier = ">=2.7,<3.0" },
+    { name = "sentence-transformers", marker = "extra == 'dense-st'", specifier = ">=2.7,<3.0" },
     { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'all'", specifier = ">=1.40,<2.0" },
     { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'monitoring'", specifier = ">=1.40,<2.0" },
     { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
@@ -3468,7 +3470,7 @@ requires-dist = [
     { name = "types-requests", marker = "extra == 'lint'", specifier = ">=2.31,<3.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29,<1.0" },
 ]
-provides-extras = ["dense", "dev", "test", "lint", "docs", "loaders", "performance", "performance-cpu", "monitoring", "all"]
+provides-extras = ["dense", "dense-st", "dev", "test", "lint", "docs", "loaders", "performance", "performance-cpu", "monitoring", "all"]
 
 [[package]]
 name = "rank-bm25"

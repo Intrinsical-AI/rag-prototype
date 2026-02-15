@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # IMPORTS FOR DYNAMIC DB
 from sqlalchemy import create_engine
@@ -20,6 +20,7 @@ from local_rag_backend.core.services.ingestion import (
     default_formatter,
     default_preprocess,
 )
+from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
@@ -31,6 +32,9 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocu
 from local_rag_backend.settings import settings as default_settings
 
 DELIMITER = ";"
+
+if TYPE_CHECKING:
+    from local_rag_backend.core.ports import EmbedderPort
 
 
 def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
@@ -51,7 +55,10 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
     doc_repo = SqlDocumentStorage(session_factory=session_local)
 
     if settings.retrieval_mode in ["dense", "hybrid"]:
-        embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        embedder: EmbedderPort
+        embedder = OpenAIEmbedder() if settings.openai_api_key else SentenceTransformerEmbedder(
+            model_name=settings.st_embedding_model
+        )
         vector_repo = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
