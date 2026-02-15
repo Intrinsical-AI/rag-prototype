@@ -1,10 +1,10 @@
 # Guía de Uso Avanzado: Orquestación de RAG Local con Ollama
 
-Este documento describe cómo utilizar `intrinsical-rag-prototype` como una librería de Python para construir flujos de trabajo de RAG (Retrieval-Augmented Generation) personalizados. Aprenderás a implementar tu propio cargador de datos (`Loader`) y a orquestar el proceso de ingesta y consulta utilizando un modelo local de Ollama.
+Este documento describe cómo utilizar `rag-prototype` como una librería de Python para construir flujos de trabajo de RAG (Retrieval-Augmented Generation) personalizados. Aprenderás a implementar tu propio cargador de datos (`Loader`) y a orquestar el proceso de ingesta y consulta utilizando un modelo local de Ollama.
 
 ## Requisitos Previos
 
-1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull gemma2`).
+1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull gemma3:1b`).
 2.  **Proyecto instalado**: Instala el proyecto en modo editable para facilitar el desarrollo:
 
     ```bash
@@ -25,7 +25,7 @@ La librería se configura mediante variables de entorno o un archivo `.env`. Par
 
 # Habilitar el generador de Ollama
 OLLAMA_ENABLED=True
-OLLAMA_MODEL="gemma2" # O el modelo que prefieras
+OLLAMA_MODEL="gemma3:1b" # O el modelo que prefieras
 
 # Configurar el modo de recuperación (sparse, dense, o hybrid)
 # Para empezar, 'sparse' es el más sencillo ya que no requiere embeddings.

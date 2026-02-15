@@ -9,7 +9,7 @@ Install optional extras for loaders:
 ```bash
 uv sync --frozen --extra loaders
 # Or
-# pip install intrinsical-rag-prototype[loaders]
+# pip install rag-prototype[loaders]
 ```
 
 ## Quick start
