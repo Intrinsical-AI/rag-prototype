@@ -14,13 +14,14 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
+from local_rag_backend.app.security import require_api_key
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 from local_rag_backend.settings import settings
 
@@ -57,10 +58,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
 
-# Enable permissive CORS for development and integration with external frontends
+# CORS: keep permissive defaults ONLY in debug mode.
+cors_allow_origins = ["*"] if settings.debug else list(settings.cors_allow_origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_allow_origins,
     # `*` + credentials is invalid per the CORS spec; browsers will ignore it.
     allow_credentials=False,
     allow_methods=["*"],
@@ -70,10 +72,15 @@ app.add_middleware(
 if settings.enable_monitoring:
     app.add_middleware(MetricsMiddleware)
 
-app.include_router(router, prefix="/api")
+app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
 
 
-@app.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+@app.get(
+    "/metrics",
+    response_class=PlainTextResponse,
+    include_in_schema=False,
+    dependencies=[Depends(require_api_key)],
+)
 async def metrics_endpoint() -> PlainTextResponse:
     """Prometheus metrics endpoint."""
     content, content_type = get_metrics()

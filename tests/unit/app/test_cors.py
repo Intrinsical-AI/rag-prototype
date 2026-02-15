@@ -11,7 +11,7 @@ async def test_cors_preflight_does_not_enable_credentials(asgi_client, in_memory
             "Access-Control-Request-Method": "GET",
         },
     )
-    # Starlette typically returns 200 for handled preflights.
-    assert r.status_code in (200, 204)
-    assert r.headers.get("access-control-allow-origin") == "*"
+    # By default (DEBUG=false + no CORS_ALLOW_ORIGINS), cross-origin requests are disallowed.
+    assert r.status_code == 400
+    assert "access-control-allow-origin" not in {k.lower() for k in r.headers}
     assert "access-control-allow-credentials" not in {k.lower() for k in r.headers}

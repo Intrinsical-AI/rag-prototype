@@ -10,9 +10,9 @@ async def test_cors_preflight_options(asgi_client):
             "Access-Control-Request-Method": "POST",
         },
     )
-    assert r.status_code in (200, 204)
-    # CORS headers should be present (wildcard allowed)
-    assert r.headers.get("access-control-allow-origin") in ("*", "http://example.com")
+    # By default (DEBUG=false + no CORS_ALLOW_ORIGINS), cross-origin requests are disallowed.
+    assert r.status_code == 400
+    assert "access-control-allow-origin" not in {k.lower() for k in r.headers}
 
 
 async def test_get_config_defaults(asgi_client, monkeypatch):

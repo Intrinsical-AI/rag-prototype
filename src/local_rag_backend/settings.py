@@ -14,6 +14,7 @@ Example:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Literal
 
@@ -40,6 +41,22 @@ class Settings(BaseSettings):
         "INFO", description="Logging level."
     )
     enable_monitoring: bool = Field(False, description="Enable Prometheus metrics.")
+
+    # --- Security / HTTP --- #
+    api_key: str | None = Field(
+        None,
+        description=(
+            "Optional API key to protect HTTP endpoints. "
+            "If set, clients must send it in the X-API-Key header."
+        ),
+    )
+    cors_allow_origins: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowed CORS origins (exact match) when DEBUG=false. "
+            "Leave empty to disable cross-origin requests."
+        ),
+    )
 
     # --- Retrieval --- #
     retrieval_mode: Literal["sparse", "dense", "hybrid"] = Field(
@@ -102,7 +119,12 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        # Allow non-JSON env vars for complex fields (e.g., comma-separated CORS origins).
+        enable_decoding=False,
     )
 
     @field_validator("log_level", mode="before")
@@ -111,6 +133,33 @@ class Settings(BaseSettings):
         # Make env/config more forgiving while keeping a strict Literal type.
         if isinstance(v, str):
             return v.upper()
+        return v
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _parse_cors_allow_origins(cls, v: Any) -> Any:
+        """
+        Allow `CORS_ALLOW_ORIGINS` to be set as:
+        - JSON list (recommended): ["http://localhost:5173", ...]
+        - Comma-separated string: http://localhost:5173,http://127.0.0.1:5173
+        - Empty string: (disable CORS)
+        """
+        if v is None:
+            return []
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            # JSON list string (common in docker-compose env)
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                except Exception:
+                    # Fall back to comma-separated parsing.
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in s.split(",") if item.strip()]
         return v
 
     @field_validator("data_dir", mode="before")
