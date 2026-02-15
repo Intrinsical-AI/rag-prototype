@@ -15,6 +15,11 @@ import click
 import uvicorn
 
 from local_rag_backend import __version__
+from local_rag_backend.diagnostics import (
+    get_documents_count,
+    get_history_count,
+    get_retrieval_index_stats,
+)
 from local_rag_backend.settings import settings
 
 
@@ -164,6 +169,8 @@ def bootstrap() -> None:
 @cli.command()
 def status() -> None:
     """Display system status and configuration."""
+    from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+
     # Styles
     title_fg = "cyan"
     key_fg = "blue"
@@ -210,6 +217,55 @@ def status() -> None:
         status_icon = "✅ YES" if path.exists() else "❌ NO"
         click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {status_icon}")
         click.echo(f"    Path: {path}")
+
+    # Consistency / counts (best-effort)
+    click.echo()
+    click.secho("📊 Data & Index Diagnostics", fg=title_fg, bold=True)
+
+    docs_count: int | None = None
+    try:
+        docs_count = get_documents_count(db_base.engine)
+        click.echo(f"  {click.style('Documents:', fg=key_fg, bold=True)} {docs_count}")
+    except Exception as e:
+        click.echo(f"  {click.style('Documents:', fg=key_fg, bold=True)} [ERROR] {e!s}")
+
+    try:
+        hist = get_history_count(db_base.engine)
+        click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} {hist}")
+    except Exception as e:
+        click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
+
+    if settings.retrieval_mode in ("dense", "hybrid"):
+        stats = get_retrieval_index_stats(
+            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
+        )
+        status_txt = str(stats.get("status"))
+        if status_txt == "ok":
+            click.echo(
+                f"  {click.style('Index:', fg=key_fg, bold=True)} "
+                f"{stats.get('vectors')} vectors "
+                f"(dim={stats.get('dim')}, backend={stats.get('backend')})"
+            )
+            if int(stats.get("duplicates") or 0):
+                click.echo(
+                    f"  {click.style('Index drift:', fg=key_fg, bold=True)} "
+                    f"[ERROR] duplicates={stats.get('duplicates')} "
+                    f"(hint: {stats.get('hint')})"
+                )
+            elif docs_count is not None and int(stats.get("id_map_len") or 0) != docs_count:
+                click.echo(
+                    f"  {click.style('Index drift:', fg=key_fg, bold=True)} "
+                    f"[ERROR] documents={docs_count} id_map={stats.get('id_map_len')} "
+                    "(hint: run `rag-rebuild-index`)"
+                )
+            else:
+                click.echo(f"  {click.style('Index drift:', fg=key_fg, bold=True)} OK")
+        else:
+            click.echo(
+                f"  {click.style('Index:', fg=key_fg, bold=True)} "
+                f"[ERROR] {status_txt} "
+                f"(hint: {stats.get('hint')})"
+            )
 
 
 # Entry point functions for setuptools

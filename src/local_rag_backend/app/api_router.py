@@ -5,6 +5,7 @@ FastAPI router for the application endpoints.
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -23,6 +24,12 @@ from local_rag_backend.core.services.maintenance import (
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.diagnostics import (
+    get_document_ids,
+    get_documents_count,
+    get_history_count,
+    get_retrieval_index_stats,
+)
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -142,6 +149,7 @@ async def readiness_check() -> dict[str, Any]:
     """Check if all dependencies are ready to handle requests."""
     checks: dict[str, Any] = {}
     is_ready = True
+    docs_count: int | None = None
 
     # 1. Database connectivity
     try:
@@ -151,6 +159,21 @@ async def readiness_check() -> dict[str, Any]:
     except Exception as e:
         checks["database"] = f"failed: {e!s}"
         is_ready = False
+
+    # 1b. Basic DB stats (best-effort)
+    if checks.get("database") == "ok":
+        try:
+            docs_count = get_documents_count(db_base.engine)
+            checks["documents"] = {"count": docs_count}
+        except Exception as e:
+            checks["documents"] = f"failed: {e!s}"
+            is_ready = False
+
+        try:
+            checks["history"] = {"count": get_history_count(db_base.engine)}
+        except Exception as e:
+            checks["history"] = f"failed: {e!s}"
+            # history is non-critical for answering questions; don't force not-ready here
 
     # 2. RAG service (best-effort: do not fail the endpoint before reporting readiness)
     try:
@@ -172,12 +195,56 @@ async def readiness_check() -> dict[str, Any]:
 
     # 4. Retrieval index (for dense/hybrid modes)
     if settings.retrieval_mode in ["dense", "hybrid"]:
-        index_ok = Path(settings.index_path).exists() and Path(settings.id_map_path).exists()
-        if index_ok:
-            checks["retrieval_index"] = "ok"
-        else:
-            checks["retrieval_index"] = "failed: not found"
+        stats = get_retrieval_index_stats(
+            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
+        )
+        checks["retrieval_index_stats"] = stats
+
+        if stats.get("status") != "ok":
+            checks["retrieval_index"] = (
+                f"failed: {stats.get('status')} "
+                f"(index_path={stats.get('index_path')}, id_map_path={stats.get('id_map_path')}). "
+                f"Hint: {stats.get('hint')}"
+            )
             is_ready = False
+        else:
+            checks["retrieval_index"] = "ok"
+
+            # Consistency checks vs SQLite (best-effort, but actionable when it fails)
+            if docs_count is not None:
+                vectors = int(stats.get("vectors") or 0)
+                id_map_len = int(stats.get("id_map_len") or 0)
+                if docs_count != id_map_len:
+                    checks["retrieval_index"] = (
+                        f"failed: drift detected (documents={docs_count}, vectors={vectors}). "
+                        "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
+                    )
+                    is_ready = False
+                else:
+                    # Optional deep check: compare sets when the corpus is small enough.
+                    # Keep /ready fast for larger corpora.
+                    if docs_count <= 5000:
+                        try:
+                            db_ids = set(get_document_ids(db_base.engine))
+                            index_ids = set(
+                                json.loads(Path(settings.id_map_path).read_text(encoding="utf-8"))
+                            )
+                            stale = sorted(index_ids - db_ids)
+                            missing = sorted(db_ids - index_ids)
+                            if stale or missing:
+                                checks["retrieval_index_drift"] = {
+                                    "stale_in_index": stale[:20],
+                                    "missing_in_index": missing[:20],
+                                    "stale_count": len(stale),
+                                    "missing_count": len(missing),
+                                }
+                                checks["retrieval_index"] = (
+                                    "failed: drift detected (ID set mismatch). "
+                                    "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
+                                )
+                                is_ready = False
+                        except Exception as e:
+                            checks["retrieval_index_drift"] = f"failed: {e!s}"
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:

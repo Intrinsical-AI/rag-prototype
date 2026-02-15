@@ -134,6 +134,19 @@ class FaissIndex:
             self.dim = self._infer_dim_or_raise()
         self._load_or_initialize()
 
+    @property
+    def backend(self) -> str:
+        return "faiss" if self._faiss is not None else "numpy"
+
+    @property
+    def ntotal(self) -> int:
+        with self._state_lock:
+            if self._faiss is not None:
+                return int(getattr(self.index, "ntotal", 0) or 0)
+            if self._vectors is None:
+                return 0
+            return int(self._vectors.shape[0])
+
     def _infer_dim_or_raise(self) -> int:
         if not self.index_path.exists():
             raise ValueError("dim is required when creating a new index (no existing index file).")
