@@ -72,5 +72,11 @@ class SparseBM25Retriever(RetrieverPort):
 
         # Ensure correct order
         ordered_docs = [docs_by_id[doc_id] for doc_id in retrieved_ids if doc_id in docs_by_id]
+        score_by_id = {
+            doc_id: score
+            for doc_id, score in zip(retrieved_ids, normalized_scores, strict=False)
+            if doc_id in docs_by_id
+        }
+        ordered_scores = [score_by_id[d.id] for d in ordered_docs]
 
-        return ordered_docs, normalized_scores
+        return ordered_docs, ordered_scores
