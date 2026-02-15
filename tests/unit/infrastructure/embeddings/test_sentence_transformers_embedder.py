@@ -20,4 +20,3 @@ def test_sentence_transformers_missing_dependency_message_mentions_dense_st(monk
     with pytest.raises(RuntimeError) as exc:
         SentenceTransformerEmbedder()
     assert "dense-st" in str(exc.value)
-
