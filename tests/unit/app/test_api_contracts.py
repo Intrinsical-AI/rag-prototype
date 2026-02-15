@@ -56,14 +56,14 @@ async def test_ask_rejects_k_out_of_range(asgi_client, in_memory_sqlite) -> None
 
 
 async def test_ask_accepts_empty_question(asgi_client, in_memory_sqlite) -> None:
-    """Test that /api/ask accepts empty questions (handled by business logic)."""
-    # Empty string should be accepted by schema validation
+    """Test that /api/ask rejects blank questions at the schema/validation layer."""
+    # Empty string should be rejected
     response = await asgi_client.post("/api/ask", json={"question": "", "k": 5})
-    assert response.status_code == 200
+    assert response.status_code == 422
 
-    # Whitespace-only should be accepted by schema validation
+    # Whitespace-only should be rejected
     response = await asgi_client.post("/api/ask", json={"question": "   ", "k": 5})
-    assert response.status_code == 200
+    assert response.status_code == 422
 
 
 async def test_history_limit_offset_bounds(asgi_client, in_memory_sqlite) -> None:

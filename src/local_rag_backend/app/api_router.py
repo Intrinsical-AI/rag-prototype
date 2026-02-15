@@ -244,7 +244,12 @@ async def list_docs(
 
 
 class IngestRequest(BaseModel):
-    texts: list[str] = Field(..., min_length=1, description="Raw texts to ingest")
+    texts: list[Annotated[str, Field(max_length=20000)]] = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Raw texts to ingest (max 64 items, 20k chars each)",
+    )
 
 
 class IngestResponse(BaseModel):
@@ -427,8 +432,8 @@ class OpenRouterGenerateRequest(BaseModel):
     model: str | None = Field(
         default=None, description="OpenRouter model ID, e.g., 'openai/gpt-4o-mini'"
     )
-    system_instruction: str
-    user_content: str
+    system_instruction: str = Field(..., min_length=1, max_length=8000)
+    user_content: str = Field(..., min_length=1, max_length=8000)
     temperature: float | None = None
     max_tokens: int | None = None
     top_p: float | None = None
