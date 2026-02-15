@@ -48,3 +48,21 @@ async def test_ready_endpoint_200_with_openai(asgi_client, monkeypatch):
     assert r.json()["status"] == "ready"
 
     app.dependency_overrides.clear()
+
+
+async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "index_path", str(tmp_path / "missing.faiss"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "missing.pkl"), raising=False)
+
+    async def _override():
+        return _DummyRag()
+
+    app.dependency_overrides[get_rag_service] = _override
+    r = await asgi_client.get("/api/ready")
+    assert r.status_code == 503
+    detail = r.json()["detail"]
+    assert detail["status"] == "not_ready"
+    assert detail["checks"]["retrieval_index"].startswith("failed")
+    app.dependency_overrides.clear()

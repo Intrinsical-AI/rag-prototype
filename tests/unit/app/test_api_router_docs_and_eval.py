@@ -104,8 +104,11 @@ async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch)
     # Create dummy index file
     idx = tmp_path / "index.faiss"
     idx.write_text("")
+    id_map = tmp_path / "id_map.pkl"
+    id_map.write_bytes(b"")  # only need to exist for readiness
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
 
     # Provide deps
     class _Dummy:
