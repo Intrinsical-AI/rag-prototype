@@ -50,6 +50,13 @@ class Settings(BaseSettings):
             "If set, clients must send it in the X-API-Key header."
         ),
     )
+    public_bind_requires_api_key: bool = Field(
+        True,
+        description=(
+            "If True, refuse to start when binding to a non-localhost address without API key. "
+            "Prevents accidental exposure when using 0.0.0.0 / Docker port publishing."
+        ),
+    )
     cors_allow_origins: list[str] = Field(
         default_factory=list,
         description=(

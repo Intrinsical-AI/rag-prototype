@@ -138,6 +138,7 @@ Key variables (non-exhaustive):
 | `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
 | `LOG_LEVEL`                      | `INFO`                    | server       | Logging level                                          |
 | `API_KEY`                        | —                         | security     | If set, require `X-API-Key: <API_KEY>` for `/api/*` and `/metrics` |
+| `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse to start if `APP_HOST` is not localhost and `API_KEY` is unset |
 | `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, FAISS paths)       |
@@ -179,6 +180,13 @@ ST_EMBEDDING_MODEL=all-MiniLM-L6-v2
 # OPENROUTER_ENABLED=true
 # ...
 ```
+
+### Upgrade notes (SQLite ID integrity)
+
+Dense/hybrid modes rely on document IDs being stable across stores (SQLite + FAISS). SQLite can reuse
+integer primary keys after deletes unless `AUTOINCREMENT` is used. On startup, the app will
+best-effort migrate legacy `documents` tables to `AUTOINCREMENT` when the schema matches the expected
+columns (`id`, `content`). If you have a customized schema, the app will refuse to auto-migrate.
 
 ---
 

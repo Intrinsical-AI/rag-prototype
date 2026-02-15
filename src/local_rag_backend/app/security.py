@@ -17,6 +17,30 @@ from local_rag_backend.settings import settings
 API_KEY_HEADER = "X-API-Key"
 
 
+def enforce_safe_bind_config() -> None:
+    """
+    Refuse to start with a public bind without an API key.
+
+    Threat model: this is a "local-first" service, but users sometimes run it in Docker
+    with `-p 8000:8000` or set `APP_HOST=0.0.0.0`. Without auth, endpoints can ingest
+    arbitrary docs and proxy paid LLM calls (OpenAI/OpenRouter), causing data/cost risk.
+    """
+    if not getattr(settings, "public_bind_requires_api_key", True):
+        return
+    if settings.api_key:
+        return
+
+    host = (settings.app_host or "").strip().lower()
+    localhost_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host in localhost_hosts:
+        return
+
+    raise RuntimeError(
+        "Refusing to start without API key when binding to a non-localhost address. "
+        "Set API_KEY (recommended) or set PUBLIC_BIND_REQUIRES_API_KEY=false to override."
+    )
+
+
 async def require_api_key(request: Request) -> None:
     """
     If `settings.api_key` is set, require clients to send the same value in `X-API-Key`.
