@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -112,6 +114,93 @@ def ensure_sqlite_documents_autoincrement(
                     text("INSERT INTO sqlite_sequence(name, seq) VALUES ('documents', :seq)"),
                     {"seq": int(max_known)},
                 )
+
+
+def ensure_sqlite_documents_identity_columns(*, engine_to_use: Engine | None = None) -> None:
+    """
+    Ensure the `documents` table contains stable identity + metadata columns.
+
+    This is a best-effort, additive migration intended for SQLite deployments without Alembic.
+    It never drops data. It:
+    - Adds missing columns (external_id, source_id, metadata, content_sha256, created_at, updated_at)
+    - Backfills metadata/content_sha256/timestamps for existing rows when possible
+    - Creates a unique index for external_id (nullable; multiple NULLs allowed)
+    """
+    eng = engine_to_use or engine
+    if eng.dialect.name != "sqlite":
+        return
+
+    required_cols = {
+        "external_id",
+        "source_id",
+        "metadata",
+        "content_sha256",
+        "created_at",
+        "updated_at",
+    }
+
+    with eng.begin() as conn:
+        sql = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'")
+        ).scalar()
+        if not sql:
+            return
+
+        cols = conn.execute(text("PRAGMA table_info(documents)")).fetchall()
+        col_names = {row[1] for row in cols}  # row[1] = name
+
+        missing = required_cols - col_names
+        if "external_id" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN external_id TEXT"))
+        if "source_id" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN source_id TEXT"))
+        if "metadata" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN metadata TEXT"))
+        if "content_sha256" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN content_sha256 TEXT"))
+        if "created_at" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN created_at DATETIME"))
+        if "updated_at" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN updated_at DATETIME"))
+
+        # Indexes (idempotent). Partial index keeps multiple NULLs and enforces uniqueness otherwise.
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_documents_external_id "
+                "ON documents(external_id) WHERE external_id IS NOT NULL"
+            )
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_documents_source_id ON documents(source_id)")
+        )
+
+        # Backfills (idempotent)
+        conn.execute(text("UPDATE documents SET metadata='{}' WHERE metadata IS NULL"))
+
+        now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+        # created_at/updated_at can be NULL for legacy rows: fill them with "now" for consistency.
+        conn.execute(
+            text("UPDATE documents SET created_at=:now WHERE created_at IS NULL"), {"now": now}
+        )
+        conn.execute(
+            text("UPDATE documents SET updated_at=:now WHERE updated_at IS NULL"), {"now": now}
+        )
+
+        # content_sha256: compute in python for rows where missing.
+        rows = conn.execute(
+            text(
+                "SELECT id, content FROM documents "
+                "WHERE content_sha256 IS NULL OR content_sha256 = ''"
+            )
+        ).fetchall()
+        for doc_id, content in rows:
+            if content is None:
+                continue
+            h = hashlib.sha256(str(content).encode("utf-8")).hexdigest()
+            conn.execute(
+                text("UPDATE documents SET content_sha256=:h WHERE id=:id"),
+                {"h": h, "id": int(doc_id)},
+            )
 
 
 async def get_db() -> AsyncGenerator[Session, None]:

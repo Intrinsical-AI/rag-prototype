@@ -47,6 +47,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
     db_base.Base.metadata.create_all(bind=db_base.engine)
     db_base.ensure_sqlite_documents_autoincrement(engine_to_use=db_base.engine)
+    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=db_base.engine)
     # Best-effort preload: don't prevent the API from starting just because an LLM
     # provider isn't configured yet (readiness endpoint should report not_ready).
     try:

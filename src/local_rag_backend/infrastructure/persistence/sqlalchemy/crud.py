@@ -5,6 +5,7 @@ CRUD operations for SQLAlchemy models.
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document, QaHistory
@@ -22,7 +23,10 @@ def get_documents(db: Session, ids: list[int]) -> Sequence[Document]:
 
 def add_documents(db: Session, texts: list[str]) -> list[int]:
     """Store new documents and return their IDs."""
-    docs = [Document(content=text) for text in texts]
+    docs = [
+        Document(content=text, content_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest())
+        for text in texts
+    ]
     db.add_all(docs)
     db.commit()
     return [doc.id for doc in docs]

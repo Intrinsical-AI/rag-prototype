@@ -60,13 +60,37 @@ class SqlDocumentStorage(DocumentRepoPort):
         """Retrieve documents by their IDs."""
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).filter(DbDocument.id.in_(ids)).all()
-            return [DomainDocument(id=d.id, content=d.content) for d in db_docs]
+            return [
+                DomainDocument(
+                    id=d.id,
+                    content=d.content,
+                    external_id=getattr(d, "external_id", None),
+                    source_id=getattr(d, "source_id", None),
+                    metadata=getattr(d, "metadata_", None),
+                    content_sha256=getattr(d, "content_sha256", None),
+                    created_at=getattr(d, "created_at", None),
+                    updated_at=getattr(d, "updated_at", None),
+                )
+                for d in db_docs
+            ]
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).order_by(DbDocument.id).all()
-            return [DomainDocument(id=d.id, content=d.content) for d in db_docs]
+            return [
+                DomainDocument(
+                    id=d.id,
+                    content=d.content,
+                    external_id=getattr(d, "external_id", None),
+                    source_id=getattr(d, "source_id", None),
+                    metadata=getattr(d, "metadata_", None),
+                    content_sha256=getattr(d, "content_sha256", None),
+                    created_at=getattr(d, "created_at", None),
+                    updated_at=getattr(d, "updated_at", None),
+                )
+                for d in db_docs
+            ]
 
 
 class HistorySqlStorage(QAHistoryPort):
