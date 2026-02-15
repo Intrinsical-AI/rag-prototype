@@ -75,13 +75,11 @@ Ahora, crea un script para orquestar el proceso de ingesta. Este script iniciali
 ```python
 # run_ingestion.py
 
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # 1. Importar componentes de la librería
 from local_rag_backend.settings import settings
-from local_rag_backend.core.services.ingestion import IngestionPipeline
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 
@@ -99,7 +97,7 @@ def main():
 
     # 4. Configurar la base de datos
     # Asegurarse de que el directorio de datos exista
-    os.makedirs(settings.data_dir, exist_ok=True)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     engine = create_engine(settings.sqlite_url)
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)

@@ -3,7 +3,6 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
 [![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green.svg)](https://github.com/Intrinsical-AI/rag-prototype)
@@ -59,6 +58,14 @@
 │   └── frontend/              # packaged index.html to serve at /
 └── tests/                     # unit + integration + e2e
 ```
+
+---
+
+## Docs
+
+* `docs/architecture.md`
+* `docs/custom_usage_guide.md`
+* `docs/langchain_loaders.md`
 
 ---
 
@@ -119,18 +126,24 @@ rag-server
 
 ## Configuration
 
-> Options are in `local_rag_backend/settings.py` (Pydantic Settings). They can be overridden with environment variables or a `.env` file (case-insensitive).
+Source of truth: `src/local_rag_backend/settings.py` (Pydantic Settings). Settings can be overridden with
+environment variables or a `.env` file (case-insensitive).
+
+Key variables (non-exhaustive):
 
 | Variable                         | Default                   | Scope        | Description                                            |
 | -------------------------------- | ------------------------- | ------------ | ------------------------------------------------------ |
 | `APP_HOST`                       | `127.0.0.1`               | server       | Service host                                           |
 | `APP_PORT`                       | `8000`                    | server       | Service port                                           |
 | `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
+| `LOG_LEVEL`                      | `INFO`                    | server       | Logging level                                          |
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
+| `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, FAISS paths)       |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
 | `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
+| `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
 | `ID_MAP_PATH`                    | `data/id_map.pkl`         | dense/hybrid | FAISS ID map                                           |
 | `ENABLE_MONITORING`              | `false`                   | monitoring   | Enable metrics middleware and `/metrics` endpoint      |
@@ -145,6 +158,7 @@ rag-server
 | `OPENAI_API_KEY`                 | —                         | OpenAI       | API key                                                |
 | `OPENAI_MODEL`                   | `gpt-4o-mini`             | OpenAI       | Chat model                                             |
 | `OPENAI_TEMPERATURE`             | `0.2`                     | OpenAI       | Temperature                                            |
+| `OPENAI_MAX_TOKENS`              | `256`                     | OpenAI       | Max tokens                                             |
 | `OLLAMA_ENABLED`                 | `false`                   | Ollama       | Enable Ollama                                          |
 | `OLLAMA_MODEL`                   | `gemma3:1b`               | Ollama       | Model served by Ollama                                 |
 | `OLLAMA_BASE_URL`                | `http://localhost:11434`  | Ollama       | Server URL                                             |
@@ -172,7 +186,7 @@ ST_EMBEDDING_MODEL=all-MiniLM-L6-v2
 * **Dense / Hybrid**:
 
   1. Save chunks in SQLite
-  2. Generate embeddings with SentenceTransformers (`ST_EMBEDDING_MODEL`)
+  2. Generate embeddings with OpenAI (if `OPENAI_API_KEY`) or SentenceTransformers (`ST_EMBEDDING_MODEL`)
   3. Upsert into FAISS (`INDEX_PATH`, `ID_MAP_PATH`)
 
 Chunking parameters (in settings):
@@ -259,7 +273,7 @@ Prerequisites: Docker Desktop/Engine.
 docker compose up -d --build
 
 # (Optional) Pull a model into Ollama once the service is up
-docker exec -it ollama ollama pull gemma:2b
+docker exec -it ollama ollama pull gemma3:1b
 
 # Verify services
 curl http://localhost:8000/api/health
@@ -319,6 +333,14 @@ make test
 ```
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
+
+## Documentation site (optional)
+
+If you install docs extras (`uv sync --extra docs`), you can run:
+
+```bash
+mkdocs serve
+```
 
 ---
 
