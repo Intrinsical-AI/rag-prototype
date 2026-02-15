@@ -36,42 +36,68 @@
 
 
 ## Proposal
-1. **PR1: Operabilidad y diagnóstico (status/ready)**
-- Scope: mejorar `rag-status` y `/api/ready` para reportar consistencia y causas.
-- DoD: `rag-status` incluye conteos (docs/vectores) y paths; `/api/ready` da error 503 con detalle accionable si falta índice en `dense/hybrid`.
+Release 02-2026 (objetivo: 10 PRs, stacked):
 
-2. **PR2: Identidad de documento (external_id) + modelo de metadata**
+1. **PR1: Operabilidad y diagnóstico (status/ready)** [DONE]
+- Scope: mejorar `rag-status` y `/api/ready` para reportar consistencia y causas.
+- DoD: `rag-status` incluye conteos (docs/vectores) y paths; `/api/ready` da error 503 con detalle accionable si falta índice en `dense/hybrid` o hay drift/corrupcion.
+
+2. **PR2: Identidad de documento (external_id) + modelo de metadata** [DONE]
 - Scope: añadir `external_id/source_id`, `metadata`, `content_hash`, timestamps; contrato estable.
 - DoD: schema + migración; tests de persistencia y lectura; docs actualizadas de identidad.
 
-3. **PR3: Upsert idempotente (API/CLI)**
+3. **PR3: Upsert idempotente (API/CLI)** [DONE]
 - Scope: endpoint/CLI `upsert` por `external_id` y política de actualización.
 - DoD: re-ingesta misma fuente no duplica; update de contenido actualiza solo lo afectado (o marca rebuild requerido); tests de idempotencia/update.
 
-4. **PR4: Extract adapters (txt/md/csv) + `rag-ingest` por path/dir**
+4. **PR4: Estabilización: estructura de paquete y límites de capas (refactor sin cambios funcionales)**
+- Scope:
+  - Reducir deuda de organización: evitar "cajón de sastre" en `src/local_rag_backend/*` raíz.
+  - Mover piezas a su capa natural (sin romper compatibilidad de imports).
+- Propuesta concreta (con shims de compatibilidad):
+  - `src/local_rag_backend/models.py` (Pydantic API schemas) -> `src/local_rag_backend/app/schemas.py` + `models.py` como re-export.
+  - `src/local_rag_backend/prompting.py` (lógica de prompts) -> `src/local_rag_backend/core/services/prompting.py` + shim.
+  - `src/local_rag_backend/diagnostics.py` (ready/status) -> `src/local_rag_backend/app/diagnostics.py` o `src/local_rag_backend/infrastructure/monitoring/diagnostics.py` + shim.
+  - `src/local_rag_backend/utils.py` -> dividir en módulos con nombre (p.ej. `core/services/text_processing.py`, `core/services/corpus.py`) + shim.
+- DoD:
+  - Cero cambios funcionales (solo movimiento/organización).
+  - Imports antiguos siguen funcionando (compat).
+  - Tests + mypy + ruff + black en verde.
+  - Docs actualizadas (rutas nuevas como source of truth).
+
+5. **PR5: Extract adapters (txt/md/csv) + `rag-ingest` por path/dir**
 - Scope: loaders por formato + CLI para ingestar ficheros/directorios.
 - DoD: ingest de dir mixto; límites/tamaños; tests con fixtures.
+- Quick-wins:
+  - Factory/Strategy para loaders (p.ej. `infrastructure/ingestion/loaders/factory.py`).
+  - No fiarse solo de extensión: detección best-effort por bytes/heurística y `python-magic` como extra opcional.
 
-5. **PR5: Clean + Chunk pipeline configurable**
+6. **PR6: Clean + Chunk pipeline configurable**
 - Scope: normalización/cleaning y chunker determinista configurable por settings.
 - DoD: chunking determinista; tests de boundaries/overlap/metadata.
+- Nota: preparar metadata para features futuras (chunk_index, parent_doc_id) sin introducir aún Parent-Doc Retrieval.
 
-6. **PR6: Dedup hash-based + constraints**
+7. **PR7: Dedup hash-based + constraints**
 - Scope: hashing por chunk + constraint/índice SQL para dedup.
 - DoD: reingesta => 0 inserts; cambio de `chunker_version` => re-chunk esperado; tests de dedup.
+- Matiz: el hash debe incluir versión de chunking y modelo de embeddings para evitar falsos "ya existe":
+  - `sha256(cleaned_text + chunker_version + embedding_model_name)`
 
-7. **PR7: Borrado por `external_id` + (opcional) tombstones**
+8. **PR8: Borrado por `external_id` + (opcional) tombstones**
 - Scope: delete consistente por identidad; decidir hard vs soft delete.
 - DoD: delete no reaparece tras rebuild; dense/hybrid consistente; tests delete+ask+rebuild.
 
-8. **PR8: Manifest del índice + detección de drift (model/dim/chunker)**
+9. **PR9: Manifest del índice + detección de drift (model/dim/chunker)**
 - Scope: `index_manifest.json` y validación en `/ready`/CLI.
 - DoD: mismatch detectado y explicado; rebuild corrige; tests de mismatch.
+- Quick-win: `meta.json`/`manifest.json` junto a `index.faiss` con `{embedding_model, dimension, chunker, created_at}`.
 
-9. **PR9: Evaluación offline como gate (`rag-eval`)**
-- Scope: dataset versionado + script que compute recall@k/MRR@k/latencia.
-- DoD: comando reproducible; subset rápido en CI; tests de parser/reporte.
-
-10. **PR10: Retrieval quality (reranker opcional) + monitoring mínimo**
-- Scope: reranker opcional (flag) y métricas/logs estructurados ingest/query.
-- DoD: toggle seguro; latencias medidas; `/metrics` consistente cuando habilitado; tests smoke de métricas y reranker.
+10. **PR10: Evaluación + monitoring mínimo + retrieval quality (reranker opcional)**
+- Scope:
+  - Evaluación offline como gate (`rag-eval`) (dataset versionado + métricas).
+  - Monitoring mínimo (métricas y logs estructurados ingest/query).
+  - Reranker opcional detrás de flag (solo si hay dataset para medir mejora).
+- DoD:
+  - `rag-eval` reproducible (subset rápido en CI) y falla por regresión.
+  - `/metrics` consistente cuando habilitado + smoke tests.
+  - Reranker toggle seguro + tests.
