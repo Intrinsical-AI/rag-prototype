@@ -8,7 +8,10 @@ Este documento describe cómo utilizar `intrinsical-rag-prototype` como una libr
 2.  **Proyecto instalado**: Instala el proyecto en modo editable para facilitar el desarrollo:
 
     ```bash
-    pip install -e .
+    uv venv .venv
+    source .venv/bin/activate
+    # Windows: .venv\Scripts\activate
+    uv sync --frozen
     ```
 
 ---
@@ -44,8 +47,10 @@ Imagina que tus datos están en una lista de diccionarios. Así sería un `Loade
 ```python
 # my_custom_loader.py
 
-from typing import Iterable, Any, Dict
-from local_rag_backend.core.ports import LoaderPort, Document
+from typing import Iterable, Any
+
+from local_rag_backend.core.domain.entities import LoadedItem
+from local_rag_backend.core.ports import LoaderPort
 
 class DictListLoader(LoaderPort):
     """Un cargador personalizado que lee datos de una lista de diccionarios."""
@@ -53,13 +58,13 @@ class DictListLoader(LoaderPort):
     def __init__(self, data: list[dict[str, Any]]):
         self._data = data
 
-    def load(self) -> Iterable[Document]:
-        """Genera Documentos a partir de la lista de datos."""
+    def load(self) -> Iterable[LoadedItem]:
+        """Genera LoadedItems a partir de la lista de datos."""
         for i, item in enumerate(self._data):
             # Asume que cada diccionario tiene 'title' y 'content'
             text = f"{item.get('title', '')}\n\n{item.get('content', '')}"
             metadata = {"source": f"dict_item_{i}", **item.get('metadata', {})}
-            yield Document(text=text.strip(), metadata=metadata)
+            yield LoadedItem(text=text.strip(), metadata=metadata)
 
 ```
 
@@ -110,11 +115,11 @@ def main():
 
     print(f"Cargando {len(my_data)} documentos...")
     all_chunks = []
-    for doc in custom_loader.load():
-        clean_text = default_preprocess(doc.text, doc.metadata)
-        chunks = default_chunker()(clean_text, doc.metadata)
+    for item in custom_loader.load():
+        clean_text = default_preprocess(item.text, item.metadata)
+        chunks = default_chunker()(clean_text, item.metadata)
         for chunk in chunks:
-            formatted_chunk = default_formatter(chunk, doc.metadata)
+            formatted_chunk = default_formatter(chunk, item.metadata)
             all_chunks.append(formatted_chunk)
 
     # 6. Almacenar los documentos procesados
