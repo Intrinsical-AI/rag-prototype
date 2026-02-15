@@ -41,6 +41,8 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
     if "settings" not in kwargs:
         kwargs["settings"] = default_settings
     settings = kwargs["settings"]
+    # Ensure data dir exists before touching SQLite.
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     # 1) Create engine and session based on the updated URL
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
