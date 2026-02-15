@@ -5,11 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Tests](https://img.shields.io/badge/tests-133%20passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
-[![Coverage](https://img.shields.io/badge/coverage-85%25-green.svg)](https://github.com/Intrinsical-AI/rag-prototype)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
+[![Coverage](https://img.shields.io/badge/coverage-85%25%2B-green.svg)](https://github.com/Intrinsical-AI/rag-prototype)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/r/intrinsical/rag-prototype)
-[![PyPI](https://img.shields.io/pypi/v/intrinsical-rag-prototype.svg)](https://pypi.org/project/intrinsical-rag-prototype/)
-[![Downloads](https://img.shields.io/pypi/dm/intrinsical-rag-prototype.svg)](https://pypi.org/project/intrinsical-rag-prototype/)
+[![PyPI](https://img.shields.io/pypi/v/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
+[![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
 
 > General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, FAISS, hybrid), and swappable LLM connectors (OpenAI or Ollama). Designed as a solid base to iterate in real development environments.
 
@@ -66,7 +66,7 @@
 
 * Python 3.11+
 * Operating system: Linux / macOS / Windows
-* For dense/hybrid mode: install the `dense` extra (FAISS + SentenceTransformers)
+* For dense/hybrid mode: install the `dense` extra (FAISS). For SentenceTransformers embeddings, also install `dense-st`.
 
 ---
 
@@ -84,8 +84,11 @@ source .venv/bin/activate
 # Install runtime deps (uses uv.lock)
 uv sync --frozen
 
-# (Optional) Dense/Hybrid deps (FAISS + SentenceTransformers)
+# (Optional) Dense/Hybrid deps (FAISS)
 # uv sync --frozen --extra dense
+#
+# (Optional) SentenceTransformers embeddings (heavy: torch/transformers)
+# uv sync --frozen --extra dense-st
 
 # (Optional) Dev/Test deps
 # uv sync --frozen --extra dev --extra test
@@ -213,7 +216,7 @@ Installation:
 ```bash
 uv sync --frozen --extra loaders
 # or when installing from PyPI:
-# pip install intrinsical-rag-prototype[loaders]
+# pip install rag-prototype[loaders]
 ```
 
 Quick usage example:

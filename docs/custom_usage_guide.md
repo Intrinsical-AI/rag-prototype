@@ -159,11 +159,11 @@ def main():
     # Realizar la consulta
     response = rag_service.ask(question)
 
-    print(f"\nRespuesta de Ollama:\n{response.answer}")
+    print(f"\nRespuesta de Ollama:\n{response['answer']}")
 
     print("\n--- Fuentes utilizadas ---")
-    for source in response.sources:
-        print(f"- ID: {source.id}, Contenido: {source.text[:100]}...")
+    for doc, score in zip(response["docs"], response["scores"], strict=False):
+        print(f"- ID: {doc.id}, Score: {score:.3f}, Contenido: {doc.content[:100]}...")
 
 if __name__ == "__main__":
     main()

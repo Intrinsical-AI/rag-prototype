@@ -166,7 +166,7 @@ sequenceDiagram
   S->>R: retrieve(query, k)
   R-->>S: (docs, scores)
   alt no docs
-    S-->>API: {"answer": "No documents indexed...", "sources": []}
+    S-->>API: {"answer": "No hay documentos indexados para responder a tu pregunta.", "sources": []}
   else docs
     S->>G: generate(question, [doc.content...])
     G-->>S: answer
@@ -234,7 +234,7 @@ class RagService:
     def ask(self, question: str, top_k: int = 3):
         docs, scores = self.retriever.retrieve(question, top_k)
         if not docs:
-            return {"answer": "No documents indexed. Please run ingestion.", "docs": [], "scores": []}
+            return {"answer": "No hay documentos indexados para responder a tu pregunta.", "docs": [], "scores": []}
         answer = self.generator.generate(question, [d.content for d in docs])
         self.history.save(question, answer, [d.id for d in docs])
         return {"answer": answer, "docs": docs, "scores": scores}
