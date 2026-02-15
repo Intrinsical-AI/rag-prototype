@@ -12,7 +12,7 @@ import requests
 from fastapi import HTTPException
 
 from local_rag_backend.core.ports import GeneratorPort
-from local_rag_backend.prompting import render_prompt_template
+from local_rag_backend.core.services.prompting import render_prompt_template
 from local_rag_backend.settings import (
     settings,  # settings.ollama_base_url y settings.ollama_request_timeout exists
 )

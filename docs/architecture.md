@@ -30,6 +30,8 @@ src/local_rag_backend/
 │   ├── main.py                 # FastAPI app + lifespan
 │   ├── api_router.py           # HTTP endpoints (/api/ask, /api/history)
 │   ├── dependencies.py         # DI bridge to factory
+│   ├── schemas.py              # Pydantic request/response schemas (API transport)
+│   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   └── factory.py              # Composition root (build retriever/LLM/services)
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
@@ -137,6 +139,10 @@ class LoaderPort(Protocol):
 * `SqlDocumentStorage` (documents via SQLAlchemy/SQLite)
 * `FaissVectorStorage` (vector index + ID map)
 * `HistorySqlStorage` (Q\&A history)
+
+**App transport**
+
+* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas.py` (with a backward-compatible re-export shim at `src/local_rag_backend/models.py`).
 
 **Ingestion**
 

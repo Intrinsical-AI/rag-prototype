@@ -37,7 +37,7 @@ class SparseBM25Retriever(RetrieverPort):
         """Preprocess and tokenize text for BM25."""
         import re
 
-        from local_rag_backend.utils import preprocess_text
+        from local_rag_backend.core.services.text_processing import preprocess_text
 
         return re.findall(r"\w+", preprocess_text(text))
 

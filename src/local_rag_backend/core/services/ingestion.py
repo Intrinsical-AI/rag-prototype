@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from local_rag_backend.core.services.etl import ETLService
-from local_rag_backend.utils import preprocess_text
+from local_rag_backend.core.services.text_processing import preprocess_text
 
 
 def default_preprocess(text: str, _metadata: Mapping[str, Any] | None = None) -> str:

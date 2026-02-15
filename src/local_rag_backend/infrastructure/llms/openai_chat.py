@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from openai import OpenAI
 
 from local_rag_backend.core.ports import GeneratorPort
-from local_rag_backend.prompting import render_prompt_template
+from local_rag_backend.core.services.prompting import render_prompt_template
 from local_rag_backend.settings import settings
 
 __all__ = ["OpenAIGenerator"]

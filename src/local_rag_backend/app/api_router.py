@@ -18,18 +18,39 @@ from sqlalchemy import text
 
 from local_rag_backend.app.blocking import run_blocking
 from local_rag_backend.app.dependencies import get_rag_service, reset_rag_service
-from local_rag_backend.core.services.etl import ETLService
-from local_rag_backend.core.services.maintenance import (
-    delete_documents_multi_store,
-    rebuild_index_from_db,
-)
-from local_rag_backend.core.services.rag import RagService
-from local_rag_backend.diagnostics import (
+from local_rag_backend.app.diagnostics import (
     get_document_ids,
     get_documents_count,
     get_history_count,
     get_retrieval_index_stats,
 )
+from local_rag_backend.app.schemas import (
+    AskEvalConfig,
+    AskEvalRequest,
+    AskEvalResponse,
+    AskRequest,
+    AskResponse,
+    DeleteDocsRequest,
+    DeleteDocsResponse,
+    DocumentInDB,
+    HistoryItem,
+    QueryResult,
+    RebuildIndexResponse,
+    UpsertDocResult,
+    UpsertDocsRequest,
+    UpsertDocsResponse,
+)
+from local_rag_backend.core.services.corpus import get_corpus_and_ids
+from local_rag_backend.core.services.etl import ETLService
+from local_rag_backend.core.services.maintenance import (
+    delete_documents_multi_store,
+    rebuild_index_from_db,
+)
+from local_rag_backend.core.services.prompting import (
+    PromptTemplateError,
+    validate_prompt_template,
+)
+from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -48,25 +69,7 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
 from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
-from local_rag_backend.models import (
-    AskEvalConfig,
-    AskEvalRequest,
-    AskEvalResponse,
-    AskRequest,
-    AskResponse,
-    DeleteDocsRequest,
-    DeleteDocsResponse,
-    DocumentInDB,
-    HistoryItem,
-    QueryResult,
-    RebuildIndexResponse,
-    UpsertDocResult,
-    UpsertDocsRequest,
-    UpsertDocsResponse,
-)
-from local_rag_backend.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.settings import settings
-from local_rag_backend.utils import get_corpus_and_ids
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

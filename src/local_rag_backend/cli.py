@@ -16,7 +16,7 @@ import click
 import uvicorn
 
 from local_rag_backend import __version__
-from local_rag_backend.diagnostics import (
+from local_rag_backend.app.diagnostics import (
     get_documents_count,
     get_history_count,
     get_retrieval_index_stats,

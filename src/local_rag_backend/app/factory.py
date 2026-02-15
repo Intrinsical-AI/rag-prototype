@@ -13,6 +13,7 @@ from functools import lru_cache
 from time import time_ns
 from typing import TYPE_CHECKING
 
+from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -29,7 +30,6 @@ from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRet
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
-from local_rag_backend.utils import get_corpus_and_ids
 
 logger = logging.getLogger(__name__)
 
