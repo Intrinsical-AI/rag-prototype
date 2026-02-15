@@ -8,7 +8,10 @@ FastAPI dependencies re-export `get_rag_service()` for DI convenience.
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
+from pathlib import Path
+from time import time_ns
 from typing import TYPE_CHECKING
 
 from local_rag_backend.core.services.rag import RagService
@@ -40,6 +43,8 @@ if TYPE_CHECKING:
         RetrieverPort,
         VectorRepoPort,
     )
+
+_RELOAD_TOKEN_FILENAME = ".rag_service_reload_token"
 
 
 def _build_embedder() -> EmbedderPort:
@@ -111,18 +116,48 @@ def build_rag_service() -> RagService:
     return RagService(retriever=retriever, generator=generator, history_storage=history_repo)
 
 
-@lru_cache(maxsize=1)
-def _get_cached_rag_service() -> RagService:
+def _reload_token_path() -> Path:
+    # Keep it in the data dir so multi-worker deployments can coordinate via a shared volume.
+    return settings.data_dir / _RELOAD_TOKEN_FILENAME
+
+
+def _read_reload_token() -> str:
+    p = _reload_token_path()
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+    except Exception as e:  # pragma: no cover
+        logger.warning("Failed to read RAG reload token at %s: %s", p, e)
+        return ""
+
+
+def _write_reload_token(token: str) -> None:
+    p = _reload_token_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(token, encoding="utf-8")
+    os.replace(tmp, p)
+
+
+@lru_cache(maxsize=4)
+def _get_cached_rag_service(reload_token: str) -> RagService:
     return build_rag_service()
 
 
 async def get_rag_service() -> RagService:
     """FastAPI dependency wrapper (async to avoid anyio threadpool for sync callables)."""
-    return _get_cached_rag_service()
+    # Multi-worker invalidation: other processes can "bust" the cache by updating the token file.
+    return _get_cached_rag_service(_read_reload_token())
 
 
 def reset_rag_service() -> None:
     """Clear the cached singleton (useful for tests)."""
+    try:
+        _write_reload_token(str(time_ns()))
+    except Exception as e:  # pragma: no cover
+        # Don't fail request handlers/tests just because the cache token couldn't be persisted.
+        logger.warning("Failed to write RAG reload token: %s", e)
     _get_cached_rag_service.cache_clear()
 
 
