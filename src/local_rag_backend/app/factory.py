@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 from functools import lru_cache
-from pathlib import Path
 from time import time_ns
 from typing import TYPE_CHECKING
 
@@ -35,6 +34,8 @@ from local_rag_backend.utils import get_corpus_and_ids
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
         EmbedderPort,
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
         VectorRepoPort,
     )
 
-_RELOAD_TOKEN_FILENAME = ".rag_service_reload_token"
+_RELOAD_TOKEN_FILENAME = ".rag_service_reload_token"  # noqa: S105
 
 
 def _build_embedder() -> EmbedderPort:
@@ -140,8 +141,8 @@ def _write_reload_token(token: str) -> None:
     os.replace(tmp, p)
 
 
-@lru_cache(maxsize=4)
-def _get_cached_rag_service(reload_token: str) -> RagService:
+@lru_cache(maxsize=1)
+def _get_cached_rag_service(_reload_token: str) -> RagService:
     return build_rag_service()
 
 
