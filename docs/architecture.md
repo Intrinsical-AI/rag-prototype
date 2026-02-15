@@ -193,6 +193,20 @@ In dense/hybrid retrieval, the system has **two stores**:
 * **SQLite** (`documents` table) is the source of truth for document text.
 * **FAISS** (`INDEX_PATH` + `ID_MAP_PATH`) is derived state: it maps `document_id -> embedding vector`.
 
+### Document Identity Contract
+
+The `documents` table is designed to support idempotent ingestion and future upserts:
+
+* `id`: internal integer primary key (stable due to SQLite `AUTOINCREMENT`)
+* `external_id`: optional stable identifier for a source document (unique when set)
+* `source_id`: optional provenance identifier (e.g., file path, URL)
+* `metadata`: JSON metadata captured at extraction time (stored as JSON text in SQLite)
+* `content_sha256`: hash of the stored `content` (dedup/update decisions)
+* `created_at`, `updated_at`: timestamps
+
+These fields allow you to track and update documents without relying on brittle “row order” or
+manual deletion. API/CLI upserts will build on this contract in subsequent PRs.
+
 The invariants that matter:
 
 * Document IDs must be stable (SQLite uses `AUTOINCREMENT` to avoid ID reuse after deletes).

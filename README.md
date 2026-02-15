@@ -188,6 +188,18 @@ integer primary keys after deletes unless `AUTOINCREMENT` is used. On startup, t
 best-effort migrate legacy `documents` tables to `AUTOINCREMENT` when the schema matches the expected
 columns (`id`, `content`). If you have a customized schema, the app will refuse to auto-migrate.
 
+### Upgrade notes (Document identity and metadata)
+
+To support idempotent ingestion and future upserts, the app also ensures the `documents` table contains
+stable identity fields and metadata. On startup (SQLite only), it will best-effort add/backfill the
+following columns if missing:
+
+* `external_id` (nullable, unique when set): stable document identity for upserts
+* `source_id` (nullable): traceability (e.g., filename/url)
+* `metadata` (JSON text): structured metadata (best-effort default `{}`)
+* `content_sha256`: content hash used by dedup/update policies
+* `created_at`, `updated_at`: timestamps (best-effort backfilled for legacy rows)
+
 ---
 
 ## Ingestion and indexing flow
