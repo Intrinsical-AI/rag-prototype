@@ -70,6 +70,36 @@ async def test_get_root_frontend_packaged_ok(asgi_client, monkeypatch):
     tmpdir.cleanup()
 
 
+async def test_get_frontend_assets_packaged_ok(asgi_client, monkeypatch):
+    tmpdir = tempfile.TemporaryDirectory()
+    base = Path(tmpdir.name)
+    (base / "index.html").write_text("<!doctype html><html><body>ok</body></html>", encoding="utf-8")
+    (base / "styles.css").write_text("body{background:#fff}", encoding="utf-8")
+    (base / "app.js").write_text("console.log('ok')", encoding="utf-8")
+
+    class _Pkg:
+        def joinpath(self, *parts):
+            return base.joinpath(*parts)
+
+    monkeypatch.setattr("local_rag_backend.app.main.resources.files", lambda *_: _Pkg())
+
+    r_css = await asgi_client.get("/assets/styles.css")
+    assert r_css.status_code == 200
+    assert "text/css" in (r_css.headers.get("content-type") or "")
+    assert "background" in r_css.text
+
+    r_js = await asgi_client.get("/assets/app.js")
+    assert r_js.status_code == 200
+    assert "javascript" in (r_js.headers.get("content-type") or "")
+    assert "console.log" in r_js.text
+    tmpdir.cleanup()
+
+
+async def test_get_frontend_assets_path_traversal_404(asgi_client):
+    r = await asgi_client.get("/assets/../pyproject.toml")
+    assert r.status_code == 404
+
+
 async def test_api_ask_schema_with_sources(asgi_client):
     # Test API schema validation for /api/ask endpoint with documents
     async def _override():

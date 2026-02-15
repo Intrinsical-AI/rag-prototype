@@ -6,16 +6,17 @@ FastAPI application entry point.
 from __future__ import annotations
 
 import logging
+import mimetypes
 import sys
 from contextlib import asynccontextmanager
 from importlib import resources
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
@@ -94,6 +95,42 @@ def get_frontend_path() -> Traversable | Path | None:
     if repo_path.is_file():
         return repo_path
     return None
+
+
+def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
+    """
+    Load a frontend asset (css/js/etc.), first from packaged resources, then from repo structure.
+    """
+    posix = PurePosixPath(asset_path)
+    if posix.is_absolute() or ".." in posix.parts:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+
+    # 1) Packaged assets
+    try:
+        pkg_root = resources.files("local_rag_backend.frontend")
+        pkg_file = pkg_root.joinpath(*posix.parts)
+        if pkg_file.is_file():
+            data = pkg_file.read_bytes()
+            mt = mimetypes.guess_type(posix.name)[0] or "application/octet-stream"
+            return data, mt
+    except (ImportError, AttributeError):
+        pass
+
+    # 2) Repo assets
+    fs_file = FRONTEND_DIR.joinpath(*posix.parts)
+    if fs_file.is_file():
+        data = fs_file.read_bytes()
+        mt = mimetypes.guess_type(fs_file.name)[0] or "application/octet-stream"
+        return data, mt
+
+    raise HTTPException(status_code=404, detail="Asset not found.")
+
+
+@app.get("/assets/{asset_path:path}", include_in_schema=False)
+async def serve_frontend_assets(asset_path: str) -> Response:
+    """Serve packaged frontend assets (css/js) for the SPA."""
+    data, media_type = _get_frontend_asset(asset_path)
+    return Response(content=data, media_type=media_type)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
