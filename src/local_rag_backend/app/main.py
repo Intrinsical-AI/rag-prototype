@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
-from local_rag_backend.app.security import require_api_key
+from local_rag_backend.app.security import enforce_safe_bind_config, require_api_key
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 from local_rag_backend.settings import settings
 
@@ -41,10 +41,12 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown events."""
     logger.info("Initializing RAG service...")
+    enforce_safe_bind_config()
     # Ensure the data directory exists (SQLite cannot create parent directories).
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
     db_base.Base.metadata.create_all(bind=db_base.engine)
+    db_base.ensure_sqlite_documents_autoincrement(engine_to_use=db_base.engine)
     # Best-effort preload: don't prevent the API from starting just because an LLM
     # provider isn't configured yet (readiness endpoint should report not_ready).
     try:
