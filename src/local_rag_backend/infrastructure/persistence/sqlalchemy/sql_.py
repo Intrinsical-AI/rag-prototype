@@ -5,13 +5,17 @@ SQLAlchemy-based implementation of the document and history repositories.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import SessionLocal
-from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import add_documents, add_history
+from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
+    add_documents,
+    add_history,
+    delete_documents,
+)
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 
 if TYPE_CHECKING:
@@ -26,6 +30,12 @@ def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, No
     session = session_factory()
     try:
         yield session
+    except Exception:
+        # Even though most CRUD helpers commit explicitly, ensure any partially-open
+        # transaction is rolled back so connections don't keep locks.
+        with suppress(Exception):
+            session.rollback()
+        raise
     finally:
         session.close()
 
@@ -40,6 +50,11 @@ class SqlDocumentStorage(DocumentRepoPort):
         """Store documents in the database."""
         with get_session(self._session_factory) as session:
             return add_documents(session, list(texts))
+
+    def delete_documents(self, ids: Sequence[int]) -> None:
+        """Delete documents by IDs (best-effort rollback helper for ETL)."""
+        with get_session(self._session_factory) as session:
+            delete_documents(session, list(ids))
 
     def get(self, ids: Sequence[int]) -> Sequence[DomainDocument]:
         """Retrieve documents by their IDs."""

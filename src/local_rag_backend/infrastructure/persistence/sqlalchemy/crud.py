@@ -28,6 +28,14 @@ def add_documents(db: Session, texts: list[str]) -> list[int]:
     return [doc.id for doc in docs]
 
 
+def delete_documents(db: Session, ids: list[int]) -> None:
+    """Delete documents by IDs (best-effort rollback helper for multi-store ETL)."""
+    if not ids:
+        return
+    db.query(Document).filter(Document.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+
+
 def add_history(
     db: Session, question: str, answer: str, source_ids: list[int] | None = None
 ) -> None:

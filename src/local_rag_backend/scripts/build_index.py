@@ -21,9 +21,11 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 
 # Import models to ensure they are registered with Base.metadata
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
-
 # To ensure table creation
+from local_rag_backend.infrastructure.persistence.sqlalchemy import (
+    base as db_base,
+    models,  # noqa: F401
+)
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 from local_rag_backend.settings import settings
 
@@ -62,6 +64,9 @@ def main() -> None:
     logger.info(f"Ensuring database schema exists at {script_engine.url}...")
     try:
         AppDeclarativeBase.metadata.create_all(bind=script_engine)
+        db_base.ensure_sqlite_documents_autoincrement(
+            engine_to_use=script_engine, id_map_path=str(settings.id_map_path)
+        )
         logger.info("Database schema ensured (tables created if they didn't exist).")
     except Exception as e:
         logger.error(f"Failed to ensure database schema: {e}", exc_info=True)
@@ -106,7 +111,9 @@ def main() -> None:
                         continue
                     texts.append(f"{row[0].strip()} {row[1].strip()}")
         else:
-            raise FileNotFoundError(f"CSV file not found at {csv_path}. Set FAQ_CSV to a valid path.")
+            raise FileNotFoundError(
+                f"CSV file not found at {csv_path}. Set FAQ_CSV to a valid path."
+            )
 
         if not texts:
             raise ValueError("No texts found in CSV.")

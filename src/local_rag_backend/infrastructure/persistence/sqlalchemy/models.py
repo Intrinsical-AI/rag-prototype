@@ -1,6 +1,7 @@
 # src/infrastructure/persistence/sqlalchemy/models.py
 
 import datetime
+from typing import ClassVar
 
 from sqlalchemy import DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -13,8 +14,13 @@ class Document(Base):
     """ORM model for a text document."""
 
     __tablename__ = "documents"
+    # Critical: without SQLite AUTOINCREMENT, INTEGER PRIMARY KEY values can be reused after
+    # deletes (e.g., insert id=1, delete all rows, next insert may return id=1 again).
+    # In a multi-store setup (SQL + FAISS), ID reuse can make an old vector point to new
+    # content (or vice versa), causing data integrity issues and potential content leakage.
+    __table_args__: ClassVar[dict[str, bool]] = {"sqlite_autoincrement": True}
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
 

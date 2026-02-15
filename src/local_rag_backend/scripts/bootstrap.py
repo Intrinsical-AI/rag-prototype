@@ -25,7 +25,10 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
+from local_rag_backend.infrastructure.persistence.sqlalchemy import (
+    base as db_base,
+    models,  # noqa: F401
+)
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings as default_settings
@@ -46,6 +49,10 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
+    # Protect multi-store integrity: migrate legacy SQLite schemas to AUTOINCREMENT if needed.
+    db_base.ensure_sqlite_documents_autoincrement(
+        engine_to_use=engine, id_map_path=str(settings.id_map_path)
+    )
 
     # 2) Determine CSV path (explicit -> settings -> repo fallback)
     csv_path_obj = Path(settings.faq_csv) if csv_path is None else Path(csv_path)
