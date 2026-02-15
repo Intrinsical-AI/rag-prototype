@@ -158,10 +158,10 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     assert all("Long Question" in doc.content for doc in docs)
 
 
-def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
-    """Test bootstrap falls back to packaged CSV when local file doesn't exist."""
+def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, capsys):
+    """Test bootstrap falls back to the repo CSV when the configured file doesn't exist."""
 
-    # Mock the packaged CSV loader to return test data
+    # Mock CSV loader to return test data (regardless of which fallback path is used)
     def mock_csv_loader_load(self):
         return iter(
             [
@@ -178,7 +178,7 @@ def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
-    # Mock CSVLoader to simulate packaged data
+    # Mock CSVLoader to simulate fallback data
     with patch(
         "local_rag_backend.infrastructure.ingestion.loaders.csv_loader.CSVLoader.load",
         mock_csv_loader_load,
@@ -191,7 +191,7 @@ def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
         captured = capsys.readouterr()
         assert "Ingested" in captured.out
 
-        # Verify packaged data was loaded
+        # Verify fallback data was loaded
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 

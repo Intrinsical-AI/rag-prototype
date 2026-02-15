@@ -8,7 +8,6 @@ It uses a dedicated database engine and session for this process.
 from __future__ import annotations
 
 import logging
-from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -89,8 +88,12 @@ def main() -> None:
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
-        # Read CSV
+        # Read CSV (explicit -> repo fallback)
         csv_path = Path(settings.faq_csv)
+        if not csv_path.is_file():
+            repo_csv = Path(__file__).resolve().parents[3] / "data" / "faq.csv"
+            if repo_csv.is_file():
+                csv_path = repo_csv
         texts = []
         if csv_path.is_file():
             with csv_path.open(encoding="utf-8") as fh:
@@ -103,23 +106,7 @@ def main() -> None:
                         continue
                     texts.append(f"{row[0].strip()} {row[1].strip()}")
         else:
-            # fallback to packaged sample data
-            try:
-                pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
-                with pkg_csv.open("r", encoding="utf-8") as fh:
-                    reader = csv.reader(fh, delimiter=";")
-                    if settings.csv_has_header:
-                        next(reader, None)
-                    for i, row in enumerate(reader, 1):
-                        if len(row) < 2:
-                            logger.warning(f"Row {i} skipped (len={len(row)}): {row}")
-                            continue
-                        texts.append(f"{row[0].strip()} {row[1].strip()}")
-                logger.info("Loaded packaged sample data (local CSV not found).")
-            except Exception:
-                raise FileNotFoundError(
-                    f"CSV file not found at {csv_path} and no packaged sample available."
-                )
+            raise FileNotFoundError(f"CSV file not found at {csv_path}. Set FAQ_CSV to a valid path.")
 
         if not texts:
             raise ValueError("No texts found in CSV.")

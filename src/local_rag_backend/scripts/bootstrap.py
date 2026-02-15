@@ -5,7 +5,6 @@ Bootstrap script for ingesting CSV data into the database and FAISS index.
 
 from __future__ import annotations
 
-from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -48,11 +47,17 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     Base.metadata.create_all(bind=engine)
 
-    # 2) Determine CSV path (local first, then packaged)
+    # 2) Determine CSV path (explicit -> settings -> repo fallback)
     csv_path_obj = Path(settings.faq_csv) if csv_path is None else Path(csv_path)
     if not csv_path_obj.is_file():
-        pkg_csv = resources.files("local_rag_backend.data").joinpath("faq.csv")
-        csv_path_obj = Path(str(pkg_csv))
+        # Repo checkout fallback (useful in development; not guaranteed in installed distributions)
+        repo_csv = Path(__file__).resolve().parents[3] / "data" / "faq.csv"
+        if repo_csv.is_file():
+            csv_path_obj = repo_csv
+        else:
+            raise FileNotFoundError(
+                f"FAQ CSV not found at {csv_path_obj}. Set FAQ_CSV to a valid path."
+            )
 
     doc_repo = SqlDocumentStorage(session_factory=session_local)
 
