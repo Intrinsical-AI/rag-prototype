@@ -330,6 +330,7 @@ Notes:
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources.
 * In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete` (or `rag-delete-docs`) instead of deleting rows manually.
+* In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
 
 Example:
 
