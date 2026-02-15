@@ -20,4 +20,3 @@ def test_invalid_id_map_format_raises(tmp_path):
 
     with pytest.raises(ValueError, match="id_map"):
         FaissIndex(index_path, id_map_path, dim=4)
-

@@ -7,7 +7,11 @@ UV_CACHE_DIR ?= .uv-cache
 UV := UV_CACHE_DIR=$(UV_CACHE_DIR) uv
 
 venv:
-	$(UV) venv .venv
+	@if [ -d .venv ]; then \
+		echo "Using existing virtualenv at .venv"; \
+	else \
+		$(UV) venv .venv; \
+	fi
 
 sync: venv
 	$(UV) sync --frozen --extra test --extra lint
