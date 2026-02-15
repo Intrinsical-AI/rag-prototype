@@ -57,7 +57,8 @@ app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # `*` + credentials is invalid per the CORS spec; browsers will ignore it.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
