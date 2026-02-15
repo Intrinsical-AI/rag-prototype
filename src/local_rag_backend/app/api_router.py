@@ -16,7 +16,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from local_rag_backend.app.dependencies import get_rag_service
+from local_rag_backend.app.dependencies import get_rag_service, reset_rag_service
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -139,9 +139,12 @@ async def readiness_check(service: RagService = Depends(get_rag_service)) -> dic
 
     # 4. Retrieval index (for dense/hybrid modes)
     if settings.retrieval_mode in ["dense", "hybrid"]:
-        checks["retrieval_index"] = (
-            "ok" if Path(settings.index_path).exists() else "warning: not found"
-        )
+        index_ok = Path(settings.index_path).exists() and Path(settings.id_map_path).exists()
+        if index_ok:
+            checks["retrieval_index"] = "ok"
+        else:
+            checks["retrieval_index"] = "failed: not found"
+            is_ready = False
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:
@@ -259,11 +262,21 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     doc_repo = SqlDocumentStorage()
 
     if settings.retrieval_mode in ("dense", "hybrid"):
-        embedder: EmbedderPort = (
-            OpenAIEmbedder()
-            if settings.openai_api_key
-            else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-        )
+        # Explicit annotation: depending on config we may use OpenAI or sentence-transformers.
+        embedder: EmbedderPort
+        if settings.openai_api_key:
+            embedder = OpenAIEmbedder()
+        else:
+            try:
+                embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            except RuntimeError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Dense/hybrid ingestion requires an embeddings backend. "
+                        "Set OPENAI_API_KEY or install the 'dense-st' extra."
+                    ),
+                ) from e
         vec = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
@@ -274,6 +287,8 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     else:
         ids = list(doc_repo.store_documents(texts))
 
+    # The RAG service is cached; reset it so subsequent queries see the updated DB / index.
+    reset_rag_service()
     return IngestResponse(count=len(ids), ids=ids)
 
 

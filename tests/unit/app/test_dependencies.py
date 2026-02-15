@@ -88,3 +88,30 @@ async def test_get_rag_service_hybrid_openai(monkeypatch):
 
     svc = await deps.get_rag_service()
     assert hasattr(svc, "retriever")
+
+
+async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqlite, monkeypatch):
+    _reset_cache()
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
+
+    calls: list[object] = []
+
+    def _build():
+        obj = object()
+        calls.append(obj)
+        return obj
+
+    monkeypatch.setattr(factory, "build_rag_service", _build, raising=True)
+
+    svc1 = await deps.get_rag_service()
+    assert svc1 is calls[0]
+
+    r = await asgi_client.post("/api/docs", json={"texts": ["hello"]})
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+
+    svc2 = await deps.get_rag_service()
+    assert svc2 is calls[1]
+    assert svc2 is not svc1
