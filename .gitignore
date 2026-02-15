@@ -152,6 +152,10 @@ data/*.db
 data/*.sqlite*
 data/*.faiss
 data/*.pkl
+data/*.lock
+data/id_map.json
+data/.rag_service_reload_token
+data/.rag_service_reload_token.tmp
 data/embeddings/
 data/models/
 # Keep the sample CSV for testing

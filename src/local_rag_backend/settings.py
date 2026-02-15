@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     # --- File Paths --- #
     data_dir: Path = Field(Path("data"), description="Base directory for data files.")
     index_path: str = Field("data/index.faiss", description="Path to the FAISS index file.")
-    id_map_path: str = Field("data/id_map.pkl", description="Path to the FAISS ID map.")
+    id_map_path: str = Field("data/id_map.json", description="Path to the FAISS ID map.")
     sqlite_url: str = Field("sqlite:///./data/app.db", description="SQLite database URL.")
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
 

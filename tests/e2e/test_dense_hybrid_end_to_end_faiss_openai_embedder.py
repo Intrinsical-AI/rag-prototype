@@ -64,7 +64,7 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     # Settings
     db_path = tmp_path / "app.db"
     index_path = tmp_path / "idx.faiss"
-    id_map_path = tmp_path / "id.pkl"
+    id_map_path = tmp_path / "id.json"
 
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{db_path}", raising=False)
     monkeypatch.setattr(settings, "index_path", str(index_path), raising=False)

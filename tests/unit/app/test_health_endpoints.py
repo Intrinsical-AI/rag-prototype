@@ -54,7 +54,7 @@ async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "index_path", str(tmp_path / "missing.faiss"), raising=False)
-    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "missing.pkl"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "missing.json"), raising=False)
 
     async def _override():
         return _DummyRag()

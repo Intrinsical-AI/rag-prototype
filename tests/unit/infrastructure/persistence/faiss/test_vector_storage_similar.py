@@ -16,7 +16,7 @@ class DummyFaissIndex:
 def test_similar_normalizes_and_maps_ids(monkeypatch):
     # inyectar dummy
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.index.FaissIndex",
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
         lambda *a, **k: None,
         raising=True,
     )

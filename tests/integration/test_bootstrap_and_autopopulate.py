@@ -50,7 +50,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
     monkeypatch.setattr(settings, "index_path", str(tmp_path / "idx.faiss"), raising=False)
-    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.json"), raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
     # Reset singleton if needed

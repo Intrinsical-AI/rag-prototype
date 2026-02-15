@@ -5,7 +5,7 @@ from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 
 def test_faiss_index_add_and_search(tmp_path):
     index_path = tmp_path / "test.index"
-    id_map_path = tmp_path / "test_map.pkl"
+    id_map_path = tmp_path / "test_map.json"
     dim = 4
     idx = FaissIndex(index_path, id_map_path, dim=dim)
     vectors = [np.random.rand(dim).astype(np.float32) for _ in range(3)]

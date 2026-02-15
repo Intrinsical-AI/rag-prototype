@@ -8,7 +8,7 @@ from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 def test_faiss_add_and_search(tmp_path):
     dim = 4
     index_file = tmp_path / "test.faiss"
-    idmap_file = tmp_path / "id_map.pkl"
+    idmap_file = tmp_path / "id_map.json"
 
     fi = FaissIndex(index_file, idmap_file, dim=dim)
 

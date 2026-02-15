@@ -21,7 +21,7 @@ def test_cli_status(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(settings, "debug", False, raising=False)
     monkeypatch.setattr(settings, "index_path", str(index_file), raising=False)
-    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.json"), raising=False)
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
 
     # Point sqlite_url so get_database_path() resolves to our tmp db file

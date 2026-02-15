@@ -90,7 +90,7 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
     monkeypatch.setattr(settings, "index_path", str(tmp_path / "idx.faiss"), raising=False)
-    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.json"), raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_chars", 50, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 10, raising=False)
 
