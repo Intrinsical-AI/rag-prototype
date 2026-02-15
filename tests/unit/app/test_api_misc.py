@@ -1,13 +1,9 @@
 # tests/unit/app/test_api_misc.py
-from fastapi.testclient import TestClient
-
-from local_rag_backend.app.main import app
 from local_rag_backend.settings import settings
 
 
-def test_cors_preflight_options():
-    client = TestClient(app)
-    r = client.options(
+async def test_cors_preflight_options(asgi_client):
+    r = await asgi_client.options(
         "/api/ask",
         headers={
             "Origin": "http://example.com",
@@ -19,13 +15,12 @@ def test_cors_preflight_options():
     assert r.headers.get("access-control-allow-origin") in ("*", "http://example.com")
 
 
-def test_get_config_defaults(monkeypatch):
+async def test_get_config_defaults(asgi_client, monkeypatch):
     # Ensure clean provider state
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
-    client = TestClient(app)
-    r = client.get("/api/config")
+    r = await asgi_client.get("/api/config")
     assert r.status_code == 200
     data = r.json()
     assert set(
@@ -35,9 +30,8 @@ def test_get_config_defaults(monkeypatch):
     assert isinstance(data["available_providers"], list)
 
 
-def test_get_templates():
-    client = TestClient(app)
-    r = client.get("/api/templates")
+async def test_get_templates(asgi_client):
+    r = await asgi_client.get("/api/templates")
     assert r.status_code == 200
     arr = r.json()
     names = {t["name"] for t in arr}

@@ -1,22 +1,19 @@
 # tests/unit/app/test_api_router_more.py
 
 import pytest
-from fastapi.testclient import TestClient
 
 from local_rag_backend.app import dependencies as deps
 from local_rag_backend.app.main import app
 from local_rag_backend.settings import settings
 
-client = TestClient(app)
 
-
-def test_health_endpoint_ok():
-    r = client.get("/api/health")
+async def test_health_endpoint_ok(asgi_client):
+    r = await asgi_client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["status"] == "healthy"
 
 
-def test_ready_endpoint_ok(monkeypatch):
+async def test_ready_endpoint_ok(asgi_client, monkeypatch):
     class _Dummy:
         pass
 
@@ -25,9 +22,12 @@ def test_ready_endpoint_ok(monkeypatch):
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
-    app.dependency_overrides[deps.get_rag_service] = lambda: _Dummy()
+    async def _override():
+        return _Dummy()
+
+    app.dependency_overrides[deps.get_rag_service] = _override
     try:
-        r = client.get("/api/ready")
+        r = await asgi_client.get("/api/ready")
         assert r.status_code == 200
         data = r.json()
         assert data["status"] == "ready"
@@ -38,7 +38,7 @@ def test_ready_endpoint_ok(monkeypatch):
         app.dependency_overrides.pop(deps.get_rag_service, None)
 
 
-def test_ready_endpoint_not_ready_no_llm(monkeypatch):
+async def test_ready_endpoint_not_ready_no_llm(asgi_client, monkeypatch):
     class _Dummy:
         pass
 
@@ -47,9 +47,12 @@ def test_ready_endpoint_not_ready_no_llm(monkeypatch):
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
-    app.dependency_overrides[deps.get_rag_service] = lambda: _Dummy()
+    async def _override():
+        return _Dummy()
+
+    app.dependency_overrides[deps.get_rag_service] = _override
     try:
-        r = client.get("/api/ready")
+        r = await asgi_client.get("/api/ready")
         assert r.status_code == 503
         payload = r.json()
         assert payload["detail"]["status"] == "not_ready"
@@ -58,8 +61,8 @@ def test_ready_endpoint_not_ready_no_llm(monkeypatch):
         app.dependency_overrides.pop(deps.get_rag_service, None)
 
 
-def test_templates_endpoint():
-    r = client.get("/api/templates")
+async def test_templates_endpoint(asgi_client):
+    r = await asgi_client.get("/api/templates")
     assert r.status_code == 200
     arr = r.json()
     assert isinstance(arr, list) and len(arr) >= 3
@@ -67,13 +70,13 @@ def test_templates_endpoint():
     assert {"default", "ollama"}.issubset(names)
 
 
-def test_config_endpoint_providers(monkeypatch):
+async def test_config_endpoint_providers(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "key", raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
 
-    r = client.get("/api/config")
+    r = await asgi_client.get("/api/config")
     assert r.status_code == 200
     data = r.json()
     prov = set(data.get("available_providers", []))
@@ -81,7 +84,7 @@ def test_config_endpoint_providers(monkeypatch):
     assert data["retrieval_mode"] in {"sparse", "dense", "hybrid"}
 
 
-def test_ask_eval_invalid_config(monkeypatch):
+async def test_ask_eval_invalid_config(asgi_client, monkeypatch):
     payload = {
         "question": "q",
         "config": {
@@ -89,7 +92,7 @@ def test_ask_eval_invalid_config(monkeypatch):
             "k": 3,
         },
     }
-    r = client.post("/api/ask_eval", json=payload)
+    r = await asgi_client.post("/api/ask_eval", json=payload)
     assert r.status_code == 400
     assert "Invalid config" in r.json()["detail"]
 
@@ -104,25 +107,22 @@ def test_ask_eval_invalid_config(monkeypatch):
         ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": 1.1}, 422),  # schema
         ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 400),  # runtime validation
         ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 400),  # runtime validation
-        (
-            {"retrieval_mode": "sparse", "k": 3, "max_tokens": 0},
-            400,
-        ),  # runtime validation (we clamp via validate_rag_config)
+        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 0}, 400),  # runtime validation
         ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 999999}, 400),  # runtime validation
     ],
 )
-def test_ask_eval_invalid_config_parametrized(config, expected_status):
+async def test_ask_eval_invalid_config_parametrized_async(asgi_client, config, expected_status):
     payload = {"question": "q", "config": config}
-    r = client.post("/api/ask_eval", json=payload)
+    r = await asgi_client.post("/api/ask_eval", json=payload)
     assert r.status_code == expected_status
     if expected_status == 400:
         assert "Invalid config" in r.json().get("detail", "")
 
 
-def test_openrouter_generate_not_configured(monkeypatch):
+async def test_openrouter_generate_not_configured(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "openrouter_enabled", False, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", None, raising=False)
-    r = client.post(
+    r = await asgi_client.post(
         "/api/openrouter/generate",
         json={
             "model": None,
@@ -133,19 +133,19 @@ def test_openrouter_generate_not_configured(monkeypatch):
     assert r.status_code == 400
 
 
-def test_dependencies_no_llm(monkeypatch, in_memory_sqlite):
-    deps.get_rag_service.cache_clear()
+async def test_dependencies_no_llm(monkeypatch, in_memory_sqlite):
+    deps.reset_rag_service()
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
     with pytest.raises(RuntimeError):
-        deps.get_rag_service()
+        await deps.get_rag_service()
 
 
-def test_metrics_endpoint_disabled(monkeypatch):
+async def test_metrics_endpoint_disabled(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "enable_monitoring", False, raising=False)
-    r = client.get("/metrics")
+    r = await asgi_client.get("/metrics")
     assert r.status_code == 200
     assert r.headers.get("content-type", "").startswith("text/plain")
     assert r.text.startswith("# Monitoring disabled")

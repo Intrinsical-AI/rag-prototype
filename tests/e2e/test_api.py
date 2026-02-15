@@ -2,8 +2,6 @@
 import tempfile
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.app.main import app
 
@@ -28,23 +26,21 @@ class DummyRagSvcWithDocs:
         }
 
 
-# ---------- override dependency --------------------------------------------
-app.dependency_overrides = {}
-app.dependency_overrides[get_rag_service] = lambda: DummyRagSvc()
-
-client = TestClient(app)
-
-
 # ---------- tests -----------------------------------------------------------
-def test_post_ask_endpoint():
-    resp = client.post("/api/ask", json={"question": "hola", "k": 2})
+async def test_post_ask_endpoint(asgi_client):
+    async def _override():
+        return DummyRagSvc()
+
+    app.dependency_overrides[get_rag_service] = _override
+    resp = await asgi_client.post("/api/ask", json={"question": "hola", "k": 2})
     assert resp.status_code == 200
     data = resp.json()
     assert data["answer"] == "eco:hola"
     assert data["sources"] == []
+    app.dependency_overrides.clear()
 
 
-def test_get_root_frontend_not_found(tmp_path, monkeypatch):
+async def test_get_root_frontend_not_found(asgi_client, tmp_path, monkeypatch):
     # Simulate that index.html does not exist neither in package nor in repo
     # 1) Force failure when searching for packaged resources
     monkeypatch.setattr(
@@ -53,11 +49,11 @@ def test_get_root_frontend_not_found(tmp_path, monkeypatch):
     )
     # 2) Fallback points to empty directory
     monkeypatch.setattr("local_rag_backend.app.main.FRONTEND_DIR", tmp_path)
-    resp = client.get("/")
+    resp = await asgi_client.get("/")
     assert resp.status_code == 404
 
 
-def test_get_root_frontend_packaged_ok(monkeypatch):
+async def test_get_root_frontend_packaged_ok(asgi_client, monkeypatch):
     tmpdir = tempfile.TemporaryDirectory()
     idx = Path(tmpdir.name) / "index.html"
     idx.write_text("<!doctype html><html><body>ok</body></html>", encoding="utf-8")
@@ -67,19 +63,20 @@ def test_get_root_frontend_packaged_ok(monkeypatch):
             return idx
 
     monkeypatch.setattr("local_rag_backend.app.main.resources.files", lambda *_: _Pkg())
-    resp = client.get("/")
+    resp = await asgi_client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
     assert "<body>ok</body>" in resp.text
     tmpdir.cleanup()
 
 
-def test_api_ask_schema_with_sources():
+async def test_api_ask_schema_with_sources(asgi_client):
     # Test API schema validation for /api/ask endpoint with documents
-    app.dependency_overrides[get_rag_service] = lambda: DummyRagSvcWithDocs()
-    client_with_docs = TestClient(app)
+    async def _override():
+        return DummyRagSvcWithDocs()
 
-    resp = client_with_docs.post("/api/ask", json={"question": "test", "k": 1})
+    app.dependency_overrides[get_rag_service] = _override
+    resp = await asgi_client.post("/api/ask", json={"question": "test", "k": 1})
     assert resp.status_code == 200
     data = resp.json()
 
@@ -99,3 +96,4 @@ def test_api_ask_schema_with_sources():
     assert source["document"]["content"] == "Test document"
     assert isinstance(source["score"], (int, float))
     assert 0.0 <= source["score"] <= 1.0
+    app.dependency_overrides.clear()

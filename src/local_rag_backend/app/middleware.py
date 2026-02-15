@@ -6,6 +6,7 @@ Middleware for observability and monitoring.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -15,8 +16,28 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
+    # Provide small stubs so tests can monkeypatch these symbols even when the optional
+    # dependency isn't installed. The middleware remains inactive unless explicitly enabled.
+    CONTENT_TYPE_LATEST = "text/plain"
 
-from typing import TYPE_CHECKING
+    class _NoopMetric:  # pragma: no cover
+        def __init__(self, *_a: object, **_k: object) -> None:
+            return None
+
+        def labels(self, **_kwargs: object) -> _NoopMetric:
+            return self
+
+        def inc(self, *_a: object, **_k: object) -> None:
+            return None
+
+        def observe(self, *_a: object, **_k: object) -> None:
+            return None
+
+    Counter = Histogram = _NoopMetric
+
+    def generate_latest() -> bytes:  # pragma: no cover
+        return b""
+
 
 from local_rag_backend.settings import settings
 

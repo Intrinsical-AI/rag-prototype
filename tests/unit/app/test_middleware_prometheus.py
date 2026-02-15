@@ -1,7 +1,7 @@
 # tests/unit/app/test_middleware_prometheus.py
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
-from fastapi.testclient import TestClient
 
 from local_rag_backend.app import middleware as mw
 from local_rag_backend.settings import settings
@@ -25,7 +25,7 @@ def test_get_metrics_enabled(monkeypatch):
     assert content_type.startswith("text/plain")
 
 
-def test_middleware_dispatch_active(monkeypatch):
+async def test_middleware_dispatch_active(monkeypatch):
     # Build a small FastAPI app and attach the middleware explicitly
     monkeypatch.setattr(mw, "PROMETHEUS_AVAILABLE", True, raising=False)
     monkeypatch.setattr(settings, "enable_monitoring", True, raising=False)
@@ -34,10 +34,11 @@ def test_middleware_dispatch_active(monkeypatch):
     app.add_middleware(mw.MetricsMiddleware)
 
     @app.get("/ping")
-    def ping():
+    async def ping():
         return PlainTextResponse("pong")
 
-    client = TestClient(app)
-    r = client.get("/ping")
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/ping")
     assert r.status_code == 200
     assert r.text == "pong"
