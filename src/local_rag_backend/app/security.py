@@ -40,6 +40,31 @@ def _request_hosts(request: Request) -> list[str]:
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
         hosts.extend(_normalize_host_token(part) for part in xff.split(",") if part.strip())
+
+    # RFC 7239 `Forwarded` can be used instead of `X-Forwarded-For`.
+    forwarded = request.headers.get("forwarded", "")
+    if forwarded:
+        hosts.extend(_extract_forwarded_for_hosts(forwarded))
+    return hosts
+
+
+def _extract_forwarded_for_hosts(header_value: str) -> list[str]:
+    hosts: list[str] = []
+    for element in str(header_value).split(","):
+        for param in element.split(";"):
+            if "=" not in param:
+                continue
+            key, raw_value = param.split("=", 1)
+            if key.strip().lower() != "for":
+                continue
+            token = raw_value.strip().strip('"')
+            # RFC 7239 allows `for=unknown` and obfuscated identifiers (`for=_hidden`).
+            # Ignore those and only evaluate concrete host tokens.
+            if not token or token.lower() == "unknown" or token.startswith("_"):
+                continue
+            normalized = _normalize_host_token(token)
+            if normalized:
+                hosts.append(normalized)
     return hosts
 
 
