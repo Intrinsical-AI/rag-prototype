@@ -15,6 +15,7 @@ Example:
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
@@ -238,6 +239,24 @@ class Settings(BaseSettings):
             db_path = self.sqlite_url[10:]  # Remove 'sqlite:///'
             return Path(db_path)
         raise ValueError("Invalid SQLite URL format")
+
+    def get_coordination_dir(self) -> Path:
+        """
+        Return the directory used for cross-process coordination artifacts.
+
+        Priority:
+        - Explicit non-default `data_dir` (user intent).
+        - Parent dir of absolute SQLite path (keeps workers aligned on shared DB).
+        - Resolved `data_dir` fallback.
+        """
+        data_dir = Path(self.data_dir).expanduser()
+        if data_dir != Path("data"):
+            return data_dir.resolve()
+        with suppress(Exception):
+            db_path = self.get_database_path().expanduser()
+            if db_path.is_absolute():
+                return db_path.parent.resolve()
+        return data_dir.resolve()
 
 
 # Global settings instance
