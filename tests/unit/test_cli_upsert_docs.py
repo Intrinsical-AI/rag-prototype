@@ -26,3 +26,27 @@ def test_cli_upsert_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch)
     docs = SqlDocumentStorage().get_all_documents()
     assert len(docs) == 2
     assert {d.external_id for d in docs} == {"doc-1", "doc-2"}
+
+
+def test_cli_upsert_docs_dense_embed_failure_does_not_persist_sql(in_memory_sqlite, monkeypatch):
+    class BadEmbedder:
+        dim = 4
+
+        def embed(self, texts):
+            raise RuntimeError("embed fail")
+
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
+        lambda *a, **k: BadEmbedder(),
+        raising=True,
+    )
+
+    r = CliRunner().invoke(
+        cli,
+        ["upsert-docs", "--external-id", "doc-1", "--content", "hello"],
+    )
+    assert r.exit_code == 1
+    assert "embed fail" in r.output
+    assert SqlDocumentStorage().get_all_documents() == []

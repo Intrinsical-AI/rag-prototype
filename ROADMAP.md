@@ -17,7 +17,9 @@
     -- Store
     -- Update (Insert/Upsert) policy
 
-- Retrieval 
+- Search
+
+- Retrieval // Reranking
     -- Bi-Encoders
     -- Cross-Encoders [F]
     -- ColBERT / ColBERTv2 [F]
