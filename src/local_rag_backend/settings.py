@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     ingest_chunk_strategy: Literal["chars_v1"] = Field(
         "chars_v1", description="Chunking strategy identifier (deterministic)."
     )
+    ingest_chunker_version: str = Field(
+        "chars_v1",
+        description=(
+            "Version token included in dedup hashes to force re-chunk/re-embed when changed "
+            "(even if the strategy name stays the same)."
+        ),
+    )
     ingest_chunk_chars: int = Field(1200, ge=200, le=8000, description="Chunk size in characters.")
     ingest_chunk_overlap: int = Field(200, ge=0, le=4000, description="Overlap between chunks.")
     csv_has_header: bool = Field(True, description="Whether CSV files have header rows.")
