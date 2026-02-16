@@ -97,13 +97,15 @@ class FaissVectorStorage(VectorRepoPort):
 
     def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         """Add vectors to the FAISS index."""
-        self.faiss_index.add_to_index(list(ids), list(vectors))
+        # Guard first: if manifest drifts from current settings, fail before mutating index files.
         self._ensure_manifest(overwrite=False)
+        self.faiss_index.add_to_index(list(ids), list(vectors))
 
     def delete(self, ids: Sequence[int]) -> None:
         """Delete vectors from the index (may rebuild the underlying index)."""
-        self.faiss_index.delete_ids(list(ids))
+        # Guard first: if manifest drifts from current settings, fail before mutating index files.
         self._ensure_manifest(overwrite=False)
+        self.faiss_index.delete_ids(list(ids))
 
     def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         """Rebuild the full index from scratch (idempotent)."""

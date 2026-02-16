@@ -56,3 +56,48 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     docs3 = SqlDocumentStorage().get_all_documents()
     assert len(docs3) == 4  # 1 (txt) + 1 (md) + 2 (csv)
     assert sum(1 for d in docs3 if (d.source_id or "").endswith("a.txt")) == 1
+
+
+def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
+    in_memory_sqlite, tmp_path, monkeypatch
+):
+    class BadEmbedder:
+        dim = 4
+
+        def embed(self, texts):
+            raise RuntimeError("embed fail")
+
+    class DummyVec:
+        def __init__(self, *a, **k):
+            return None
+
+        def delete(self, ids):
+            return None
+
+        def upsert(self, ids, vectors):
+            return None
+
+        def rebuild(self, ids, vectors):
+            return None
+
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
+        lambda *a, **k: BadEmbedder(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        lambda *a, **k: DummyVec(),
+        raising=True,
+    )
+
+    root = tmp_path / "in"
+    root.mkdir()
+    (root / "a.txt").write_text("hello", encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    assert r.exit_code == 1
+    assert "embed fail" in r.output
+    assert SqlDocumentStorage().get_all_documents() == []
