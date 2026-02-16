@@ -15,6 +15,7 @@ from fastapi import HTTPException, Request
 from local_rag_backend.settings import settings
 
 API_KEY_HEADER = "X-API-Key"
+_LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def enforce_safe_bind_config() -> None:
@@ -49,6 +50,17 @@ async def require_api_key(request: Request) -> None:
     """
     expected = settings.api_key
     if not expected:
+        if not getattr(settings, "public_bind_requires_api_key", True):
+            return
+        client_host = ((request.client.host if request.client else "") or "").strip().lower()
+        if client_host and client_host not in _LOCALHOST_HOSTS:
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Unauthorized: API key is required for non-local requests. "
+                    "Set API_KEY or disable PUBLIC_BIND_REQUIRES_API_KEY explicitly."
+                ),
+            )
         return
 
     provided = request.headers.get(API_KEY_HEADER) or ""
