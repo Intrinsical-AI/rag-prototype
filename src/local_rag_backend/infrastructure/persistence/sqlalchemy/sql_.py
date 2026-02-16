@@ -30,6 +30,25 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
 
 
+def _normalize_external_ids(external_ids: Sequence[str]) -> list[str]:
+    """
+    Normalize external IDs for delete/tombstone operations.
+
+    - Strip whitespace
+    - Drop blanks
+    - Deduplicate while preserving order
+    """
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in external_ids:
+        ext = str(raw).strip()
+        if not ext or ext in seen:
+            continue
+        seen.add(ext)
+        normalized.append(ext)
+    return normalized
+
+
 @contextmanager
 def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
     """Provide a transactional scope around a series of operations."""
@@ -299,7 +318,7 @@ class SqlDocumentStorage(DocumentRepoPort):
             return out
 
     def get_tombstoned_external_ids(self, external_ids: Sequence[str]) -> set[str]:
-        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return set()
         with get_session(self._session_factory) as session:
@@ -311,7 +330,7 @@ class SqlDocumentStorage(DocumentRepoPort):
             return {str(r[0]) for r in rows if r and r[0]}
 
     def tombstone_external_ids(self, external_ids: Sequence[str]) -> int:
-        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return 0
 
@@ -339,7 +358,7 @@ class SqlDocumentStorage(DocumentRepoPort):
 
         Returns: (deleted_sql, deleted_ids, missing_external_ids, tombstoned)
         """
-        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return 0, [], [], 0
 
