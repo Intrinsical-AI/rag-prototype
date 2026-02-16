@@ -57,6 +57,26 @@ def delete_documents_multi_store(
     if not ids_list:
         return 0, 0 if vec_repo else None, False
 
+    resolved_embedder = embedder
+
+    # Preflight vector mutability before SQL delete when rebuild fallback would require
+    # an embedder we don't have yet. This avoids deleting SQL first and then discovering
+    # we can't repair dense/hybrid drift.
+    if vec_repo is not None and rebuild_on_index_failure and resolved_embedder is None:
+        try:
+            vec_repo.delete([])
+        except Exception as preflight_err:
+            if embedder_factory is not None:
+                try:
+                    resolved_embedder = embedder_factory()
+                except Exception:
+                    resolved_embedder = None
+            if resolved_embedder is None:
+                raise RuntimeError(
+                    "Vector index preflight failed and no embeddings backend is available for "
+                    "rebuild fallback. Aborting SQL delete to avoid multi-store drift."
+                ) from preflight_err
+
     # SQL delete first. If this succeeds but index delete fails, we can rebuild index from DB.
     before = len(list(doc_repo.get(ids_list)))
     doc_repo.delete_documents(ids_list)
@@ -69,14 +89,20 @@ def delete_documents_multi_store(
         deleted_index_raw = vec_repo.delete(ids_list)
         deleted_index = int(deleted_index_raw) if deleted_index_raw is not None else len(ids_list)
         return deleted_sql, deleted_index, False
-    except Exception:
+    except Exception as delete_err:
         if not rebuild_on_index_failure:
             raise
-        resolved_embedder = embedder
         if resolved_embedder is None and embedder_factory is not None:
-            resolved_embedder = embedder_factory()
+            try:
+                resolved_embedder = embedder_factory()
+            except Exception:
+                resolved_embedder = None
         if resolved_embedder is None:
-            raise
+            raise RuntimeError(
+                "Multi-store inconsistency risk: SQL delete succeeded but vector index delete "
+                "failed and no embeddings backend is available for rebuild fallback. "
+                "Configure embeddings and run `rag-rebuild-index` / POST /api/index/rebuild."
+            ) from delete_err
         try:
             rebuilt = rebuild_index_from_db(
                 doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder
