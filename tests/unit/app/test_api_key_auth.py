@@ -1,5 +1,7 @@
+import httpx
 import pytest
 
+from local_rag_backend.app.main import app
 from local_rag_backend.settings import settings
 
 
@@ -19,3 +21,36 @@ async def test_api_key_required_when_configured(asgi_client, in_memory_sqlite, m
 
     r4 = await asgi_client.get("/metrics", headers={"X-API-Key": "secret"})
     assert r4.status_code == 200
+
+
+@pytest.mark.unit
+async def test_non_local_requests_require_api_key_when_public_bind_guard_enabled(
+    in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "api_key", None, raising=False)
+    monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(
+            app=app, raise_app_exceptions=True, client=("203.0.113.7", 4242)
+        )
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get("/api/health")
+
+    assert r.status_code == 401
+    assert "non-local requests" in r.json()["detail"]
+
+
+@pytest.mark.unit
+async def test_non_local_requests_can_be_allowed_explicitly(in_memory_sqlite, monkeypatch):
+    monkeypatch.setattr(settings, "api_key", None, raising=False)
+    monkeypatch.setattr(settings, "public_bind_requires_api_key", False, raising=False)
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(
+            app=app, raise_app_exceptions=True, client=("203.0.113.9", 9000)
+        )
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get("/api/health")
+
+    assert r.status_code == 200
