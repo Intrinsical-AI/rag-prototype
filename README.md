@@ -262,6 +262,10 @@ rag-upsert-docs --external-id doc-1 --content "hello"
 
 # Summarized system and files status
 rag-status
+
+
+# Offline retrieval evaluation (reproducible gate; default dataset is packaged)
+rag-eval --retrieval-mode sparse
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
@@ -271,6 +275,22 @@ Optional: better file type detection (best-effort) using `python-magic`:
 ```bash
 uv sync --frozen --extra magic
 # or: pip install rag-prototype[magic]
+```
+
+Optional: Prometheus metrics (`/metrics`) and structured-ish domain metrics:
+
+```bash
+uv sync --frozen --extra monitoring
+# then:
+export ENABLE_MONITORING=true
+rag-server
+```
+
+Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
+
+```bash
+export ENABLE_RERANKER=true
+export RERANKER_CANDIDATE_K=20
 ```
 
 ### Ingestion pipeline
