@@ -135,6 +135,7 @@ def ensure_sqlite_documents_identity_columns(*, engine_to_use: Engine | None = N
         "source_id",
         "metadata",
         "content_sha256",
+        "chunk_dedup_sha256",
         "created_at",
         "updated_at",
     }
@@ -158,6 +159,8 @@ def ensure_sqlite_documents_identity_columns(*, engine_to_use: Engine | None = N
             conn.execute(text("ALTER TABLE documents ADD COLUMN metadata TEXT"))
         if "content_sha256" in missing:
             conn.execute(text("ALTER TABLE documents ADD COLUMN content_sha256 TEXT"))
+        if "chunk_dedup_sha256" in missing:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN chunk_dedup_sha256 TEXT"))
         if "created_at" in missing:
             conn.execute(text("ALTER TABLE documents ADD COLUMN created_at DATETIME"))
         if "updated_at" in missing:
@@ -168,6 +171,12 @@ def ensure_sqlite_documents_identity_columns(*, engine_to_use: Engine | None = N
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_documents_external_id "
                 "ON documents(external_id) WHERE external_id IS NOT NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_documents_chunk_dedup_sha256 "
+                "ON documents(chunk_dedup_sha256) WHERE chunk_dedup_sha256 IS NOT NULL"
             )
         )
         conn.execute(

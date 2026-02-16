@@ -31,6 +31,8 @@ class Document(Base):
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
     # Hash of raw content for dedup/update decisions. Filled best-effort for legacy rows.
     content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional dedup hash for chunk-level ingestion flows (PR7). Unique when present (partial index).
+    chunk_dedup_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

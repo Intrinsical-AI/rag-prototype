@@ -101,6 +101,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         content: str
         source_id: str | None = None
         metadata: Mapping[str, Any] | None = None
+        chunk_dedup_sha256: str | None = None
 
     @dataclass(frozen=True)
     class UpsertResult:
@@ -156,6 +157,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                         source_id=item.source_id,
                         metadata_=dict(item.metadata) if item.metadata is not None else None,
                         content_sha256=sha,
+                        chunk_dedup_sha256=item.chunk_dedup_sha256,
                     )
                     session.add(new_doc)
                     session.flush()  # allocate PK
@@ -183,7 +185,13 @@ class SqlDocumentStorage(DocumentRepoPort):
                 if item.source_id is not None:
                     source_changed = item.source_id != getattr(db_doc, "source_id", None)
 
-                if not (content_changed or metadata_changed or source_changed):
+                dedup_changed = False
+                if item.chunk_dedup_sha256 is not None:
+                    dedup_changed = item.chunk_dedup_sha256 != getattr(
+                        db_doc, "chunk_dedup_sha256", None
+                    )
+
+                if not (content_changed or metadata_changed or source_changed or dedup_changed):
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
@@ -204,6 +212,8 @@ class SqlDocumentStorage(DocumentRepoPort):
                     db_doc.source_id = item.source_id
                 if item.metadata is not None:
                     db_doc.metadata_ = dict(item.metadata)
+                if item.chunk_dedup_sha256 is not None:
+                    db_doc.chunk_dedup_sha256 = item.chunk_dedup_sha256
 
                 results.append(
                     SqlDocumentStorage.UpsertResult(
