@@ -34,6 +34,12 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     assert len(docs1) == 6  # 3 (txt) + 1 (md) + 2 (csv rows)
     assert all(d.external_id and d.external_id.startswith("file:") for d in docs1)
     assert sum(1 for d in docs1 if (d.source_id or "").endswith("a.txt")) == 3
+    # Prepared metadata for future parent-doc retrieval.
+    a_chunks = [d for d in docs1 if (d.source_id or "").endswith("a.txt")]
+    assert all((d.metadata or {}).get("chunk_index") is not None for d in a_chunks)
+    assert all((d.metadata or {}).get("parent_doc_id") is not None for d in a_chunks)
+    assert all((d.metadata or {}).get("chunk_start_char") is not None for d in a_chunks)
+    assert all((d.metadata or {}).get("chunk_end_char") is not None for d in a_chunks)
 
     r2 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert r2.exit_code == 0, r2.output
