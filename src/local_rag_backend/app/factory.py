@@ -15,9 +15,9 @@ from time import time_ns
 from typing import TYPE_CHECKING
 
 from local_rag_backend.app.composition import (
-    build_dense_embedder_from_settings,
     build_generator_from_settings,
-    build_retriever_from_settings,
+    build_retriever_with_default_embedder_from_settings,
+    resolve_preferred_llm_provider,
 )
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -43,33 +43,12 @@ if TYPE_CHECKING:
 
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
-        EmbedderPort,
         GeneratorPort,
         QAHistoryPort,
         RetrieverPort,
     )
 
 _RELOAD_TOKEN_FILENAME = ".rag_service_reload_token"  # noqa: S105
-
-
-def _build_embedder() -> EmbedderPort:
-    """
-    Choose an embedder for dense/hybrid retrieval.
-
-    Preference order:
-    1) OpenAI embeddings when `OPENAI_API_KEY` is configured (no heavy deps).
-    2) SentenceTransformers when installed (requires `dense-st` extra).
-    """
-    return build_dense_embedder_from_settings(
-        settings_obj=settings,
-        openai_embedder_factory=OpenAIEmbedder,
-        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-        missing_backend_message=(
-            "Dense/hybrid retrieval requires an embeddings backend. "
-            "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
-            "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
-        ),
-    )
 
 
 def build_rag_service() -> RagService:
@@ -80,11 +59,12 @@ def build_rag_service() -> RagService:
     doc_repo: DocumentRepoPort = SqlDocumentStorage()
 
     # 2. Retriever Port
-    retriever: RetrieverPort = build_retriever_from_settings(
+    retriever: RetrieverPort = build_retriever_with_default_embedder_from_settings(
         settings_obj=settings,
         retrieval_mode=settings.retrieval_mode,
         doc_repo=doc_repo,
-        dense_embedder_factory=_build_embedder,
+        openai_embedder_factory=OpenAIEmbedder,
+        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
         sparse_retriever_factory=SparseBM25Retriever,
         dense_retriever_factory=DenseFaissRetriever,
         hybrid_retriever_factory=HybridRetriever,
@@ -93,9 +73,7 @@ def build_rag_service() -> RagService:
 
     # 3. Generator Port
     generator: GeneratorPort
-    preferred_provider = "ollama" if settings.ollama_enabled else "openai" if settings.openai_api_key else None
-    if preferred_provider is None:
-        raise RuntimeError("No LLM configured. Set OPENAI_API_KEY or enable OLLAMA_ENABLED.")
+    preferred_provider = resolve_preferred_llm_provider(settings_obj=settings)
     generator = build_generator_from_settings(
         settings_obj=settings,
         llm_provider=preferred_provider,

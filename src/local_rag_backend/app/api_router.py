@@ -20,7 +20,7 @@ from local_rag_backend.app.blocking import run_blocking
 from local_rag_backend.app.composition import (
     build_dense_embedder_from_settings,
     build_generator_from_settings,
-    build_retriever_from_settings,
+    build_retriever_with_default_embedder_from_settings,
     get_available_llm_providers as get_available_llm_providers_from_settings,
 )
 from local_rag_backend.app.dependencies import get_rag_service, reset_rag_service
@@ -761,11 +761,16 @@ def _build_retriever_from_config(
 ) -> RetrieverPort:
     """Build a retriever instance based on dynamic configuration."""
     try:
-        return build_retriever_from_settings(
+        return build_retriever_with_default_embedder_from_settings(
             settings_obj=settings,
             retrieval_mode=cfg.retrieval_mode,
             doc_repo=doc_repo,
-            dense_embedder_factory=_build_embedder_for_dense,
+            openai_embedder_factory=OpenAIEmbedder,
+            st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
+            missing_backend_message=(
+                "Dense/hybrid operations require an embeddings backend. "
+                "Set OPENAI_API_KEY or install the 'dense-st' extra."
+            ),
             preloaded_docs=preloaded_docs,
             hybrid_alpha=cfg.hybrid_alpha,
             enable_reranker=settings.enable_reranker,
