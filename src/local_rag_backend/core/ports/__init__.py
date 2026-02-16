@@ -52,7 +52,7 @@ class VectorRepoPort(Protocol):
     """Interface for storing and searching vector embeddings."""
 
     def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
-    def delete(self, ids: Sequence[int]) -> None:
+    def delete(self, ids: Sequence[int]) -> int:
         """Delete vectors for given IDs (best-effort; may rebuild index)."""
         ...
 

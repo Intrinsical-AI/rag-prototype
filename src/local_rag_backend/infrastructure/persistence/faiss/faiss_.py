@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
 from local_rag_backend.infrastructure.persistence.faiss.manifest import (
-    build_expected_manifest_config,
     create_manifest_if_missing_for_settings,
+    expected_manifest_config_from_settings,
     manifest_path_for,
     overwrite_manifest_for_settings,
     read_manifest,
@@ -33,18 +33,7 @@ class FaissVectorStorage(VectorRepoPort):
         self.faiss_index = FaissIndex(index_path, id_map_path, dim)
 
     def _expected_manifest_config(self) -> dict[str, str]:
-        embedding_backend = "openai" if bool(settings.openai_api_key) else "sentence_transformers"
-        embedding_model = (
-            settings.openai_embedding_model
-            if bool(settings.openai_api_key)
-            else settings.st_embedding_model
-        )
-        return build_expected_manifest_config(
-            embedding_backend=embedding_backend,
-            embedding_model=embedding_model,
-            chunker_strategy=settings.ingest_chunk_strategy,
-            chunker_version=settings.ingest_chunker_version,
-        )
+        return expected_manifest_config_from_settings(settings)
 
     def _ensure_manifest(self, *, overwrite: bool) -> None:
         """
@@ -115,11 +104,11 @@ class FaissVectorStorage(VectorRepoPort):
         self._ensure_manifest(overwrite=False)
         self.faiss_index.add_to_index(list(ids), list(vectors))
 
-    def delete(self, ids: Sequence[int]) -> None:
+    def delete(self, ids: Sequence[int]) -> int:
         """Delete vectors from the index (may rebuild the underlying index)."""
         # Guard first: if manifest drifts from current settings, fail before mutating index files.
         self._ensure_manifest(overwrite=False)
-        self.faiss_index.delete_ids(list(ids))
+        return self.faiss_index.delete_ids(list(ids))
 
     def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         """Rebuild the full index from scratch (idempotent)."""

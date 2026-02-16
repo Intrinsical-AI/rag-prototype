@@ -19,6 +19,7 @@ from openai import OpenAI
 
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.core.services.prompting import render_prompt_template
+from local_rag_backend.infrastructure.llms.openai_client import create_openai_client
 from local_rag_backend.settings import settings
 
 __all__ = ["OpenAIGenerator"]
@@ -48,22 +49,13 @@ class OpenAIGenerator(GeneratorPort):
         self.max_tokens = max_tokens if max_tokens is not None else settings.openai_max_tokens
         self.prompt_template = prompt_template or settings.openai_prompt_template
 
-        try:
-            self.client = OpenAI(
-                api_key=resolved_key,
-                base_url=base_url,
-                default_headers=extra_headers,
-                timeout=settings.openai_request_timeout,
-            )
-        except TypeError as e:
-            # Compatibility fallback for test doubles/older SDK variants that don't accept `timeout`.
-            if "timeout" not in str(e):
-                raise
-            self.client = OpenAI(
-                api_key=resolved_key,
-                base_url=base_url,
-                default_headers=extra_headers,
-            )
+        self.client = create_openai_client(
+            api_key=resolved_key,
+            base_url=base_url,
+            default_headers=extra_headers,
+            timeout=settings.openai_request_timeout,
+            client_factory=OpenAI,
+        )
 
     def _build_prompt(self, question: str, contexts: Sequence[str]) -> str:
         """Build the prompt string for the OpenAI API."""
