@@ -96,11 +96,6 @@ def _build_dense_embedder() -> EmbedderPort:
         settings_obj=settings,
         openai_embedder_factory=OpenAIEmbedder,
         st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-        missing_backend_message=(
-            "Dense/hybrid retrieval requires an embeddings backend. "
-            "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
-            "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
-        ),
     )
 
 
