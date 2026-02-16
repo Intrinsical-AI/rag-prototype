@@ -24,6 +24,23 @@ from local_rag_backend.app.diagnostics import (
 from local_rag_backend.settings import settings
 
 
+def _ensure_sqlite_schema_for_cli() -> None:
+    """
+    Ensure SQLite schema is compatible with the current ORM mappings.
+
+    CLI commands can be run without starting the FastAPI server, so they must
+    apply the same best-effort SQLite migrations that the app does at startup.
+    """
+    from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    db_base.Base.metadata.create_all(bind=db_base.engine)
+    db_base.ensure_sqlite_documents_autoincrement(
+        engine_to_use=db_base.engine, id_map_path=str(settings.id_map_path)
+    )
+    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=db_base.engine)
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="rag-prototype")
 def cli() -> None:
@@ -52,6 +69,7 @@ def server() -> None:
 def build_index() -> None:
     """Build FAISS index from existing documents."""
     try:
+        _ensure_sqlite_schema_for_cli()
         # Import here to avoid circular imports
         from local_rag_backend.scripts.build_index import main as build_main
 
@@ -69,6 +87,7 @@ def build_index() -> None:
 def rebuild_index() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
     try:
+        _ensure_sqlite_schema_for_cli()
         from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.maintenance import rebuild_index_from_db
         from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -107,6 +126,7 @@ def delete_docs(ids: tuple[int, ...]) -> None:
         sys.exit(2)
 
     try:
+        _ensure_sqlite_schema_for_cli()
         from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.maintenance import delete_documents_multi_store
         from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -176,6 +196,7 @@ def upsert_docs(
 ) -> None:
     """Upsert documents by external_id (idempotent)."""
     try:
+        _ensure_sqlite_schema_for_cli()
         from typing import Any, cast
 
         from local_rag_backend.app.factory import reset_rag_service
@@ -273,6 +294,7 @@ def upsert_docs(
 def bootstrap() -> None:
     """Bootstrap database with sample data."""
     try:
+        _ensure_sqlite_schema_for_cli()
         # Import here to avoid circular imports
         from local_rag_backend.scripts.bootstrap import main as bootstrap_main
 
@@ -290,6 +312,8 @@ def bootstrap() -> None:
 def status() -> None:
     """Display system status and configuration."""
     from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+
+    _ensure_sqlite_schema_for_cli()
 
     # Styles
     title_fg = "cyan"
@@ -467,6 +491,7 @@ def ingest(
         sys.exit(2)
 
     try:
+        _ensure_sqlite_schema_for_cli()
         from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.chunking import chunk_chars_v1
         from local_rag_backend.core.services.ingestion import (

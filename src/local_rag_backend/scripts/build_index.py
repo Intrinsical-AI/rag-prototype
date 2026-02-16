@@ -67,6 +67,7 @@ def main() -> None:
         db_base.ensure_sqlite_documents_autoincrement(
             engine_to_use=script_engine, id_map_path=str(settings.id_map_path)
         )
+        db_base.ensure_sqlite_documents_identity_columns(engine_to_use=script_engine)
         logger.info("Database schema ensured (tables created if they didn't exist).")
     except Exception as e:
         logger.error(f"Failed to ensure database schema: {e}", exc_info=True)

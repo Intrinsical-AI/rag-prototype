@@ -53,6 +53,7 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
     db_base.ensure_sqlite_documents_autoincrement(
         engine_to_use=engine, id_map_path=str(settings.id_map_path)
     )
+    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=engine)
 
     # 2) Determine CSV path (explicit -> settings -> repo fallback)
     csv_path_obj = Path(settings.faq_csv) if csv_path is None else Path(csv_path)
