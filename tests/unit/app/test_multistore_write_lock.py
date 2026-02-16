@@ -147,3 +147,26 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
     # Final SQL state must match final vector state (latest content = B -> vector 2.0).
     assert FakeRepo._by_external_id["doc-1"][1] == "B"
     assert fake_vec.by_id[1] == [2.0]
+
+
+async def test_docs_ingest_executes_single_locked_mutation_pass(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    called_funcs: list[str] = []
+
+    async def _fake_run_blocking(func, /, *args, **kwargs):
+        called_funcs.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(api, "run_blocking", _fake_run_blocking, raising=True)
+    monkeypatch.setattr(api, "reset_rag_service", lambda: None, raising=True)
+
+    resp = await asgi_client.post("/api/docs", json={"texts": ["  hello world  "]})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["count"] >= 1
+
+    # Regression guard: /api/docs must run exactly one sync ingestion path under the lock wrapper.
+    assert called_funcs.count("_run_multi_store_write_locked") == 1
+    assert "_ingest_sync" not in called_funcs
