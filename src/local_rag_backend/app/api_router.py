@@ -292,7 +292,9 @@ async def ollama_health_check() -> dict[str, Any]:
         dict: A dictionary with the status of the Ollama server.
     """
     try:
-        response = await run_blocking(requests.get, settings.ollama_base_url, timeout=5)
+        response = await run_blocking(
+            requests.get, settings.ollama_base_url, timeout=5, task_type="network"
+        )
         response.raise_for_status()
         return {"status": "ok", "url": settings.ollama_base_url}
     except requests.exceptions.RequestException as e:
@@ -426,7 +428,12 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     ok = False
     ids: list[int] = []
     try:
-        ids = cast("list[int]", await run_blocking(_run_multi_store_write_locked, _ingest_operation))
+        ids = cast(
+            "list[int]",
+            await run_blocking(
+                _run_multi_store_write_locked, _ingest_operation, task_type="mutation"
+            ),
+        )
         ok = True
         return IngestResponse(count=len(ids), ids=ids)
     except RuntimeError as e:
@@ -473,7 +480,9 @@ async def delete_docs_by_external_id(
     try:
         summary = cast(
             "docs_service.DeleteDocsByExternalIdSummary",
-            await run_blocking(_run_multi_store_write_locked, _delete_operation),
+            await run_blocking(
+                _run_multi_store_write_locked, _delete_operation, task_type="mutation"
+            ),
         )
         return DeleteDocsByExternalIdResponse(
             deleted_sql=summary.deleted_sql,
@@ -501,7 +510,9 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
     try:
         summary = cast(
             "docs_service.DeleteDocsSummary",
-            await run_blocking(_run_multi_store_write_locked, _delete_operation),
+            await run_blocking(
+                _run_multi_store_write_locked, _delete_operation, task_type="mutation"
+            ),
         )
         return DeleteDocsResponse(
             deleted_sql=summary.deleted_sql,
@@ -529,7 +540,9 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
     try:
         summary = cast(
             "docs_service.UpsertDocsSummary",
-            await run_blocking(_run_multi_store_write_locked, _upsert_operation),
+            await run_blocking(
+                _run_multi_store_write_locked, _upsert_operation, task_type="mutation"
+            ),
         )
         return UpsertDocsResponse(
             inserted=summary.inserted,
@@ -570,7 +583,12 @@ async def rebuild_index() -> RebuildIndexResponse:
         )
 
     try:
-        indexed = cast("int", await run_blocking(_run_multi_store_write_locked, _rebuild_operation))
+        indexed = cast(
+            "int",
+            await run_blocking(
+                _run_multi_store_write_locked, _rebuild_operation, task_type="mutation"
+            ),
+        )
         return RebuildIndexResponse(indexed=indexed)
     finally:
         reset_rag_service()
@@ -660,7 +678,7 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return rag_result, latency_ms
 
-    rag_result, latency_ms = await run_blocking(_run_eval_sync)
+    rag_result, latency_ms = await run_blocking(_run_eval_sync, task_type="eval")
     docs = rag_result["docs"]
     scores = rag_result["scores"]
     sources = [
@@ -740,7 +758,7 @@ async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterG
         )
 
     try:
-        resp = await run_blocking(_create_sync)
+        resp = await run_blocking(_create_sync, task_type="network")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
 

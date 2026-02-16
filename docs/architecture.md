@@ -208,6 +208,11 @@ sequenceDiagram
 
 `/api/history` reads persisted Q\&A with pagination.
 
+Async/sync boundary:
+- FastAPI handlers call sync core/infra paths via `app/blocking.py`.
+- Blocking work is partitioned by task type (`default`, `mutation`, `network`, `eval`) with
+  dedicated worker pools and queue limits to reduce event-loop starvation risk.
+
 ---
 
 ## Multi-Store Consistency (SQLite + FAISS)

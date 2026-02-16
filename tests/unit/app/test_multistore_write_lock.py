@@ -155,8 +155,10 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
     called_funcs: list[str] = []
+    called_task_types: list[str] = []
 
     async def _fake_run_blocking(func, /, *args, **kwargs):
+        called_task_types.append(str(kwargs.pop("task_type", "default")))
         called_funcs.append(getattr(func, "__name__", repr(func)))
         return func(*args, **kwargs)
 
@@ -171,6 +173,7 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
 
     # Regression guard: /api/docs must run exactly one sync ingestion path under the lock wrapper.
     assert called_funcs.count("_run_multi_store_write_locked") == 1
+    assert called_task_types == ["mutation"]
     assert "_ingest_sync" not in called_funcs
 
 
