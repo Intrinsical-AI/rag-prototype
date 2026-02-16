@@ -23,7 +23,6 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocu
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 if TYPE_CHECKING:
-
     from local_rag_backend.core.ports import RetrieverPort
 
 
