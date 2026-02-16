@@ -171,6 +171,11 @@ Key variables (non-exhaustive):
 | `OLLAMA_BASE_URL`                | `http://localhost:11434`  | Ollama       | Server URL                                             |
 | `OLLAMA_REQUEST_TIMEOUT`         | `180`                     | Ollama       | Timeout (s)                                            |
 
+### Proxy security note
+
+When exposing this service behind a reverse proxy, keep `API_KEY` enabled and ensure the proxy sanitizes forwarding headers.
+Runtime auth guards evaluate client origin using `X-Forwarded-For` and RFC 7239 `Forwarded`; untrusted/unsanitized header chains can weaken source attribution.
+
 Example [`.env`](.env.example):
 
 ```env
@@ -399,6 +404,7 @@ docker build --target production .
 
   * Body: `{ "question": "str", "k": int (1..10, default 3) }`
   * Response: `{ "answer": "str", "sources": [ { "document": {"id": int, "content": "str"}, "score": float(0..1) }, ... ] }`
+* `POST /api/ask_eval` (ephemeral per-request RAG config for retrieval/generator evaluation)
 * `GET /api/history?limit=1..100&offset>=0`
 
   * Response: list of `{ id, question, answer, created_at, source_ids[] }`
@@ -417,6 +423,7 @@ Notes:
 * In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete`, `/api/docs/delete_by_external_id` (or `rag-delete-docs` / `rag-delete-external-ids`) instead of deleting rows manually.
 * Dense/hybrid delete flows try incremental index deletion first and trigger full rebuild only on failure.
 * In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
+* For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
 Example:
 
@@ -448,6 +455,10 @@ Current CI gates include:
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
 - security scan (`bandit` + `safety`) failing on findings
 - Docker build for `--target production` on `main/master`
+
+Workflow trigger note:
+- PRs/commits that only change docs (`**/*.md`, `docs/**`) do not trigger CI due to `paths-ignore` in `.github/workflows/ci.yml`.
+- Run local validation manually for doc-only changes when they alter architecture/API/operations guidance.
 
 For local parity, use:
 

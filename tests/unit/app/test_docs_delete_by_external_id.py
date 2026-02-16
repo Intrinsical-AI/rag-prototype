@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from local_rag_backend.app import api_router as api
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
@@ -191,3 +192,40 @@ async def test_delete_by_external_id_dense_does_not_require_embedder_on_successf
     assert payload["deleted_index"] == 1
     assert payload["rebuilt_index"] is False
     assert embedder_calls == 0
+
+
+async def test_delete_by_external_id_dense_preflight_failure_without_embedder_aborts_before_sql(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    r1 = await asgi_client.post(
+        "/api/docs/upsert",
+        json={"docs": [{"external_id": "doc-preflight-fail", "content": "hello"}]},
+    )
+    assert r1.status_code == 200
+
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+
+    class PreflightFailVec:
+        def delete(self, ids):
+            if not list(ids):
+                raise RuntimeError("manifest-drift")
+            return len(list(ids))
+
+    def _boom_embedder(**_kwargs):
+        raise RuntimeError("embedder-unavailable")
+
+    monkeypatch.setattr(api, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
+    monkeypatch.setattr(api, "FaissVectorStorage", lambda **_k: PreflightFailVec(), raising=True)
+
+    with pytest.raises(RuntimeError, match="Aborting SQL delete"):
+        await asgi_client.post(
+            "/api/docs/delete_by_external_id",
+            json={"external_ids": ["doc-preflight-fail"]},
+        )
+
+    docs = SqlDocumentStorage().get_all_documents()
+    assert len(docs) == 1
+    assert docs[0].external_id == "doc-preflight-fail"
+    assert not SqlDocumentStorage().get_tombstoned_external_ids(["doc-preflight-fail"])

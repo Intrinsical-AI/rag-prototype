@@ -7,7 +7,7 @@ The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Port
 * **Dependency Inversion**: the core depends on *ports* (interfaces), never on concrete implementations.
 * **Stable Core**: domain entities and services are tech-agnostic.
 * **Adapters at the Edge**: infrastructure code implements the ports.
-* **Composition Root**: `app/factory.py` wires ports to adapters based on settings.
+* **Composition Root**: `app/factory.py` wires ports to adapters based on settings, using shared adapter-selection helpers from `app/composition.py`.
 * **Testability**: adapters can be swapped for fakes/mocks; ports are `Protocol`s.
 
 ---
@@ -32,9 +32,15 @@ src/local_rag_backend/
 │   ├── dependencies.py         # DI bridge to factory
 │   ├── schemas.py              # Pydantic request/response schemas (API transport)
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
-│   └── factory.py              # Composition root (build retriever/LLM/services)
+│   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
+│   ├── factory.py              # Composition root (build retriever/LLM/services)
+│   └── services/evaluation.py  # App-level orchestration for offline eval (ephemeral infra wiring)
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
+
+Evaluation layering:
+- `core/services/evaluation.py` is technology-agnostic (dataset parsing + metric computation).
+- `app/services/evaluation.py` owns ephemeral SQL/retriever wiring for `rag-eval`.
 
 ---
 
@@ -68,7 +74,7 @@ graph TD
   A -->|DI via factory| C1 & C2 & C3 & D1 & D2 & E1 & S1 & V1
 ```
 
-The composition root `app/factory.py` chooses specific adapters (BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`.
+The composition root `app/factory.py` chooses specific adapters (BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`, with policy centralized in `app/composition.py` and reused by API/CLI/scripts.
 
 ---
 
@@ -106,7 +112,7 @@ class DocumentRepoPort(Protocol):
 @runtime_checkable
 class VectorRepoPort(Protocol):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
-    def delete(self, ids: Sequence[int]) -> None: ...
+    def delete(self, ids: Sequence[int]) -> int: ...
     def rebuild(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]: ...
 
@@ -201,7 +207,7 @@ In dense/hybrid retrieval, the system has **two stores**:
 
 ### Document Identity Contract
 
-The `documents` table is designed to support idempotent ingestion and future upserts:
+The `documents` table is designed to support idempotent ingestion and upserts (already available via API and CLI):
 
 * `id`: internal integer primary key (stable due to SQLite `AUTOINCREMENT`)
 * `external_id`: optional stable identifier for a source document (unique when set)
@@ -211,7 +217,10 @@ The `documents` table is designed to support idempotent ingestion and future ups
 * `created_at`, `updated_at`: timestamps
 
 These fields allow you to track and update documents without relying on brittle “row order” or
-manual deletion. API/CLI upserts will build on this contract in subsequent PRs.
+manual deletion. Current user-facing upsert flows are:
+
+* `POST /api/docs/upsert`
+* `rag-upsert-docs`
 
 The invariants that matter:
 
@@ -220,7 +229,10 @@ The invariants that matter:
 
 Maintenance logic lives in `src/local_rag_backend/core/services/maintenance.py`:
 
-* `delete_documents_multi_store(...)`: delete from SQLite, attempt to delete vectors, and optionally rebuild the full index if index deletion fails.
+* `delete_documents_multi_store(...)`:
+  * preflights index mutability (`vec_repo.delete([])`) before SQL delete when rebuild fallback would require a not-yet-resolved embedder,
+  * aborts before SQL mutation if preflight fails and no embedder is available for safe rebuild,
+  * otherwise deletes from SQLite, attempts vector deletion, and falls back to full rebuild when configured.
 * `rebuild_index_from_db(...)`: idempotent rebuild of FAISS from the current SQLite docs.
 
 Because the application caches a process-local singleton `RagService`, API/CLI maintenance operations call `reset_rag_service()` after mutating the DB and/or index so subsequent queries see the updated state.
@@ -233,7 +245,9 @@ The FastAPI router lives in `src/local_rag_backend/app/api_router.py` (mounted u
 In addition to `/api/ask` and `/api/history`, the project exposes:
 
 * `POST /api/docs` and `GET /api/docs` (ingest/list documents)
+* `POST /api/docs/upsert` (idempotent upsert by `external_id`)
 * `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
+* `POST /api/docs/delete_by_external_id` (delete by `external_id` + tombstones)
 * `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/ask_eval` (ephemeral per-request RAG configuration)
 * `POST /api/openrouter/generate` (OpenRouter proxy when configured)
