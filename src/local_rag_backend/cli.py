@@ -106,6 +106,12 @@ def rebuild_index() -> None:
             if settings.openai_api_key
             else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
         )
+        # Rebuild must be able to recover from an incompatible on-disk index (e.g. dim drift).
+        from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+            purge_index_artifacts,
+        )
+
+        purge_index_artifacts(index_path=settings.index_path, id_map_path=settings.id_map_path)
         vec = FaissVectorStorage(
             index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
         )
@@ -443,8 +449,23 @@ def status() -> None:
         click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
 
     if settings.retrieval_mode in ("dense", "hybrid"):
+        expected_manifest = {
+            "embedding_backend": (
+                "openai" if bool(settings.openai_api_key) else "sentence_transformers"
+            ),
+            "embedding_model": (
+                settings.openai_embedding_model
+                if bool(settings.openai_api_key)
+                else settings.st_embedding_model
+            ),
+            "chunker_strategy": settings.ingest_chunk_strategy,
+            "chunker_version": settings.ingest_chunker_version,
+        }
         stats = get_retrieval_index_stats(
-            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
+            index_path=settings.index_path,
+            id_map_path=settings.id_map_path,
+            dim=None,
+            expected_manifest=expected_manifest,
         )
         status_txt = str(stats.get("status"))
         if status_txt == "ok":
@@ -452,6 +473,10 @@ def status() -> None:
                 f"  {click.style('Index:', fg=key_fg, bold=True)} "
                 f"{stats.get('vectors')} vectors "
                 f"(dim={stats.get('dim')}, backend={stats.get('backend')})"
+            )
+            click.echo(
+                f"  {click.style('Manifest:', fg=key_fg, bold=True)} OK "
+                f"(path={stats.get('manifest_path')})"
             )
             if int(stats.get("duplicates") or 0):
                 click.echo(
@@ -473,6 +498,18 @@ def status() -> None:
                 f"[ERROR] {status_txt} "
                 f"(hint: {stats.get('hint')})"
             )
+            if status_txt == "drift":
+                mm = stats.get("manifest_mismatches") or []
+                if isinstance(mm, list) and mm:
+                    # Keep output short but actionable.
+                    sample = ", ".join(
+                        f"{m.get('key')}={m.get('actual')} (expected {m.get('expected')})"
+                        for m in mm[:3]
+                        if isinstance(m, dict)
+                    )
+                    click.echo(
+                        f"  {click.style('Manifest drift:', fg=key_fg, bold=True)} [ERROR] {sample}"
+                    )
 
 
 # Entry point functions for setuptools

@@ -33,18 +33,29 @@ def get_document_ids(engine: Engine, *, limit: int | None = None) -> list[int]:
 
 
 def get_retrieval_index_stats(
-    *, index_path: str | Path, id_map_path: str | Path, dim: int | None = None
+    *,
+    index_path: str | Path,
+    id_map_path: str | Path,
+    dim: int | None = None,
+    expected_manifest: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Return best-effort stats for the on-disk retrieval index.
 
     This is safe to call even when optional deps are missing. It returns:
-      - status: ok|missing|corrupt
+      - status: ok|missing|corrupt|drift
       - hint: remediation hint when not ok
       - vectors/id_map_len/unique_ids/duplicates/dim/backend when ok (best-effort)
     """
     idx_path = Path(index_path)
     map_path = Path(id_map_path)
+    from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+        manifest_path_for,
+        read_manifest,
+        validate_manifest,
+    )
+
+    manifest_path = manifest_path_for(idx_path)
 
     missing: list[str] = []
     if not idx_path.exists():
@@ -57,6 +68,7 @@ def get_retrieval_index_stats(
             "missing": missing,
             "index_path": str(idx_path),
             "id_map_path": str(map_path),
+            "manifest_path": str(manifest_path),
             "hint": "Create/rebuild the index (e.g. `rag-rebuild-index` or POST /api/index/rebuild).",
         }
 
@@ -74,6 +86,7 @@ def get_retrieval_index_stats(
             "status": "ok",
             "index_path": str(idx_path),
             "id_map_path": str(map_path),
+            "manifest_path": str(manifest_path),
             "backend": backend,
             "dim": int(idx.dim),
             "vectors": vectors,
@@ -91,12 +104,60 @@ def get_retrieval_index_stats(
             payload["error"] = "duplicate document IDs in id_map"
             payload["hint"] = "Rebuild the index to remove duplicates (e.g. `rag-rebuild-index`)."
 
+        # Manifest checks (drift detection against stable identifiers).
+        # Only override status when the underlying index/id_map is consistent.
+        try:
+            manifest = read_manifest(manifest_path)
+            payload["manifest_present"] = bool(manifest)
+            payload["manifest"] = manifest
+
+            if payload["status"] == "ok":
+                if manifest is None:
+                    payload["status"] = "drift"
+                    payload["error"] = "index manifest missing"
+                    payload["hint"] = (
+                        "Rebuild the index to generate a manifest and prevent config drift "
+                        "(e.g. `rag-rebuild-index`)."
+                    )
+                else:
+                    mismatches, errors = validate_manifest(
+                        manifest=manifest,
+                        expected_config=expected_manifest,
+                        actual_dimension=int(idx.dim),
+                        actual_index_backend=backend,
+                    )
+                    payload["manifest_errors"] = errors
+                    payload["manifest_mismatches"] = [
+                        {"key": m.key, "expected": m.expected, "actual": m.actual}
+                        for m in mismatches
+                    ]
+                    if errors:
+                        payload["status"] = "corrupt"
+                        payload["error"] = "invalid index manifest"
+                        payload["hint"] = (
+                            "Rebuild the index to repair the manifest (e.g. `rag-rebuild-index`)."
+                        )
+                    elif mismatches:
+                        payload["status"] = "drift"
+                        payload["error"] = "index manifest mismatch"
+                        payload["hint"] = (
+                            "Rebuild the index to remove drift (e.g. `rag-rebuild-index`)."
+                        )
+        except Exception as e:
+            if payload["status"] == "ok":
+                payload["status"] = "corrupt"
+                payload["error"] = f"manifest read/validation failed: {type(e).__name__}: {e}"
+                payload["hint"] = (
+                    "Rebuild the index to repair the manifest (e.g. `rag-rebuild-index`)."
+                )
+
         return payload
     except Exception as e:
         return {
             "status": "corrupt",
             "index_path": str(idx_path),
             "id_map_path": str(map_path),
+            "manifest_path": str(manifest_path),
             "error": f"{type(e).__name__}: {e}",
             "hint": "Rebuild the index (e.g. `rag-rebuild-index` or POST /api/index/rebuild).",
         }

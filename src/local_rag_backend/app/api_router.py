@@ -202,8 +202,23 @@ async def readiness_check() -> dict[str, Any]:
 
     # 4. Retrieval index (for dense/hybrid modes)
     if settings.retrieval_mode in ["dense", "hybrid"]:
+        expected_manifest = {
+            "embedding_backend": (
+                "openai" if bool(settings.openai_api_key) else "sentence_transformers"
+            ),
+            "embedding_model": (
+                settings.openai_embedding_model
+                if bool(settings.openai_api_key)
+                else settings.st_embedding_model
+            ),
+            "chunker_strategy": settings.ingest_chunk_strategy,
+            "chunker_version": settings.ingest_chunker_version,
+        }
         stats = get_retrieval_index_stats(
-            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
+            index_path=settings.index_path,
+            id_map_path=settings.id_map_path,
+            dim=None,
+            expected_manifest=expected_manifest,
         )
         checks["retrieval_index_stats"] = stats
 
@@ -667,6 +682,12 @@ async def rebuild_index() -> RebuildIndexResponse:
     def _rebuild_sync() -> RebuildIndexResponse:
         doc_repo = SqlDocumentStorage()
         embedder = _build_embedder_for_dense()
+        # Rebuild must be able to recover from an incompatible on-disk index (e.g. dim drift).
+        from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+            purge_index_artifacts,
+        )
+
+        purge_index_artifacts(index_path=settings.index_path, id_map_path=settings.id_map_path)
         vec = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
