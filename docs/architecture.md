@@ -142,7 +142,7 @@ class LoaderPort(Protocol):
 
 **App transport**
 
-* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas.py` (with a backward-compatible re-export shim at `src/local_rag_backend/models.py`).
+* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas.py`.
 
 **Ingestion**
 

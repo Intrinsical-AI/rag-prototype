@@ -54,14 +54,15 @@ Release 02-2026 (objetivo: 10 PRs, stacked):
 - Scope:
   - Reducir deuda de organización: evitar "cajón de sastre" en `src/local_rag_backend/*` raíz.
   - Mover piezas a su capa natural (sin romper compatibilidad de imports).
-- Propuesta concreta (con shims de compatibilidad):
-  - `src/local_rag_backend/models.py` (Pydantic API schemas) -> `src/local_rag_backend/app/schemas.py` + `models.py` como re-export.
-  - `src/local_rag_backend/prompting.py` (lógica de prompts) -> `src/local_rag_backend/core/services/prompting.py` + shim.
-  - `src/local_rag_backend/diagnostics.py` (ready/status) -> `src/local_rag_backend/app/diagnostics.py` o `src/local_rag_backend/infrastructure/monitoring/diagnostics.py` + shim.
-  - `src/local_rag_backend/utils.py` -> dividir en módulos con nombre (p.ej. `core/services/text_processing.py`, `core/services/corpus.py`) + shim.
+- Propuesta concreta (migración completa, sin shims):
+  - Eliminar módulos ambiguos en raíz y actualizar imports a ubicaciones definitivas:
+    - API schemas (Pydantic) -> `src/local_rag_backend/app/schemas.py`
+    - Prompting (lógica core) -> `src/local_rag_backend/core/services/prompting.py`
+    - Diagnostics (ready/status) -> `src/local_rag_backend/app/diagnostics.py`
+    - Text processing / corpus helpers -> `src/local_rag_backend/core/services/text_processing.py` y `src/local_rag_backend/core/services/corpus.py`
 - DoD:
   - Cero cambios funcionales (solo movimiento/organización).
-  - Imports antiguos siguen funcionando (compat).
+  - Superficie reducida: no quedan `models.py/prompting.py/diagnostics.py/utils.py` en raíz.
   - Tests + mypy + ruff + black en verde.
   - Docs actualizadas (rutas nuevas como source of truth).
 
