@@ -52,6 +52,21 @@ class ExistingStateRepoLike(Protocol):
     ) -> Mapping[str, ExistingStateLookupLike]: ...
 
 
+def _content_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _needs_embedding(item: UpsertItemLike, existing: Mapping[str, ExistingStateLookupLike]) -> bool:
+    current = existing.get(item.external_id)
+    if current is None:
+        return True
+
+    normalized_content = item.content.strip()
+    new_sha = _content_sha256(normalized_content)
+    old_sha = current.content_sha256 or ""
+    return old_sha != new_sha or current.content != normalized_content
+
+
 def precompute_vectors_for_changed_items(
     *,
     items: Sequence[UpsertItemLike],
@@ -69,17 +84,7 @@ def precompute_vectors_for_changed_items(
     existing_states = doc_repo.get_existing_doc_states_by_external_id(
         [it.external_id for it in items]
     )
-    to_embed: list[UpsertItemLike] = []
-    for it in items:
-        content = it.content.strip()
-        current = existing_states.get(it.external_id)
-        if current is None:
-            to_embed.append(it)
-            continue
-        content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        old_sha = current.content_sha256 or ""
-        if old_sha != content_sha or current.content != content:
-            to_embed.append(it)
+    to_embed = [it for it in items if _needs_embedding(it, existing_states)]
 
     if not to_embed:
         return {}
