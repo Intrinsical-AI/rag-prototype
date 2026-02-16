@@ -31,7 +31,16 @@ class OpenAIEmbedder(EmbedderPort):
         self.dim = _MODEL_DIM.get(self.model, 1536)
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required to use OpenAI embeddings.")
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        try:
+            self.client = OpenAI(
+                api_key=settings.openai_api_key,
+                timeout=settings.openai_request_timeout,
+            )
+        except TypeError as e:
+            # Compatibility fallback for test doubles/older SDK variants that don't accept `timeout`.
+            if "timeout" not in str(e):
+                raise
+            self.client = OpenAI(api_key=settings.openai_api_key)
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         if not texts:

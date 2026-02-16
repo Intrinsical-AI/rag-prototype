@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = Field(
         "text-embedding-3-small", description="Default OpenAI embedding model."
     )
+    openai_request_timeout: int = Field(
+        60,
+        ge=1,
+        le=600,
+        description="Timeout in seconds for OpenAI-compatible HTTP requests.",
+    )
     openai_temperature: float = Field(0.2, ge=0.0, le=2.0, description="OpenAI temperature.")
     openai_top_p: float = Field(1.0, ge=0.0, le=1.0, description="OpenAI top_p parameter.")
     openai_max_tokens: int = Field(256, ge=1, le=4096, description="OpenAI max tokens.")

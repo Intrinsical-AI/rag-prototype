@@ -1046,11 +1046,22 @@ async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterG
         headers["X-Title"] = settings.openrouter_app_title
 
     def _create_sync() -> Any:
-        client = OpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
-            default_headers=headers or None,
-        )
+        try:
+            client = OpenAI(
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+                default_headers=headers or None,
+                timeout=settings.openai_request_timeout,
+            )
+        except TypeError as e:
+            # Compatibility fallback for test doubles/older SDK variants that don't accept `timeout`.
+            if "timeout" not in str(e):
+                raise
+            client = OpenAI(
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+                default_headers=headers or None,
+            )
         return client.chat.completions.create(
             model=(payload.model or settings.openrouter_model),
             temperature=payload.temperature,
