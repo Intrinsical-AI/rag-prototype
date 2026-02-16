@@ -27,3 +27,20 @@ def test_rag_status_reports_missing_index_in_dense_mode(in_memory_sqlite, tmp_pa
     assert r.exit_code == 0, r.output
     assert "Index:" in r.output
     assert "missing" in r.output
+
+
+def test_rag_status_reports_manifest_missing_in_dense_mode(in_memory_sqlite, tmp_path, monkeypatch):
+    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+
+    monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "index_path", str(tmp_path / "index.faiss"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id_map.json"), raising=False)
+
+    # Create index + id_map but no manifest.
+    FaissIndex(settings.index_path, settings.id_map_path, dim=4).rebuild([], [])
+
+    r = CliRunner().invoke(cli, ["status"])
+    assert r.exit_code == 0, r.output
+    assert "Index:" in r.output
+    assert "drift" in r.output
