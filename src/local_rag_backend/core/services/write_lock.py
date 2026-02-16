@@ -53,6 +53,12 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
             except Exception:  # pragma: no cover
                 locked = False  # pragma: no cover
 
+        if not locked:
+            raise RuntimeError(
+                f"Unable to acquire multi-store write lock at {lock_path}. "
+                "Refusing to run mutating operation without a cross-process lock."
+            )
+
         yield
     finally:
         if locked:
