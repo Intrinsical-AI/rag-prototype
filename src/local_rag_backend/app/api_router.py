@@ -57,8 +57,8 @@ from local_rag_backend.core.services.maintenance import (
 )
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.core.services.rag import RagService
-from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.core.services.reranking import RerankingRetriever
+from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -557,7 +557,6 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     ids: list[int] = []
     try:
         ids = cast("list[int]", await run_blocking(_run_multi_store_write_locked, _ingest_sync))
-        ids = await run_blocking(_ingest_sync)
         ok = True
         return IngestResponse(count=len(ids), ids=ids)
     except RuntimeError as e:
