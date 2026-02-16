@@ -11,6 +11,7 @@ Goal:
 from __future__ import annotations
 
 import importlib
+import math
 import string
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     from local_rag_backend.core.ports import LoaderPort
 
 DetectedFormat = Literal["csv", "markdown", "text", "binary", "unknown"]
+_PRINTABLE_CHARS = frozenset(string.printable)
+_MIN_TEXT_RATIO = 0.95
 
 
 @dataclass(frozen=True)
@@ -101,8 +104,9 @@ def get_loader_for_file(
     use_magic: bool = True,
     csv_delimiter: str | None = None,
     csv_has_header: bool = True,
+    detection: Detection | None = None,
 ) -> LoaderPort | None:
-    det = detect_file_format(path, sniff_bytes=sniff_bytes, use_magic=use_magic)
+    det = detection or detect_file_format(path, sniff_bytes=sniff_bytes, use_magic=use_magic)
     if det.fmt == "binary" or det.fmt == "unknown":
         return None
     if det.fmt == "csv":
@@ -143,10 +147,19 @@ def _decode_text_sample(raw: bytes) -> str | None:
 def _looks_like_text(text: str) -> bool:
     if not text.strip():
         return False
-    printable = set(string.printable)
-    # Consider it text if most characters are printable or whitespace.
-    good = sum(1 for ch in text if ch in printable or ch.isspace())
-    return (good / max(1, len(text))) >= 0.95
+    # Consider it text if most chars are printable/whitespace; stop early when outcome is certain.
+    total = len(text)
+    required_good = math.ceil(total * _MIN_TEXT_RATIO)
+    good = 0
+    for i, ch in enumerate(text, 1):
+        if ch in _PRINTABLE_CHARS or ch.isspace():
+            good += 1
+            if good >= required_good:
+                return True
+        remaining = total - i
+        if good + remaining < required_good:
+            return False
+    return good >= required_good
 
 
 def _looks_like_markdown(text: str) -> bool:
