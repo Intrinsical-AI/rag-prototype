@@ -30,6 +30,8 @@ from local_rag_backend.app.schemas import (
     AskEvalResponse,
     AskRequest,
     AskResponse,
+    DeleteDocsByExternalIdRequest,
+    DeleteDocsByExternalIdResponse,
     DeleteDocsRequest,
     DeleteDocsResponse,
     DocumentInDB,
@@ -434,6 +436,10 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
                 )
 
         unique_items = list(items_by_extid.values())
+        tombstoned = doc_repo.get_tombstoned_external_ids(unique_extids)
+        if tombstoned:
+            unique_extids = [e for e in unique_extids if e not in tombstoned]
+            unique_items = [it for it in unique_items if it.external_id not in tombstoned]
         if not unique_items:
             return []
 
@@ -477,6 +483,67 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     # The RAG service is cached; reset it so subsequent queries see the updated DB / index.
     reset_rag_service()
     return IngestResponse(count=len(ids), ids=ids)
+
+
+@router.post("/docs/delete_by_external_id", response_model=DeleteDocsByExternalIdResponse)
+async def delete_docs_by_external_id(
+    payload: Annotated[DeleteDocsByExternalIdRequest, Body(...)],
+) -> DeleteDocsByExternalIdResponse:
+    external_ids = [str(x).strip() for x in payload.external_ids if str(x).strip()]
+    if not external_ids:
+        return DeleteDocsByExternalIdResponse(
+            deleted_sql=0,
+            deleted_index=0,
+            tombstoned=0,
+            missing_external_ids=[],
+            rebuilt_index=False,
+        )
+
+    def _delete_sync() -> DeleteDocsByExternalIdResponse:
+        doc_repo = SqlDocumentStorage()
+        deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
+            external_ids
+        )
+
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            vec = FaissVectorStorage(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=None,
+            )
+            embedder = _build_embedder_for_dense()
+            try:
+                vec.delete(deleted_ids)
+                return DeleteDocsByExternalIdResponse(
+                    deleted_sql=deleted_sql,
+                    deleted_index=len(deleted_ids),
+                    tombstoned=tombstoned,
+                    missing_external_ids=missing,
+                    rebuilt_index=False,
+                )
+            except Exception:
+                rebuilt_n = rebuild_index_from_db(
+                    doc_repo=doc_repo, vec_repo=vec, embedder=embedder
+                )
+                return DeleteDocsByExternalIdResponse(
+                    deleted_sql=deleted_sql,
+                    deleted_index=None,
+                    tombstoned=tombstoned,
+                    missing_external_ids=missing,
+                    rebuilt_index=rebuilt_n >= 0,
+                )
+
+        return DeleteDocsByExternalIdResponse(
+            deleted_sql=deleted_sql,
+            deleted_index=None,
+            tombstoned=tombstoned,
+            missing_external_ids=missing,
+            rebuilt_index=False,
+        )
+
+    resp = await run_blocking(_delete_sync)
+    reset_rag_service()
+    return resp
 
 
 @router.post("/docs/delete", response_model=DeleteDocsResponse)
@@ -524,6 +591,12 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
 
     def _upsert_sync() -> UpsertDocsResponse:
         doc_repo = SqlDocumentStorage()
+        tombstoned = doc_repo.get_tombstoned_external_ids([d.external_id for d in payload.docs])
+        if tombstoned:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Some external_id values are tombstoned (deleted): {sorted(tombstoned)[:10]}",
+            )
         items = [
             SqlDocumentStorage.UpsertDoc(
                 external_id=d.external_id,
