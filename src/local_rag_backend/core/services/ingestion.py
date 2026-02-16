@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from local_rag_backend.core.services.etl import ETLService
+    from local_rag_backend.settings import Settings
+from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.text_processing import preprocess_text
 
 
@@ -24,22 +26,8 @@ def default_chunker(
 ) -> Callable[[str, Mapping[str, Any] | None], list[str]]:
     """Default chunker splitting text by character count with overlap."""
 
-    # Ensure overlap is strictly less than max_chars
-    safe_overlap = max(0, min(overlap, max_chars - 1))
-
     def _chunk(text: str, _metadata: Mapping[str, Any] | None = None) -> list[str]:
-        if len(text) <= max_chars:
-            return [text]
-
-        chunks = []
-        start = 0
-        while start < len(text):
-            end = start + max_chars
-            chunks.append(text[start:end])
-            if end >= len(text):
-                break
-            start += max_chars - safe_overlap
-        return chunks
+        return [c.text for c in chunk_chars_v1(text, max_chars=max_chars, overlap=overlap)]
 
     return _chunk
 
@@ -50,6 +38,29 @@ def default_formatter(text: str, metadata: Mapping[str, Any] | None = None) -> s
         return text
     header = "\n".join(f"{k.title()}: {v}" for k, v in metadata.items() if v is not None)
     return f"{header}\n\n{text}" if header else text
+
+
+def build_preprocess_fn_from_settings(
+    settings: Settings,
+) -> Callable[[str, Mapping[str, Any] | None], str]:
+    def _fn(text: str, _metadata: Mapping[str, Any] | None = None) -> str:
+        return preprocess_text(
+            text,
+            lowercase=settings.ingest_clean_lowercase,
+            remove_html=settings.ingest_clean_remove_html,
+            collapse_whitespace=settings.ingest_clean_collapse_whitespace,
+            strip=settings.ingest_clean_strip,
+        )
+
+    return _fn
+
+
+def build_chunk_fn_from_settings(
+    settings: Settings,
+) -> Callable[[str, Mapping[str, Any] | None], list[str]]:
+    if settings.ingest_chunk_strategy != "chars_v1":
+        raise ValueError(f"Unsupported ingest_chunk_strategy: {settings.ingest_chunk_strategy!r}")
+    return default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
 
 
 if TYPE_CHECKING:
