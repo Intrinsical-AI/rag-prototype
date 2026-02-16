@@ -241,6 +241,9 @@ rag-bootstrap
 # Ingest .txt/.md/.csv from file(s) or directory(ies)
 rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
 
+# Keep symlink targets out of scope (also skips symlink paths passed as root inputs)
+rag-ingest --no-follow-symlinks ./docs
+
 
 # Explicitly build the index from the CSV (populate SQL and FAISS if applicable)
 rag-build-index
@@ -389,6 +392,7 @@ Notes:
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
 * `POST /api/docs/upsert` (idempotent upsert by `external_id`)
 * `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
+* `POST /api/docs/delete_by_external_id` (delete by `external_id` + tombstones)
 * `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
 
@@ -397,6 +401,7 @@ Notes:
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources.
 * In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete`, `/api/docs/delete_by_external_id` (or `rag-delete-docs` / `rag-delete-external-ids`) instead of deleting rows manually.
+* Dense/hybrid delete flows try incremental index deletion first and trigger full rebuild only on failure.
 * In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
 
 Example:
