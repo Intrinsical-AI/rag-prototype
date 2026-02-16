@@ -169,3 +169,57 @@ def test_delete_documents_index_and_rebuild_failure_raises_consistency_error():
             ids=[1],
             rebuild_on_index_failure=True,
         )
+
+
+def test_delete_documents_aborts_before_sql_when_vector_preflight_fails_without_embedder():
+    doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "b")])
+
+    class PreflightFailVec(DummyVecRepo):
+        def delete(self, ids):
+            self.delete_calls.append(list(ids))
+            if not ids:
+                raise RuntimeError("manifest-drift")
+            return len(list(ids))
+
+    vec_repo = PreflightFailVec()
+
+    def _embedder_factory():
+        raise RuntimeError("embedder-unavailable")
+
+    with pytest.raises(RuntimeError, match="Aborting SQL delete"):
+        delete_documents_multi_store(
+            doc_repo=doc_repo,
+            vec_repo=vec_repo,
+            embedder_factory=_embedder_factory,
+            ids=[1],
+            rebuild_on_index_failure=True,
+        )
+
+    # Critical: SQL state must remain untouched when we cannot guarantee dense repair.
+    assert [d.id for d in doc_repo.get_all_documents()] == [1, 2]
+    assert doc_repo.deleted == []
+
+
+def test_delete_documents_raises_explicit_consistency_error_when_fallback_embedder_unavailable():
+    doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "b")])
+
+    class DeleteOnlyFailVec(DummyVecRepo):
+        def delete(self, ids):
+            self.delete_calls.append(list(ids))
+            if ids:
+                raise RuntimeError("fail-delete")
+            return 0
+
+    vec_repo = DeleteOnlyFailVec()
+
+    def _embedder_factory():
+        raise RuntimeError("embedder-unavailable")
+
+    with pytest.raises(RuntimeError, match="Multi-store inconsistency risk"):
+        delete_documents_multi_store(
+            doc_repo=doc_repo,
+            vec_repo=vec_repo,
+            embedder_factory=_embedder_factory,
+            ids=[1],
+            rebuild_on_index_failure=True,
+        )
