@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -31,13 +31,23 @@ from local_rag_backend.settings import settings
 
 logger = logging.getLogger(__name__)
 _ = _models
+T = TypeVar("T")
 # Configure logging to see script and data_loader output
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from local_rag_backend.core.ports import EmbedderPort
+
+
+def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
+    from local_rag_backend.core.services.write_lock import multi_store_write_lock
+
+    with multi_store_write_lock(coordination_dir=settings.get_coordination_dir()):
+        return operation()
 
 
 def main() -> None:
@@ -72,7 +82,7 @@ def main() -> None:
         logger.info("Database schema ensured (tables created if they didn't exist).")
     except Exception as e:
         logger.error(f"Failed to ensure database schema: {e}", exc_info=True)
-        return  # Exit if tables can't be created
+        raise RuntimeError("Unable to ensure SQLite schema before build-index.") from e
 
     # 3. Embedder (for dense or hybrid mode)
     embedder_for_indexing: EmbedderPort | None = None
@@ -132,21 +142,24 @@ def main() -> None:
                 dim=embedder_for_indexing.dim,
             )
             etl = ETLService(doc_repo, vector_repo, embedder_for_indexing)
-            ids = etl.ingest(texts)
+            ids = list(_run_with_multi_store_write_lock(lambda: etl.ingest(texts)))
             logger.info(f"Ingested {len(ids)} docs into SQL and FAISS.")
         else:
             # SQL only for sparse mode
-            ids = doc_repo.store_documents(texts)
+            ids = list(_run_with_multi_store_write_lock(lambda: doc_repo.store_documents(texts)))
             logger.info(f"Ingested {len(ids)} docs into SQL only (sparse mode).")
 
         logger.info("build_index script finished successfully.")
 
     except FileNotFoundError as e:
         logger.error(f"Halting script: {e}")
+        raise
     except ValueError as e:  # For example, dimension mismatch of embedder
         logger.error(f"Halting script due to value error: {e}", exc_info=True)
+        raise
     except Exception as e:
         logger.error(f"An unexpected error occurred during build_index: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":

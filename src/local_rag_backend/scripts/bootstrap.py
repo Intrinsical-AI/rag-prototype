@@ -37,7 +37,16 @@ DELIMITER = ";"
 _ = _models
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from local_rag_backend.core.ports import EmbedderPort
+
+
+def _run_with_multi_store_write_lock(settings: Any, operation: Callable[[], Any]) -> Any:
+    from local_rag_backend.core.services.write_lock import multi_store_write_lock
+
+    with multi_store_write_lock(coordination_dir=settings.get_coordination_dir()):
+        return operation()
 
 
 def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
@@ -90,7 +99,7 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
             preprocess_fn=build_preprocess_fn_from_settings(settings),
             chunk_fn=build_chunk_fn_from_settings(settings),
         )
-        chunk_count = pipeline.run()
+        chunk_count = int(_run_with_multi_store_write_lock(settings, pipeline.run))
         print(f"[OK] Ingested {chunk_count} docs into SQL and FAISS.")
     else:
         # sparse mode: apply the same preprocessing + chunking + formatting pipeline,
@@ -99,18 +108,22 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
         preprocess_fn = build_preprocess_fn_from_settings(settings)
         chunk = build_chunk_fn_from_settings(settings)
 
-        buf: list[str] = []
-        ids: list[int] = []
-        batch = 128
-        for item in loader.load():
-            clean = preprocess_fn(item.text, dict(item.metadata) if item.metadata else None)
-            for c in chunk(clean, dict(item.metadata) if item.metadata else None):
-                buf.append(default_formatter(c, dict(item.metadata) if item.metadata else None))
-                if len(buf) >= batch:
-                    ids += list(doc_repo.store_documents(buf))
-                    buf.clear()
-        if buf:
-            ids += list(doc_repo.store_documents(buf))
+        def _ingest_sparse_locked() -> list[int]:
+            buf: list[str] = []
+            ids: list[int] = []
+            batch = 128
+            for item in loader.load():
+                clean = preprocess_fn(item.text, dict(item.metadata) if item.metadata else None)
+                for c in chunk(clean, dict(item.metadata) if item.metadata else None):
+                    buf.append(default_formatter(c, dict(item.metadata) if item.metadata else None))
+                    if len(buf) >= batch:
+                        ids += list(doc_repo.store_documents(buf))
+                        buf.clear()
+            if buf:
+                ids += list(doc_repo.store_documents(buf))
+            return ids
+
+        ids = list(_run_with_multi_store_write_lock(settings, _ingest_sparse_locked))
 
         print(f"[OK] Ingested {len(ids)} docs into SQL only (sparse mode).")
 
