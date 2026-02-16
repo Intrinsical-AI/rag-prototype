@@ -25,13 +25,16 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
+from local_rag_backend.infrastructure.persistence.sqlalchemy import (
+    base as db_base,
+    models as _models,
+)
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings as default_settings
 
 DELIMITER = ";"
+_ = _models
 
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import EmbedderPort

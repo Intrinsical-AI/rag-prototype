@@ -132,8 +132,8 @@ def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     # Ensure models are registered with Base.metadata.
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import (
-        models as _models,  # noqa: F401
+    from local_rag_backend.infrastructure.persistence.sqlalchemy import (  # noqa: F401
+        models as _models,
     )
 
     db_base.Base.metadata.create_all(bind=engine)

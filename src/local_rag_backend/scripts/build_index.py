@@ -22,12 +22,15 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 
 # Import models to ensure they are registered with Base.metadata
 # To ensure table creation
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models  # noqa: F401
+from local_rag_backend.infrastructure.persistence.sqlalchemy import (
+    base as db_base,
+    models as _models,
+)
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base as AppDeclarativeBase
 from local_rag_backend.settings import settings
 
 logger = logging.getLogger(__name__)
+_ = _models
 # Configure logging to see script and data_loader output
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

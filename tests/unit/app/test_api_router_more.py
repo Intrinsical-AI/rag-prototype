@@ -2,8 +2,7 @@
 
 import pytest
 
-from local_rag_backend.app import api_router as api
-from local_rag_backend.app import dependencies as deps
+from local_rag_backend.app import api_router as api, dependencies as deps
 from local_rag_backend.settings import settings
 
 

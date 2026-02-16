@@ -1,8 +1,7 @@
 # tests/unit/app/test_dependencies.py
 from types import SimpleNamespace
 
-from local_rag_backend.app import dependencies as deps
-from local_rag_backend.app import factory
+from local_rag_backend.app import dependencies as deps, factory
 from local_rag_backend.settings import settings
 
 
