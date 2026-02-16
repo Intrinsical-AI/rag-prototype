@@ -200,6 +200,9 @@ def upsert_docs_cmd(
                     metadata=md,
                 )
             )
+        ext_ids = [it.external_id for it in items]
+        if len(set(ext_ids)) != len(ext_ids):
+            raise ValueError("external_id values must be unique within the request")
 
         def _upsert_sync() -> tuple[int, int, int, bool]:
             doc_repo = SqlDocumentStorage()
