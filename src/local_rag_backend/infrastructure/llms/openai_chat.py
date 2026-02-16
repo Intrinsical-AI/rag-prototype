@@ -48,11 +48,22 @@ class OpenAIGenerator(GeneratorPort):
         self.max_tokens = max_tokens if max_tokens is not None else settings.openai_max_tokens
         self.prompt_template = prompt_template or settings.openai_prompt_template
 
-        self.client = OpenAI(
-            api_key=resolved_key,
-            base_url=base_url,
-            default_headers=extra_headers,
-        )
+        try:
+            self.client = OpenAI(
+                api_key=resolved_key,
+                base_url=base_url,
+                default_headers=extra_headers,
+                timeout=settings.openai_request_timeout,
+            )
+        except TypeError as e:
+            # Compatibility fallback for test doubles/older SDK variants that don't accept `timeout`.
+            if "timeout" not in str(e):
+                raise
+            self.client = OpenAI(
+                api_key=resolved_key,
+                base_url=base_url,
+                default_headers=extra_headers,
+            )
 
     def _build_prompt(self, question: str, contexts: Sequence[str]) -> str:
         """Build the prompt string for the OpenAI API."""
