@@ -1,26 +1,28 @@
-from types import SimpleNamespace
+from __future__ import annotations
 
 import pytest
 
 from local_rag_backend.app import factory
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SystemStateStorage
 
 
 @pytest.mark.unit
-async def test_get_rag_service_cache_is_invalidated_by_reload_token(tmp_path, monkeypatch):
+async def test_get_rag_service_cache_is_invalidated_by_system_state_version(
+    in_memory_sqlite, monkeypatch
+):
     """
-    Regression test: in multi-worker deployments, `reset_rag_service()` only cleared
-    the in-process cache, leaving other workers serving stale retrievers/generators.
-    """
-    monkeypatch.setattr(factory.settings, "data_dir", tmp_path, raising=False)
+    Regression test: cache invalidation must propagate across processes/workers.
 
-    # Ensure a clean slate for this module-level cache.
+    We simulate an external process by bumping the shared DB-backed version directly.
+    """
+    state = SystemStateStorage(session_factory=in_memory_sqlite)
+    monkeypatch.setattr(factory, "_system_state", state, raising=True)
+
     factory._get_cached_rag_service.cache_clear()
-    token_path = tmp_path / ".rag_service_reload_token"
-    token_path.unlink(missing_ok=True)
 
     built: list[object] = []
 
-    def _build():
+    def _build() -> object:
         obj = object()
         built.append(obj)
         return obj
@@ -32,8 +34,8 @@ async def test_get_rag_service_cache_is_invalidated_by_reload_token(tmp_path, mo
     assert svc1 is svc2
     assert built == [svc1]
 
-    # Simulate an external invalidation (another process updated the token file).
-    token_path.write_text("new-token", encoding="utf-8")
+    # Simulate external invalidation (another process bumps shared version in DB).
+    state.bump_version(factory._RAG_SERVICE_STATE_KEY)
 
     svc3 = await factory.get_rag_service()
     assert svc3 is not svc1
@@ -43,33 +45,15 @@ async def test_get_rag_service_cache_is_invalidated_by_reload_token(tmp_path, mo
     assert svc4 is svc3
 
 
-def test_write_reload_token_uses_unique_tmp_paths(tmp_path, monkeypatch):
-    monkeypatch.setattr(factory.settings, "data_dir", tmp_path, raising=False)
-    token_path = tmp_path / ".rag_service_reload_token"
+def test_reset_rag_service_bumps_system_state_version(in_memory_sqlite, monkeypatch) -> None:
+    state = SystemStateStorage(session_factory=in_memory_sqlite)
+    monkeypatch.setattr(factory, "_system_state", state, raising=True)
 
-    seen_sources: set[str] = set()
-    real_replace = factory.os.replace
+    factory._get_cached_rag_service.cache_clear()
 
-    def _replace(src, dst):
-        src_s = str(src)
-        if src_s in seen_sources:
-            raise FileNotFoundError("duplicate temporary path")
-        seen_sources.add(src_s)
-        return real_replace(src, dst)
+    assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 0
+    factory.reset_rag_service()
+    assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 1
 
-    monkeypatch.setattr(factory.os, "replace", _replace, raising=True)
-
-    factory._write_reload_token("v1")
-    factory._write_reload_token("v2")
-
-    assert token_path.read_text(encoding="utf-8") == "v2"
-
-
-def test_reload_token_path_uses_coordination_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        factory,
-        "settings",
-        SimpleNamespace(get_coordination_dir=lambda: tmp_path),
-        raising=True,
-    )
-    assert factory._reload_token_path() == tmp_path / ".rag_service_reload_token"
+    factory.reset_rag_service()
+    assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 2

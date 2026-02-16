@@ -175,7 +175,9 @@ All of these implement the ports above and can be swapped at composition time.
 * Chooses **retriever** by `settings.retrieval_mode` (`sparse`, `dense`, `hybrid`)
 * Chooses **generator**: Ollama (if `OLLAMA_ENABLED`) or OpenAI (if `OPENAI_API_KEY`)
 * Instantiates `RagService(retriever, generator, history_storage)`
-* Provides a process-local singleton via `get_rag_service()` (and `reset_rag_service()` for tests)
+* Provides a process-local singleton via `get_rag_service()`
+* Cross-process cache invalidation uses DB-backed `system_state.version` (key: `rag_service`),
+  bumped by `reset_rag_service()`
 
 ---
 
