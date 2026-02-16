@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 
 from local_rag_backend.app import dependencies as deps, factory
+from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.settings import settings
 
 
@@ -16,7 +17,11 @@ async def test_get_rag_service_sparse_openai(monkeypatch):
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
     # Minimal dummies
-    monkeypatch.setattr(factory, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+    class DummyDocRepo:
+        def get_all_documents(self):
+            return [Document(id=1, content="doc1"), Document(id=2, content="doc2")]
+
+    monkeypatch.setattr(factory, "SqlDocumentStorage", lambda *a, **k: DummyDocRepo())
     monkeypatch.setattr(factory, "SparseBM25Retriever", lambda **k: SimpleNamespace())
 
     class DummyRS:
@@ -66,8 +71,11 @@ async def test_get_rag_service_hybrid_openai(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
-    # Mock DB access for sparse retriever in hybrid mode
-    monkeypatch.setattr(factory, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+    class DummyDocRepo:
+        def get_all_documents(self):
+            return [Document(id=1, content="doc1"), Document(id=2, content="doc2")]
+
+    monkeypatch.setattr(factory, "SqlDocumentStorage", lambda *a, **k: DummyDocRepo())
 
     class DummyEmbedder:
         dim = 4

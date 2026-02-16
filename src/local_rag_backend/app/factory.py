@@ -14,7 +14,6 @@ from functools import lru_cache
 from time import time_ns
 from typing import TYPE_CHECKING
 
-from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -79,9 +78,11 @@ def build_rag_service() -> RagService:
 
     # 2. Retriever Port
     if settings.retrieval_mode == "sparse":
-        corpus, doc_ids = get_corpus_and_ids(doc_repo)
+        docs = doc_repo.get_all_documents()
+        corpus = [d.content for d in docs]
+        doc_ids = [d.id for d in docs]
         retriever: RetrieverPort = SparseBM25Retriever(
-            documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
+            documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo, preloaded_docs=docs
         )
     else:
         embedder: EmbedderPort = _build_embedder()
@@ -95,9 +96,11 @@ def build_rag_service() -> RagService:
         if settings.retrieval_mode == "dense":
             retriever = dense_retriever
         else:  # hybrid
-            corpus, doc_ids = get_corpus_and_ids(doc_repo)
+            docs = doc_repo.get_all_documents()
+            corpus = [d.content for d in docs]
+            doc_ids = [d.id for d in docs]
             sparse_retriever = SparseBM25Retriever(
-                documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
+                documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo, preloaded_docs=docs
             )
             retriever = HybridRetriever(
                 dense=dense_retriever,

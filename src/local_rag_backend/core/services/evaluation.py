@@ -16,7 +16,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
@@ -144,8 +143,15 @@ def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
 def _build_sparse_retriever(
     *, doc_repo: SqlDocumentStorage, reranker_enabled: bool, candidate_k: int, strategy: str
 ) -> RetrieverPort:
-    corpus, doc_ids = get_corpus_and_ids(doc_repo)
-    base: RetrieverPort = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+    docs = doc_repo.get_all_documents()
+    corpus = [d.content for d in docs]
+    doc_ids = [d.id for d in docs]
+    base: RetrieverPort = SparseBM25Retriever(
+        documents=corpus,
+        doc_ids=doc_ids,
+        doc_repo=doc_repo,
+        preloaded_docs=docs,
+    )
     if reranker_enabled:
         return RerankingRetriever(base, candidate_k=candidate_k, strategy=strategy)
     return base
