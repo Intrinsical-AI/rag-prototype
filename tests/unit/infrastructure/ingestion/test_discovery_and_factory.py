@@ -77,6 +77,42 @@ def test_discover_files_skips_broken_symlink_and_enforces_max_file_bytes(tmp_pat
     assert files2 == [big]
 
 
+def test_discover_files_skips_symlink_directory_input_when_follow_symlinks_is_disabled(
+    tmp_path: Path,
+):
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    (real_dir / "inside.txt").write_text("ok", encoding="utf-8")
+
+    symlink_dir = tmp_path / "linked"
+    symlink_dir.symlink_to(real_dir, target_is_directory=True)
+
+    files_no_follow = list(
+        discover_files(
+            [symlink_dir],
+            recursive=True,
+            follow_symlinks=False,
+            max_files=10,
+            max_file_bytes=10_000,
+            max_total_bytes=10_000,
+        )
+    )
+    assert files_no_follow == []
+
+    files_follow = list(
+        discover_files(
+            [symlink_dir],
+            recursive=True,
+            follow_symlinks=True,
+            max_files=10,
+            max_file_bytes=10_000,
+            max_total_bytes=10_000,
+        )
+    )
+    assert len(files_follow) == 1
+    assert files_follow[0].name == "inside.txt"
+
+
 def test_factory_skips_binary_and_detects_markdown_heuristically(tmp_path: Path):
     bin_p = tmp_path / "bin.dat"
     bin_p.write_bytes(b"\x00\x01\x02")
