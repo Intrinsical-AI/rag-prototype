@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.infrastructure.ingestion.loaders.discovery import discover_files
 from local_rag_backend.infrastructure.ingestion.loaders.factory import (
+    Detection,
     detect_file_format,
     get_loader_for_file,
 )
@@ -144,3 +145,24 @@ def test_detect_file_format_empty_and_extension_hint_paths(tmp_path: Path):
     txt.write_text("hello world", encoding="utf-8")
     det2 = detect_file_format(txt, use_magic=False)
     assert det2.fmt == "text"
+
+
+def test_get_loader_for_file_reuses_precomputed_detection(tmp_path: Path, monkeypatch):
+    txt = tmp_path / "note.txt"
+    txt.write_text("hello world", encoding="utf-8")
+
+    def _should_not_run(*_args, **_kwargs):
+        raise AssertionError("detect_file_format should not be called when detection is provided")
+
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.ingestion.loaders.factory.detect_file_format",
+        _should_not_run,
+        raising=True,
+    )
+
+    loader = get_loader_for_file(
+        txt,
+        use_magic=False,
+        detection=Detection(fmt="text", reason="precomputed"),
+    )
+    assert loader is not None
