@@ -581,8 +581,9 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
             reranker_enabled=bool(settings.enable_reranker),
             duration_ms=int(1000 * t.seconds()),
         )
-        if ok:
-            reset_rag_service()
+        # Always bust cache after a mutating attempt.
+        # Even failed writes can be partially applied in degraded scenarios (e.g. rebuild failure).
+        reset_rag_service()
 
 
 @router.post("/docs/delete_by_external_id", response_model=DeleteDocsByExternalIdResponse)
@@ -641,12 +642,13 @@ async def delete_docs_by_external_id(
             rebuilt_index=False,
         )
 
-    resp = cast(
-        "DeleteDocsByExternalIdResponse",
-        await run_blocking(_run_multi_store_write_locked, _delete_sync),
-    )
-    reset_rag_service()
-    return resp
+    try:
+        return cast(
+            "DeleteDocsByExternalIdResponse",
+            await run_blocking(_run_multi_store_write_locked, _delete_sync),
+        )
+    finally:
+        reset_rag_service()
 
 
 @router.post("/docs/delete", response_model=DeleteDocsResponse)
@@ -678,11 +680,12 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
         deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=ids)
         return DeleteDocsResponse(deleted_sql=deleted_sql, deleted_index=None, rebuilt_index=False)
 
-    resp = cast(
-        "DeleteDocsResponse", await run_blocking(_run_multi_store_write_locked, _delete_sync)
-    )
-    reset_rag_service()
-    return resp
+    try:
+        return cast(
+            "DeleteDocsResponse", await run_blocking(_run_multi_store_write_locked, _delete_sync)
+        )
+    finally:
+        reset_rag_service()
 
 
 @router.post("/docs/upsert", response_model=UpsertDocsResponse)
@@ -815,11 +818,12 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
             ],
         )
 
-    resp = cast(
-        "UpsertDocsResponse", await run_blocking(_run_multi_store_write_locked, _upsert_sync)
-    )
-    reset_rag_service()
-    return resp
+    try:
+        return cast(
+            "UpsertDocsResponse", await run_blocking(_run_multi_store_write_locked, _upsert_sync)
+        )
+    finally:
+        reset_rag_service()
 
 
 @router.post("/index/rebuild", response_model=RebuildIndexResponse)
@@ -844,11 +848,12 @@ async def rebuild_index() -> RebuildIndexResponse:
         n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
         return RebuildIndexResponse(indexed=n)
 
-    resp = cast(
-        "RebuildIndexResponse", await run_blocking(_run_multi_store_write_locked, _rebuild_sync)
-    )
-    reset_rag_service()
-    return resp
+    try:
+        return cast(
+            "RebuildIndexResponse", await run_blocking(_run_multi_store_write_locked, _rebuild_sync)
+        )
+    finally:
+        reset_rag_service()
 
 
 def _build_retriever_from_config(

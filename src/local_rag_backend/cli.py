@@ -62,6 +62,15 @@ def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
         return operation()
 
 
+def _reset_rag_service_best_effort() -> None:
+    from local_rag_backend.app.factory import reset_rag_service
+
+    try:
+        reset_rag_service()
+    except Exception:
+        return None
+
+
 @cli.command()
 def server() -> None:
     """Start the RAG FastAPI server using settings from config file or environment."""
@@ -82,6 +91,7 @@ def server() -> None:
 @cli.command("build-index")
 def build_index() -> None:
     """Build FAISS index from existing documents."""
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
         # Import here to avoid circular imports
@@ -89,20 +99,24 @@ def build_index() -> None:
 
         click.echo("[INFO] Building FAISS index...")
         with click.progressbar(length=1, label="Building index") as bar:
+            mutation_attempted = True
             _run_with_multi_store_write_lock(build_main)
             bar.update(1)
         click.echo("[OK] Index built successfully!")
     except Exception as e:
         click.echo(f"[ERROR] Error building index: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 @cli.command("rebuild-index")
 def rebuild_index() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
-        from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.maintenance import rebuild_index_from_db
         from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
         from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -132,12 +146,15 @@ def rebuild_index() -> None:
             )
             return rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
 
+        mutation_attempted = True
         n = _run_with_multi_store_write_lock(_rebuild_sync)
-        reset_rag_service()
         click.echo(f"[OK] Rebuilt index with {n} vectors.")
     except Exception as e:
         click.echo(f"[ERROR] Error rebuilding index: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 @cli.command("delete-docs")
@@ -148,9 +165,9 @@ def delete_docs(ids: tuple[int, ...]) -> None:
         click.echo("[ERROR] Provide one or more document IDs.", err=True)
         sys.exit(2)
 
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
-        from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.maintenance import delete_documents_multi_store
         from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
         from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -182,8 +199,8 @@ def delete_docs(ids: tuple[int, ...]) -> None:
             deleted_sql, _, rebuilt = delete_documents_multi_store(doc_repo=doc_repo, ids=list(ids))
             return deleted_sql, None, rebuilt
 
+        mutation_attempted = True
         deleted_sql, deleted_index, rebuilt = _run_with_multi_store_write_lock(_delete_sync)
-        reset_rag_service()
         if deleted_index is None and settings.retrieval_mode not in ("dense", "hybrid"):
             click.echo(f"[OK] Deleted {deleted_sql} docs from SQL.")
             return
@@ -195,6 +212,9 @@ def delete_docs(ids: tuple[int, ...]) -> None:
     except Exception as e:
         click.echo(f"[ERROR] Error deleting docs: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 @cli.command("delete-external-ids")
@@ -205,9 +225,9 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
         click.echo("[ERROR] Provide one or more external_ids.", err=True)
         sys.exit(2)
 
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
-        from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.maintenance import rebuild_index_from_db
         from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
         from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -243,11 +263,10 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
                     rebuilt = n >= 0
             return deleted_sql, deleted_index, missing, tombstoned, rebuilt
 
+        mutation_attempted = True
         deleted_sql, deleted_index, missing, tombstoned, rebuilt = _run_with_multi_store_write_lock(
             _delete_sync
         )
-
-        reset_rag_service()
         click.echo(
             f"[OK] Deleted {deleted_sql} docs by external_id. "
             f"tombstoned={tombstoned} missing={len(missing)} "
@@ -258,6 +277,9 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
     except Exception as e:
         click.echo(f"[ERROR] Error deleting by external_id: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 @cli.command("upsert-docs")
@@ -285,11 +307,11 @@ def upsert_docs(
     metadata_json: str | None,
 ) -> None:
     """Upsert documents by external_id (idempotent)."""
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
         from typing import Any, cast
 
-        from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.maintenance import rebuild_index_from_db
         from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
         from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -422,19 +444,23 @@ def upsert_docs(
 
             return inserted, updated, unchanged, rebuilt
 
+        mutation_attempted = True
         inserted, updated, unchanged, rebuilt = _run_with_multi_store_write_lock(_upsert_sync)
-        reset_rag_service()
         click.echo(
             f"[OK] Upserted docs. inserted={inserted} updated={updated} unchanged={unchanged} rebuilt_index={rebuilt}"
         )
     except Exception as e:
         click.echo(f"[ERROR] Error upserting docs: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 @cli.command()
 def bootstrap() -> None:
     """Bootstrap database with sample data."""
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
         # Import here to avoid circular imports
@@ -442,12 +468,16 @@ def bootstrap() -> None:
 
         click.echo("[INFO] Bootstrapping database with sample data...")
         with click.progressbar(length=1, label="Bootstrapping") as bar:
+            mutation_attempted = True
             _run_with_multi_store_write_lock(bootstrap_main)
             bar.update(1)
         click.echo("[OK] Bootstrap completed successfully!")
     except Exception as e:
         click.echo(f"[ERROR] Error bootstrapping: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 @cli.command()
@@ -739,9 +769,9 @@ def ingest(
         click.echo("[ERROR] Provide one or more paths (file or directory).", err=True)
         sys.exit(2)
 
+    mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
-        from local_rag_backend.app.factory import reset_rag_service
         from local_rag_backend.core.services.chunking import chunk_chars_v1
         from local_rag_backend.core.services.ingestion import (
             build_preprocess_fn_from_settings,
@@ -795,6 +825,9 @@ def ingest(
         if not files:
             click.echo("[WARN] No files found under limits. Nothing to ingest.")
             return
+
+        if not dry_run:
+            mutation_attempted = True
 
         total_inserted = 0
         total_updated = 0
@@ -994,9 +1027,6 @@ def ingest(
             if deleted_stale:
                 click.echo(f"[INFO] Deleted {deleted_stale} stale chunks for {file_path}.")
 
-        if not dry_run:
-            reset_rag_service()
-
         if dry_run:
             click.echo(
                 f"[DRY-RUN] files={total_files} chunks={total_chunks} skipped={total_skipped} "
@@ -1012,6 +1042,9 @@ def ingest(
     except Exception as e:
         click.echo(f"[ERROR] Error ingesting files: {e}", err=True)
         sys.exit(1)
+    finally:
+        if mutation_attempted:
+            _reset_rag_service_best_effort()
 
 
 def rag_ingest() -> None:
