@@ -163,6 +163,7 @@ Key variables (non-exhaustive):
 | `HYBRID_RETRIEVAL_ALPHA`         | `0.5`                     | hybrid       | Weight of the **sparse** component (0=dense, 1=sparse) |
 | `OPENAI_API_KEY`                 | —                         | OpenAI       | API key                                                |
 | `OPENAI_MODEL`                   | `gpt-4o-mini`             | OpenAI       | Chat model                                             |
+| `OPENAI_REQUEST_TIMEOUT`         | `60`                      | OpenAI       | Timeout (s) for OpenAI-compatible HTTP requests        |
 | `OPENAI_TEMPERATURE`             | `0.2`                     | OpenAI       | Temperature                                            |
 | `OPENAI_MAX_TOKENS`              | `256`                     | OpenAI       | Max tokens                                             |
 | `OLLAMA_ENABLED`                 | `false`                   | Ollama       | Enable Ollama                                          |
@@ -176,6 +177,7 @@ Example [`.env`](.env.example):
 RETRIEVAL_MODE=hybrid
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_REQUEST_TIMEOUT=60
 OPENAI_TOP_P=1.0
 OLLAMA_ENABLED=false
 ST_EMBEDDING_MODEL=all-MiniLM-L6-v2
