@@ -14,8 +14,12 @@ from functools import lru_cache
 from time import time_ns
 from typing import TYPE_CHECKING
 
+from local_rag_backend.app.composition import (
+    build_dense_embedder_from_settings,
+    build_generator_from_settings,
+    build_retriever_from_settings,
+)
 from local_rag_backend.core.services.rag import RagService
-from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -43,7 +47,6 @@ if TYPE_CHECKING:
         GeneratorPort,
         QAHistoryPort,
         RetrieverPort,
-        VectorRepoPort,
     )
 
 _RELOAD_TOKEN_FILENAME = ".rag_service_reload_token"  # noqa: S105
@@ -57,16 +60,16 @@ def _build_embedder() -> EmbedderPort:
     1) OpenAI embeddings when `OPENAI_API_KEY` is configured (no heavy deps).
     2) SentenceTransformers when installed (requires `dense-st` extra).
     """
-    if settings.openai_api_key:
-        return OpenAIEmbedder()
-    try:
-        return SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-    except RuntimeError as e:
-        raise RuntimeError(
+    return build_dense_embedder_from_settings(
+        settings_obj=settings,
+        openai_embedder_factory=OpenAIEmbedder,
+        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
+        missing_backend_message=(
             "Dense/hybrid retrieval requires an embeddings backend. "
             "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
             "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
-        ) from e
+        ),
+    )
 
 
 def build_rag_service() -> RagService:
@@ -77,52 +80,28 @@ def build_rag_service() -> RagService:
     doc_repo: DocumentRepoPort = SqlDocumentStorage()
 
     # 2. Retriever Port
-    if settings.retrieval_mode == "sparse":
-        docs = doc_repo.get_all_documents()
-        corpus = [d.content for d in docs]
-        doc_ids = [d.id for d in docs]
-        retriever: RetrieverPort = SparseBM25Retriever(
-            documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo, preloaded_docs=docs
-        )
-    else:
-        embedder: EmbedderPort = _build_embedder()
-
-        vector_repo: VectorRepoPort = FaissVectorStorage(
-            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
-        )
-        dense_retriever = DenseFaissRetriever(
-            embedder=embedder, faiss_index=vector_repo, doc_repo=doc_repo
-        )
-        if settings.retrieval_mode == "dense":
-            retriever = dense_retriever
-        else:  # hybrid
-            docs = doc_repo.get_all_documents()
-            corpus = [d.content for d in docs]
-            doc_ids = [d.id for d in docs]
-            sparse_retriever = SparseBM25Retriever(
-                documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo, preloaded_docs=docs
-            )
-            retriever = HybridRetriever(
-                dense=dense_retriever,
-                sparse=sparse_retriever,
-                alpha=settings.hybrid_retrieval_alpha,
-            )
-
-    if settings.enable_reranker:
-        retriever = RerankingRetriever(
-            retriever,
-            candidate_k=settings.reranker_candidate_k,
-            strategy=settings.reranker_strategy,
-        )
+    retriever: RetrieverPort = build_retriever_from_settings(
+        settings_obj=settings,
+        retrieval_mode=settings.retrieval_mode,
+        doc_repo=doc_repo,
+        dense_embedder_factory=_build_embedder,
+        sparse_retriever_factory=SparseBM25Retriever,
+        dense_retriever_factory=DenseFaissRetriever,
+        hybrid_retriever_factory=HybridRetriever,
+        vector_repo_factory=FaissVectorStorage,
+    )
 
     # 3. Generator Port
     generator: GeneratorPort
-    if settings.ollama_enabled:
-        generator = OllamaGenerator()
-    elif settings.openai_api_key:
-        generator = OpenAIGenerator()
-    else:
+    preferred_provider = "ollama" if settings.ollama_enabled else "openai" if settings.openai_api_key else None
+    if preferred_provider is None:
         raise RuntimeError("No LLM configured. Set OPENAI_API_KEY or enable OLLAMA_ENABLED.")
+    generator = build_generator_from_settings(
+        settings_obj=settings,
+        llm_provider=preferred_provider,
+        openai_generator_factory=OpenAIGenerator,
+        ollama_generator_factory=OllamaGenerator,
+    )
 
     # 4. History Storage
     history_repo: QAHistoryPort = HistorySqlStorage()

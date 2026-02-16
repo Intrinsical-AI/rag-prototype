@@ -118,3 +118,86 @@ def test_cli_delete_docs_dense_does_not_require_embedder_when_index_delete_succe
     result = CliRunner().invoke(cli, ["delete-docs", str(doc_id)])
     assert result.exit_code == 0, result.output
     assert embedder_calls == 0
+
+
+def test_cli_delete_external_ids_dense_does_not_require_embedder_when_index_delete_succeeds(
+    in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+
+    embedder_calls = 0
+
+    def _boom_embedder(*_args, **_kwargs):
+        nonlocal embedder_calls
+        embedder_calls += 1
+        raise RuntimeError("embedder should not be called on successful delete path")
+
+    class DummyVec:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        def delete(self, ids):
+            return len(list(ids))
+
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        _boom_embedder,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        lambda *_a, **_k: DummyVec(),
+        raising=True,
+    )
+
+    repo = SqlDocumentStorage()
+    repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="doc-ext-ok", content="to-delete-dense")]
+    )
+    result = CliRunner().invoke(cli, ["delete-external-ids", "doc-ext-ok"])
+    assert result.exit_code == 0, result.output
+    assert embedder_calls == 0
+
+
+def test_cli_delete_external_ids_dense_preflight_failure_without_embedder_aborts_before_sql(
+    in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+
+    class PreflightFailVec:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        def delete(self, ids):
+            if not list(ids):
+                raise RuntimeError("manifest-drift")
+            return len(list(ids))
+
+    def _boom_embedder(*_args, **_kwargs):
+        raise RuntimeError("embedder-unavailable")
+
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        _boom_embedder,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        lambda *_a, **_k: PreflightFailVec(),
+        raising=True,
+    )
+
+    repo = SqlDocumentStorage()
+    repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="doc-ext-preflight", content="keep-me")]
+    )
+
+    result = CliRunner().invoke(cli, ["delete-external-ids", "doc-ext-preflight"])
+    assert result.exit_code == 1
+    assert "Aborting SQL delete" in result.output
+    docs = repo.get_all_documents()
+    assert len(docs) == 1
+    assert docs[0].external_id == "doc-ext-preflight"
+    assert not repo.get_tombstoned_external_ids(["doc-ext-preflight"])

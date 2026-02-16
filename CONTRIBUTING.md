@@ -38,6 +38,14 @@ Optional local security audit that does not block:
 make sec-soft
 ```
 
+## Proxy security expectations
+
+If the service is exposed beyond localhost (cloud VM, k8s ingress, reverse proxy):
+
+- Set `API_KEY` (recommended default for public/networked deployments).
+- Ensure the edge proxy sanitizes and controls `X-Forwarded-For` and `Forwarded`.
+- Do not trust client-supplied forwarding headers unless the proxy overwrites/normalizes them.
+
 ## Docker expectations
 
 CI builds the production image only:
@@ -58,3 +66,10 @@ Rules for reproducibility:
 - Tests/linters/security checks pass locally.
 - Documentation is updated when behavior, CI, or operational flows change.
 - PR description includes rationale, risk, and verification commands executed.
+
+### Docs parity checklist (architecture/API changes)
+
+- If ports/contracts changed, update `docs/architecture.md` and keep method signatures aligned.
+- If API endpoints or payload semantics changed, update `README.md` API section.
+- If operational behavior changed (CI gates, Docker stages, security defaults), update `README.md` and this guide.
+- If a docs-only PR changes architecture/API/ops guidance, run local checks manually (CI is skipped for docs-only changes by workflow `paths-ignore`).
