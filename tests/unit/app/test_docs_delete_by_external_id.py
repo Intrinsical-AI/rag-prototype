@@ -91,6 +91,7 @@ async def test_delete_by_external_id_dense_is_consistent_and_survives_rebuild(
         def delete(self, ids):
             self.deletes.append(list(ids))
             self.ids -= set(ids)
+            return len(ids)
 
         def rebuild(self, ids, vectors):
             self.rebuilds.append(list(ids))
