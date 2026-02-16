@@ -287,6 +287,9 @@ uv sync --frozen --extra magic
 # or: pip install rag-prototype[magic]
 ```
 
+`rag-ingest` detection is Unicode-aware (UTF-8 text with non-ASCII characters is accepted) and
+handles unreadable files as best-effort skips instead of aborting the full ingestion run.
+
 Optional: Prometheus metrics (`/metrics`) and structured-ish domain metrics:
 
 ```bash

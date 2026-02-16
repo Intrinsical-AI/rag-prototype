@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import importlib
 import math
-import string
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from local_rag_backend.core.ports import LoaderPort
 
 DetectedFormat = Literal["csv", "markdown", "text", "binary", "unknown"]
-_PRINTABLE_CHARS = frozenset(string.printable)
 _MIN_TEXT_RATIO = 0.95
 
 
@@ -54,7 +52,12 @@ def detect_file_format(path: Path, *, sniff_bytes: int = 4096, use_magic: bool =
     elif ext in {".txt", ".log", ".rst"}:
         ext_hint = "text"
 
-    raw = _read_head(path, sniff_bytes)
+    try:
+        raw = _read_head(path, sniff_bytes)
+    except OSError:
+        # Keep ingestion resilient: unreadable files should be skipped, not abort the full run.
+        return Detection("unknown", "read-error")
+
     if not raw:
         return Detection("unknown", "empty")
     if b"\x00" in raw:
@@ -148,11 +151,12 @@ def _looks_like_text(text: str) -> bool:
     if not text.strip():
         return False
     # Consider it text if most chars are printable/whitespace; stop early when outcome is certain.
+    # Use Unicode-aware printability so UTF-8 non-ASCII texts aren't dropped as "unknown".
     total = len(text)
     required_good = math.ceil(total * _MIN_TEXT_RATIO)
     good = 0
     for i, ch in enumerate(text, 1):
-        if ch in _PRINTABLE_CHARS or ch.isspace():
+        if ch.isspace() or ch.isprintable():
             good += 1
             if good >= required_good:
                 return True
