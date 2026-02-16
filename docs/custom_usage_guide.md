@@ -209,6 +209,9 @@ Opciones recomendadas:
 # Borrar documentos por ID (SQL + FAISS cuando aplique)
 rag-delete-docs 10 11 12
 
+# Borrar por external_id (añade tombstones para que no reaparezcan en futuras ingestas)
+rag-delete-external-ids "chunk:<sha256>" "file:/abs/path:part=file:chunk=0"
+
 # Rebuild completo del índice desde SQLite (idempotente; dense/hybrid)
 rag-rebuild-index
 ```
@@ -220,6 +223,11 @@ rag-rebuild-index
 curl -X POST "http://localhost:8000/api/docs/delete" \
   -H "Content-Type: application/json" \
   -d '{"ids":[10,11,12]}'
+
+# Borrar por external_id
+curl -X POST "http://localhost:8000/api/docs/delete_by_external_id" \
+  -H "Content-Type: application/json" \
+  -d '{"external_ids":["chunk:<sha256>","file:/abs/path:part=file:chunk=0"]}'
 
 # Rebuild del índice (dense/hybrid)
 curl -X POST "http://localhost:8000/api/index/rebuild"
