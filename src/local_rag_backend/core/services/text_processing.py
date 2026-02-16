@@ -9,9 +9,22 @@ import re
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def preprocess_text(text: str) -> str:
-    """Normalize text by lowercasing, removing HTML tags, and collapsing whitespace."""
-    text = text.lower().strip()
-    text = _HTML_TAG_RE.sub(" ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+def preprocess_text(
+    text: str,
+    *,
+    lowercase: bool = True,
+    remove_html: bool = True,
+    collapse_whitespace: bool = True,
+    strip: bool = True,
+) -> str:
+    """Normalize text for ingestion/retrieval (configurable, deterministic)."""
+    out = text
+    if strip:
+        out = out.strip()
+    if lowercase:
+        out = out.lower()
+    if remove_html:
+        out = _HTML_TAG_RE.sub(" ", out)
+    if collapse_whitespace:
+        out = re.sub(r"\s+", " ", out).strip()
+    return out

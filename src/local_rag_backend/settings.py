@@ -113,9 +113,18 @@ class Settings(BaseSettings):
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
 
     # --- Ingestion --- #
+    ingest_chunk_strategy: Literal["chars_v1"] = Field(
+        "chars_v1", description="Chunking strategy identifier (deterministic)."
+    )
     ingest_chunk_chars: int = Field(1200, ge=200, le=8000, description="Chunk size in characters.")
     ingest_chunk_overlap: int = Field(200, ge=0, le=4000, description="Overlap between chunks.")
     csv_has_header: bool = Field(True, description="Whether CSV files have header rows.")
+    ingest_clean_lowercase: bool = Field(True, description="Lowercase during ingestion cleaning.")
+    ingest_clean_remove_html: bool = Field(True, description="Remove HTML tags during cleaning.")
+    ingest_clean_collapse_whitespace: bool = Field(
+        True, description="Collapse whitespace during cleaning."
+    )
+    ingest_clean_strip: bool = Field(True, description="Strip leading/trailing whitespace first.")
 
     # --- Prompt Templates --- #
     openai_prompt_template: str = Field(
