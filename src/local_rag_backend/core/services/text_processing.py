@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def preprocess_text(
@@ -26,5 +27,5 @@ def preprocess_text(
     if remove_html:
         out = _HTML_TAG_RE.sub(" ", out)
     if collapse_whitespace:
-        out = re.sub(r"\s+", " ", out).strip()
+        out = _WHITESPACE_RE.sub(" ", out).strip()
     return out
