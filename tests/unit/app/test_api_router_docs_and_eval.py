@@ -189,6 +189,8 @@ async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_
 async def test_openrouter_generate_success(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "openai_request_timeout", 19, raising=False)
+    captured: dict[str, object] = {}
 
     class DummyUsage:
         prompt_tokens = 1
@@ -207,7 +209,7 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
 
     class DummyClient:
         def __init__(self, *args, **kwargs):
-            pass
+            captured.update(kwargs)
 
         class chat:
             class completions:
@@ -232,3 +234,4 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
     data = r.json()
     assert data["text"] == "hi"
     assert data["usage"]["prompt_tokens"] == 1
+    assert captured.get("timeout") == 19
