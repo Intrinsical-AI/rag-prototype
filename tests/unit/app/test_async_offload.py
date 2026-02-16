@@ -37,7 +37,7 @@ async def test_openrouter_generate_runs_in_worker_thread(asgi_client, monkeypatc
     monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
 
-    from local_rag_backend.app import api_router as api
+    from local_rag_backend.app.services import openrouter as openrouter_service
 
     class DummyUsage:
         prompt_tokens = 1
@@ -64,7 +64,7 @@ async def test_openrouter_generate_runs_in_worker_thread(asgi_client, monkeypatc
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(api, "OpenAI", DummyClient)
+    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
 
     r = await asgi_client.post(
         "/api/openrouter/generate",

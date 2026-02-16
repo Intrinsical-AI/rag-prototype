@@ -2,8 +2,8 @@
 
 import pytest
 import requests
-from fastapi import HTTPException
 
+from local_rag_backend.core.errors import LLMResponseError, LLMTimeoutError
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 
 
@@ -34,9 +34,9 @@ def test_generate_ok(monkeypatch):
 def test_generate_missing_response(monkeypatch):
     monkeypatch.setattr("requests.post", lambda *a, **k: _RespNoField())
     gen = OllamaGenerator()
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(LLMResponseError) as exc:
         gen.generate("q", ["ctx"])
-    assert exc.value.status_code == 500
+    assert "response malformed" in str(exc.value).lower()
 
 
 def test_generate_timeout(monkeypatch):
@@ -45,6 +45,5 @@ def test_generate_timeout(monkeypatch):
 
     monkeypatch.setattr("requests.post", _timeout)
     gen = OllamaGenerator()
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(LLMTimeoutError):
         gen.generate("q", ["ctx"])
-    assert exc.value.status_code == 504

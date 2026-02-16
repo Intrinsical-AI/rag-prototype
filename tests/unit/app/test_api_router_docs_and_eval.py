@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from local_rag_backend.app import api_router as api
+from local_rag_backend.app.services import openrouter as openrouter_service
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
@@ -217,7 +218,7 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(api, "OpenAI", DummyClient)
+    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
 
     r = await asgi_client.post(
         "/api/openrouter/generate",
@@ -255,7 +256,7 @@ async def test_openrouter_generate_malformed_response_is_502(asgi_client, monkey
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(api, "OpenAI", DummyClient)
+    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
 
     r = await asgi_client.post(
         "/api/openrouter/generate",
