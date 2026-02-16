@@ -41,12 +41,15 @@ class DummyEmbedder:
 
 
 class DummyVecRepo:
-    def __init__(self, fail_delete=False) -> None:
+    def __init__(self, fail_delete=False, fail_rebuild=False) -> None:
         self.rebuild_calls = []
         self.delete_calls = []
         self.fail_delete = fail_delete
+        self.fail_rebuild = fail_rebuild
 
     def rebuild(self, ids, vectors):
+        if self.fail_rebuild:
+            raise RuntimeError("fail-rebuild")
         self.rebuild_calls.append((list(ids), list(vectors)))
 
     def delete(self, ids):
@@ -105,4 +108,19 @@ def test_delete_documents_index_failure_no_rebuild_raises():
             embedder=None,
             ids=[1],
             rebuild_on_index_failure=False,
+        )
+
+
+def test_delete_documents_index_and_rebuild_failure_raises_consistency_error():
+    doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "b")])
+    vec_repo = DummyVecRepo(fail_delete=True, fail_rebuild=True)
+    embedder = DummyEmbedder()
+
+    with pytest.raises(RuntimeError, match="Multi-store inconsistency risk"):
+        delete_documents_multi_store(
+            doc_repo=doc_repo,
+            vec_repo=vec_repo,
+            embedder=embedder,
+            ids=[1],
+            rebuild_on_index_failure=True,
         )
