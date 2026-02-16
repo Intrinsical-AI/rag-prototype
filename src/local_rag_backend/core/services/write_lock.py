@@ -33,10 +33,11 @@ def _exclusive_file_lock(lock_path: Path) -> AbstractContextManager[None]:
 
 
 @contextmanager
-def multi_store_write_lock() -> Iterator[None]:
+def multi_store_write_lock(*, coordination_dir: Path | None = None) -> Iterator[None]:
     """
     Serialize mutating multi-store operations (SQL + FAISS) across threads/processes.
     """
-    lock_path = settings.get_coordination_dir() / ".rag_multi_store_write.lock"
+    lock_root = coordination_dir or settings.get_coordination_dir()
+    lock_path = lock_root / ".rag_multi_store_write.lock"
     with _LOCAL_WRITE_LOCK, _exclusive_file_lock(lock_path):
         yield

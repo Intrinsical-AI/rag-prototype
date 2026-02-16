@@ -859,9 +859,7 @@ def ingest(
                 continue
 
             total_files += 1
-            ingest_plans.append(
-                (file_path, file_prefix, tuple(items), tuple(desired_external_ids))
-            )
+            ingest_plans.append((file_path, file_prefix, tuple(items), tuple(desired_external_ids)))
 
         if dry_run:
             click.echo(
@@ -871,6 +869,7 @@ def ingest(
             return
 
         for plan_batch in _batched(ingest_plans, ingest_batch_files):
+
             def _ingest_batch_sync(
                 plans_bound: tuple[
                     tuple[
@@ -897,9 +896,7 @@ def ingest(
                     )
                     if tombstoned:
                         desired_external_ids_local -= tombstoned
-                        items_local = [
-                            it for it in items_local if it.external_id not in tombstoned
-                        ]
+                        items_local = [it for it in items_local if it.external_id not in tombstoned]
 
                     existing = doc_repo.list_ids_by_external_id_prefix(file_prefix_bound)
                     stale_ids = [
