@@ -18,8 +18,8 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
     add_history,
     delete_documents,
 )
+from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import (
-    Document as DbDocument,
     DocumentTombstone as DbDocumentTombstone,
 )
 
@@ -112,6 +112,43 @@ class SqlDocumentStorage(DocumentRepoPort):
         id: int
         action: Literal["inserted", "updated", "unchanged"]
         content_changed: bool
+
+    @dataclass(frozen=True)
+    class ExistingDocState:
+        id: int
+        external_id: str
+        content: str
+        content_sha256: str | None
+
+    def get_existing_doc_states_by_external_id(
+        self, external_ids: Sequence[str]
+    ) -> dict[str, ExistingDocState]:
+        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        if not ext_ids:
+            return {}
+        with get_session(self._session_factory) as session:
+            rows = (
+                session.query(
+                    DbDocument.id,
+                    DbDocument.external_id,
+                    DbDocument.content,
+                    DbDocument.content_sha256,
+                )
+                .filter(DbDocument.external_id.is_not(None))
+                .filter(DbDocument.external_id.in_(ext_ids))
+                .all()
+            )
+            out: dict[str, SqlDocumentStorage.ExistingDocState] = {}
+            for doc_id, ext_id, content, content_sha in rows:
+                if ext_id is None:
+                    continue
+                out[str(ext_id)] = SqlDocumentStorage.ExistingDocState(
+                    id=int(doc_id),
+                    external_id=str(ext_id),
+                    content=str(content or ""),
+                    content_sha256=(str(content_sha) if content_sha is not None else None),
+                )
+            return out
 
     def upsert_documents_by_external_id(
         self, items: Sequence[UpsertDoc]

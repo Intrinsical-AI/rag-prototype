@@ -65,7 +65,7 @@ class AskEvalConfig(BaseModel):
     )
     model: str | None = Field(default=None, max_length=256)
     temperature: float | None = None
-    top_p: float | None = None
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     max_tokens: int | None = None
     prompt_template: str | None = Field(default=None, max_length=20000)
 
