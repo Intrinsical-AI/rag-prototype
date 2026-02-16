@@ -223,6 +223,8 @@ class SqlDocumentStorage(DocumentRepoPort):
         Return existing (id, external_id) for rows whose external_id starts with `prefix`.
 
         Used by file ingestion to delete stale chunks when a source shrinks or its chunking changes.
+        Callers should include a delimiter in the prefix to avoid accidental collisions
+        (e.g. `file:/tmp/foo:` should not match `file:/tmp/foo2:`).
         """
         prefix_s = str(prefix)
         if not prefix_s:

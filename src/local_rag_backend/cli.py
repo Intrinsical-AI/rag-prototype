@@ -544,7 +544,9 @@ def ingest(
                 continue
 
             source_id = str(file_path.resolve())
-            file_prefix = f"file:{source_id}"
+            # Include a delimiter to avoid accidental prefix matches:
+            # e.g. `file:/tmp/foo:` should not match `file:/tmp/foo2:...`.
+            file_prefix = f"file:{source_id}:"
 
             items: list[SqlDocumentStorage.UpsertDoc] = []
             desired_external_ids: set[str] = set()
@@ -562,7 +564,7 @@ def ingest(
                 processed = default_preprocess(loaded.text, md)
                 chunks = chunk_fn(processed, md)
                 for chunk_index, chunk in enumerate(chunks):
-                    external_id = f"{file_prefix}:part={part_id}:chunk={chunk_index}"
+                    external_id = f"{file_prefix}part={part_id}:chunk={chunk_index}"
                     desired_external_ids.add(external_id)
 
                     md_chunk = dict(md)
