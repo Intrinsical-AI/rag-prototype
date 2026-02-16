@@ -15,9 +15,9 @@ from sqlalchemy.orm import sessionmaker
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.ingestion import (
     IngestionPipeline,
-    default_chunker,
+    build_chunk_fn_from_settings,
+    build_preprocess_fn_from_settings,
     default_formatter,
-    default_preprocess,
 )
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -85,7 +85,8 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
         pipeline = IngestionPipeline(
             loader,
             etl,
-            chunk_fn=default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap),
+            preprocess_fn=build_preprocess_fn_from_settings(settings),
+            chunk_fn=build_chunk_fn_from_settings(settings),
         )
         chunk_count = pipeline.run()
         print(f"[OK] Ingested {chunk_count} docs into SQL and FAISS.")
@@ -93,13 +94,14 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
         # sparse mode: apply the same preprocessing + chunking + formatting pipeline,
         # but storing only in SQL (no embeddings / FAISS)
         loader = CSVLoader(csv_path_obj, delimiter=DELIMITER, has_header=settings.csv_has_header)
-        chunk = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+        preprocess_fn = build_preprocess_fn_from_settings(settings)
+        chunk = build_chunk_fn_from_settings(settings)
 
         buf: list[str] = []
         ids: list[int] = []
         batch = 128
         for item in loader.load():
-            clean = default_preprocess(item.text, dict(item.metadata) if item.metadata else None)
+            clean = preprocess_fn(item.text, dict(item.metadata) if item.metadata else None)
             for c in chunk(clean, dict(item.metadata) if item.metadata else None):
                 buf.append(default_formatter(c, dict(item.metadata) if item.metadata else None))
                 if len(buf) >= batch:
