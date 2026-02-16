@@ -131,3 +131,23 @@ async def test_delete_by_external_id_dense_is_consistent_and_survives_rebuild(
     assert len(remaining) == 1
     assert remaining[0].id in dummy_vec.ids
     assert victim_id not in dummy_vec.ids
+
+
+async def test_delete_by_external_id_deduplicates_request_values(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    r1 = await asgi_client.post(
+        "/api/docs/upsert", json={"docs": [{"external_id": "doc-1", "content": "x"}]}
+    )
+    assert r1.status_code == 200
+
+    rd = await asgi_client.post(
+        "/api/docs/delete_by_external_id",
+        json={"external_ids": [" doc-1 ", "doc-1", "doc-1"]},
+    )
+    assert rd.status_code == 200
+    payload = rd.json()
+    assert payload["deleted_sql"] == 1
+    assert payload["tombstoned"] == 1
