@@ -194,6 +194,7 @@ Notas:
 
 * En `dense`/`hybrid`, la CLI actualiza SQLite y FAISS de forma consistente (y borra chunks obsoletos si un fichero se acorta).
 * La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
+* Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.
 
 ---
 
@@ -215,6 +216,9 @@ rag-delete-external-ids "chunk:<sha256>" "file:/abs/path:part=file:chunk=0"
 # Rebuild completo del índice desde SQLite (idempotente; dense/hybrid)
 rag-rebuild-index
 ```
+
+Nota operativa:
+* En `dense`/`hybrid`, los borrados intentan primero la eliminación incremental del índice y sólo hacen rebuild completo si esa sincronización falla.
 
 ### 2) API (FastAPI)
 
