@@ -41,7 +41,6 @@ from local_rag_backend.app.schemas import (
     UpsertDocsResponse,
 )
 from local_rag_backend.core.services.corpus import get_corpus_and_ids
-from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.maintenance import (
     delete_documents_multi_store,
     rebuild_index_from_db,
@@ -370,28 +369,101 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     if not texts:
         return IngestResponse(count=0, ids=[])
 
-    try:
+    def _embedding_model_name_for_dedup() -> str:
+        if settings.retrieval_mode not in ("dense", "hybrid"):
+            return "none"
+        if settings.openai_api_key:
+            return str(settings.openai_embedding_model)
+        return str(settings.st_embedding_model)
 
-        def _ingest_sync() -> list[int]:
-            doc_repo = SqlDocumentStorage()
-            if settings.retrieval_mode in ("dense", "hybrid"):
-                embedder: EmbedderPort
-                if settings.openai_api_key:
-                    embedder = OpenAIEmbedder()
-                else:
-                    embedder = SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-                vec = FaissVectorStorage(
-                    index_path=settings.index_path,
-                    id_map_path=settings.id_map_path,
-                    dim=embedder.dim,
+    def _ingest_sync() -> list[int]:
+        from local_rag_backend.core.services.chunking import chunk_chars_v1
+        from local_rag_backend.core.services.dedup import chunk_dedup_sha256
+        from local_rag_backend.core.services.ingestion import (
+            build_preprocess_fn_from_settings,
+            default_formatter,
+        )
+
+        doc_repo = SqlDocumentStorage()
+        preprocess_fn = build_preprocess_fn_from_settings(settings)
+
+        chunker_version = str(settings.ingest_chunker_version)
+        embed_model = _embedding_model_name_for_dedup()
+
+        # Build unique items by external_id (dedup hash) and keep a stable insertion order.
+        source_id = f"api:/docs:v={chunker_version}:emb={embed_model}"
+        unique_extids: list[str] = []
+        items_by_extid: dict[str, SqlDocumentStorage.UpsertDoc] = {}
+
+        for i, raw in enumerate(texts):
+            md_base: dict[str, object] = {"source": "api:/docs", "input_index": i}
+            processed = preprocess_fn(raw, md_base)
+            chunks = chunk_chars_v1(
+                processed,
+                max_chars=settings.ingest_chunk_chars,
+                overlap=settings.ingest_chunk_overlap,
+            )
+            for c in chunks:
+                dedup = chunk_dedup_sha256(
+                    cleaned_text=c.text,
+                    chunker_version=chunker_version,
+                    embedding_model_name=embed_model,
                 )
-                etl = ETLService(doc_repo, vec, embedder)
-                return list(etl.ingest(texts))
-            return list(doc_repo.store_documents(texts))
+                external_id = f"chunk:{dedup}"
 
+                if external_id in items_by_extid:
+                    continue
+                unique_extids.append(external_id)
+
+                md = dict(md_base)
+                md["chunk_index"] = int(c.chunk_index)
+                md["chunk_start_char"] = int(c.start_char)
+                md["chunk_end_char"] = int(c.end_char)
+                md["chunker_version"] = chunker_version
+                md["embedding_model"] = embed_model
+                md["dedup_sha256"] = dedup
+                md["parent_doc_id"] = f"api:/docs:text={i}"
+
+                content = default_formatter(c.text, md)
+                items_by_extid[external_id] = SqlDocumentStorage.UpsertDoc(
+                    external_id=external_id,
+                    content=content,
+                    source_id=source_id,
+                    metadata=md,
+                    chunk_dedup_sha256=dedup,
+                )
+
+        unique_items = list(items_by_extid.values())
+        if not unique_items:
+            return []
+
+        results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+            unique_items
+        )
+        id_by_ext = {r.external_id: int(r.id) for r in results}
+
+        if settings.retrieval_mode in ("dense", "hybrid") and changed_content:
+            embedder = _build_embedder_for_dense()
+            vec = FaissVectorStorage(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=embedder.dim,
+            )
+            ids = [doc_id for doc_id, _ in changed_content]
+            texts_to_embed = [t for _, t in changed_content]
+            vectors = embedder.embed(texts_to_embed)
+            try:
+                if updated_content_ids:
+                    vec.delete(updated_content_ids)
+                vec.upsert(ids, vectors)
+            except Exception:
+                rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+
+        return [id_by_ext[e] for e in unique_extids if e in id_by_ext]
+
+    try:
         ids = await run_blocking(_ingest_sync)
     except RuntimeError as e:
-        # Surface missing optional deps as a client error (dense-st not installed).
         if "sentence-transformers" in str(e) or "Dense/hybrid" in str(e):
             raise HTTPException(
                 status_code=400,
