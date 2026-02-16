@@ -101,3 +101,21 @@ def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert SqlDocumentStorage().get_all_documents() == []
+
+
+def test_cli_ingest_accepts_utf8_non_ascii_text(in_memory_sqlite, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_chars", 10_000, raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_overlap", 0, raising=False)
+
+    root = tmp_path / "in"
+    root.mkdir()
+    text_file = root / "es.txt"
+    text_file.write_text("¿Cómo está? Información útil para RAG.", encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    assert r.exit_code == 0, r.output
+
+    docs = SqlDocumentStorage().get_all_documents()
+    assert len(docs) == 1
+    assert (docs[0].source_id or "").endswith("es.txt")
