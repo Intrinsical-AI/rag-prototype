@@ -223,6 +223,10 @@ Available scripts:
 rag-bootstrap
 
 
+# Ingest .txt/.md/.csv from file(s) or directory(ies)
+rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
+
+
 # Explicitly build the index from the CSV (populate SQL and FAISS if applicable)
 rag-build-index
 
@@ -244,6 +248,13 @@ rag-status
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
+
+Optional: better file type detection (best-effort) using `python-magic`:
+
+```bash
+uv sync --frozen --extra magic
+# or: pip install rag-prototype[magic]
+```
 
 ### Ingestion pipeline
 
