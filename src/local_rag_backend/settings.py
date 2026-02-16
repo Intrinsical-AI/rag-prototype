@@ -245,12 +245,17 @@ class Settings(BaseSettings):
         Return the directory used for cross-process coordination artifacts.
 
         Priority:
-        - Explicit non-default `data_dir` (user intent).
+        - Explicit absolute `data_dir` (user intent).
         - Parent dir of absolute SQLite path (keeps workers aligned on shared DB).
-        - Resolved `data_dir` fallback.
+        - Resolved `data_dir` for purely relative deployments.
+
+        Rationale:
+        - A relative `data_dir` can resolve differently per process (different CWD),
+          splitting write locks while sharing the same absolute SQLite database.
+          Prefer the DB parent in that case to avoid multi-process lock drift.
         """
         data_dir = Path(self.data_dir).expanduser()
-        if data_dir != Path("data"):
+        if data_dir.is_absolute():
             return data_dir.resolve()
         with suppress(Exception):
             db_path = self.get_database_path().expanduser()
