@@ -1,6 +1,6 @@
 # Simple developer helpers (uv-first).
 
-.PHONY: venv sync lint type test sec clean docker-build compose-up compose-down
+.PHONY: venv sync lint type test sec sec-hard sec-soft clean docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
 UV_CACHE_DIR ?= .uv-cache
@@ -26,10 +26,25 @@ type: sync
 test: sync
 	$(UV) run --active --no-sync pytest -q
 
-sec:
-	- $(UV) pip install bandit safety
-	- $(UV) run bandit -r src/ -q
-	- $(UV) run safety check -q
+sec: sec-hard
+
+sec-hard: sync
+	$(UV) pip install "bandit[toml]" safety
+	$(UV) run bandit -r src/ -ll -ii
+	@if [ -n "$(SAFETY_API_KEY)" ]; then \
+		$(UV) run safety check --full-report --key "$(SAFETY_API_KEY)"; \
+	else \
+		$(UV) run safety check --full-report; \
+	fi
+
+sec-soft: sync
+	- $(UV) pip install "bandit[toml]" safety
+	- $(UV) run bandit -r src/ -ll -ii
+	- @if [ -n "$(SAFETY_API_KEY)" ]; then \
+		$(UV) run safety check --full-report --key "$(SAFETY_API_KEY)"; \
+	else \
+		$(UV) run safety check --full-report; \
+	fi
 
 clean:
 	rm -rf \
