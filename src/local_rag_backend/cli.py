@@ -79,6 +79,25 @@ def _reset_rag_service_best_effort() -> None:
         return None
 
 
+def _build_dense_embedder() -> EmbedderPort:
+    """
+    Build the dense/hybrid embedder based on current settings.
+
+    Keep this in one place so CLI mutating commands (rebuild/upsert/ingest/delete)
+    stay consistent when embedding backend selection changes.
+    """
+    from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+    from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+        SentenceTransformerEmbedder,
+    )
+
+    return (
+        OpenAIEmbedder()
+        if settings.openai_api_key
+        else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+    )
+
+
 @cli.command()
 def server() -> None:
     """Start the RAG FastAPI server using settings from config file or environment."""
@@ -126,10 +145,6 @@ def rebuild_index() -> None:
     try:
         _ensure_sqlite_schema_for_cli()
         from local_rag_backend.core.services.maintenance import rebuild_index_from_db
-        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-            SentenceTransformerEmbedder,
-        )
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
@@ -138,11 +153,7 @@ def rebuild_index() -> None:
 
         def _rebuild_sync() -> int:
             doc_repo = SqlDocumentStorage()
-            embedder = (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
+            embedder = _build_dense_embedder()
             # Rebuild must be able to recover from an incompatible on-disk index (e.g. dim drift).
             from local_rag_backend.infrastructure.persistence.faiss.manifest import (
                 purge_index_artifacts,
@@ -177,19 +188,8 @@ def delete_docs(ids: tuple[int, ...]) -> None:
     try:
         _ensure_sqlite_schema_for_cli()
         from local_rag_backend.core.services.maintenance import delete_documents_multi_store
-        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-            SentenceTransformerEmbedder,
-        )
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-
-        def _build_dense_embedder() -> EmbedderPort:
-            return (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
 
         def _delete_sync() -> tuple[int, int | None, bool]:
             doc_repo = SqlDocumentStorage()
@@ -239,19 +239,8 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
     try:
         _ensure_sqlite_schema_for_cli()
         from local_rag_backend.core.services.maintenance import rebuild_index_from_db
-        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-            SentenceTransformerEmbedder,
-        )
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-
-        def _build_dense_embedder() -> EmbedderPort:
-            return (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
 
         def _delete_sync() -> tuple[int, int | None, list[str], int, bool]:
             doc_repo = SqlDocumentStorage()
@@ -325,10 +314,6 @@ def upsert_docs(
         _ensure_sqlite_schema_for_cli()
         from typing import Any, cast
 
-        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-            SentenceTransformerEmbedder,
-        )
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
@@ -384,11 +369,7 @@ def upsert_docs(
             embedder = None
             vectors_by_external_id: dict[str, list[float]] = {}
             if settings.retrieval_mode in ("dense", "hybrid"):
-                embedder = (
-                    OpenAIEmbedder()
-                    if settings.openai_api_key
-                    else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-                )
+                embedder = _build_dense_embedder()
                 vectors_by_external_id = precompute_vectors_for_changed_items(
                     items=items,
                     doc_repo=doc_repo,
@@ -744,10 +725,6 @@ def ingest(
             default_formatter,
         )
         from local_rag_backend.core.services.maintenance import delete_documents_multi_store
-        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-            SentenceTransformerEmbedder,
-        )
         from local_rag_backend.infrastructure.ingestion.loaders.discovery import discover_files
         from local_rag_backend.infrastructure.ingestion.loaders.factory import (
             detect_file_format,
@@ -762,14 +739,10 @@ def ingest(
         delimiter_opt = None if csv_delimiter.strip().lower() == "auto" else csv_delimiter
         has_header = settings.csv_has_header if csv_has_header is None else bool(csv_has_header)
 
-        embedder = None
+        embedder: EmbedderPort | None = None
         vec = None
         if settings.retrieval_mode in ("dense", "hybrid") and not dry_run:
-            embedder = (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
+            embedder = _build_dense_embedder()
             vec = FaissVectorStorage(
                 index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
             )
