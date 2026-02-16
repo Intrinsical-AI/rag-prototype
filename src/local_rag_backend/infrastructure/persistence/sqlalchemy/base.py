@@ -7,9 +7,10 @@ import datetime
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from local_rag_backend.settings import settings
@@ -22,6 +23,22 @@ if TYPE_CHECKING:
 engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
+
+
+def _is_sqlite_duplicate_column_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "duplicate column name" in msg or "already exists" in msg
+
+
+def _add_sqlite_column_best_effort(*, conn: Any, ddl_sql: str) -> None:
+    try:
+        conn.execute(text(ddl_sql))
+    except OperationalError as exc:
+        # Multi-process startup race: another worker may add the same column between
+        # PRAGMA introspection and ALTER TABLE execution.
+        if _is_sqlite_duplicate_column_error(exc):
+            return
+        raise
 
 
 def ensure_sqlite_documents_autoincrement(
@@ -152,19 +169,33 @@ def ensure_sqlite_documents_identity_columns(*, engine_to_use: Engine | None = N
 
         missing = required_cols - col_names
         if "external_id" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN external_id TEXT"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN external_id TEXT"
+            )
         if "source_id" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN source_id TEXT"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN source_id TEXT"
+            )
         if "metadata" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN metadata TEXT"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN metadata TEXT"
+            )
         if "content_sha256" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN content_sha256 TEXT"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN content_sha256 TEXT"
+            )
         if "chunk_dedup_sha256" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN chunk_dedup_sha256 TEXT"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN chunk_dedup_sha256 TEXT"
+            )
         if "created_at" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN created_at DATETIME"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN created_at DATETIME"
+            )
         if "updated_at" in missing:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN updated_at DATETIME"))
+            _add_sqlite_column_best_effort(
+                conn=conn, ddl_sql="ALTER TABLE documents ADD COLUMN updated_at DATETIME"
+            )
 
         # Indexes (idempotent). Partial index keeps multiple NULLs and enforces uniqueness otherwise.
         conn.execute(
