@@ -55,6 +55,7 @@ from local_rag_backend.app.schemas import (
     UpsertDocsRequest,
     UpsertDocsResponse,
 )
+from local_rag_backend.app.services import docs as docs_service, index as index_service
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -78,6 +79,7 @@ from local_rag_backend.infrastructure.llms.openai_client import create_openai_cl
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.faiss.manifest import (
     expected_manifest_config_from_settings,
+    purge_index_artifacts,
 )
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
@@ -409,116 +411,22 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
         return IngestResponse(count=0, ids=[])
     t = Timer()
 
-    def _embedding_model_name_for_dedup() -> str:
-        if settings.retrieval_mode not in ("dense", "hybrid"):
-            return "none"
-        if settings.openai_api_key:
-            return str(settings.openai_embedding_model)
-        return str(settings.st_embedding_model)
-
-    def _ingest_sync() -> list[int]:
-        from local_rag_backend.core.services.chunking import chunk_chars_v1
-        from local_rag_backend.core.services.dedup import chunk_dedup_sha256
-        from local_rag_backend.core.services.ingestion import (
-            build_preprocess_fn_from_settings,
-            default_formatter,
+    def _ingest_operation() -> list[int]:
+        return docs_service.ingest_docs_sync(
+            texts=texts,
+            settings_obj=settings,
+            build_embedder=_build_embedder_for_dense,
+            doc_repo_factory=SqlDocumentStorage,
+            vector_repo_factory=FaissVectorStorage,
+            precompute_vectors_fn=precompute_vectors_for_changed_items,
+            sync_dense_fn=sync_dense_after_upsert,
+            rebuild_fn=rebuild_index_from_db,
         )
-
-        doc_repo = SqlDocumentStorage()
-        preprocess_fn = build_preprocess_fn_from_settings(settings)
-
-        chunker_version = str(settings.ingest_chunker_version)
-        embed_model = _embedding_model_name_for_dedup()
-
-        # Build unique items by external_id (dedup hash) and keep a stable insertion order.
-        source_id = f"api:/docs:v={chunker_version}:emb={embed_model}"
-        unique_extids: list[str] = []
-        items_by_extid: dict[str, SqlDocumentStorage.UpsertDoc] = {}
-
-        for i, raw in enumerate(texts):
-            md_base: dict[str, object] = {"source": "api:/docs", "input_index": i}
-            processed = preprocess_fn(raw, md_base)
-            chunks = chunk_chars_v1(
-                processed,
-                max_chars=settings.ingest_chunk_chars,
-                overlap=settings.ingest_chunk_overlap,
-            )
-            for c in chunks:
-                dedup = chunk_dedup_sha256(
-                    cleaned_text=c.text,
-                    chunker_version=chunker_version,
-                    embedding_model_name=embed_model,
-                )
-                external_id = f"chunk:{dedup}"
-
-                if external_id in items_by_extid:
-                    continue
-                unique_extids.append(external_id)
-
-                md = dict(md_base)
-                md["chunk_index"] = int(c.chunk_index)
-                md["chunk_start_char"] = int(c.start_char)
-                md["chunk_end_char"] = int(c.end_char)
-                md["chunker_version"] = chunker_version
-                md["embedding_model"] = embed_model
-                md["dedup_sha256"] = dedup
-                md["parent_doc_id"] = f"api:/docs:text={i}"
-
-                content = default_formatter(c.text, md)
-                items_by_extid[external_id] = SqlDocumentStorage.UpsertDoc(
-                    external_id=external_id,
-                    content=content,
-                    source_id=source_id,
-                    metadata=md,
-                    chunk_dedup_sha256=dedup,
-                )
-
-        unique_items = list(items_by_extid.values())
-        tombstoned = doc_repo.get_tombstoned_external_ids(unique_extids)
-        if tombstoned:
-            unique_extids = [e for e in unique_extids if e not in tombstoned]
-            unique_items = [it for it in unique_items if it.external_id not in tombstoned]
-        if not unique_items:
-            return []
-
-        embedder = None
-        vectors_by_external_id: dict[str, list[float]] = {}
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            # Compute embeddings before SQL upsert so provider failures don't leave SQL/index drift.
-            embedder = _build_embedder_for_dense()
-            vectors_by_external_id = precompute_vectors_for_changed_items(
-                items=unique_items,
-                doc_repo=doc_repo,
-                embedder=embedder,
-            )
-
-        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
-            unique_items
-        )
-        id_by_ext = {r.external_id: int(r.id) for r in results}
-
-        if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-            vec = FaissVectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=embedder.dim,
-            )
-            sync_dense_after_upsert(
-                results=results,
-                updated_content_ids=updated_content_ids,
-                vectors_by_external_id=vectors_by_external_id,
-                vec_repo=vec,
-                doc_repo=doc_repo,
-                embedder=embedder,
-                rebuild_fn=rebuild_index_from_db,
-            )
-
-        return [id_by_ext[e] for e in unique_extids if e in id_by_ext]
 
     ok = False
     ids: list[int] = []
     try:
-        ids = cast("list[int]", await run_blocking(_run_multi_store_write_locked, _ingest_sync))
+        ids = cast("list[int]", await run_blocking(_run_multi_store_write_locked, _ingest_operation))
         ok = True
         return IngestResponse(count=len(ids), ids=ids)
     except RuntimeError as e:
@@ -552,50 +460,27 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
 async def delete_docs_by_external_id(
     payload: Annotated[DeleteDocsByExternalIdRequest, Body(...)],
 ) -> DeleteDocsByExternalIdResponse:
-    external_ids = [str(x).strip() for x in payload.external_ids if str(x).strip()]
-    if not external_ids:
-        return DeleteDocsByExternalIdResponse(
-            deleted_sql=0,
-            deleted_index=0,
-            tombstoned=0,
-            missing_external_ids=[],
-            rebuilt_index=False,
-        )
-
-    def _delete_sync() -> DeleteDocsByExternalIdResponse:
-        doc_repo = SqlDocumentStorage()
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            vec = FaissVectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=None,
-            )
-            deleted_sql, deleted_index, missing, tombstoned, rebuilt = (
-                delete_external_ids_multi_store(
-                    doc_repo=doc_repo,
-                    external_ids=external_ids,
-                    vec_repo=vec,
-                    embedder_factory=_build_embedder_for_dense,
-                    rebuild_on_index_failure=True,
-                )
-            )
-        else:
-            deleted_sql, deleted_index, missing, tombstoned, rebuilt = (
-                delete_external_ids_multi_store(doc_repo=doc_repo, external_ids=external_ids)
-            )
-
-        return DeleteDocsByExternalIdResponse(
-            deleted_sql=deleted_sql,
-            deleted_index=deleted_index,
-            tombstoned=tombstoned,
-            missing_external_ids=missing,
-            rebuilt_index=rebuilt,
+    def _delete_operation() -> docs_service.DeleteDocsByExternalIdSummary:
+        return docs_service.delete_docs_by_external_id_sync(
+            external_ids=payload.external_ids,
+            settings_obj=settings,
+            build_embedder=_build_embedder_for_dense,
+            doc_repo_factory=SqlDocumentStorage,
+            vector_repo_factory=FaissVectorStorage,
+            delete_external_ids_fn=delete_external_ids_multi_store,
         )
 
     try:
-        return cast(
-            "DeleteDocsByExternalIdResponse",
-            await run_blocking(_run_multi_store_write_locked, _delete_sync),
+        summary = cast(
+            "docs_service.DeleteDocsByExternalIdSummary",
+            await run_blocking(_run_multi_store_write_locked, _delete_operation),
+        )
+        return DeleteDocsByExternalIdResponse(
+            deleted_sql=summary.deleted_sql,
+            deleted_index=summary.deleted_index,
+            tombstoned=summary.tombstoned,
+            missing_external_ids=summary.missing_external_ids,
+            rebuilt_index=summary.rebuilt_index,
         )
     finally:
         reset_rag_service()
@@ -603,35 +488,25 @@ async def delete_docs_by_external_id(
 
 @router.post("/docs/delete", response_model=DeleteDocsResponse)
 async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> DeleteDocsResponse:
-    ids = [int(i) for i in payload.ids]
-    if not ids:
-        return DeleteDocsResponse(deleted_sql=0, deleted_index=0, rebuilt_index=False)
-
-    def _delete_sync() -> DeleteDocsResponse:
-        doc_repo = SqlDocumentStorage()
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            vec = FaissVectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=None,  # infer from existing index when possible
-            )
-            deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
-                doc_repo=doc_repo,
-                vec_repo=vec,
-                embedder_factory=_build_embedder_for_dense,
-                ids=ids,
-                rebuild_on_index_failure=True,
-            )
-            return DeleteDocsResponse(
-                deleted_sql=deleted_sql, deleted_index=deleted_index, rebuilt_index=rebuilt
-            )
-
-        deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=ids)
-        return DeleteDocsResponse(deleted_sql=deleted_sql, deleted_index=None, rebuilt_index=False)
+    def _delete_operation() -> docs_service.DeleteDocsSummary:
+        return docs_service.delete_docs_sync(
+            ids=payload.ids,
+            settings_obj=settings,
+            build_embedder=_build_embedder_for_dense,
+            doc_repo_factory=SqlDocumentStorage,
+            vector_repo_factory=FaissVectorStorage,
+            delete_docs_fn=delete_documents_multi_store,
+        )
 
     try:
-        return cast(
-            "DeleteDocsResponse", await run_blocking(_run_multi_store_write_locked, _delete_sync)
+        summary = cast(
+            "docs_service.DeleteDocsSummary",
+            await run_blocking(_run_multi_store_write_locked, _delete_operation),
+        )
+        return DeleteDocsResponse(
+            deleted_sql=summary.deleted_sql,
+            deleted_index=summary.deleted_index,
+            rebuilt_index=summary.rebuilt_index,
         )
     finally:
         reset_rag_service()
@@ -639,71 +514,28 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
 
 @router.post("/docs/upsert", response_model=UpsertDocsResponse)
 async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> UpsertDocsResponse:
-    # Validate uniqueness early for deterministic behavior.
-    ext_ids = [d.external_id for d in payload.docs]
-    if len(set(ext_ids)) != len(ext_ids):
-        raise HTTPException(
-            status_code=400, detail="external_id values must be unique per request."
+    def _upsert_operation() -> docs_service.UpsertDocsSummary:
+        return docs_service.upsert_docs_sync(
+            docs=payload.docs,
+            settings_obj=settings,
+            build_embedder=_build_embedder_for_dense,
+            doc_repo_factory=SqlDocumentStorage,
+            vector_repo_factory=FaissVectorStorage,
+            precompute_vectors_fn=precompute_vectors_for_changed_items,
+            sync_dense_fn=sync_dense_after_upsert,
+            rebuild_fn=rebuild_index_from_db,
         )
 
-    def _upsert_sync() -> UpsertDocsResponse:
-        doc_repo = SqlDocumentStorage()
-        tombstoned = doc_repo.get_tombstoned_external_ids([d.external_id for d in payload.docs])
-        if tombstoned:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Some external_id values are tombstoned (deleted): {sorted(tombstoned)[:10]}",
-            )
-        items = [
-            SqlDocumentStorage.UpsertDoc(
-                external_id=d.external_id,
-                content=d.content,
-                source_id=d.source_id,
-                metadata=d.metadata,
-            )
-            for d in payload.docs
-        ]
-
-        embedder = None
-        vectors_by_external_id: dict[str, list[float]] = {}
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            # Compute embeddings before SQL upsert so provider failures don't leave SQL/index drift.
-            embedder = _build_embedder_for_dense()
-            vectors_by_external_id = precompute_vectors_for_changed_items(
-                items=items,
-                doc_repo=doc_repo,
-                embedder=embedder,
-            )
-
-        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
-            items
+    try:
+        summary = cast(
+            "docs_service.UpsertDocsSummary",
+            await run_blocking(_run_multi_store_write_locked, _upsert_operation),
         )
-        inserted = sum(1 for r in results if r.action == "inserted")
-        updated = sum(1 for r in results if r.action == "updated")
-        unchanged = sum(1 for r in results if r.action == "unchanged")
-
-        rebuilt_index = False
-        if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-            vec = FaissVectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=embedder.dim,
-            )
-            rebuilt_index = sync_dense_after_upsert(
-                results=results,
-                updated_content_ids=updated_content_ids,
-                vectors_by_external_id=vectors_by_external_id,
-                vec_repo=vec,
-                doc_repo=doc_repo,
-                embedder=embedder,
-                rebuild_fn=rebuild_index_from_db,
-            )
-
         return UpsertDocsResponse(
-            inserted=inserted,
-            updated=updated,
-            unchanged=unchanged,
-            rebuilt_index=rebuilt_index,
+            inserted=summary.inserted,
+            updated=summary.updated,
+            unchanged=summary.unchanged,
+            rebuilt_index=summary.rebuilt_index,
             results=[
                 UpsertDocResult(
                     external_id=r.external_id,
@@ -711,14 +543,13 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
                     action=r.action,
                     content_changed=r.content_changed,
                 )
-                for r in results
+                for r in summary.results
             ],
         )
-
-    try:
-        return cast(
-            "UpsertDocsResponse", await run_blocking(_run_multi_store_write_locked, _upsert_sync)
-        )
+    except docs_service.TombstonedExternalIdsError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
         reset_rag_service()
 
@@ -728,27 +559,19 @@ async def rebuild_index() -> RebuildIndexResponse:
     if settings.retrieval_mode not in ("dense", "hybrid"):
         raise HTTPException(status_code=400, detail="Index rebuild requires dense or hybrid mode.")
 
-    def _rebuild_sync() -> RebuildIndexResponse:
-        doc_repo = SqlDocumentStorage()
-        embedder = _build_embedder_for_dense()
-        # Rebuild must be able to recover from an incompatible on-disk index (e.g. dim drift).
-        from local_rag_backend.infrastructure.persistence.faiss.manifest import (
-            purge_index_artifacts,
+    def _rebuild_operation() -> int:
+        return index_service.rebuild_index_sync(
+            settings_obj=settings,
+            build_embedder=_build_embedder_for_dense,
+            doc_repo_factory=SqlDocumentStorage,
+            vector_repo_factory=FaissVectorStorage,
+            purge_index_artifacts_fn=purge_index_artifacts,
+            rebuild_fn=rebuild_index_from_db,
         )
-
-        purge_index_artifacts(index_path=settings.index_path, id_map_path=settings.id_map_path)
-        vec = FaissVectorStorage(
-            index_path=settings.index_path,
-            id_map_path=settings.id_map_path,
-            dim=embedder.dim,
-        )
-        n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
-        return RebuildIndexResponse(indexed=n)
 
     try:
-        return cast(
-            "RebuildIndexResponse", await run_blocking(_run_multi_store_write_locked, _rebuild_sync)
-        )
+        indexed = cast("int", await run_blocking(_run_multi_store_write_locked, _rebuild_operation))
+        return RebuildIndexResponse(indexed=indexed)
     finally:
         reset_rag_service()
 
