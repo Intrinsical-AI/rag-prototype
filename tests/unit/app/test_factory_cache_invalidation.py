@@ -39,3 +39,25 @@ async def test_get_rag_service_cache_is_invalidated_by_reload_token(tmp_path, mo
 
     svc4 = await factory.get_rag_service()
     assert svc4 is svc3
+
+
+def test_write_reload_token_uses_unique_tmp_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(factory.settings, "data_dir", tmp_path, raising=False)
+    token_path = tmp_path / ".rag_service_reload_token"
+
+    seen_sources: set[str] = set()
+    real_replace = factory.os.replace
+
+    def _replace(src, dst):
+        src_s = str(src)
+        if src_s in seen_sources:
+            raise FileNotFoundError("duplicate temporary path")
+        seen_sources.add(src_s)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(factory.os, "replace", _replace, raising=True)
+
+    factory._write_reload_token("v1")
+    factory._write_reload_token("v2")
+
+    assert token_path.read_text(encoding="utf-8") == "v2"
