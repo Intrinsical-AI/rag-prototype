@@ -48,10 +48,12 @@ def _noop_generate_latest(*_args: Any, **_kwargs: Any) -> bytes:  # pragma: no c
 
 
 try:  # pragma: no cover
-    from prometheus_client import CONTENT_TYPE_LATEST as _CONTENT_TYPE_LATEST
-    from prometheus_client import Counter as _PromCounter
-    from prometheus_client import Histogram as _PromHistogram
-    from prometheus_client import generate_latest as _prom_generate_latest
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST as _CONTENT_TYPE_LATEST,
+        Counter as _PromCounter,
+        Histogram as _PromHistogram,
+        generate_latest as _prom_generate_latest,
+    )
 
     PROMETHEUS_AVAILABLE = True
     CONTENT_TYPE_LATEST = _CONTENT_TYPE_LATEST
