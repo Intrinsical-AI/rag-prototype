@@ -151,6 +151,7 @@ Key variables (non-exhaustive):
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
 | `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
+| (derived) `index_manifest.json`  | `data/index_manifest.json`| dense/hybrid | Index manifest (model/dim/chunker) for drift detection |
 | `ENABLE_MONITORING`              | `false`                   | monitoring   | Enable metrics middleware and `/metrics` endpoint      |
 | `OPENAI_TOP_P`                   | `1.0`                     | OpenAI       | top-p parameter                                        |
 | `OPENROUTER_ENABLED`             | `false`                  | OpenRouter   | Enable OpenRouter proxy                                |
@@ -182,6 +183,14 @@ ST_EMBEDDING_MODEL=all-MiniLM-L6-v2
 # OPENROUTER_ENABLED=true
 # ...
 ```
+
+### Index manifest (dense/hybrid)
+
+When `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
+It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
+
+If you change any of these settings, `/api/ready` and `rag-status` will report drift and instruct you to rebuild:
+`rag-rebuild-index` (or `POST /api/index/rebuild`).
 
 ### Upgrade notes (SQLite ID integrity)
 
