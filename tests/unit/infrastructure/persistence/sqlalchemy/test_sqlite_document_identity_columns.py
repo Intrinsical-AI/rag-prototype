@@ -4,7 +4,8 @@ import hashlib
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.engine import Connection
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
@@ -78,3 +79,36 @@ def test_store_documents_sets_content_sha256(in_memory_sqlite):
     by_content = {d.content: d for d in docs}
     assert by_content["a"].content_sha256 == hashlib.sha256(b"a").hexdigest()
     assert by_content["b"].content_sha256 == hashlib.sha256(b"b").hexdigest()
+
+
+def test_ensure_identity_columns_tolerates_duplicate_column_race(tmp_path, monkeypatch):
+    db_path = tmp_path / "app.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(
+            text("CREATE TABLE documents (id INTEGER PRIMARY KEY NOT NULL, content TEXT NOT NULL)")
+        )
+
+    original_execute = Connection.execute
+    injected = False
+
+    def _execute_with_race(self, statement, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal injected
+        sql = str(statement)
+        if not injected and "ALTER TABLE documents ADD COLUMN source_id TEXT" in sql:
+            injected = True
+            # Simulate a parallel worker adding the same column between introspection and ALTER.
+            with engine.begin() as other:
+                other.execute(text("ALTER TABLE documents ADD COLUMN source_id TEXT"))
+            raise OperationalError(sql, {}, Exception("duplicate column name: source_id"))
+        return original_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(Connection, "execute", _execute_with_race, raising=True)
+
+    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=engine)
+    assert injected is True
+
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(documents)")).fetchall()}
+        assert "source_id" in cols
+        assert "external_id" in cols
