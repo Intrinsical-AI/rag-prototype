@@ -56,6 +56,7 @@ class DummyVecRepo:
         self.delete_calls.append(list(ids))
         if self.fail_delete:
             raise RuntimeError("fail-delete")
+        return len(list(ids))
 
 
 def test_rebuild_index_from_db_empty_rebuilds_to_empty():
@@ -95,6 +96,27 @@ def test_delete_documents_index_failure_triggers_rebuild():
     assert deleted_index is None
     assert rebuilt is True
     assert vec_repo.rebuild_calls  # rebuilt from DB state (doc 2 remains)
+
+
+def test_delete_documents_uses_real_deleted_index_count():
+    doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "bb"), _Doc(3, "ccc")])
+
+    class PartialDeleteVec(DummyVecRepo):
+        def delete(self, ids):
+            super().delete(ids)
+            return 1
+
+    vec_repo = PartialDeleteVec()
+    deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+        doc_repo=doc_repo,
+        vec_repo=vec_repo,
+        embedder=DummyEmbedder(),
+        ids=[1, 2],
+        rebuild_on_index_failure=True,
+    )
+    assert deleted_sql == 2
+    assert deleted_index == 1
+    assert rebuilt is False
 
 
 def test_delete_documents_index_failure_no_rebuild_raises():
