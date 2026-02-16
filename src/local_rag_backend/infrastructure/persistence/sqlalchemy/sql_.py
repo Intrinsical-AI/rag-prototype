@@ -18,7 +18,10 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
     add_history,
     delete_documents,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
+from local_rag_backend.infrastructure.persistence.sqlalchemy.models import (
+    Document as DbDocument,
+    DocumentTombstone as DbDocumentTombstone,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping, Sequence
@@ -257,6 +260,83 @@ class SqlDocumentStorage(DocumentRepoPort):
                     continue
                 out.append((int(doc_id), str(ext_id)))
             return out
+
+    def get_tombstoned_external_ids(self, external_ids: Sequence[str]) -> set[str]:
+        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        if not ext_ids:
+            return set()
+        with get_session(self._session_factory) as session:
+            rows = (
+                session.query(DbDocumentTombstone.external_id)
+                .filter(DbDocumentTombstone.external_id.in_(ext_ids))
+                .all()
+            )
+            return {str(r[0]) for r in rows if r and r[0]}
+
+    def tombstone_external_ids(self, external_ids: Sequence[str]) -> int:
+        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        if not ext_ids:
+            return 0
+
+        with get_session(self._session_factory) as session:
+            # SQLite doesn't support INSERT ... ON CONFLICT in ORM portably without Core.
+            # We'll ignore duplicates by checking existing first.
+            existing = (
+                session.query(DbDocumentTombstone.external_id)
+                .filter(DbDocumentTombstone.external_id.in_(ext_ids))
+                .all()
+            )
+            existing_set = {str(r[0]) for r in existing if r and r[0]}
+            to_add = [e for e in ext_ids if e not in existing_set]
+            if not to_add:
+                return 0
+            session.add_all([DbDocumentTombstone(external_id=e) for e in to_add])
+            session.commit()
+            return len(to_add)
+
+    def delete_by_external_ids(
+        self, external_ids: Sequence[str]
+    ) -> tuple[int, list[int], list[str], int]:
+        """
+        Hard-delete documents by external_id and add tombstones.
+
+        Returns: (deleted_sql, deleted_ids, missing_external_ids, tombstoned)
+        """
+        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
+        if not ext_ids:
+            return 0, [], [], 0
+
+        with get_session(self._session_factory) as session:
+            rows = (
+                session.query(DbDocument.id, DbDocument.external_id)
+                .filter(DbDocument.external_id.is_not(None))
+                .filter(DbDocument.external_id.in_(ext_ids))
+                .all()
+            )
+            found_by_ext = {str(ext): int(doc_id) for doc_id, ext in rows if ext is not None}
+            missing = [e for e in ext_ids if e not in found_by_ext]
+
+            # Tombstone all requested external_ids (including missing) to prevent reappearance.
+            existing_ts = (
+                session.query(DbDocumentTombstone.external_id)
+                .filter(DbDocumentTombstone.external_id.in_(ext_ids))
+                .all()
+            )
+            existing_ts_set = {str(r[0]) for r in existing_ts if r and r[0]}
+            to_tombstone = [e for e in ext_ids if e not in existing_ts_set]
+            if to_tombstone:
+                session.add_all([DbDocumentTombstone(external_id=e) for e in to_tombstone])
+
+            deleted_ids = list(found_by_ext.values())
+            deleted_sql = 0
+            if deleted_ids:
+                deleted_sql = (
+                    session.query(DbDocument)
+                    .filter(DbDocument.id.in_(deleted_ids))
+                    .delete(synchronize_session=False)
+                )
+            session.commit()
+            return int(deleted_sql or 0), deleted_ids, missing, len(to_tombstone)
 
 
 class HistorySqlStorage(QAHistoryPort):
