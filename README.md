@@ -138,7 +138,7 @@ Key variables (non-exhaustive):
 | `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
 | `LOG_LEVEL`                      | `INFO`                    | server       | Logging level                                          |
 | `API_KEY`                        | —                         | security     | If set, require `X-API-Key: <API_KEY>` for `/api/*` and `/metrics` |
-| `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse to start if `APP_HOST` is not localhost and `API_KEY` is unset |
+| `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse unsafe public startup and reject non-local `/api/*` + `/metrics` requests when `API_KEY` is unset |
 | `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, FAISS paths)       |
@@ -446,6 +446,7 @@ mkdocs serve
 ## Runtime considerations
 
 * **Singleton per process**: `RagService` is initialized as a singleton in `factory`. With `uvicorn --workers N`, each process loads its own instance (and its FAISS). Align deployment and warm-up as needed.
+* **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit `DATA_DIR`; when `DATA_DIR` is default and `SQLITE_URL` is absolute, it uses the DB parent directory to keep workers/CLI aligned.
 * **Metrics**: if `ENABLE_MONITORING=true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
 * **Dense/Hybrid**: must use the same embedding model for indexing and querying (`ST_EMBEDDING_MODEL`).
 
