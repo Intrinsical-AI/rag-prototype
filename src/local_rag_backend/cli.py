@@ -468,10 +468,10 @@ def ingest(
 
     try:
         from local_rag_backend.app.factory import reset_rag_service
+        from local_rag_backend.core.services.chunking import chunk_chars_v1
         from local_rag_backend.core.services.ingestion import (
-            default_chunker,
+            build_preprocess_fn_from_settings,
             default_formatter,
-            default_preprocess,
         )
         from local_rag_backend.core.services.maintenance import (
             delete_documents_multi_store,
@@ -490,7 +490,7 @@ def ingest(
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
         doc_repo = SqlDocumentStorage()
-        chunk_fn = default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
+        preprocess_fn = build_preprocess_fn_from_settings(settings)
 
         delimiter_opt = None if csv_delimiter.strip().lower() == "auto" else csv_delimiter
         has_header = settings.csv_has_header if csv_has_header is None else bool(csv_has_header)
@@ -561,15 +561,25 @@ def ingest(
                 if "row_index" in md and md["row_index"] is not None:
                     part_id = f"row-{md['row_index']}"
 
-                processed = default_preprocess(loaded.text, md)
-                chunks = chunk_fn(processed, md)
-                for chunk_index, chunk in enumerate(chunks):
+                parent_doc_id = f"{file_prefix}part={part_id}"
+                processed = preprocess_fn(loaded.text, md)
+                chunks = chunk_chars_v1(
+                    processed,
+                    max_chars=settings.ingest_chunk_chars,
+                    overlap=settings.ingest_chunk_overlap,
+                )
+                for c in chunks:
+                    chunk_index = int(c.chunk_index)
+                    chunk = c.text
                     external_id = f"{file_prefix}part={part_id}:chunk={chunk_index}"
                     desired_external_ids.add(external_id)
 
                     md_chunk = dict(md)
                     md_chunk["part_id"] = part_id
                     md_chunk["chunk_index"] = chunk_index
+                    md_chunk["chunk_start_char"] = int(c.start_char)
+                    md_chunk["chunk_end_char"] = int(c.end_char)
+                    md_chunk["parent_doc_id"] = parent_doc_id
                     content = default_formatter(chunk, md_chunk)
                     items.append(
                         SqlDocumentStorage.UpsertDoc(
