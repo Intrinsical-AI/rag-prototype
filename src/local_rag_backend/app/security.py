@@ -53,7 +53,7 @@ async def require_api_key(request: Request) -> None:
         if not getattr(settings, "public_bind_requires_api_key", True):
             return
         client_host = ((request.client.host if request.client else "") or "").strip().lower()
-        if client_host and client_host not in _LOCALHOST_HOSTS:
+        if client_host not in _LOCALHOST_HOSTS:
             raise HTTPException(
                 status_code=401,
                 detail=(
