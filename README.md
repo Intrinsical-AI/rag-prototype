@@ -373,6 +373,20 @@ Notes:
 - In `docker-compose.yml`, `OLLAMA_ENABLED=true` and `OLLAMA_BASE_URL=http://ollama:11434` are set.
 - `docker-compose.yml` defaults to `RETRIEVAL_MODE=sparse` for a lightweight image; install/build with the `dense` extra for dense/hybrid.
 
+### Docker build expectations (CI parity)
+
+The `Dockerfile` is multi-stage and CI builds the `production` target only. Dependency resolution is lockfile-driven:
+
+- `uv.lock` is required for reproducible image builds.
+- install path uses `uv sync --frozen` (no floating resolution in CI).
+- runtime image is minimal and excludes build toolchain (`build-essential`, `git`).
+
+Recommended local verification:
+
+```bash
+docker build --target production .
+```
+
 ---
 
 ## API
@@ -417,16 +431,33 @@ curl -X POST "http://localhost:8000/api/ask" \
 ## Tests
 
 ```bash
-pytest
-# Coverage (already enabled by default via pyproject.toml)
-# pytest --cov-report=xml:coverage.xml
-# pytest --cov-report=html:htmlcov
-
-# If your environment has a read-only/non-writable home directory, prefer:
-make test
+UV_CACHE_DIR=.uv-cache uv run --active --no-sync pytest -q
+UV_CACHE_DIR=.uv-cache uv run --active --no-sync ruff check src tests
+uv run pre-commit run --all-files
 ```
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). Some integration tests require `faiss` and/or `sentence_transformers`; if they are not installed, those tests are skipped automatically. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
+
+### CI gates
+
+Current CI gates include:
+
+- `pre-commit run --all-files`
+- `ruff check .` and `ruff format --check .`
+- `mypy .`
+- tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
+- security scan (`bandit` + `safety`) failing on findings
+- Docker build for `--target production` on `main/master`
+
+For local parity, use:
+
+```bash
+make lint
+make type
+make test
+make sec        # strict
+make sec-soft   # non-blocking local audit
+```
 
 ## Documentation site (optional)
 
