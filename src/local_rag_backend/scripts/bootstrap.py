@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from local_rag_backend.app.composition import build_dense_embedder_from_settings
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.ingestion import (
     IngestionPipeline,
@@ -81,10 +82,10 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
 
     if settings.retrieval_mode in ["dense", "hybrid"]:
         embedder: EmbedderPort
-        embedder = (
-            OpenAIEmbedder()
-            if settings.openai_api_key
-            else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        embedder = build_dense_embedder_from_settings(
+            settings_obj=settings,
+            openai_embedder_factory=OpenAIEmbedder,
+            st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
         )
         vector_repo = FaissVectorStorage(
             index_path=settings.index_path,

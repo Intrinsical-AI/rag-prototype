@@ -33,6 +33,13 @@ if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
 
 
+DEFAULT_DENSE_BACKEND_MESSAGE = (
+    "Dense/hybrid retrieval requires an embeddings backend. "
+    "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
+    "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
+)
+
+
 def get_available_llm_providers(*, settings_obj: Settings) -> dict[str, str]:
     providers: dict[str, str] = {}
     if settings_obj.openai_api_key:
@@ -51,14 +58,68 @@ def build_dense_embedder_from_settings(
     settings_obj: Settings,
     openai_embedder_factory: Callable[[], EmbedderPort],
     st_embedder_factory: Callable[[str], EmbedderPort],
-    missing_backend_message: str,
+    missing_backend_message: str | None = None,
 ) -> EmbedderPort:
+    backend_message = missing_backend_message or DEFAULT_DENSE_BACKEND_MESSAGE
     if settings_obj.openai_api_key:
         return openai_embedder_factory()
     try:
         return st_embedder_factory(str(settings_obj.st_embedding_model))
     except RuntimeError as e:
-        raise RuntimeError(missing_backend_message) from e
+        raise RuntimeError(backend_message) from e
+
+
+def build_retriever_with_default_embedder_from_settings(
+    *,
+    settings_obj: Settings,
+    retrieval_mode: str,
+    doc_repo: DocumentRepoPort,
+    openai_embedder_factory: Callable[[], EmbedderPort],
+    st_embedder_factory: Callable[[str], EmbedderPort],
+    missing_backend_message: str | None = None,
+    preloaded_docs: Sequence[DomainDocument] | None = None,
+    hybrid_alpha: float | None = None,
+    enable_reranker: bool | None = None,
+    reranker_candidate_k: int | None = None,
+    reranker_strategy: str | None = None,
+    sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
+    dense_retriever_factory: Callable[..., RetrieverPort] = DenseFaissRetriever,
+    hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
+    vector_repo_factory: Callable[..., Any] = FaissVectorStorage,
+    reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
+) -> RetrieverPort:
+    def _dense_embedder_factory() -> EmbedderPort:
+        return build_dense_embedder_from_settings(
+            settings_obj=settings_obj,
+            openai_embedder_factory=openai_embedder_factory,
+            st_embedder_factory=st_embedder_factory,
+            missing_backend_message=missing_backend_message,
+        )
+
+    return build_retriever_from_settings(
+        settings_obj=settings_obj,
+        retrieval_mode=retrieval_mode,
+        doc_repo=doc_repo,
+        dense_embedder_factory=_dense_embedder_factory,
+        preloaded_docs=preloaded_docs,
+        hybrid_alpha=hybrid_alpha,
+        enable_reranker=enable_reranker,
+        reranker_candidate_k=reranker_candidate_k,
+        reranker_strategy=reranker_strategy,
+        sparse_retriever_factory=sparse_retriever_factory,
+        dense_retriever_factory=dense_retriever_factory,
+        hybrid_retriever_factory=hybrid_retriever_factory,
+        vector_repo_factory=vector_repo_factory,
+        reranker_factory=reranker_factory,
+    )
+
+
+def resolve_preferred_llm_provider(*, settings_obj: Settings) -> str:
+    if settings_obj.ollama_enabled:
+        return "ollama"
+    if settings_obj.openai_api_key:
+        return "openai"
+    raise RuntimeError("No LLM configured. Set OPENAI_API_KEY or enable OLLAMA_ENABLED.")
 
 
 def build_retriever_from_settings(
