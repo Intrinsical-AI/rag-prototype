@@ -64,9 +64,9 @@ class AskEvalConfig(BaseModel):
         default=None, description="Optional override for generator provider: 'openai'|'ollama'"
     )
     model: str | None = Field(default=None, max_length=256)
-    temperature: float | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
-    max_tokens: int | None = None
+    max_tokens: int | None = Field(default=None, ge=1, le=4096)
     prompt_template: str | None = Field(default=None, max_length=20000)
 
 

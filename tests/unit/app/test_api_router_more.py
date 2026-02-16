@@ -98,12 +98,12 @@ async def test_ask_eval_invalid_config(asgi_client, monkeypatch):
         ({"retrieval_mode": "dense", "k": 11}, 422),  # k too large (schema)
         ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": -0.1}, 422),  # schema
         ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": 1.1}, 422),  # schema
-        ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 400),  # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 400),  # runtime validation
+        ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 422),  # schema
         ({"retrieval_mode": "sparse", "k": 3, "top_p": -0.1}, 422),  # schema
         ({"retrieval_mode": "sparse", "k": 3, "top_p": 1.1}, 422),  # schema
-        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 0}, 400),  # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 999999}, 400),  # runtime validation
+        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 0}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 999999}, 422),  # schema
     ],
 )
 async def test_ask_eval_invalid_config_parametrized_async(asgi_client, config, expected_status):

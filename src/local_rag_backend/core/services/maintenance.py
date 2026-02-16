@@ -65,8 +65,9 @@ def delete_documents_multi_store(
         return deleted_sql, None, False
 
     try:
-        vec_repo.delete(ids_list)
-        return deleted_sql, len(ids_list), False
+        deleted_index_raw = vec_repo.delete(ids_list)
+        deleted_index = int(deleted_index_raw) if deleted_index_raw is not None else len(ids_list)
+        return deleted_sql, deleted_index, False
     except Exception:
         if not rebuild_on_index_failure:
             raise
