@@ -23,19 +23,23 @@ T = TypeVar("T")
 
 _EXECUTOR: ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = threading.Lock()
+_DEFAULT_WORKERS = 8
+_POLL_INTERVAL_SECONDS = 0.001
+
+
+def _parse_positive_int(raw: str | None, *, fallback: int) -> int:
+    if raw is None:
+        return fallback
+    try:
+        value = int(raw)
+    except ValueError:
+        return fallback
+    return value if value > 0 else fallback
 
 
 def _default_workers() -> int:
     # Keep conservative by default; these tasks can involve network I/O and CPU.
-    env = os.getenv("RAG_BLOCKING_WORKERS")
-    if env:
-        try:
-            v = int(env)
-        except ValueError:
-            return 8
-        if v > 0:
-            return v
-    return 8
+    return _parse_positive_int(os.getenv("RAG_BLOCKING_WORKERS"), fallback=_DEFAULT_WORKERS)
 
 
 def _get_executor() -> ThreadPoolExecutor:
@@ -67,7 +71,7 @@ async def run_blocking(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> 
     fut = _get_executor().submit(call)
     try:
         while not fut.done():
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(_POLL_INTERVAL_SECONDS)
         return fut.result()
     except asyncio.CancelledError:  # pragma: no cover
         fut.cancel()
