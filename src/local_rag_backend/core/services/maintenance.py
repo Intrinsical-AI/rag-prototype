@@ -72,5 +72,11 @@ def delete_documents_multi_store(
             raise
         if embedder is None:
             raise
-        rebuilt = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
-        return deleted_sql, None, rebuilt >= 0
+        try:
+            rebuilt = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
+            return deleted_sql, None, rebuilt >= 0
+        except Exception as rebuild_err:
+            raise RuntimeError(
+                "Multi-store inconsistency risk: SQL delete succeeded but vector index sync failed. "
+                "Run `rag-rebuild-index` / POST /api/index/rebuild to repair."
+            ) from rebuild_err

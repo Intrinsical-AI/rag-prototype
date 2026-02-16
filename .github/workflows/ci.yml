@@ -154,6 +154,42 @@ jobs:
           path: pytest-results.xml
           retention-days: 7
 
+  test-windows-smoke:
+    name: Tests (Windows smoke)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: test-windows-smoke
+
+      - name: Create virtualenv
+        run: uv venv
+
+      - name: Install deps
+        run: uv sync --frozen --extra dev --extra test
+
+      - name: Run smoke tests (cross-platform persistence paths)
+        run: >
+          uv run pytest -q
+          tests/unit/infrastructure/persistence/faiss/test_faiss_index.py
+          tests/unit/infrastructure/persistence/faiss/test_faiss_index_race.py
+          tests/unit/infrastructure/persistence/faiss/test_vector_storage_manifest_guard.py
+          tests/unit/core/services/test_maintenance.py
+
   security:
     name: Security Scan (bandit + safety)
     runs-on: ubuntu-latest
