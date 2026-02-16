@@ -7,7 +7,7 @@ to transport concerns.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -98,7 +98,24 @@ class DeleteDocsResponse(BaseModel):
 
 
 class DeleteDocsByExternalIdRequest(BaseModel):
-    external_ids: list[str] = Field(..., min_length=1, max_length=512)
+    external_ids: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        ..., min_length=1, max_length=512
+    )
+
+    @field_validator("external_ids")
+    @classmethod
+    def _normalize_external_ids(cls, v: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for ext in v:
+            ext_s = ext.strip()
+            if not ext_s or ext_s in seen:
+                continue
+            seen.add(ext_s)
+            normalized.append(ext_s)
+        if not normalized:
+            raise ValueError("external_ids must contain at least one non-blank value")
+        return normalized
 
 
 class DeleteDocsByExternalIdResponse(BaseModel):
