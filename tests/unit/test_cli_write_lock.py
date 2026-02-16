@@ -54,7 +54,7 @@ def test_cli_delete_docs_runs_under_multi_store_lock(in_memory_sqlite, monkeypat
     assert lock_entries == 1
 
 
-def test_cli_ingest_runs_each_file_mutation_under_multi_store_lock(
+def test_cli_ingest_runs_mutation_batches_under_multi_store_lock(
     in_memory_sqlite, tmp_path, monkeypatch
 ):
     lock_entries = 0
@@ -75,9 +75,11 @@ def test_cli_ingest_runs_each_file_mutation_under_multi_store_lock(
     root = tmp_path / "in"
     root.mkdir()
     (root / "a.txt").write_text("hello world", encoding="utf-8")
+    (root / "b.txt").write_text("hello world 2", encoding="utf-8")
 
     result = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert result.exit_code == 0, result.output
+    # Ingest now batches file mutations, so multiple files can share one lock window.
     assert lock_entries == 1
 
 
