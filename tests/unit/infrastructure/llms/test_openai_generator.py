@@ -60,3 +60,39 @@ def test_generator_requires_api_key(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         OpenAIGenerator()
+
+
+def test_generator_passes_configured_timeout(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class DummyClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return type(
+                        "Resp",
+                        (),
+                        {
+                            "choices": [
+                                type(
+                                    "Choice",
+                                    (),
+                                    {"message": type("Msg", (), {"content": "ok"})()},
+                                )()
+                            ]
+                        },
+                    )()
+
+    def _dummy_openai(**kwargs):
+        captured.update(kwargs)
+        return DummyClient()
+
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "openai_request_timeout", 23, raising=False)
+    monkeypatch.setattr("local_rag_backend.infrastructure.llms.openai_chat.OpenAI", _dummy_openai)
+
+    gen = OpenAIGenerator()
+    out = gen.generate("q", ["ctx"])
+    assert out == "ok"
+    assert captured.get("timeout") == 23
