@@ -770,7 +770,26 @@ async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterG
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
 
-    text = resp.choices[0].message.content or ""
+    choices = getattr(resp, "choices", None)
+    if not isinstance(choices, list) or not choices:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenRouter error: malformed response (missing choices).",
+        )
+
+    first_choice = choices[0]
+    message = getattr(first_choice, "message", None)
+    content = getattr(message, "content", None)
+    if content is None:
+        text = ""
+    elif isinstance(content, str):
+        text = content
+    else:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenRouter error: malformed response content.",
+        )
+
     usage = getattr(resp, "usage", None)
     usage_obj = None
     if usage is not None:
