@@ -12,6 +12,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, TypeVar
 
 import click
 import uvicorn
@@ -23,6 +24,11 @@ from local_rag_backend.app.diagnostics import (
     get_retrieval_index_stats,
 )
 from local_rag_backend.settings import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+T = TypeVar("T")
 
 
 def _ensure_sqlite_schema_for_cli() -> None:
@@ -47,6 +53,13 @@ def _ensure_sqlite_schema_for_cli() -> None:
 def cli() -> None:
     """Intrinsical RAG Prototype - Production-ready RAG system with hexagonal architecture."""
     pass
+
+
+def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
+    from local_rag_backend.core.services.write_lock import multi_store_write_lock
+
+    with multi_store_write_lock():
+        return operation()
 
 
 @cli.command()
@@ -76,7 +89,7 @@ def build_index() -> None:
 
         click.echo("[INFO] Building FAISS index...")
         with click.progressbar(length=1, label="Building index") as bar:
-            build_main()
+            _run_with_multi_store_write_lock(build_main)
             bar.update(1)
         click.echo("[OK] Index built successfully!")
     except Exception as e:
@@ -101,22 +114,25 @@ def rebuild_index() -> None:
         if settings.retrieval_mode not in ("dense", "hybrid"):
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
 
-        doc_repo = SqlDocumentStorage()
-        embedder = (
-            OpenAIEmbedder()
-            if settings.openai_api_key
-            else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-        )
-        # Rebuild must be able to recover from an incompatible on-disk index (e.g. dim drift).
-        from local_rag_backend.infrastructure.persistence.faiss.manifest import (
-            purge_index_artifacts,
-        )
+        def _rebuild_sync() -> int:
+            doc_repo = SqlDocumentStorage()
+            embedder = (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+            # Rebuild must be able to recover from an incompatible on-disk index (e.g. dim drift).
+            from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+                purge_index_artifacts,
+            )
 
-        purge_index_artifacts(index_path=settings.index_path, id_map_path=settings.id_map_path)
-        vec = FaissVectorStorage(
-            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
-        )
-        n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+            purge_index_artifacts(index_path=settings.index_path, id_map_path=settings.id_map_path)
+            vec = FaissVectorStorage(
+                index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
+            )
+            return rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+
+        n = _run_with_multi_store_write_lock(_rebuild_sync)
         reset_rag_service()
         click.echo(f"[OK] Rebuilt index with {n} vectors.")
     except Exception as e:
@@ -143,35 +159,39 @@ def delete_docs(ids: tuple[int, ...]) -> None:
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
-        doc_repo = SqlDocumentStorage()
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            # For deletion, avoid loading the embedder just to infer dim if the index already exists.
-            vec = FaissVectorStorage(
-                index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
-            )
-            embedder = (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
-            deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
-                doc_repo=doc_repo,
-                vec_repo=vec,
-                embedder=embedder,
-                ids=list(ids),
-                rebuild_on_index_failure=True,
-            )
-            reset_rag_service()
-            click.echo(
-                f"[OK] Deleted {deleted_sql} docs from SQL. "
-                f"Index delete={'ok' if deleted_index is not None else 'n/a'} "
-                f"rebuilt={rebuilt}."
-            )
-            return
+        def _delete_sync() -> tuple[int, int | None, bool]:
+            doc_repo = SqlDocumentStorage()
+            if settings.retrieval_mode in ("dense", "hybrid"):
+                # For deletion, avoid loading the embedder just to infer dim if the index exists.
+                vec = FaissVectorStorage(
+                    index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
+                )
+                embedder = (
+                    OpenAIEmbedder()
+                    if settings.openai_api_key
+                    else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+                )
+                return delete_documents_multi_store(
+                    doc_repo=doc_repo,
+                    vec_repo=vec,
+                    embedder=embedder,
+                    ids=list(ids),
+                    rebuild_on_index_failure=True,
+                )
 
-        deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=list(ids))
+            deleted_sql, _, rebuilt = delete_documents_multi_store(doc_repo=doc_repo, ids=list(ids))
+            return deleted_sql, None, rebuilt
+
+        deleted_sql, deleted_index, rebuilt = _run_with_multi_store_write_lock(_delete_sync)
         reset_rag_service()
-        click.echo(f"[OK] Deleted {deleted_sql} docs from SQL.")
+        if deleted_index is None and settings.retrieval_mode not in ("dense", "hybrid"):
+            click.echo(f"[OK] Deleted {deleted_sql} docs from SQL.")
+            return
+        click.echo(
+            f"[OK] Deleted {deleted_sql} docs from SQL. "
+            f"Index delete={'ok' if deleted_index is not None else 'n/a'} "
+            f"rebuilt={rebuilt}."
+        )
     except Exception as e:
         click.echo(f"[ERROR] Error deleting docs: {e}", err=True)
         sys.exit(1)
@@ -196,30 +216,36 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
-        doc_repo = SqlDocumentStorage()
-        deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
-            list(external_ids)
-        )
+        def _delete_sync() -> tuple[int, int | None, list[str], int, bool]:
+            doc_repo = SqlDocumentStorage()
+            deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
+                list(external_ids)
+            )
 
-        rebuilt = False
-        deleted_index: int | None = None
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            vec = FaissVectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=None,
-            )
-            embedder = (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
-            try:
-                vec.delete(deleted_ids)
-                deleted_index = len(deleted_ids)
-            except Exception:
-                n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
-                rebuilt = n >= 0
+            rebuilt = False
+            deleted_index: int | None = None
+            if settings.retrieval_mode in ("dense", "hybrid"):
+                vec = FaissVectorStorage(
+                    index_path=settings.index_path,
+                    id_map_path=settings.id_map_path,
+                    dim=None,
+                )
+                embedder = (
+                    OpenAIEmbedder()
+                    if settings.openai_api_key
+                    else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+                )
+                try:
+                    vec.delete(deleted_ids)
+                    deleted_index = len(deleted_ids)
+                except Exception:
+                    n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+                    rebuilt = n >= 0
+            return deleted_sql, deleted_index, missing, tombstoned, rebuilt
+
+        deleted_sql, deleted_index, missing, tombstoned, rebuilt = _run_with_multi_store_write_lock(
+            _delete_sync
+        )
 
         reset_rag_service()
         click.echo(
@@ -313,88 +339,90 @@ def upsert_docs(
                 )
             )
 
-        doc_repo = SqlDocumentStorage()
-        tombstoned = doc_repo.get_tombstoned_external_ids([i.external_id for i in items])
-        if tombstoned:
-            raise RuntimeError(
-                "Some external_id values are tombstoned (deleted): "
-                + ", ".join(sorted(tombstoned)[:10])
-            )
-        embedder = None
-        vectors_by_external_id: dict[str, list[float]] = {}
-        if settings.retrieval_mode in ("dense", "hybrid"):
-            embedder = (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
-            existing_states = doc_repo.get_existing_doc_states_by_external_id(
-                [it.external_id for it in items]
-            )
-            to_embed = []
-            for it in items:
-                content = it.content.strip()
-                current = existing_states.get(it.external_id)
-                if current is None:
-                    to_embed.append(it)
-                    continue
-                content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-                old_sha = current.content_sha256 or ""
-                if old_sha != content_sha or current.content != content:
-                    to_embed.append(it)
-
-            if to_embed:
-                embedded = embedder.embed([it.content.strip() for it in to_embed])
-                if len(embedded) != len(to_embed):
-                    raise RuntimeError(
-                        f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
-                    )
-                vectors_by_external_id = {
-                    it.external_id: list(vec) for it, vec in zip(to_embed, embedded, strict=False)
-                }
-
-        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
-            items
-        )
-
-        inserted = sum(1 for r in results if r.action == "inserted")
-        updated = sum(1 for r in results if r.action == "updated")
-        unchanged = sum(1 for r in results if r.action == "unchanged")
-
-        rebuilt = False
-        if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-            changed_results = [r for r in results if r.content_changed]
-            missing_vectors = [
-                r.external_id
-                for r in changed_results
-                if r.external_id not in vectors_by_external_id
-            ]
-            if missing_vectors:
+        def _upsert_sync() -> tuple[int, int, int, bool]:
+            doc_repo = SqlDocumentStorage()
+            tombstoned = doc_repo.get_tombstoned_external_ids([i.external_id for i in items])
+            if tombstoned:
                 raise RuntimeError(
-                    "Missing precomputed vectors for changed documents: "
-                    + ", ".join(missing_vectors[:10])
+                    "Some external_id values are tombstoned (deleted): "
+                    + ", ".join(sorted(tombstoned)[:10])
                 )
-            ids = [int(r.id) for r in changed_results]
-            vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
-            if not ids:
-                reset_rag_service()
-                click.echo(
-                    f"[OK] Upserted docs. inserted={inserted} updated={updated} unchanged={unchanged} rebuilt_index={rebuilt}"
+            embedder = None
+            vectors_by_external_id: dict[str, list[float]] = {}
+            if settings.retrieval_mode in ("dense", "hybrid"):
+                embedder = (
+                    OpenAIEmbedder()
+                    if settings.openai_api_key
+                    else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
                 )
-                return
-            vec = FaissVectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=embedder.dim,
-            )
-            try:
-                if updated_content_ids:
-                    vec.delete(updated_content_ids)
-                vec.upsert(ids, vectors)
-            except Exception:
-                n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
-                rebuilt = n >= 0
+                existing_states = doc_repo.get_existing_doc_states_by_external_id(
+                    [it.external_id for it in items]
+                )
+                to_embed = []
+                for it in items:
+                    content = it.content.strip()
+                    current = existing_states.get(it.external_id)
+                    if current is None:
+                        to_embed.append(it)
+                        continue
+                    content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                    old_sha = current.content_sha256 or ""
+                    if old_sha != content_sha or current.content != content:
+                        to_embed.append(it)
 
+                if to_embed:
+                    embedded = embedder.embed([it.content.strip() for it in to_embed])
+                    if len(embedded) != len(to_embed):
+                        raise RuntimeError(
+                            f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
+                        )
+                    vectors_by_external_id = {
+                        it.external_id: list(vec)
+                        for it, vec in zip(to_embed, embedded, strict=False)
+                    }
+
+            results, _changed_content, updated_content_ids = (
+                doc_repo.upsert_documents_by_external_id(items)
+            )
+
+            inserted = sum(1 for r in results if r.action == "inserted")
+            updated = sum(1 for r in results if r.action == "updated")
+            unchanged = sum(1 for r in results if r.action == "unchanged")
+
+            rebuilt = False
+            if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
+                changed_results = [r for r in results if r.content_changed]
+                missing_vectors = [
+                    r.external_id
+                    for r in changed_results
+                    if r.external_id not in vectors_by_external_id
+                ]
+                if missing_vectors:
+                    raise RuntimeError(
+                        "Missing precomputed vectors for changed documents: "
+                        + ", ".join(missing_vectors[:10])
+                    )
+                ids = [int(r.id) for r in changed_results]
+                vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
+                if ids:
+                    vec = FaissVectorStorage(
+                        index_path=settings.index_path,
+                        id_map_path=settings.id_map_path,
+                        dim=embedder.dim,
+                    )
+                    try:
+                        if updated_content_ids:
+                            vec.delete(updated_content_ids)
+                        vec.upsert(ids, vectors)
+                    except Exception:
+                        n = rebuild_index_from_db(
+                            doc_repo=doc_repo, vec_repo=vec, embedder=embedder
+                        )
+                        rebuilt = n >= 0
+
+            return inserted, updated, unchanged, rebuilt
+
+        inserted, updated, unchanged, rebuilt = _run_with_multi_store_write_lock(_upsert_sync)
         reset_rag_service()
         click.echo(
             f"[OK] Upserted docs. inserted={inserted} updated={updated} unchanged={unchanged} rebuilt_index={rebuilt}"
@@ -414,7 +442,7 @@ def bootstrap() -> None:
 
         click.echo("[INFO] Bootstrapping database with sample data...")
         with click.progressbar(length=1, label="Bootstrapping") as bar:
-            bootstrap_main()
+            _run_with_multi_store_write_lock(bootstrap_main)
             bar.update(1)
         click.echo("[OK] Bootstrap completed successfully!")
     except Exception as e:
@@ -840,109 +868,131 @@ def ingest(
                 total_skipped += 1
                 continue
 
-            # Respect tombstones: deleted external_ids must not reappear on future ingestions.
-            tombstoned = doc_repo.get_tombstoned_external_ids(list(desired_external_ids))
-            if tombstoned:
-                desired_external_ids -= tombstoned
-                items = [it for it in items if it.external_id not in tombstoned]
-
-            existing = doc_repo.list_ids_by_external_id_prefix(file_prefix)
-            stale_ids = [doc_id for doc_id, ext in existing if ext not in desired_external_ids]
-
             if dry_run:
                 total_files += 1
                 total_chunks += len(items)
                 continue
 
-            vectors_by_external_id: dict[str, list[float]] = {}
-            if settings.retrieval_mode in ("dense", "hybrid"):
-                assert embedder is not None
-                existing_states = doc_repo.get_existing_doc_states_by_external_id(
-                    [it.external_id for it in items]
-                )
-                to_embed = []
-                for it in items:
-                    content = it.content.strip()
-                    current = existing_states.get(it.external_id)
-                    if current is None:
-                        to_embed.append(it)
-                        continue
-                    content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-                    old_sha = current.content_sha256 or ""
-                    if old_sha != content_sha or current.content != content:
-                        to_embed.append(it)
+            def _ingest_file_sync(
+                desired_external_ids_bound: tuple[str, ...] = tuple(desired_external_ids),
+                items_bound: tuple[SqlDocumentStorage.UpsertDoc, ...] = tuple(items),
+                file_prefix_bound: str = file_prefix,
+            ) -> tuple[int, int, int, bool, int, int]:
+                desired_external_ids_local = set(desired_external_ids_bound)
+                items_local = list(items_bound)
 
-                if to_embed:
-                    embedded = embedder.embed([it.content.strip() for it in to_embed])
-                    if len(embedded) != len(to_embed):
-                        raise RuntimeError(
-                            f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
-                        )
-                    vectors_by_external_id = {
-                        it.external_id: list(vec)
-                        for it, vec in zip(to_embed, embedded, strict=False)
-                    }
+                # Respect tombstones: deleted external_ids must not reappear on future ingestions.
+                tombstoned = doc_repo.get_tombstoned_external_ids(list(desired_external_ids_local))
+                if tombstoned:
+                    desired_external_ids_local -= tombstoned
+                    items_local = [it for it in items_local if it.external_id not in tombstoned]
 
-            results, _changed_content, updated_content_ids = (
-                doc_repo.upsert_documents_by_external_id(items)
-            )
+                existing = doc_repo.list_ids_by_external_id_prefix(file_prefix_bound)
+                stale_ids = [
+                    doc_id for doc_id, ext in existing if ext not in desired_external_ids_local
+                ]
 
-            total_files += 1
-            total_chunks += len(items)
-            total_inserted += sum(1 for r in results if r.action == "inserted")
-            total_updated += sum(1 for r in results if r.action == "updated")
-            total_unchanged += sum(1 for r in results if r.action == "unchanged")
-
-            if settings.retrieval_mode in ("dense", "hybrid"):
-                assert embedder is not None
-                assert vec is not None
-
-                rebuilt = False
-                changed_results = [r for r in results if r.content_changed]
-                if changed_results:
-                    missing_vectors = [
-                        r.external_id
-                        for r in changed_results
-                        if r.external_id not in vectors_by_external_id
-                    ]
-                    if missing_vectors:
-                        raise RuntimeError(
-                            "Missing precomputed vectors for changed documents: "
-                            + ", ".join(missing_vectors[:10])
-                        )
-                    ids = [int(r.id) for r in changed_results]
-                    vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
-                    try:
-                        if updated_content_ids:
-                            vec.delete(updated_content_ids)
-                        vec.upsert(ids, vectors)
-                    except Exception:
-                        n = rebuild_index_from_db(
-                            doc_repo=doc_repo, vec_repo=vec, embedder=embedder
-                        )
-                        rebuilt = n >= 0
-
-                if stale_ids:
-                    deleted_sql, _, rebuilt_del = delete_documents_multi_store(
-                        doc_repo=doc_repo,
-                        ids=stale_ids,
-                        vec_repo=vec,
-                        embedder=embedder,
-                        rebuild_on_index_failure=True,
+                vectors_by_external_id: dict[str, list[float]] = {}
+                if settings.retrieval_mode in ("dense", "hybrid"):
+                    assert embedder is not None
+                    existing_states = doc_repo.get_existing_doc_states_by_external_id(
+                        [it.external_id for it in items_local]
                     )
-                    total_deleted = deleted_sql
-                    if total_deleted:
-                        click.echo(f"[INFO] Deleted {total_deleted} stale chunks for {file_path}.")
-                    rebuilt = rebuilt or rebuilt_del
+                    to_embed = []
+                    for it in items_local:
+                        content = it.content.strip()
+                        current = existing_states.get(it.external_id)
+                        if current is None:
+                            to_embed.append(it)
+                            continue
+                        content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                        old_sha = current.content_sha256 or ""
+                        if old_sha != content_sha or current.content != content:
+                            to_embed.append(it)
 
-                rebuilt_any = rebuilt_any or rebuilt
-            else:
-                if stale_ids:
+                    if to_embed:
+                        embedded = embedder.embed([it.content.strip() for it in to_embed])
+                        if len(embedded) != len(to_embed):
+                            raise RuntimeError(
+                                f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
+                            )
+                        vectors_by_external_id = {
+                            it.external_id: list(vec)
+                            for it, vec in zip(to_embed, embedded, strict=False)
+                        }
+
+                results, _changed_content, updated_content_ids = (
+                    doc_repo.upsert_documents_by_external_id(items_local)
+                )
+                inserted = sum(1 for r in results if r.action == "inserted")
+                updated = sum(1 for r in results if r.action == "updated")
+                unchanged = sum(1 for r in results if r.action == "unchanged")
+                rebuilt = False
+                deleted_stale = 0
+
+                if settings.retrieval_mode in ("dense", "hybrid"):
+                    assert embedder is not None
+                    assert vec is not None
+
+                    changed_results = [r for r in results if r.content_changed]
+                    if changed_results:
+                        missing_vectors = [
+                            r.external_id
+                            for r in changed_results
+                            if r.external_id not in vectors_by_external_id
+                        ]
+                        if missing_vectors:
+                            raise RuntimeError(
+                                "Missing precomputed vectors for changed documents: "
+                                + ", ".join(missing_vectors[:10])
+                            )
+                        ids = [int(r.id) for r in changed_results]
+                        vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
+                        try:
+                            if updated_content_ids:
+                                vec.delete(updated_content_ids)
+                            vec.upsert(ids, vectors)
+                        except Exception:
+                            n = rebuild_index_from_db(
+                                doc_repo=doc_repo, vec_repo=vec, embedder=embedder
+                            )
+                            rebuilt = n >= 0
+
+                    if stale_ids:
+                        deleted_sql, _, rebuilt_del = delete_documents_multi_store(
+                            doc_repo=doc_repo,
+                            ids=stale_ids,
+                            vec_repo=vec,
+                            embedder=embedder,
+                            rebuild_on_index_failure=True,
+                        )
+                        deleted_stale = int(deleted_sql)
+                        rebuilt = rebuilt or rebuilt_del
+                elif stale_ids:
                     deleted_sql, _, _ = delete_documents_multi_store(
                         doc_repo=doc_repo, ids=stale_ids
                     )
-                    if deleted_sql:
-                        click.echo(f"[INFO] Deleted {deleted_sql} stale chunks for {file_path}.")
+                    deleted_stale = int(deleted_sql)
+
+                return inserted, updated, unchanged, rebuilt, deleted_stale, len(items_local)
+
+            (
+                inserted,
+                updated,
+                unchanged,
+                rebuilt,
+                deleted_stale,
+                ingested_chunks,
+            ) = _run_with_multi_store_write_lock(_ingest_file_sync)
+
+            total_files += 1
+            total_chunks += ingested_chunks
+            total_inserted += inserted
+            total_updated += updated
+            total_unchanged += unchanged
+            rebuilt_any = rebuilt_any or rebuilt
+            if deleted_stale:
+                click.echo(f"[INFO] Deleted {deleted_stale} stale chunks for {file_path}.")
 
         if not dry_run:
             reset_rag_service()
