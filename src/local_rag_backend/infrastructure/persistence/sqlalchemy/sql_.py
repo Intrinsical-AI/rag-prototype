@@ -18,8 +18,8 @@ from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import (
     add_history,
     delete_documents,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import (
+    Document as DbDocument,
     DocumentTombstone as DbDocumentTombstone,
 )
 
