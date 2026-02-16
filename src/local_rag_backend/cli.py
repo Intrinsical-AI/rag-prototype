@@ -98,6 +98,11 @@ def _build_dense_embedder() -> EmbedderPort:
     )
 
 
+def _batched(values: list[T], batch_size: int) -> list[list[T]]:
+    size = max(1, int(batch_size))
+    return [values[i : i + size] for i in range(0, len(values), size)]
+
+
 @cli.command()
 def server() -> None:
     """Start the RAG FastAPI server using settings from config file or environment."""
@@ -772,6 +777,16 @@ def ingest(
         total_files = 0
         total_skipped = 0
         rebuilt_any = False
+        # Keep batch size conservative to reduce commit overhead without ballooning memory.
+        ingest_batch_files = 64
+        ingest_plans: list[
+            tuple[
+                Path,
+                str,
+                tuple[SqlDocumentStorage.UpsertDoc, ...],
+                tuple[str, ...],
+            ]
+        ] = []
 
         for file_path in files:
             det = detect_file_format(file_path, sniff_bytes=sniff_bytes, use_magic=use_magic)
@@ -843,42 +858,91 @@ def ingest(
                 total_chunks += len(items)
                 continue
 
-            def _ingest_file_sync(
-                desired_external_ids_bound: tuple[str, ...] = tuple(desired_external_ids),
-                items_bound: tuple[SqlDocumentStorage.UpsertDoc, ...] = tuple(items),
-                file_prefix_bound: str = file_prefix,
-            ) -> tuple[int, int, int, bool, int, int]:
-                desired_external_ids_local = set(desired_external_ids_bound)
-                items_local = list(items_bound)
+            total_files += 1
+            ingest_plans.append(
+                (file_path, file_prefix, tuple(items), tuple(desired_external_ids))
+            )
 
-                # Respect tombstones: deleted external_ids must not reappear on future ingestions.
-                tombstoned = doc_repo.get_tombstoned_external_ids(list(desired_external_ids_local))
-                if tombstoned:
-                    desired_external_ids_local -= tombstoned
-                    items_local = [it for it in items_local if it.external_id not in tombstoned]
+        if dry_run:
+            click.echo(
+                f"[DRY-RUN] files={total_files} chunks={total_chunks} skipped={total_skipped} "
+                f"(limits: max_files={max_files} max_file_bytes={max_file_bytes} max_total_bytes={max_total_bytes})"
+            )
+            return
 
-                existing = doc_repo.list_ids_by_external_id_prefix(file_prefix_bound)
-                stale_ids = [
-                    doc_id for doc_id, ext in existing if ext not in desired_external_ids_local
-                ]
+        for plan_batch in _batched(ingest_plans, ingest_batch_files):
+            def _ingest_batch_sync(
+                plans_bound: tuple[
+                    tuple[
+                        Path,
+                        str,
+                        tuple[SqlDocumentStorage.UpsertDoc, ...],
+                        tuple[str, ...],
+                    ],
+                    ...,
+                ] = tuple(plan_batch),
+            ) -> tuple[int, int, int, bool, int, int, list[tuple[Path, int]]]:
+                all_items: list[SqlDocumentStorage.UpsertDoc] = []
+                stale_ids_all: list[int] = []
+                stale_by_file: list[tuple[Path, int]] = []
+                ingested_chunks = 0
+
+                for file_path_bound, file_prefix_bound, items_bound, desired_bound in plans_bound:
+                    desired_external_ids_local = set(desired_bound)
+                    items_local = list(items_bound)
+
+                    # Respect tombstones: deleted external_ids must not reappear on future ingestions.
+                    tombstoned = doc_repo.get_tombstoned_external_ids(
+                        list(desired_external_ids_local)
+                    )
+                    if tombstoned:
+                        desired_external_ids_local -= tombstoned
+                        items_local = [
+                            it for it in items_local if it.external_id not in tombstoned
+                        ]
+
+                    existing = doc_repo.list_ids_by_external_id_prefix(file_prefix_bound)
+                    stale_ids = [
+                        doc_id for doc_id, ext in existing if ext not in desired_external_ids_local
+                    ]
+                    if stale_ids:
+                        stale_ids_all.extend(stale_ids)
+                        stale_by_file.append((file_path_bound, len(stale_ids)))
+
+                    ingested_chunks += len(items_local)
+                    all_items.extend(items_local)
+
+                # Defensive dedup: avoid duplicate external_ids when inputs overlap.
+                unique_items: list[SqlDocumentStorage.UpsertDoc] = []
+                seen_external_ids: set[str] = set()
+                for item in all_items:
+                    if item.external_id in seen_external_ids:
+                        continue
+                    seen_external_ids.add(item.external_id)
+                    unique_items.append(item)
 
                 vectors_by_external_id: dict[str, list[float]] = {}
-                if settings.retrieval_mode in ("dense", "hybrid"):
+                if settings.retrieval_mode in ("dense", "hybrid") and unique_items:
                     assert embedder is not None
                     vectors_by_external_id = precompute_vectors_for_changed_items(
-                        items=items_local,
+                        items=unique_items,
                         doc_repo=doc_repo,
                         embedder=embedder,
                     )
 
-                results, _changed_content, updated_content_ids = (
-                    doc_repo.upsert_documents_by_external_id(items_local)
-                )
+                results: list[SqlDocumentStorage.UpsertResult] = []
+                updated_content_ids: list[int] = []
+                if unique_items:
+                    results, _changed_content, updated_content_ids = (
+                        doc_repo.upsert_documents_by_external_id(unique_items)
+                    )
+
                 inserted = sum(1 for r in results if r.action == "inserted")
                 updated = sum(1 for r in results if r.action == "updated")
                 unchanged = sum(1 for r in results if r.action == "unchanged")
                 rebuilt = False
                 deleted_stale = 0
+                stale_ids_unique = sorted({int(x) for x in stale_ids_all})
 
                 if settings.retrieval_mode in ("dense", "hybrid"):
                     assert embedder is not None
@@ -893,48 +957,49 @@ def ingest(
                         embedder=embedder,
                     )
 
-                    if stale_ids:
+                    if stale_ids_unique:
                         deleted_sql, _, rebuilt_del = delete_documents_multi_store(
                             doc_repo=doc_repo,
-                            ids=stale_ids,
+                            ids=stale_ids_unique,
                             vec_repo=vec,
                             embedder=embedder,
                             rebuild_on_index_failure=True,
                         )
                         deleted_stale = int(deleted_sql)
                         rebuilt = rebuilt or rebuilt_del
-                elif stale_ids:
+                elif stale_ids_unique:
                     deleted_sql, _, _ = delete_documents_multi_store(
-                        doc_repo=doc_repo, ids=stale_ids
+                        doc_repo=doc_repo, ids=stale_ids_unique
                     )
                     deleted_stale = int(deleted_sql)
 
-                return inserted, updated, unchanged, rebuilt, deleted_stale, len(items_local)
+                return (
+                    inserted,
+                    updated,
+                    unchanged,
+                    rebuilt,
+                    deleted_stale,
+                    ingested_chunks,
+                    stale_by_file,
+                )
 
             (
                 inserted,
                 updated,
                 unchanged,
                 rebuilt,
-                deleted_stale,
+                _deleted_stale,
                 ingested_chunks,
-            ) = _run_with_multi_store_write_lock(_ingest_file_sync)
+                stale_by_file,
+            ) = _run_with_multi_store_write_lock(_ingest_batch_sync)
 
-            total_files += 1
             total_chunks += ingested_chunks
             total_inserted += inserted
             total_updated += updated
             total_unchanged += unchanged
             rebuilt_any = rebuilt_any or rebuilt
-            if deleted_stale:
-                click.echo(f"[INFO] Deleted {deleted_stale} stale chunks for {file_path}.")
-
-        if dry_run:
-            click.echo(
-                f"[DRY-RUN] files={total_files} chunks={total_chunks} skipped={total_skipped} "
-                f"(limits: max_files={max_files} max_file_bytes={max_file_bytes} max_total_bytes={max_total_bytes})"
-            )
-            return
+            for stale_file_path, stale_count in stale_by_file:
+                click.echo(f"[INFO] Deleted {stale_count} stale chunks for {stale_file_path}.")
 
         click.echo(
             f"[OK] Ingest completed. files={total_files} chunks={total_chunks} "
