@@ -235,3 +235,38 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
     assert data["text"] == "hi"
     assert data["usage"]["prompt_tokens"] == 1
     assert captured.get("timeout") == 19
+
+
+async def test_openrouter_generate_malformed_response_is_502(asgi_client, monkeypatch):
+    monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
+
+    class DummyResp:
+        choices: list[object] = []
+        usage = None
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return DummyResp()
+
+    monkeypatch.setattr(api, "OpenAI", DummyClient)
+
+    r = await asgi_client.post(
+        "/api/openrouter/generate",
+        json={
+            "model": None,
+            "system_instruction": "sys",
+            "user_content": "hi",
+            "temperature": 0.5,
+            "max_tokens": 10,
+            "top_p": 1.0,
+        },
+    )
+    assert r.status_code == 502
+    assert "malformed response" in r.json()["detail"]
