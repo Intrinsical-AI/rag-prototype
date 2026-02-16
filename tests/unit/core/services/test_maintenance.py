@@ -98,6 +98,29 @@ def test_delete_documents_index_failure_triggers_rebuild():
     assert vec_repo.rebuild_calls  # rebuilt from DB state (doc 2 remains)
 
 
+def test_delete_documents_does_not_build_embedder_when_index_delete_succeeds():
+    doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "bb")])
+    vec_repo = DummyVecRepo(fail_delete=False)
+    factory_calls = 0
+
+    def _embedder_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return DummyEmbedder()
+
+    deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+        doc_repo=doc_repo,
+        vec_repo=vec_repo,
+        embedder_factory=_embedder_factory,
+        ids=[1],
+        rebuild_on_index_failure=True,
+    )
+    assert deleted_sql == 1
+    assert deleted_index == 1
+    assert rebuilt is False
+    assert factory_calls == 0
+
+
 def test_delete_documents_uses_real_deleted_index_count():
     doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "bb"), _Doc(3, "ccc")])
 
