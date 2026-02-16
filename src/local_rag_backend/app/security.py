@@ -16,6 +16,7 @@ from local_rag_backend.settings import settings
 
 API_KEY_HEADER = "X-API-Key"
 _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_AMBIGUOUS_PROXY_HOST = "__proxy_ambiguous__"
 
 
 def _normalize_host_token(raw: str) -> str:
@@ -39,12 +40,23 @@ def _request_hosts(request: Request) -> list[str]:
 
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
-        hosts.extend(_normalize_host_token(part) for part in xff.split(",") if part.strip())
+        parsed_xff = [_normalize_host_token(part) for part in xff.split(",") if part.strip()]
+        concrete_xff = [host for host in parsed_xff if host]
+        if concrete_xff:
+            hosts.extend(concrete_xff)
+        else:
+            # Fail closed: a present-but-unusable proxy chain is untrusted.
+            hosts.append(_AMBIGUOUS_PROXY_HOST)
 
     # RFC 7239 `Forwarded` can be used instead of `X-Forwarded-For`.
     forwarded = request.headers.get("forwarded", "")
     if forwarded:
-        hosts.extend(_extract_forwarded_for_hosts(forwarded))
+        parsed_forwarded = _extract_forwarded_for_hosts(forwarded)
+        if parsed_forwarded:
+            hosts.extend(parsed_forwarded)
+        else:
+            # Fail closed: a present-but-unusable proxy chain is untrusted.
+            hosts.append(_AMBIGUOUS_PROXY_HOST)
     return hosts
 
 
