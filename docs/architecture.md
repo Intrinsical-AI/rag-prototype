@@ -35,7 +35,7 @@ src/local_rag_backend/
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
 │   ├── factory.py              # Composition root (build retriever/LLM/services)
-│   └── services/               # App use-cases (docs/index mutations, eval orchestration, etc.)
+│   └── services/               # App use-cases + app ports (docs/index mutations, eval orchestration, etc.)
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
 
@@ -46,6 +46,8 @@ Evaluation layering:
 HTTP docs/index layering:
 - `/api/docs*` and `/api/index/rebuild` delegate business orchestration to `app/services/docs.py`
   and `app/services/index.py`, keeping `api_router.py` focused on transport concerns.
+- App-layer dependency contracts for these use-cases live in `app/services/ports.py`
+  (`DocsMutationPorts`, `IndexMutationPorts`), reducing direct app->infra coupling.
 
 CLI layering:
 - `cli.py` is the composition/entrypoint module (group + helpers + command registration).
