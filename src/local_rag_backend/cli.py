@@ -34,6 +34,8 @@ from local_rag_backend.settings import settings
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from local_rag_backend.core.ports import EmbedderPort
+
 T = TypeVar("T")
 
 
@@ -182,6 +184,13 @@ def delete_docs(ids: tuple[int, ...]) -> None:
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
+        def _build_dense_embedder() -> EmbedderPort:
+            return (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+
         def _delete_sync() -> tuple[int, int | None, bool]:
             doc_repo = SqlDocumentStorage()
             if settings.retrieval_mode in ("dense", "hybrid"):
@@ -189,15 +198,10 @@ def delete_docs(ids: tuple[int, ...]) -> None:
                 vec = FaissVectorStorage(
                     index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
                 )
-                embedder = (
-                    OpenAIEmbedder()
-                    if settings.openai_api_key
-                    else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-                )
                 return delete_documents_multi_store(
                     doc_repo=doc_repo,
                     vec_repo=vec,
-                    embedder=embedder,
+                    embedder_factory=_build_dense_embedder,
                     ids=list(ids),
                     rebuild_on_index_failure=True,
                 )
@@ -242,6 +246,13 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
+        def _build_dense_embedder() -> EmbedderPort:
+            return (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+
         def _delete_sync() -> tuple[int, int | None, list[str], int, bool]:
             doc_repo = SqlDocumentStorage()
             deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
@@ -256,15 +267,12 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
                     id_map_path=settings.id_map_path,
                     dim=None,
                 )
-                embedder = (
-                    OpenAIEmbedder()
-                    if settings.openai_api_key
-                    else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-                )
                 try:
                     deleted_index = int(vec.delete(deleted_ids))
                 except Exception:
-                    n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+                    n = rebuild_index_from_db(
+                        doc_repo=doc_repo, vec_repo=vec, embedder=_build_dense_embedder()
+                    )
                     rebuilt = n >= 0
             return deleted_sql, deleted_index, missing, tombstoned, rebuilt
 

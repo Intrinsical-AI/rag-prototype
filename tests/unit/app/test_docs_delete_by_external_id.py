@@ -152,3 +152,42 @@ async def test_delete_by_external_id_deduplicates_request_values(
     payload = rd.json()
     assert payload["deleted_sql"] == 1
     assert payload["tombstoned"] == 1
+
+
+async def test_delete_by_external_id_dense_does_not_require_embedder_on_successful_index_delete(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    r1 = await asgi_client.post(
+        "/api/docs/upsert",
+        json={"docs": [{"external_id": "doc-embedder-not-needed", "content": "hello"}]},
+    )
+    assert r1.status_code == 200
+
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+
+    embedder_calls = 0
+
+    def _boom_embedder(**_kwargs):
+        nonlocal embedder_calls
+        embedder_calls += 1
+        raise RuntimeError("embedder should not be called on successful delete path")
+
+    class DummyVec:
+        def delete(self, ids):
+            return len(list(ids))
+
+    monkeypatch.setattr(api, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
+    monkeypatch.setattr(api, "FaissVectorStorage", lambda **_k: DummyVec(), raising=True)
+
+    rd = await asgi_client.post(
+        "/api/docs/delete_by_external_id",
+        json={"external_ids": ["doc-embedder-not-needed"]},
+    )
+    assert rd.status_code == 200
+    payload = rd.json()
+    assert payload["deleted_sql"] == 1
+    assert payload["deleted_index"] == 1
+    assert payload["rebuilt_index"] is False
+    assert embedder_calls == 0

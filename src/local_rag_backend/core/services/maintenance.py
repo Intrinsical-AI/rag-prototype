@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
@@ -45,6 +45,7 @@ def delete_documents_multi_store(
     ids: Sequence[int],
     vec_repo: VectorRepoPort | None = None,
     embedder: EmbedderPort | None = None,
+    embedder_factory: Callable[[], EmbedderPort] | None = None,
     rebuild_on_index_failure: bool = True,
 ) -> tuple[int, int | None, bool]:
     """
@@ -71,10 +72,15 @@ def delete_documents_multi_store(
     except Exception:
         if not rebuild_on_index_failure:
             raise
-        if embedder is None:
+        resolved_embedder = embedder
+        if resolved_embedder is None and embedder_factory is not None:
+            resolved_embedder = embedder_factory()
+        if resolved_embedder is None:
             raise
         try:
-            rebuilt = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
+            rebuilt = rebuild_index_from_db(
+                doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder
+            )
             return deleted_sql, None, rebuilt >= 0
         except Exception as rebuild_err:
             raise RuntimeError(

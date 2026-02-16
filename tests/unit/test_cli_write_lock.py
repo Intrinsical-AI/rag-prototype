@@ -79,3 +79,40 @@ def test_cli_ingest_runs_each_file_mutation_under_multi_store_lock(
     result = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert result.exit_code == 0, result.output
     assert lock_entries == 1
+
+
+def test_cli_delete_docs_dense_does_not_require_embedder_when_index_delete_succeeds(
+    in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+
+    embedder_calls = 0
+
+    def _boom_embedder(*_args, **_kwargs):
+        nonlocal embedder_calls
+        embedder_calls += 1
+        raise RuntimeError("embedder should not be called on successful delete path")
+
+    class DummyVec:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        def delete(self, ids):
+            return len(list(ids))
+
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        _boom_embedder,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        lambda *_a, **_k: DummyVec(),
+        raising=True,
+    )
+
+    doc_id = SqlDocumentStorage().store_documents(["to-delete-dense"])[0]
+    result = CliRunner().invoke(cli, ["delete-docs", str(doc_id)])
+    assert result.exit_code == 0, result.output
+    assert embedder_calls == 0
