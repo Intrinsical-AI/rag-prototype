@@ -170,6 +170,63 @@ def delete_docs(ids: tuple[int, ...]) -> None:
         sys.exit(1)
 
 
+@cli.command("delete-external-ids")
+@click.argument("external_ids", nargs=-1, type=str)
+def delete_external_ids(external_ids: tuple[str, ...]) -> None:
+    """Delete documents by external_id from SQLite (and FAISS in dense/hybrid mode), adding tombstones."""
+    if not external_ids:
+        click.echo("[ERROR] Provide one or more external_ids.", err=True)
+        sys.exit(2)
+
+    try:
+        _ensure_sqlite_schema_for_cli()
+        from local_rag_backend.app.factory import reset_rag_service
+        from local_rag_backend.core.services.maintenance import rebuild_index_from_db
+        from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+        from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+            SentenceTransformerEmbedder,
+        )
+        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+
+        doc_repo = SqlDocumentStorage()
+        deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
+            list(external_ids)
+        )
+
+        rebuilt = False
+        deleted_index: int | None = None
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            vec = FaissVectorStorage(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                dim=None,
+            )
+            embedder = (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+            try:
+                vec.delete(deleted_ids)
+                deleted_index = len(deleted_ids)
+            except Exception:
+                n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+                rebuilt = n >= 0
+
+        reset_rag_service()
+        click.echo(
+            f"[OK] Deleted {deleted_sql} docs by external_id. "
+            f"tombstoned={tombstoned} missing={len(missing)} "
+            f"index_delete={'ok' if deleted_index is not None else 'n/a'} rebuilt={rebuilt}."
+        )
+        if missing:
+            click.echo(f"[INFO] Missing external_ids (tombstoned anyway): {missing[:10]}")
+    except Exception as e:
+        click.echo(f"[ERROR] Error deleting by external_id: {e}", err=True)
+        sys.exit(1)
+
+
 @cli.command("upsert-docs")
 @click.option(
     "--json",
@@ -250,6 +307,12 @@ def upsert_docs(
             )
 
         doc_repo = SqlDocumentStorage()
+        tombstoned = doc_repo.get_tombstoned_external_ids([i.external_id for i in items])
+        if tombstoned:
+            raise RuntimeError(
+                "Some external_id values are tombstoned (deleted): "
+                + ", ".join(sorted(tombstoned)[:10])
+            )
         results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             items
         )
@@ -448,6 +511,11 @@ def rag_upsert_docs() -> None:
     cli.main(args=["upsert-docs", *sys.argv[1:]], standalone_mode=False)
 
 
+def rag_delete_external_ids() -> None:
+    """Entry point for rag-delete-external-ids command."""
+    cli.main(args=["delete-external-ids", *sys.argv[1:]], standalone_mode=False)
+
+
 @cli.command("ingest")
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))
 @click.option("--recursive/--no-recursive", default=True, show_default=True)
@@ -618,6 +686,12 @@ def ingest(
             if not items:
                 total_skipped += 1
                 continue
+
+            # Respect tombstones: deleted external_ids must not reappear on future ingestions.
+            tombstoned = doc_repo.get_tombstoned_external_ids(list(desired_external_ids))
+            if tombstoned:
+                desired_external_ids -= tombstoned
+                items = [it for it in items if it.external_id not in tombstoned]
 
             existing = doc_repo.list_ids_by_external_id_prefix(file_prefix)
             stale_ids = [doc_id for doc_id, ext in existing if ext not in desired_external_ids]
