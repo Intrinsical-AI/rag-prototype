@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from local_rag_backend.app.composition import build_dense_embedder_from_settings
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -90,12 +91,16 @@ def main() -> None:
         logger.info(
             f"{settings.retrieval_mode.title()} retrieval mode detected. Initializing embedder for indexing."
         )
-        if settings.openai_api_key:
-            embedder_for_indexing = OpenAIEmbedder()
-        else:
-            embedder_for_indexing = SentenceTransformerEmbedder(
-                model_name=settings.st_embedding_model
-            )
+        embedder_for_indexing = build_dense_embedder_from_settings(
+            settings_obj=settings,
+            openai_embedder_factory=OpenAIEmbedder,
+            st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
+            missing_backend_message=(
+                "Dense/hybrid retrieval requires an embeddings backend. "
+                "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
+                "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
+            ),
+        )
 
     # 4. Use ETL logic directly (similar to bootstrap.py)
     try:

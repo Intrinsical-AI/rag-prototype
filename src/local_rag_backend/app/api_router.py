@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from local_rag_backend.app.blocking import run_blocking
+from local_rag_backend.app.composition import (
+    build_dense_embedder_from_settings,
+    build_generator_from_settings,
+    build_retriever_from_settings,
+    get_available_llm_providers as get_available_llm_providers_from_settings,
+)
 from local_rag_backend.app.dependencies import get_rag_service, reset_rag_service
 from local_rag_backend.app.diagnostics import (
     get_document_ids,
@@ -55,6 +61,7 @@ from local_rag_backend.core.services.dense_upsert import (
 )
 from local_rag_backend.core.services.maintenance import (
     delete_documents_multi_store,
+    delete_external_ids_multi_store,
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
@@ -116,23 +123,20 @@ def validate_rag_config(config: AskEvalConfig) -> list[str]:
 
 def get_available_llm_providers() -> dict[str, str]:
     """Check available LLM providers based on settings."""
-    providers = {}
-    if settings.openai_api_key:
-        providers["openai"] = "configured"
-    if settings.ollama_enabled:
-        providers["ollama"] = "enabled"
-    if getattr(settings, "openrouter_enabled", False) and getattr(
-        settings, "openrouter_api_key", None
-    ):
-        providers["openrouter"] = "configured"
-    return providers
+    return get_available_llm_providers_from_settings(settings_obj=settings)
 
 
 def _build_embedder_for_dense() -> EmbedderPort:
-    if settings.openai_api_key:
-        return OpenAIEmbedder()
     try:
-        return SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+        return build_dense_embedder_from_settings(
+            settings_obj=settings,
+            openai_embedder_factory=OpenAIEmbedder,
+            st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
+            missing_backend_message=(
+                "Dense/hybrid operations require an embeddings backend. "
+                "Set OPENAI_API_KEY or install the 'dense-st' extra."
+            ),
+        )
     except RuntimeError as e:
         raise HTTPException(
             status_code=400,
@@ -560,44 +564,32 @@ async def delete_docs_by_external_id(
 
     def _delete_sync() -> DeleteDocsByExternalIdResponse:
         doc_repo = SqlDocumentStorage()
-        deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
-            external_ids
-        )
-
         if settings.retrieval_mode in ("dense", "hybrid"):
             vec = FaissVectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
                 dim=None,
             )
-            try:
-                deleted_index = int(vec.delete(deleted_ids))
-                return DeleteDocsByExternalIdResponse(
-                    deleted_sql=deleted_sql,
-                    deleted_index=deleted_index,
-                    tombstoned=tombstoned,
-                    missing_external_ids=missing,
-                    rebuilt_index=False,
+            deleted_sql, deleted_index, missing, tombstoned, rebuilt = (
+                delete_external_ids_multi_store(
+                    doc_repo=doc_repo,
+                    external_ids=external_ids,
+                    vec_repo=vec,
+                    embedder_factory=_build_embedder_for_dense,
+                    rebuild_on_index_failure=True,
                 )
-            except Exception:
-                embedder = _build_embedder_for_dense()
-                rebuilt_n = rebuild_index_from_db(
-                    doc_repo=doc_repo, vec_repo=vec, embedder=embedder
-                )
-                return DeleteDocsByExternalIdResponse(
-                    deleted_sql=deleted_sql,
-                    deleted_index=None,
-                    tombstoned=tombstoned,
-                    missing_external_ids=missing,
-                    rebuilt_index=rebuilt_n >= 0,
-                )
+            )
+        else:
+            deleted_sql, deleted_index, missing, tombstoned, rebuilt = (
+                delete_external_ids_multi_store(doc_repo=doc_repo, external_ids=external_ids)
+            )
 
         return DeleteDocsByExternalIdResponse(
             deleted_sql=deleted_sql,
-            deleted_index=None,
+            deleted_index=deleted_index,
             tombstoned=tombstoned,
             missing_external_ids=missing,
-            rebuilt_index=False,
+            rebuilt_index=rebuilt,
         )
 
     try:
@@ -764,113 +756,51 @@ async def rebuild_index() -> RebuildIndexResponse:
 def _build_retriever_from_config(
     cfg: AskEvalConfig,
     doc_repo: DocumentRepoPort,
-    corpus: list[str],
-    doc_ids: list[int],
     *,
     preloaded_docs: Sequence[DomainDocument] | None = None,
 ) -> RetrieverPort:
     """Build a retriever instance based on dynamic configuration."""
-    retriever: RetrieverPort
-    if cfg.retrieval_mode == "sparse":
-        retriever = SparseBM25Retriever(
-            documents=corpus,
-            doc_ids=doc_ids,
+    try:
+        return build_retriever_from_settings(
+            settings_obj=settings,
+            retrieval_mode=cfg.retrieval_mode,
             doc_repo=doc_repo,
+            dense_embedder_factory=_build_embedder_for_dense,
             preloaded_docs=preloaded_docs,
+            hybrid_alpha=cfg.hybrid_alpha,
+            enable_reranker=settings.enable_reranker,
+            reranker_candidate_k=settings.reranker_candidate_k,
+            reranker_strategy=settings.reranker_strategy,
+            sparse_retriever_factory=SparseBM25Retriever,
+            dense_retriever_factory=DenseFaissRetriever,
+            hybrid_retriever_factory=HybridRetriever,
+            vector_repo_factory=FaissVectorStorage,
+            reranker_factory=RerankingRetriever,
         )
-        if settings.enable_reranker:
-            retriever = RerankingRetriever(
-                retriever,
-                candidate_k=settings.reranker_candidate_k,
-                strategy=settings.reranker_strategy,
-            )
-        return retriever
-
-    embedder: EmbedderPort = (
-        OpenAIEmbedder()
-        if settings.openai_api_key
-        else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-    )
-    faiss_storage = FaissVectorStorage(
-        index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
-    )
-    dense_retriever = DenseFaissRetriever(
-        embedder=embedder, faiss_index=faiss_storage, doc_repo=doc_repo
-    )
-
-    if cfg.retrieval_mode == "dense":
-        retriever = dense_retriever
-    elif cfg.retrieval_mode == "hybrid":
-        sparse_retriever = SparseBM25Retriever(
-            documents=corpus,
-            doc_ids=doc_ids,
-            doc_repo=doc_repo,
-            preloaded_docs=preloaded_docs,
-        )
-        alpha = (
-            cfg.hybrid_alpha if cfg.hybrid_alpha is not None else settings.hybrid_retrieval_alpha
-        )
-        retriever = HybridRetriever(dense=dense_retriever, sparse=sparse_retriever, alpha=alpha)
-    else:
-        raise HTTPException(
-            status_code=400, detail=f"Unsupported retrieval_mode: {cfg.retrieval_mode}"
-        )
-
-    if settings.enable_reranker:
-        retriever = RerankingRetriever(
-            retriever,
-            candidate_k=settings.reranker_candidate_k,
-            strategy=settings.reranker_strategy,
-        )
-
-    return retriever
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def _build_generator_from_config(cfg: AskEvalConfig) -> GeneratorPort:
     """Build a generator instance based on dynamic configuration."""
     available_providers = get_available_llm_providers()
-    provider = cfg.llm_provider or next(iter(available_providers), None)
-
-    if not provider:
-        raise HTTPException(status_code=500, detail="No LLM provider available.")
-
-    if provider not in available_providers:
-        raise HTTPException(
-            status_code=400, detail=f"LLM provider '{provider}' is not available or configured."
-        )
-
-    # Note: use explicit keyword args to satisfy static typing
-
-    if provider == "openrouter":
-        headers: dict[str, str] = {}
-        if settings.openrouter_site_url is not None:
-            headers["HTTP-Referer"] = settings.openrouter_site_url
-        if settings.openrouter_app_title is not None:
-            headers["X-Title"] = settings.openrouter_app_title
-        return OpenAIGenerator(
-            model=(cfg.model or settings.openrouter_model),
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            max_tokens=cfg.max_tokens,
-            prompt_template=cfg.prompt_template,
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
-            extra_headers=headers or None,
-        )
-    if provider == "openai":
-        return OpenAIGenerator(
+    try:
+        return build_generator_from_settings(
+            settings_obj=settings,
+            llm_provider=cfg.llm_provider,
             model=cfg.model,
             temperature=cfg.temperature,
             top_p=cfg.top_p,
             max_tokens=cfg.max_tokens,
             prompt_template=cfg.prompt_template,
+            openai_generator_factory=OpenAIGenerator,
+            ollama_generator_factory=OllamaGenerator,
+            available_providers=available_providers,
         )
-    if provider == "ollama":
-        return OllamaGenerator(
-            model=cfg.model, temperature=cfg.temperature, prompt_template=cfg.prompt_template
-        )
-
-    raise HTTPException(status_code=400, detail=f"Unsupported llm_provider: {provider}")
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post(
@@ -892,11 +822,7 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
     def _run_eval_sync() -> tuple[dict[str, Any], int]:
         doc_repo = SqlDocumentStorage()
         docs = doc_repo.get_all_documents()
-        corpus = [d.content for d in docs]
-        doc_ids = [d.id for d in docs]
-        retriever = _build_retriever_from_config(
-            cfg, doc_repo, corpus, doc_ids, preloaded_docs=docs
-        )
+        retriever = _build_retriever_from_config(cfg, doc_repo, preloaded_docs=docs)
         generator = _build_generator_from_config(cfg)
 
         history_storage = HistorySqlStorage()
