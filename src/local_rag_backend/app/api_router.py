@@ -5,6 +5,7 @@ FastAPI router for the application endpoints.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -47,10 +48,7 @@ from local_rag_backend.core.services.maintenance import (
     delete_documents_multi_store,
     rebuild_index_from_db,
 )
-from local_rag_backend.core.services.prompting import (
-    PromptTemplateError,
-    validate_prompt_template,
-)
+from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -458,25 +456,65 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
         if not unique_items:
             return []
 
-        results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+        embedder = None
+        vectors_by_external_id: dict[str, list[float]] = {}
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            # Compute embeddings before SQL upsert so provider failures don't leave SQL/index drift.
+            embedder = _build_embedder_for_dense()
+            existing_states = doc_repo.get_existing_doc_states_by_external_id(
+                [it.external_id for it in unique_items]
+            )
+            to_embed = []
+            for it in unique_items:
+                content = it.content.strip()
+                current = existing_states.get(it.external_id)
+                if current is None:
+                    to_embed.append(it)
+                    continue
+                content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                old_sha = current.content_sha256 or ""
+                if old_sha != content_sha or current.content != content:
+                    to_embed.append(it)
+
+            if to_embed:
+                embedded = embedder.embed([it.content.strip() for it in to_embed])
+                if len(embedded) != len(to_embed):
+                    raise RuntimeError(
+                        f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
+                    )
+                vectors_by_external_id = {
+                    it.external_id: list(vec) for it, vec in zip(to_embed, embedded, strict=False)
+                }
+
+        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             unique_items
         )
         id_by_ext = {r.external_id: int(r.id) for r in results}
 
-        if settings.retrieval_mode in ("dense", "hybrid") and changed_content:
-            embedder = _build_embedder_for_dense()
+        if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
             vec = FaissVectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
                 dim=embedder.dim,
             )
-            ids = [doc_id for doc_id, _ in changed_content]
-            texts_to_embed = [t for _, t in changed_content]
-            vectors = embedder.embed(texts_to_embed)
+            changed_results = [r for r in results if r.content_changed]
+            missing_vectors = [
+                r.external_id
+                for r in changed_results
+                if r.external_id not in vectors_by_external_id
+            ]
+            if missing_vectors:
+                raise RuntimeError(
+                    "Missing precomputed vectors for changed documents: "
+                    + ", ".join(missing_vectors[:10])
+                )
+            ids = [int(r.id) for r in changed_results]
+            vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
             try:
-                if updated_content_ids:
+                if ids and updated_content_ids:
                     vec.delete(updated_content_ids)
-                vec.upsert(ids, vectors)
+                if ids:
+                    vec.upsert(ids, vectors)
             except Exception:
                 rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
 
@@ -622,7 +660,37 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
             for d in payload.docs
         ]
 
-        results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+        embedder = None
+        vectors_by_external_id: dict[str, list[float]] = {}
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            # Compute embeddings before SQL upsert so provider failures don't leave SQL/index drift.
+            embedder = _build_embedder_for_dense()
+            existing_states = doc_repo.get_existing_doc_states_by_external_id(
+                [it.external_id for it in items]
+            )
+            to_embed = []
+            for it in items:
+                content = it.content.strip()
+                current = existing_states.get(it.external_id)
+                if current is None:
+                    to_embed.append(it)
+                    continue
+                content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                old_sha = current.content_sha256 or ""
+                if old_sha != content_sha or current.content != content:
+                    to_embed.append(it)
+
+            if to_embed:
+                embedded = embedder.embed([it.content.strip() for it in to_embed])
+                if len(embedded) != len(to_embed):
+                    raise RuntimeError(
+                        f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
+                    )
+                vectors_by_external_id = {
+                    it.external_id: list(vec) for it, vec in zip(to_embed, embedded, strict=False)
+                }
+
+        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             items
         )
         inserted = sum(1 for r in results if r.action == "inserted")
@@ -630,17 +698,43 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
         unchanged = sum(1 for r in results if r.action == "unchanged")
 
         rebuilt_index = False
-        if settings.retrieval_mode in ("dense", "hybrid") and changed_content:
-            embedder = _build_embedder_for_dense()
+        if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
+            changed_results = [r for r in results if r.content_changed]
+            missing_vectors = [
+                r.external_id
+                for r in changed_results
+                if r.external_id not in vectors_by_external_id
+            ]
+            if missing_vectors:
+                raise RuntimeError(
+                    "Missing precomputed vectors for changed documents: "
+                    + ", ".join(missing_vectors[:10])
+                )
+            ids = [int(r.id) for r in changed_results]
+            vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
+
+            if not ids:
+                return UpsertDocsResponse(
+                    inserted=inserted,
+                    updated=updated,
+                    unchanged=unchanged,
+                    rebuilt_index=rebuilt_index,
+                    results=[
+                        UpsertDocResult(
+                            external_id=r.external_id,
+                            id=r.id,
+                            action=r.action,
+                            content_changed=r.content_changed,
+                        )
+                        for r in results
+                    ],
+                )
+
             vec = FaissVectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
                 dim=embedder.dim,
             )
-
-            ids = [doc_id for doc_id, _ in changed_content]
-            texts = [text for _, text in changed_content]
-            vectors = embedder.embed(texts)
             try:
                 # Updates must remove the old vector for that doc_id first.
                 if updated_content_ids:

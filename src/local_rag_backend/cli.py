@@ -8,6 +8,7 @@ starting the server, building indices, and bootstrapping data.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -319,7 +320,40 @@ def upsert_docs(
                 "Some external_id values are tombstoned (deleted): "
                 + ", ".join(sorted(tombstoned)[:10])
             )
-        results, changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+        embedder = None
+        vectors_by_external_id: dict[str, list[float]] = {}
+        if settings.retrieval_mode in ("dense", "hybrid"):
+            embedder = (
+                OpenAIEmbedder()
+                if settings.openai_api_key
+                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+            )
+            existing_states = doc_repo.get_existing_doc_states_by_external_id(
+                [it.external_id for it in items]
+            )
+            to_embed = []
+            for it in items:
+                content = it.content.strip()
+                current = existing_states.get(it.external_id)
+                if current is None:
+                    to_embed.append(it)
+                    continue
+                content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                old_sha = current.content_sha256 or ""
+                if old_sha != content_sha or current.content != content:
+                    to_embed.append(it)
+
+            if to_embed:
+                embedded = embedder.embed([it.content.strip() for it in to_embed])
+                if len(embedded) != len(to_embed):
+                    raise RuntimeError(
+                        f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
+                    )
+                vectors_by_external_id = {
+                    it.external_id: list(vec) for it, vec in zip(to_embed, embedded, strict=False)
+                }
+
+        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             items
         )
 
@@ -328,20 +362,31 @@ def upsert_docs(
         unchanged = sum(1 for r in results if r.action == "unchanged")
 
         rebuilt = False
-        if settings.retrieval_mode in ("dense", "hybrid") and changed_content:
-            embedder = (
-                OpenAIEmbedder()
-                if settings.openai_api_key
-                else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-            )
+        if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
+            changed_results = [r for r in results if r.content_changed]
+            missing_vectors = [
+                r.external_id
+                for r in changed_results
+                if r.external_id not in vectors_by_external_id
+            ]
+            if missing_vectors:
+                raise RuntimeError(
+                    "Missing precomputed vectors for changed documents: "
+                    + ", ".join(missing_vectors[:10])
+                )
+            ids = [int(r.id) for r in changed_results]
+            vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
+            if not ids:
+                reset_rag_service()
+                click.echo(
+                    f"[OK] Upserted docs. inserted={inserted} updated={updated} unchanged={unchanged} rebuilt_index={rebuilt}"
+                )
+                return
             vec = FaissVectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
                 dim=embedder.dim,
             )
-            ids = [doc_id for doc_id, _ in changed_content]
-            texts = [text for _, text in changed_content]
-            vectors = embedder.embed(texts)
             try:
                 if updated_content_ids:
                     vec.delete(updated_content_ids)
@@ -738,7 +783,36 @@ def ingest(
                 total_chunks += len(items)
                 continue
 
-            results, changed_content, updated_content_ids = (
+            vectors_by_external_id: dict[str, list[float]] = {}
+            if settings.retrieval_mode in ("dense", "hybrid"):
+                assert embedder is not None
+                existing_states = doc_repo.get_existing_doc_states_by_external_id(
+                    [it.external_id for it in items]
+                )
+                to_embed = []
+                for it in items:
+                    content = it.content.strip()
+                    current = existing_states.get(it.external_id)
+                    if current is None:
+                        to_embed.append(it)
+                        continue
+                    content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                    old_sha = current.content_sha256 or ""
+                    if old_sha != content_sha or current.content != content:
+                        to_embed.append(it)
+
+                if to_embed:
+                    embedded = embedder.embed([it.content.strip() for it in to_embed])
+                    if len(embedded) != len(to_embed):
+                        raise RuntimeError(
+                            f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
+                        )
+                    vectors_by_external_id = {
+                        it.external_id: list(vec)
+                        for it, vec in zip(to_embed, embedded, strict=False)
+                    }
+
+            results, _changed_content, updated_content_ids = (
                 doc_repo.upsert_documents_by_external_id(items)
             )
 
@@ -753,10 +827,20 @@ def ingest(
                 assert vec is not None
 
                 rebuilt = False
-                if changed_content:
-                    ids = [doc_id for doc_id, _ in changed_content]
-                    texts = [text for _, text in changed_content]
-                    vectors = embedder.embed(texts)
+                changed_results = [r for r in results if r.content_changed]
+                if changed_results:
+                    missing_vectors = [
+                        r.external_id
+                        for r in changed_results
+                        if r.external_id not in vectors_by_external_id
+                    ]
+                    if missing_vectors:
+                        raise RuntimeError(
+                            "Missing precomputed vectors for changed documents: "
+                            + ", ".join(missing_vectors[:10])
+                        )
+                    ids = [int(r.id) for r in changed_results]
+                    vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
                     try:
                         if updated_content_ids:
                             vec.delete(updated_content_ids)
