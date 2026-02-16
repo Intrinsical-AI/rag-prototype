@@ -10,6 +10,7 @@ Goal:
 
 from __future__ import annotations
 
+import importlib
 import string
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -118,10 +119,12 @@ def _read_head(path: Path, n: int) -> bytes:
 
 def _magic_mime(raw: bytes) -> str | None:
     try:
-        import magic  # type: ignore[import-not-found]
-
+        magic = importlib.import_module("magic")
+        from_buffer = getattr(magic, "from_buffer", None)
+        if from_buffer is None:
+            return None
         # `magic.from_buffer` exists in python-magic; ask for MIME to keep stable signals.
-        return str(magic.from_buffer(raw, mime=True))
+        return str(from_buffer(raw, mime=True))
     except Exception:
         return None
 
