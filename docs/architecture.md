@@ -34,13 +34,17 @@ src/local_rag_backend/
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
 │   ├── factory.py              # Composition root (build retriever/LLM/services)
-│   └── services/evaluation.py  # App-level orchestration for offline eval (ephemeral infra wiring)
+│   └── services/               # App use-cases (docs/index mutations, eval orchestration, etc.)
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
 
 Evaluation layering:
 - `core/services/evaluation.py` is technology-agnostic (dataset parsing + metric computation).
 - `app/services/evaluation.py` owns ephemeral SQL/retriever wiring for `rag-eval`.
+
+HTTP docs/index layering:
+- `/api/docs*` and `/api/index/rebuild` delegate business orchestration to `app/services/docs.py`
+  and `app/services/index.py`, keeping `api_router.py` focused on transport concerns.
 
 ---
 
