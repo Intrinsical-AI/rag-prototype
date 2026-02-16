@@ -243,6 +243,10 @@ rag-rebuild-index
 rag-delete-docs 1 2 3
 
 
+# Delete documents by external_id (adds tombstones to prevent reappearance)
+rag-delete-external-ids chunk:abcd... file:/path/to/x:part=file:chunk=0
+
+
 # Upsert documents by external_id (idempotent)
 rag-upsert-docs --external-id doc-1 --content "hello"
 
@@ -361,7 +365,7 @@ Notes:
 
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources.
-* In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete` (or `rag-delete-docs`) instead of deleting rows manually.
+* In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete`, `/api/docs/delete_by_external_id` (or `rag-delete-docs` / `rag-delete-external-ids`) instead of deleting rows manually.
 * In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
 
 Example:
