@@ -249,8 +249,8 @@ from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVecto
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 
 doc_repo = SqlDocumentStorage()
-vec_repo = FaissVectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=None)
 embedder = OpenAIEmbedder()
+vec_repo = FaissVectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=embedder.dim)
 
 # 1) Borrado consistente
 delete_documents_multi_store(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder, ids=[10, 11, 12])
@@ -258,3 +258,6 @@ delete_documents_multi_store(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embe
 # 2) Rebuild idempotente desde SQLite
 rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
 ```
+
+Nota (dense/hybrid): al mutar el índice, se mantiene un `index_manifest.json` junto a `INDEX_PATH` para
+detectar drift de configuración (modelo/dim/chunker). Si cambias esos settings, ejecuta un rebuild.
