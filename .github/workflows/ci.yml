@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -10,7 +10,7 @@ on:
       - 'LICENSE'
       - 'CHANGELOG*'
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -33,23 +33,57 @@ env:
   UV_CACHE_DIR: '.uv-cache'
 
 jobs:
+  pre-commit:
+    name: Pre-commit (all files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: pre-commit
+
+      - name: Create virtualenv
+        run: uv venv
+
+      - name: Install deps for hooks
+        run: |
+          uv sync --frozen --extra lint --no-install-project --no-dev
+          uv pip install pre-commit
+
+      - name: Run pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up uv (cached)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
         with:
           enable-cache: true
-          # Invalida cuando cambie pyproject/uv.lock y separa clave para este job
           cache-dependency-glob: |
             **/pyproject.toml
             **/uv.lock
@@ -58,7 +92,6 @@ jobs:
       - name: Create virtualenv
         run: uv venv
 
-      # Solo herramientas; no instalamos el proyecto para acelerar
       - name: Install lint deps (extras)
         run: uv sync --frozen --extra lint --no-install-project --no-dev
 
@@ -68,19 +101,21 @@ jobs:
       - name: Ruff format (check)
         run: uv run ruff format --check .
 
-
   typing:
     name: Typing (mypy)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up uv (cached)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -98,31 +133,36 @@ jobs:
         run: uv run mypy .
 
   test:
-    name: Tests (Ubuntu)
+    name: Tests (Ubuntu, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: ${{ matrix.python-version }}
 
       - name: Set up uv (cached)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
         with:
           enable-cache: true
           cache-dependency-glob: |
             **/pyproject.toml
             **/uv.lock
-          cache-suffix: test
+          cache-suffix: test-py${{ matrix.python-version }}
 
       - name: Create virtualenv
         run: uv venv
 
-      # Proyecto + extras dev/test
       - name: Install deps
         run: uv sync --frozen --extra dev --extra test
 
@@ -137,10 +177,11 @@ jobs:
           -v
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        continue-on-error: true  # Don't fail CI if Codecov upload fails
+        if: ${{ matrix.python-version == '3.11' }}
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        continue-on-error: true
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}  # necesario en repos privados
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: ./coverage.xml
           flags: unittests
@@ -148,9 +189,9 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-results-ubuntu-py311
+          name: test-results-ubuntu-py${{ matrix.python-version }}
           path: pytest-results.xml
           retention-days: 7
 
@@ -161,14 +202,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up uv (cached)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -193,15 +236,18 @@ jobs:
   security:
     name: Security Scan (bandit + safety)
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up uv (cached)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -215,16 +261,20 @@ jobs:
       - name: Install security tools
         run: uv pip install "bandit[toml]" safety
 
-      - name: Run security scans
+      - name: Run security scans (fail on findings)
         run: |
-          uv run bandit -r src/ -f json -o bandit-report.json || true
-          uv run safety check --full-report --json --output safety-report.json ${SAFETY_API_KEY:+--key $SAFETY_API_KEY} || true
+          uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
+          if [ -n "${SAFETY_API_KEY:-}" ]; then
+            uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
+          else
+            uv run safety check --full-report --json --output safety-report.json
+          fi
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
 
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: security-reports
           path: |
@@ -234,22 +284,25 @@ jobs:
 
   docker:
     name: Docker Build
-    needs: [lint, typing, test, security]
+    needs: [pre-commit, lint, typing, test, security]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Build (cache to GHA)
-        uses: docker/build-push-action@v6
+      - name: Build production image (cache to GHA)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
+          target: production
           push: false
           tags: intrinsical/rag-prototype:latest
           cache-from: type=gha
