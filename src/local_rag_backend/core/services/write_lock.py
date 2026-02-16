@@ -82,6 +82,6 @@ def multi_store_write_lock() -> Iterator[None]:
     """
     Serialize mutating multi-store operations (SQL + FAISS) across threads/processes.
     """
-    lock_path = settings.data_dir / ".rag_multi_store_write.lock"
+    lock_path = settings.get_coordination_dir() / ".rag_multi_store_write.lock"
     with _LOCAL_WRITE_LOCK, _exclusive_file_lock(lock_path):
         yield
