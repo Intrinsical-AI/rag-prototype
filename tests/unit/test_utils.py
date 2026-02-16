@@ -89,3 +89,13 @@ def test_preprocess_malformed_html():
 
     # Invalid tag syntax (should not be removed)
     assert preprocess_text("Hello<>World") == "hello<>world"
+
+
+def test_preprocess_text_options_respected():
+    raw = "  <b>Hello</b>\nWorld  "
+    assert preprocess_text(raw, lowercase=False) == "Hello World"
+    assert preprocess_text(raw, remove_html=False) == "<b>hello</b> world"
+    assert "\n" in preprocess_text(raw, collapse_whitespace=False)
+    assert preprocess_text(
+        raw, strip=False, collapse_whitespace=False, remove_html=False
+    ).startswith("  ")
