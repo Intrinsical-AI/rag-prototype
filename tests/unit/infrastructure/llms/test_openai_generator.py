@@ -1,8 +1,8 @@
 # tests/unit/infrastructure/llms/test_openai_generator.py
 
 import pytest
-from fastapi import HTTPException
 
+from local_rag_backend.core.errors import LLMConfigurationError, LLMResponseError
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.settings import settings
 
@@ -51,14 +51,14 @@ def test_generate_api_error(monkeypatch):
         make_dummy_openai(should_raise=True),
     )
     gen = OpenAIGenerator()
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(LLMResponseError) as exc:
         gen.generate("fallará", ["ctx"])
-    assert exc.value.status_code == 502
+    assert "OpenAI API error" in str(exc.value)
 
 
 def test_generator_requires_api_key(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
-    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+    with pytest.raises(LLMConfigurationError, match="OPENAI_API_KEY"):
         OpenAIGenerator()
 
 

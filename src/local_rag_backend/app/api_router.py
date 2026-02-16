@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -30,6 +29,7 @@ from local_rag_backend.app.diagnostics import (
     get_history_count,
     get_retrieval_index_stats,
 )
+from local_rag_backend.app.error_mapping import raise_http_for_runtime_error
 from local_rag_backend.app.observability import (
     Timer,
     fingerprint_question,
@@ -37,6 +37,8 @@ from local_rag_backend.app.observability import (
     observe_ingest,
     observe_query,
 )
+from local_rag_backend.app.routers.meta import router as meta_router
+from local_rag_backend.app.routers.openrouter import router as openrouter_router
 from local_rag_backend.app.schemas import (
     AskEvalConfig,
     AskEvalRequest,
@@ -56,9 +58,9 @@ from local_rag_backend.app.schemas import (
     UpsertDocsResponse,
 )
 from local_rag_backend.app.services import docs as docs_service, index as index_service
-from local_rag_backend.app.services.ports import (
-    DocsMutationPorts,
-    IndexMutationPorts,
+from local_rag_backend.app.services.mutation_ports import (
+    build_docs_mutation_ports,
+    build_index_mutation_ports,
 )
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
@@ -79,7 +81,6 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.infrastructure.llms.openai_client import create_openai_client
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.faiss.manifest import (
     expected_manifest_config_from_settings,
@@ -103,6 +104,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.orm import Session
 
+    from local_rag_backend.app.services.ports import DocsMutationPorts, IndexMutationPorts
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
@@ -154,6 +156,8 @@ def _build_embedder_for_dense() -> EmbedderPort:
 
 
 router = APIRouter()
+router.include_router(openrouter_router)
+router.include_router(meta_router)
 
 
 def _run_multi_store_write_locked(fn: Any) -> Any:
@@ -162,7 +166,7 @@ def _run_multi_store_write_locked(fn: Any) -> Any:
 
 
 def _docs_mutation_ports() -> DocsMutationPorts:
-    return DocsMutationPorts(
+    return build_docs_mutation_ports(
         build_embedder=_build_embedder_for_dense,
         doc_repo_factory=cast("Any", lambda: SqlDocumentStorage()),
         build_upsert_doc=SqlDocumentStorage.UpsertDoc,
@@ -176,7 +180,7 @@ def _docs_mutation_ports() -> DocsMutationPorts:
 
 
 def _index_mutation_ports() -> IndexMutationPorts:
-    return IndexMutationPorts(
+    return build_index_mutation_ports(
         build_embedder=_build_embedder_for_dense,
         doc_repo_factory=lambda: SqlDocumentStorage(),
         vector_repo_factory=FaissVectorStorage,
@@ -350,6 +354,9 @@ async def ask(request: AskRequest, service: RagService = Depends(get_rag_service
     try:
         rag_result = await run_blocking(service.ask, request.question, request.k)
         ok = True
+    except Exception as e:
+        raise_http_for_runtime_error(e)
+        raise
     finally:
         observe_query(ok=ok, duration_s=t.seconds())
     docs = rag_result["docs"]
@@ -686,7 +693,11 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return rag_result, latency_ms
 
-    rag_result, latency_ms = await run_blocking(_run_eval_sync, task_type="eval")
+    try:
+        rag_result, latency_ms = await run_blocking(_run_eval_sync, task_type="eval")
+    except Exception as e:
+        raise_http_for_runtime_error(e)
+        raise
     docs = rag_result["docs"]
     scores = rag_result["scores"]
     sources = [
@@ -697,186 +708,3 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
         for doc, score in zip(docs, scores, strict=False)
     ]
     return AskEvalResponse(answer=rag_result["answer"], sources=sources, latency_ms=latency_ms)
-
-
-# ---------------------- OpenRouter Proxy (CodeArena) ---------------------- #
-
-
-class OpenRouterUsage(BaseModel):
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-class OpenRouterGenerateRequest(BaseModel):
-    model: str | None = Field(
-        default=None, description="OpenRouter model ID, e.g., 'openai/gpt-4o-mini'"
-    )
-    system_instruction: str = Field(..., min_length=1, max_length=8000)
-    user_content: str = Field(..., min_length=1, max_length=8000)
-    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
-    max_tokens: int | None = Field(default=None, ge=1, le=4096)
-    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
-
-
-class OpenRouterGenerateResponse(BaseModel):
-    text: str
-    usage: OpenRouterUsage | None = None
-
-
-@router.post(
-    "/openrouter/generate",
-    response_model=OpenRouterGenerateResponse,
-    tags=["LLM"],
-    summary="Proxy completion via OpenRouter (OpenAI-compatible)",
-)
-async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterGenerateResponse:
-    if not (
-        getattr(settings, "openrouter_enabled", False)
-        and getattr(settings, "openrouter_api_key", None)
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="OpenRouter is not configured (set OPENROUTER_ENABLED and OPENROUTER_API_KEY)",
-        )
-
-    headers: dict[str, str] = {}
-    if settings.openrouter_site_url is not None:
-        headers["HTTP-Referer"] = settings.openrouter_site_url
-    if settings.openrouter_app_title is not None:
-        headers["X-Title"] = settings.openrouter_app_title
-
-    def _create_sync() -> Any:
-        client = create_openai_client(
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
-            default_headers=headers or None,
-            timeout=settings.openai_request_timeout,
-            client_factory=OpenAI,
-        )
-        return client.chat.completions.create(
-            model=(payload.model or settings.openrouter_model),
-            temperature=payload.temperature,
-            top_p=payload.top_p,
-            max_tokens=payload.max_tokens,
-            messages=[
-                {"role": "system", "content": payload.system_instruction},
-                {"role": "user", "content": payload.user_content},
-            ],
-        )
-
-    try:
-        resp = await run_blocking(_create_sync, task_type="network")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"OpenRouter error: {e!s}") from e
-
-    choices = getattr(resp, "choices", None)
-    if not isinstance(choices, list) or not choices:
-        raise HTTPException(
-            status_code=502,
-            detail="OpenRouter error: malformed response (missing choices).",
-        )
-
-    first_choice = choices[0]
-    message = getattr(first_choice, "message", None)
-    content = getattr(message, "content", None)
-    if content is None:
-        text = ""
-    elif isinstance(content, str):
-        text = content
-    else:
-        raise HTTPException(
-            status_code=502,
-            detail="OpenRouter error: malformed response content.",
-        )
-
-    usage = getattr(resp, "usage", None)
-    usage_obj = None
-    if usage is not None:
-        usage_obj = OpenRouterUsage(
-            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
-            total_tokens=getattr(usage, "total_tokens", 0) or 0,
-        )
-
-    return OpenRouterGenerateResponse(text=text, usage=usage_obj)
-
-
-# ---------------------- Templates API ---------------------- #
-
-
-class TemplateResponse(BaseModel):
-    name: str
-    template: str
-    description: str
-
-
-@router.get(
-    "/templates",
-    response_model=list[TemplateResponse],
-    tags=["RAG"],
-    summary="Get available prompt templates",
-)
-async def get_templates() -> list[TemplateResponse]:
-    """
-    Get available prompt templates for RAG queries.
-    Returns:
-        List[TemplateResponse]: Available prompt templates with descriptions
-    """
-    templates = [
-        TemplateResponse(
-            name="default",
-            template=settings.openai_prompt_template,
-            description="Default template for OpenAI/OpenRouter models",
-        ),
-        TemplateResponse(
-            name="ollama",
-            template=settings.ollama_prompt_template,
-            description="Template optimized for Ollama models",
-        ),
-        TemplateResponse(
-            name="concise",
-            template="Based on the context below, provide a concise answer.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nANSWER:",
-            description="Concise template for brief responses",
-        ),
-        TemplateResponse(
-            name="detailed",
-            template="You are an expert Q&A system. Your task is to answer the user's question based on the provided sources. Synthesize the information from the sources into a coherent, detailed answer.\n\nSources:\n{context}\n\nQuestion: {question}\n\nAnswer:",
-            description="Detailed template for comprehensive responses",
-        ),
-    ]
-    return templates
-
-
-# ---------------------- Configuration API ---------------------- #
-
-
-class ConfigResponse(BaseModel):
-    retrieval_mode: str
-    hybrid_alpha: float
-    temperature: float
-    max_tokens: int
-    available_providers: list[str]
-
-
-@router.get(
-    "/config",
-    response_model=ConfigResponse,
-    tags=["RAG"],
-    summary="Get backend configuration defaults",
-)
-async def get_config() -> ConfigResponse:
-    """
-    Get backend configuration defaults.
-    Returns:
-        ConfigResponse: Current backend configuration defaults
-    """
-    available_providers = list(get_available_llm_providers().keys())
-
-    return ConfigResponse(
-        retrieval_mode=settings.retrieval_mode,
-        hybrid_alpha=settings.hybrid_retrieval_alpha,
-        temperature=settings.openai_temperature,
-        max_tokens=settings.openai_max_tokens,
-        available_providers=available_providers,
-    )

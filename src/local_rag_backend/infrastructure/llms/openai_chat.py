@@ -4,7 +4,7 @@ OpenAI Chat completion generator (compatible con API v1)
 
 * Instantiated with `OpenAI(api_key=…)`.
 * `generate()` builds prompt exactly as expected by asserts.
-* Handles `APIError` and converts it to `HTTPException 502`.
+* Raises typed provider errors; HTTP mapping is handled in app transport layer.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from fastapi import HTTPException
 from openai import OpenAI
 
+from local_rag_backend.core.errors import LLMConfigurationError, LLMResponseError
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.core.services.prompting import render_prompt_template
 from local_rag_backend.infrastructure.llms.openai_client import create_openai_client
@@ -41,7 +41,7 @@ class OpenAIGenerator(GeneratorPort):
     ):
         resolved_key = api_key or settings.openai_api_key
         if not resolved_key:
-            raise RuntimeError("OPENAI_API_KEY is required to use the OpenAI generator.")
+            raise LLMConfigurationError("OPENAI_API_KEY is required to use the OpenAI generator.")
 
         self.model = model or settings.openai_model
         self.temperature = temperature if temperature is not None else settings.openai_temperature
@@ -77,5 +77,5 @@ class OpenAIGenerator(GeneratorPort):
             content = response.choices[0].message.content
             return content or ""
         except Exception as e:
-            # Broadly catch API errors, connection issues, etc.
-            raise HTTPException(status_code=502, detail=f"OpenAI API error: {e!s}") from e
+            # Broadly catch provider/runtime SDK errors and map in app layer.
+            raise LLMResponseError(f"OpenAI API error: {e!s}") from e

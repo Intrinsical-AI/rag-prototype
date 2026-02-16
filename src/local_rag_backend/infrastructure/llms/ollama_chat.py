@@ -9,8 +9,12 @@ import logging
 from typing import TYPE_CHECKING
 
 import requests
-from fastapi import HTTPException
 
+from local_rag_backend.core.errors import (
+    LLMConnectionError,
+    LLMResponseError,
+    LLMTimeoutError,
+)
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.core.services.prompting import render_prompt_template
 from local_rag_backend.settings import (
@@ -57,16 +61,16 @@ class OllamaGenerator(GeneratorPort):
 
             if "response" in response_data and isinstance(response_data["response"], str):
                 return response_data["response"].strip()
-            raise HTTPException(500, "Ollama response malformed")
+            raise LLMResponseError("Ollama response malformed")
 
         except requests.exceptions.Timeout as e:
-            raise HTTPException(504, f"Ollama request timed out to {self.api_url}") from e
+            raise LLMTimeoutError(f"Ollama request timed out to {self.api_url}") from e
         except requests.exceptions.ConnectionError as e:
-            raise HTTPException(503, f"Could not connect to Ollama at {self.api_url}") from e
+            raise LLMConnectionError(f"Could not connect to Ollama at {self.api_url}") from e
         except requests.exceptions.RequestException as e:
             status = e.response.status_code if e.response is not None else 500
             detail = e.response.text if e.response is not None else str(e)
-            raise HTTPException(status, f"Ollama API error: {detail}") from e
+            raise LLMResponseError(f"Ollama API error (status={status}): {detail}") from e
         except Exception as e:
             logger.error(f"Unexpected error calling Ollama: {e}", exc_info=True)
-            raise HTTPException(500, f"Unexpected error calling Ollama: {e!s}") from e
+            raise LLMResponseError(f"Unexpected error calling Ollama: {e!s}") from e
