@@ -59,6 +59,9 @@ def discover_files(
         return [p]
 
     for inp in inputs:
+        if not follow_symlinks and inp.is_symlink():
+            continue
+
         if inp.is_file():
             yield from _yield_file(inp)
             continue
