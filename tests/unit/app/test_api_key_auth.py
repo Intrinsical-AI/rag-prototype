@@ -113,3 +113,45 @@ async def test_rfc7239_forwarded_non_local_host_requires_api_key_when_client_is_
 
     assert r.status_code == 401
     assert "non-local requests" in r.json()["detail"]
+
+
+@pytest.mark.unit
+async def test_rfc7239_forwarded_unknown_requires_api_key_when_client_is_local(
+    in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "api_key", None, raising=False)
+    monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(
+            app=app, raise_app_exceptions=True, client=("127.0.0.1", 4242)
+        )
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                "/api/health",
+                headers={"Forwarded": "for=unknown;proto=https"},
+            )
+
+    assert r.status_code == 401
+    assert "non-local requests" in r.json()["detail"]
+
+
+@pytest.mark.unit
+async def test_x_forwarded_for_blank_chain_requires_api_key_when_client_is_local(
+    in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "api_key", None, raising=False)
+    monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(
+            app=app, raise_app_exceptions=True, client=("127.0.0.1", 4242)
+        )
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                "/api/health",
+                headers={"X-Forwarded-For": " ,   "},
+            )
+
+    assert r.status_code == 401
+    assert "non-local requests" in r.json()["detail"]
