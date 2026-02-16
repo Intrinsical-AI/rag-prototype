@@ -41,6 +41,29 @@ def test_coordination_dir_prefers_explicit_data_dir(tmp_path):
     assert s.get_coordination_dir() == data_dir.resolve()
 
 
+def test_coordination_dir_uses_absolute_sqlite_parent_when_data_dir_is_relative(
+    tmp_path, monkeypatch
+):
+    shared_db = tmp_path / "shared" / "app.db"
+    shared_db.parent.mkdir(parents=True, exist_ok=True)
+    wd_a = tmp_path / "worker-a"
+    wd_b = tmp_path / "worker-b"
+    wd_a.mkdir()
+    wd_b.mkdir()
+
+    monkeypatch.chdir(wd_a)
+    s_a = Settings(data_dir=Path("coord"), sqlite_url=f"sqlite:///{shared_db}")
+    dir_a = s_a.get_coordination_dir()
+
+    monkeypatch.chdir(wd_b)
+    s_b = Settings(data_dir=Path("coord"), sqlite_url=f"sqlite:///{shared_db}")
+    dir_b = s_b.get_coordination_dir()
+
+    assert dir_a == shared_db.parent.resolve()
+    assert dir_b == shared_db.parent.resolve()
+    assert dir_a == dir_b
+
+
 def test_coordination_dir_uses_absolute_sqlite_parent_when_data_dir_is_default(tmp_path):
     s = Settings(data_dir=Path("data"), sqlite_url=f"sqlite:///{tmp_path / 'app.db'}")
     assert s.get_coordination_dir() == tmp_path.resolve()
