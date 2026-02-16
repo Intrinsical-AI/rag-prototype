@@ -13,6 +13,47 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _try_posix_lock(file_obj: Any) -> bool:
+    try:  # POSIX
+        import fcntl
+
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
+        return True
+    except Exception:  # pragma: no cover
+        return False
+
+
+def _try_windows_lock(file_obj: Any) -> bool:  # pragma: no cover
+    try:
+        import msvcrt
+
+        msvcrt_any: Any = msvcrt
+        file_obj.seek(0, os.SEEK_END)
+        if file_obj.tell() == 0:
+            file_obj.write(b"0")
+            file_obj.flush()
+        file_obj.seek(0)
+        msvcrt_any.locking(file_obj.fileno(), getattr(msvcrt_any, "LK_LOCK", 1), 1)
+        return True
+    except Exception:
+        return False
+
+
+def _best_effort_unlock(file_obj: Any) -> None:
+    with suppress(Exception):  # pragma: no cover
+        import fcntl
+
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
+    with suppress(Exception):  # pragma: no cover
+        import msvcrt  # pragma: no cover
+
+        msvcrt_mod: Any = msvcrt  # pragma: no cover
+        file_obj.seek(0)  # pragma: no cover
+        msvcrt_mod.locking(  # pragma: no cover
+            file_obj.fileno(), getattr(msvcrt_mod, "LK_UNLCK", 0), 1
+        )
+
+
 @contextmanager
 def exclusive_file_lock(lock_path: Path, *, error_message: str) -> Iterator[None]:
     """
@@ -26,30 +67,9 @@ def exclusive_file_lock(lock_path: Path, *, error_message: str) -> Iterator[None
     f = lock_path.open("a+b")
     locked = False
     try:
-        try:  # POSIX
-            import fcntl
-
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            locked = True
-        except Exception:  # pragma: no cover
-            locked = False
-
-        if not locked:  # pragma: no cover
-            try:  # Windows
-                import msvcrt  # pragma: no cover
-
-                msvcrt_any: Any = msvcrt  # pragma: no cover
-                f.seek(0, os.SEEK_END)  # pragma: no cover
-                if f.tell() == 0:  # pragma: no cover
-                    f.write(b"0")  # pragma: no cover
-                    f.flush()  # pragma: no cover
-                f.seek(0)  # pragma: no cover
-                msvcrt_any.locking(  # pragma: no cover
-                    f.fileno(), getattr(msvcrt_any, "LK_LOCK", 1), 1
-                )
-                locked = True  # pragma: no cover
-            except Exception:  # pragma: no cover
-                locked = False  # pragma: no cover
+        locked = _try_posix_lock(f)
+        if not locked:
+            locked = _try_windows_lock(f)
 
         if not locked:
             raise RuntimeError(error_message)
@@ -57,16 +77,5 @@ def exclusive_file_lock(lock_path: Path, *, error_message: str) -> Iterator[None
         yield
     finally:
         if locked:
-            with suppress(Exception):  # pragma: no cover
-                import fcntl
-
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            with suppress(Exception):  # pragma: no cover
-                import msvcrt  # pragma: no cover
-
-                msvcrt_mod: Any = msvcrt  # pragma: no cover
-                f.seek(0)  # pragma: no cover
-                msvcrt_mod.locking(  # pragma: no cover
-                    f.fileno(), getattr(msvcrt_mod, "LK_UNLCK", 0), 1
-                )
+            _best_effort_unlock(f)
         f.close()
