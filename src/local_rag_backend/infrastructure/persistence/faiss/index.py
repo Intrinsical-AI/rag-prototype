@@ -58,7 +58,7 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
 
     - POSIX: fcntl.flock
     - Windows: msvcrt.locking
-    - Else: no-op (still keeps atomic replaces)
+    - Else: fail-closed
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     f = lock_path.open("a+b")
@@ -90,6 +90,12 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
                 locked = True  # pragma: no cover
             except Exception:  # pragma: no cover
                 locked = False  # pragma: no cover
+
+        if not locked:
+            raise RuntimeError(
+                f"Unable to acquire FAISS file lock at {lock_path}. "
+                "Refusing to mutate index state without a cross-process lock."
+            )
 
         yield
     finally:

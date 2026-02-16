@@ -73,6 +73,20 @@ class FaissVectorStorage(VectorRepoPort):
             )
             return
 
+        manifest_path = manifest_path_for(idx_path)
+        manifest = read_manifest(manifest_path)
+        if manifest is None:
+            vectors = int(getattr(self.faiss_index, "ntotal", 0) or 0)
+            id_map = getattr(self.faiss_index, "id_map", [])
+            id_map_len = len(id_map) if isinstance(id_map, list) else 0
+            # Fail closed for legacy non-empty indexes without manifest.
+            # Auto-creating here would "bless" unknown historical config and hide drift.
+            if vectors > 0 or id_map_len > 0:
+                raise RuntimeError(
+                    "Index manifest missing for a non-empty index; rebuild is required "
+                    "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
+                )
+
         create_manifest_if_missing_for_settings(
             index_path=idx_path,
             expected=expected,
@@ -80,7 +94,7 @@ class FaissVectorStorage(VectorRepoPort):
             index_backend=backend,
         )
 
-        manifest = read_manifest(manifest_path_for(idx_path))
+        manifest = read_manifest(manifest_path)
         if manifest is None:  # pragma: no cover
             raise RuntimeError("Index manifest is missing after creation attempt.")
         mismatches, errors = validate_manifest(
