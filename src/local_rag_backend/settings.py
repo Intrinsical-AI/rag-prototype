@@ -41,6 +41,9 @@ class Settings(BaseSettings):
         "INFO", description="Logging level."
     )
     enable_monitoring: bool = Field(False, description="Enable Prometheus metrics.")
+    enable_reranker: bool = Field(
+        False, description="Enable reranking of retrieved documents (best-effort)."
+    )
 
     # --- Security / HTTP --- #
     api_key: str | None = Field(
@@ -132,6 +135,17 @@ class Settings(BaseSettings):
         True, description="Collapse whitespace during cleaning."
     )
     ingest_clean_strip: bool = Field(True, description="Strip leading/trailing whitespace first.")
+
+    # --- Retrieval quality (optional) --- #
+    reranker_strategy: Literal["overlap_v1"] = Field(
+        "overlap_v1", description="Reranker strategy identifier."
+    )
+    reranker_candidate_k: int = Field(
+        20,
+        ge=3,
+        le=200,
+        description="Candidates to fetch before reranking (top-k is returned).",
+    )
 
     # --- Prompt Templates --- #
     openai_prompt_template: str = Field(

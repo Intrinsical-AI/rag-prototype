@@ -25,6 +25,13 @@ from local_rag_backend.app.diagnostics import (
     get_history_count,
     get_retrieval_index_stats,
 )
+from local_rag_backend.app.observability import (
+    Timer,
+    fingerprint_question,
+    log_event,
+    observe_ingest,
+    observe_query,
+)
 from local_rag_backend.app.schemas import (
     AskEvalConfig,
     AskEvalRequest,
@@ -51,6 +58,7 @@ from local_rag_backend.core.services.maintenance import (
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.core.services.write_lock import multi_store_write_lock
+from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -313,9 +321,24 @@ async def ask(request: AskRequest, service: RagService = Depends(get_rag_service
         AskResponse: Generated answer with source documents
     """
     # Avoid blocking the event loop: the RAG pipeline is synchronous (DB/FAISS + network I/O).
-    rag_result = await run_blocking(service.ask, request.question, request.k)
+    t = Timer()
+    ok = False
+    try:
+        rag_result = await run_blocking(service.ask, request.question, request.k)
+        ok = True
+    finally:
+        observe_query(ok=ok, duration_s=t.seconds())
     docs = rag_result["docs"]
     scores = rag_result["scores"]
+    log_event(
+        "rag_query",
+        **fingerprint_question(request.question),
+        k=int(request.k),
+        retrieval_mode=str(settings.retrieval_mode),
+        reranker_enabled=bool(settings.enable_reranker),
+        sources=len(docs),
+        duration_ms=int(1000 * t.seconds()),
+    )
 
     sources = [
         QueryResult(
@@ -392,6 +415,7 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
     texts = [t.strip() for t in payload.texts if t and t.strip()]
     if not texts:
         return IngestResponse(count=0, ids=[])
+    t = Timer()
 
     def _embedding_model_name_for_dedup() -> str:
         if settings.retrieval_mode not in ("dense", "hybrid"):
@@ -529,8 +553,13 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
 
         return [id_by_ext[e] for e in unique_extids if e in id_by_ext]
 
+    ok = False
+    ids: list[int] = []
     try:
         ids = cast("list[int]", await run_blocking(_run_multi_store_write_locked, _ingest_sync))
+        ids = await run_blocking(_ingest_sync)
+        ok = True
+        return IngestResponse(count=len(ids), ids=ids)
     except RuntimeError as e:
         if "sentence-transformers" in str(e) or "Dense/hybrid" in str(e):
             raise HTTPException(
@@ -541,10 +570,20 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
                 ),
             ) from e
         raise
-
-    # The RAG service is cached; reset it so subsequent queries see the updated DB / index.
-    reset_rag_service()
-    return IngestResponse(count=len(ids), ids=ids)
+    finally:
+        observe_ingest(source="api:/docs", ok=ok, inserted=len(ids))
+        log_event(
+            "rag_ingest",
+            source="api:/docs",
+            ok=ok,
+            input_texts=len(texts),
+            inserted=len(ids),
+            retrieval_mode=str(settings.retrieval_mode),
+            reranker_enabled=bool(settings.enable_reranker),
+            duration_ms=int(1000 * t.seconds()),
+        )
+        if ok:
+            reset_rag_service()
 
 
 @router.post("/docs/delete_by_external_id", response_model=DeleteDocsByExternalIdResponse)
@@ -820,8 +859,16 @@ def _build_retriever_from_config(
     doc_ids: list[int],
 ) -> RetrieverPort:
     """Build a retriever instance based on dynamic configuration."""
+    retriever: RetrieverPort
     if cfg.retrieval_mode == "sparse":
-        return SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+        retriever = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+        if settings.enable_reranker:
+            retriever = RerankingRetriever(
+                retriever,
+                candidate_k=settings.reranker_candidate_k,
+                strategy=settings.reranker_strategy,
+            )
+        return retriever
 
     embedder: EmbedderPort = (
         OpenAIEmbedder()
@@ -836,16 +883,26 @@ def _build_retriever_from_config(
     )
 
     if cfg.retrieval_mode == "dense":
-        return dense_retriever
-
-    if cfg.retrieval_mode == "hybrid":
+        retriever = dense_retriever
+    elif cfg.retrieval_mode == "hybrid":
         sparse_retriever = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
         alpha = (
             cfg.hybrid_alpha if cfg.hybrid_alpha is not None else settings.hybrid_retrieval_alpha
         )
-        return HybridRetriever(dense=dense_retriever, sparse=sparse_retriever, alpha=alpha)
+        retriever = HybridRetriever(dense=dense_retriever, sparse=sparse_retriever, alpha=alpha)
+    else:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported retrieval_mode: {cfg.retrieval_mode}"
+        )
 
-    raise HTTPException(status_code=400, detail=f"Unsupported retrieval_mode: {cfg.retrieval_mode}")
+    if settings.enable_reranker:
+        retriever = RerankingRetriever(
+            retriever,
+            candidate_k=settings.reranker_candidate_k,
+            strategy=settings.reranker_strategy,
+        )
+
+    return retriever
 
 
 def _build_generator_from_config(cfg: AskEvalConfig) -> GeneratorPort:

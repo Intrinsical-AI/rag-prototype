@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -103,6 +104,13 @@ def build_rag_service() -> RagService:
                 sparse=sparse_retriever,
                 alpha=settings.hybrid_retrieval_alpha,
             )
+
+    if settings.enable_reranker:
+        retriever = RerankingRetriever(
+            retriever,
+            candidate_k=settings.reranker_candidate_k,
+            strategy=settings.reranker_strategy,
+        )
 
     # 3. Generator Port
     generator: GeneratorPort
