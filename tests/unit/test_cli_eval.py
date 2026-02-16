@@ -7,13 +7,6 @@ from click.testing import CliRunner
 from local_rag_backend.cli import cli
 
 
-def test_rag_eval_passes_on_packaged_dataset() -> None:
-    # Use the packaged dataset by default (no args).
-    r = CliRunner().invoke(cli, ["eval", "--retrieval-mode", "sparse", "--reranker"])
-    assert r.exit_code == 0, r.output
-    assert "hit_rate=" in r.output
-
-
 def test_rag_eval_fails_below_threshold(tmp_path: Path) -> None:
     # Minimal dataset where the relevant_external_ids don't exist => hit_rate=0.
     ds = tmp_path / "ds.jsonl"

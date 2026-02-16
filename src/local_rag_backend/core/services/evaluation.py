@@ -12,17 +12,8 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from local_rag_backend.core.services.reranking import RerankingRetriever
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
-
 if TYPE_CHECKING:
-    from local_rag_backend.core.ports import RetrieverPort
+    from collections.abc import Callable, Sequence
 
 
 @dataclass(frozen=True)
@@ -120,46 +111,10 @@ class EvalResult:
     mrr: float
 
 
-def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
-    # StaticPool ensures all sessions share the same in-memory DB connection.
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-    # Ensure models are registered with Base.metadata.
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import (  # noqa: F401
-        models as _models,
-    )
-
-    db_base.Base.metadata.create_all(bind=engine)
-    db_base.ensure_sqlite_documents_autoincrement(engine_to_use=engine)
-    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=engine)
-    return SqlDocumentStorage(session_factory=session_local)
-
-
-def _build_sparse_retriever(
-    *, doc_repo: SqlDocumentStorage, reranker_enabled: bool, candidate_k: int, strategy: str
-) -> RetrieverPort:
-    docs = doc_repo.get_all_documents()
-    corpus = [d.content for d in docs]
-    doc_ids = [d.id for d in docs]
-    base: RetrieverPort = SparseBM25Retriever(
-        documents=corpus,
-        doc_ids=doc_ids,
-        doc_repo=doc_repo,
-        preloaded_docs=docs,
-    )
-    if reranker_enabled:
-        return RerankingRetriever(base, candidate_k=candidate_k, strategy=strategy)
-    return base
-
-
 def run_retrieval_eval(
     *,
     dataset: EvalDataset,
+    retrieve_external_ids: Callable[[str, int], Sequence[str]] | None = None,
     retrieval_mode: str = "sparse",
     k: int = 3,
     reranker_enabled: bool = False,
@@ -167,6 +122,9 @@ def run_retrieval_eval(
     reranker_strategy: str = "overlap_v1",
     max_queries: int | None = None,
 ) -> EvalResult:
+    # Backward-compatible kwargs retained for callers migrating from the previous
+    # infra-coupled implementation where reranker wiring happened in this layer.
+    _ = (reranker_candidate_k, reranker_strategy)
     if retrieval_mode != "sparse":
         raise ValueError(
             "This eval currently supports retrieval_mode=sparse only (dependency-free)."
@@ -174,38 +132,21 @@ def run_retrieval_eval(
     if k <= 0:
         raise ValueError("k must be positive")
 
-    doc_repo = _build_ephemeral_doc_repo()
-    items = [
-        SqlDocumentStorage.UpsertDoc(
-            external_id=d.external_id,
-            content=d.content,
-            source_id=d.source_id,
-            metadata={"dataset_id": dataset.dataset_id},
-        )
-        for d in dataset.docs
-    ]
-    results, _changed, _updated = doc_repo.upsert_documents_by_external_id(items)
-    id_by_external_id = {r.external_id: int(r.id) for r in results}
-
-    retriever = _build_sparse_retriever(
-        doc_repo=doc_repo,
-        reranker_enabled=reranker_enabled,
-        candidate_k=reranker_candidate_k,
-        strategy=reranker_strategy,
-    )
-
     qs: list[EvalQuery] = list(dataset.queries)
     if max_queries is not None:
         qs = qs[: max(0, int(max_queries))]
     if not qs:
         raise ValueError("No queries to evaluate after max_queries.")
+    if retrieve_external_ids is None:
+        raise ValueError(
+            "retrieve_external_ids callback is required for sparse evaluation."
+        )
 
     hits = 0
     rr_sum = 0.0
     for q in qs:
-        relevant = {eid for eid in q.relevant_external_ids if eid in id_by_external_id}
-        docs, _scores = retriever.retrieve(q.query, k)
-        retrieved_ext = [d.external_id for d in docs if getattr(d, "external_id", None)]
+        relevant = set(q.relevant_external_ids)
+        retrieved_ext = [str(eid) for eid in retrieve_external_ids(q.query, k) if str(eid).strip()]
 
         hit = any(eid in relevant for eid in retrieved_ext)
         if hit:

@@ -17,6 +17,7 @@ import click
 import uvicorn
 
 from local_rag_backend import __version__
+from local_rag_backend.app.composition import build_dense_embedder_from_settings
 from local_rag_backend.app.diagnostics import (
     get_documents_count,
     get_history_count,
@@ -91,10 +92,15 @@ def _build_dense_embedder() -> EmbedderPort:
         SentenceTransformerEmbedder,
     )
 
-    return (
-        OpenAIEmbedder()
-        if settings.openai_api_key
-        else SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
+    return build_dense_embedder_from_settings(
+        settings_obj=settings,
+        openai_embedder_factory=OpenAIEmbedder,
+        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
+        missing_backend_message=(
+            "Dense/hybrid retrieval requires an embeddings backend. "
+            "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
+            "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
+        ),
     )
 
 
@@ -243,32 +249,28 @@ def delete_external_ids(external_ids: tuple[str, ...]) -> None:
     mutation_attempted = False
     try:
         _ensure_sqlite_schema_for_cli()
-        from local_rag_backend.core.services.maintenance import rebuild_index_from_db
+        from local_rag_backend.core.services.maintenance import delete_external_ids_multi_store
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
         def _delete_sync() -> tuple[int, int | None, list[str], int, bool]:
             doc_repo = SqlDocumentStorage()
-            deleted_sql, deleted_ids, missing, tombstoned = doc_repo.delete_by_external_ids(
-                list(external_ids)
-            )
-
-            rebuilt = False
-            deleted_index: int | None = None
             if settings.retrieval_mode in ("dense", "hybrid"):
                 vec = FaissVectorStorage(
                     index_path=settings.index_path,
                     id_map_path=settings.id_map_path,
                     dim=None,
                 )
-                try:
-                    deleted_index = int(vec.delete(deleted_ids))
-                except Exception:
-                    n = rebuild_index_from_db(
-                        doc_repo=doc_repo, vec_repo=vec, embedder=_build_dense_embedder()
-                    )
-                    rebuilt = n >= 0
-            return deleted_sql, deleted_index, missing, tombstoned, rebuilt
+                return delete_external_ids_multi_store(
+                    doc_repo=doc_repo,
+                    external_ids=list(external_ids),
+                    vec_repo=vec,
+                    embedder_factory=_build_dense_embedder,
+                    rebuild_on_index_failure=True,
+                )
+            return delete_external_ids_multi_store(
+                doc_repo=doc_repo, external_ids=list(external_ids)
+            )
 
         mutation_attempted = True
         deleted_sql, deleted_index, missing, tombstoned, rebuilt = _run_with_multi_store_write_lock(
@@ -602,11 +604,11 @@ def eval_cmd(
     json_out: Path | None,
 ) -> None:
     """Offline retrieval evaluation (reproducible, dependency-free by default)."""
+    from local_rag_backend.app.services.evaluation import run_retrieval_eval
     from local_rag_backend.core.services.evaluation import (
         eval_result_to_json,
         format_eval_result,
         load_eval_dataset,
-        run_retrieval_eval,
     )
 
     ds = load_eval_dataset(dataset)
