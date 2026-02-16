@@ -23,7 +23,12 @@ class SparseBM25Retriever(RetrieverPort):
     """Sparse retriever using the BM25 algorithm."""
 
     def __init__(
-        self, documents: Sequence[str], doc_ids: Sequence[int], doc_repo: DocumentRepoPort
+        self,
+        documents: Sequence[str],
+        doc_ids: Sequence[int],
+        doc_repo: DocumentRepoPort,
+        *,
+        preloaded_docs: Sequence[Document] | None = None,
     ):
         self.doc_ids = list(doc_ids)
         self.doc_repo = doc_repo
@@ -31,7 +36,14 @@ class SparseBM25Retriever(RetrieverPort):
         self._tokenized_corpus = [self._tokenize(doc) for doc in documents] if documents else []
         # Avoid one SQL roundtrip per query in sparse mode; cache corpus docs in memory.
         # This retriever instance is rebuilt when RAG service is invalidated after mutations.
-        self._docs_by_id = {doc.id: doc for doc in doc_repo.get(self.doc_ids)}
+        if preloaded_docs is None:
+            self._docs_by_id = {doc.id: doc for doc in doc_repo.get(self.doc_ids)}
+        else:
+            expected = set(self.doc_ids)
+            self._docs_by_id = {doc.id: doc for doc in preloaded_docs if doc.id in expected}
+            missing = [doc_id for doc_id in self.doc_ids if doc_id not in self._docs_by_id]
+            if missing:
+                self._docs_by_id.update({doc.id: doc for doc in doc_repo.get(missing)})
 
         if self._tokenized_corpus and any(self._tokenized_corpus):
             from rank_bm25 import BM25Okapi

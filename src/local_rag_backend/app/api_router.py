@@ -49,7 +49,6 @@ from local_rag_backend.app.schemas import (
     UpsertDocsRequest,
     UpsertDocsResponse,
 )
-from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -87,8 +86,11 @@ from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Ret
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.orm import Session
 
+    from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
         EmbedderPort,
@@ -764,11 +766,18 @@ def _build_retriever_from_config(
     doc_repo: DocumentRepoPort,
     corpus: list[str],
     doc_ids: list[int],
+    *,
+    preloaded_docs: Sequence[DomainDocument] | None = None,
 ) -> RetrieverPort:
     """Build a retriever instance based on dynamic configuration."""
     retriever: RetrieverPort
     if cfg.retrieval_mode == "sparse":
-        retriever = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+        retriever = SparseBM25Retriever(
+            documents=corpus,
+            doc_ids=doc_ids,
+            doc_repo=doc_repo,
+            preloaded_docs=preloaded_docs,
+        )
         if settings.enable_reranker:
             retriever = RerankingRetriever(
                 retriever,
@@ -792,7 +801,12 @@ def _build_retriever_from_config(
     if cfg.retrieval_mode == "dense":
         retriever = dense_retriever
     elif cfg.retrieval_mode == "hybrid":
-        sparse_retriever = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
+        sparse_retriever = SparseBM25Retriever(
+            documents=corpus,
+            doc_ids=doc_ids,
+            doc_repo=doc_repo,
+            preloaded_docs=preloaded_docs,
+        )
         alpha = (
             cfg.hybrid_alpha if cfg.hybrid_alpha is not None else settings.hybrid_retrieval_alpha
         )
@@ -877,8 +891,12 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
 
     def _run_eval_sync() -> tuple[dict[str, Any], int]:
         doc_repo = SqlDocumentStorage()
-        corpus, doc_ids = get_corpus_and_ids(doc_repo)
-        retriever = _build_retriever_from_config(cfg, doc_repo, corpus, doc_ids)
+        docs = doc_repo.get_all_documents()
+        corpus = [d.content for d in docs]
+        doc_ids = [d.id for d in docs]
+        retriever = _build_retriever_from_config(
+            cfg, doc_repo, corpus, doc_ids, preloaded_docs=docs
+        )
         generator = _build_generator_from_config(cfg)
 
         history_storage = HistorySqlStorage()
