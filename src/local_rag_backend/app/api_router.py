@@ -5,7 +5,6 @@ FastAPI router for the application endpoints.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from pathlib import Path
@@ -51,6 +50,10 @@ from local_rag_backend.app.schemas import (
     UpsertDocsResponse,
 )
 from local_rag_backend.core.services.corpus import get_corpus_and_ids
+from local_rag_backend.core.services.dense_upsert import (
+    precompute_vectors_for_changed_items,
+    sync_dense_after_upsert,
+)
 from local_rag_backend.core.services.maintenance import (
     delete_documents_multi_store,
     rebuild_index_from_db,
@@ -65,7 +68,11 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
+from local_rag_backend.infrastructure.llms.openai_client import create_openai_client
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+    expected_manifest_config_from_settings,
+)
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
 from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
@@ -97,16 +104,6 @@ def validate_rag_config(config: AskEvalConfig) -> list[str]:
     errors = []
     if config.retrieval_mode not in ["sparse", "dense", "hybrid"]:
         errors.append(f"Invalid retrieval_mode: {config.retrieval_mode}")
-    if not (1 <= config.k <= 10):
-        errors.append(f"Invalid k value: {config.k}. Must be between 1 and 10")
-    if config.retrieval_mode == "hybrid" and not (0.0 <= (config.hybrid_alpha or 0.5) <= 1.0):
-        errors.append(f"Invalid hybrid_alpha: {config.hybrid_alpha}. Must be between 0.0 and 1.0")
-    if config.temperature is not None and not (0.0 <= config.temperature <= 2.0):
-        errors.append(f"Invalid temperature: {config.temperature}. Must be between 0.0 and 2.0")
-    if config.top_p is not None and not (0.0 <= config.top_p <= 1.0):
-        errors.append(f"Invalid top_p: {config.top_p}. Must be between 0.0 and 1.0")
-    if config.max_tokens is not None and not (1 <= config.max_tokens <= 4096):
-        errors.append(f"Invalid max_tokens: {config.max_tokens}. Must be between 1 and 4096")
     if config.prompt_template is not None:
         try:
             validate_prompt_template(config.prompt_template)
@@ -217,18 +214,7 @@ async def readiness_check() -> dict[str, Any]:
 
     # 4. Retrieval index (for dense/hybrid modes)
     if settings.retrieval_mode in ["dense", "hybrid"]:
-        expected_manifest = {
-            "embedding_backend": (
-                "openai" if bool(settings.openai_api_key) else "sentence_transformers"
-            ),
-            "embedding_model": (
-                settings.openai_embedding_model
-                if bool(settings.openai_api_key)
-                else settings.st_embedding_model
-            ),
-            "chunker_strategy": settings.ingest_chunk_strategy,
-            "chunker_version": settings.ingest_chunker_version,
-        }
+        expected_manifest = expected_manifest_config_from_settings(settings)
         stats = get_retrieval_index_stats(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
@@ -494,30 +480,11 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
         if settings.retrieval_mode in ("dense", "hybrid"):
             # Compute embeddings before SQL upsert so provider failures don't leave SQL/index drift.
             embedder = _build_embedder_for_dense()
-            existing_states = doc_repo.get_existing_doc_states_by_external_id(
-                [it.external_id for it in unique_items]
+            vectors_by_external_id = precompute_vectors_for_changed_items(
+                items=unique_items,
+                doc_repo=doc_repo,
+                embedder=embedder,
             )
-            to_embed = []
-            for it in unique_items:
-                content = it.content.strip()
-                current = existing_states.get(it.external_id)
-                if current is None:
-                    to_embed.append(it)
-                    continue
-                content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-                old_sha = current.content_sha256 or ""
-                if old_sha != content_sha or current.content != content:
-                    to_embed.append(it)
-
-            if to_embed:
-                embedded = embedder.embed([it.content.strip() for it in to_embed])
-                if len(embedded) != len(to_embed):
-                    raise RuntimeError(
-                        f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
-                    )
-                vectors_by_external_id = {
-                    it.external_id: list(vec) for it, vec in zip(to_embed, embedded, strict=False)
-                }
 
         results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             unique_items
@@ -530,26 +497,15 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
                 id_map_path=settings.id_map_path,
                 dim=embedder.dim,
             )
-            changed_results = [r for r in results if r.content_changed]
-            missing_vectors = [
-                r.external_id
-                for r in changed_results
-                if r.external_id not in vectors_by_external_id
-            ]
-            if missing_vectors:
-                raise RuntimeError(
-                    "Missing precomputed vectors for changed documents: "
-                    + ", ".join(missing_vectors[:10])
-                )
-            ids = [int(r.id) for r in changed_results]
-            vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
-            try:
-                if ids and updated_content_ids:
-                    vec.delete(updated_content_ids)
-                if ids:
-                    vec.upsert(ids, vectors)
-            except Exception:
-                rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
+            sync_dense_after_upsert(
+                results=results,
+                updated_content_ids=updated_content_ids,
+                vectors_by_external_id=vectors_by_external_id,
+                vec_repo=vec,
+                doc_repo=doc_repo,
+                embedder=embedder,
+                rebuild_fn=rebuild_index_from_db,
+            )
 
         return [id_by_ext[e] for e in unique_extids if e in id_by_ext]
 
@@ -614,10 +570,10 @@ async def delete_docs_by_external_id(
             )
             embedder = _build_embedder_for_dense()
             try:
-                vec.delete(deleted_ids)
+                deleted_index = int(vec.delete(deleted_ids))
                 return DeleteDocsByExternalIdResponse(
                     deleted_sql=deleted_sql,
-                    deleted_index=len(deleted_ids),
+                    deleted_index=deleted_index,
                     tombstoned=tombstoned,
                     missing_external_ids=missing,
                     rebuilt_index=False,
@@ -720,30 +676,11 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
         if settings.retrieval_mode in ("dense", "hybrid"):
             # Compute embeddings before SQL upsert so provider failures don't leave SQL/index drift.
             embedder = _build_embedder_for_dense()
-            existing_states = doc_repo.get_existing_doc_states_by_external_id(
-                [it.external_id for it in items]
+            vectors_by_external_id = precompute_vectors_for_changed_items(
+                items=items,
+                doc_repo=doc_repo,
+                embedder=embedder,
             )
-            to_embed = []
-            for it in items:
-                content = it.content.strip()
-                current = existing_states.get(it.external_id)
-                if current is None:
-                    to_embed.append(it)
-                    continue
-                content_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-                old_sha = current.content_sha256 or ""
-                if old_sha != content_sha or current.content != content:
-                    to_embed.append(it)
-
-            if to_embed:
-                embedded = embedder.embed([it.content.strip() for it in to_embed])
-                if len(embedded) != len(to_embed):
-                    raise RuntimeError(
-                        f"Embedder returned {len(embedded)} vectors for {len(to_embed)} documents."
-                    )
-                vectors_by_external_id = {
-                    it.external_id: list(vec) for it, vec in zip(to_embed, embedded, strict=False)
-                }
 
         results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             items
@@ -754,53 +691,20 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
 
         rebuilt_index = False
         if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-            changed_results = [r for r in results if r.content_changed]
-            missing_vectors = [
-                r.external_id
-                for r in changed_results
-                if r.external_id not in vectors_by_external_id
-            ]
-            if missing_vectors:
-                raise RuntimeError(
-                    "Missing precomputed vectors for changed documents: "
-                    + ", ".join(missing_vectors[:10])
-                )
-            ids = [int(r.id) for r in changed_results]
-            vectors = [vectors_by_external_id[r.external_id] for r in changed_results]
-
-            if not ids:
-                return UpsertDocsResponse(
-                    inserted=inserted,
-                    updated=updated,
-                    unchanged=unchanged,
-                    rebuilt_index=rebuilt_index,
-                    results=[
-                        UpsertDocResult(
-                            external_id=r.external_id,
-                            id=r.id,
-                            action=r.action,
-                            content_changed=r.content_changed,
-                        )
-                        for r in results
-                    ],
-                )
-
             vec = FaissVectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
                 dim=embedder.dim,
             )
-            try:
-                # Updates must remove the old vector for that doc_id first.
-                if updated_content_ids:
-                    vec.delete(updated_content_ids)
-                vec.upsert(ids, vectors)
-            except Exception:
-                # Recovery: rebuild full index from DB.
-                rebuilt_index_from_db = rebuild_index_from_db(
-                    doc_repo=doc_repo, vec_repo=vec, embedder=embedder
-                )
-                rebuilt_index = rebuilt_index_from_db >= 0
+            rebuilt_index = sync_dense_after_upsert(
+                results=results,
+                updated_content_ids=updated_content_ids,
+                vectors_by_external_id=vectors_by_external_id,
+                vec_repo=vec,
+                doc_repo=doc_repo,
+                embedder=embedder,
+                rebuild_fn=rebuild_index_from_db,
+            )
 
         return UpsertDocsResponse(
             inserted=inserted,
@@ -1046,22 +950,13 @@ async def openrouter_generate(payload: OpenRouterGenerateRequest) -> OpenRouterG
         headers["X-Title"] = settings.openrouter_app_title
 
     def _create_sync() -> Any:
-        try:
-            client = OpenAI(
-                api_key=settings.openrouter_api_key,
-                base_url=settings.openrouter_base_url,
-                default_headers=headers or None,
-                timeout=settings.openai_request_timeout,
-            )
-        except TypeError as e:
-            # Compatibility fallback for test doubles/older SDK variants that don't accept `timeout`.
-            if "timeout" not in str(e):
-                raise
-            client = OpenAI(
-                api_key=settings.openrouter_api_key,
-                base_url=settings.openrouter_base_url,
-                default_headers=headers or None,
-            )
+        client = create_openai_client(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            default_headers=headers or None,
+            timeout=settings.openai_request_timeout,
+            client_factory=OpenAI,
+        )
         return client.chat.completions.create(
             model=(payload.model or settings.openrouter_model),
             temperature=payload.temperature,
@@ -1160,15 +1055,7 @@ async def get_config() -> ConfigResponse:
     Returns:
         ConfigResponse: Current backend configuration defaults
     """
-    available_providers = []
-    if settings.openai_api_key:
-        available_providers.append("openai")
-    if settings.ollama_enabled:
-        available_providers.append("ollama")
-    if getattr(settings, "openrouter_enabled", False) and getattr(
-        settings, "openrouter_api_key", None
-    ):
-        available_providers.append("openrouter")
+    available_providers = list(get_available_llm_providers().keys())
 
     return ConfigResponse(
         retrieval_mode=settings.retrieval_mode,

@@ -16,11 +16,6 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def get_documents(db: Session, ids: list[int]) -> Sequence[Document]:
-    """Retrieve documents by their IDs."""
-    return db.query(Document).filter(Document.id.in_(ids)).all()
-
-
 def add_documents(db: Session, texts: list[str]) -> list[int]:
     """Store new documents and return their IDs."""
     docs = [
