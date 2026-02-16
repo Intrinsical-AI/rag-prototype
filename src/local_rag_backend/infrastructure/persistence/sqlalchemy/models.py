@@ -53,3 +53,19 @@ class QaHistory(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     source_ids: Mapped[list[int] | None] = mapped_column(JSON)
+
+
+class DocumentTombstone(Base):
+    """
+    Tombstones for deleted external_ids.
+
+    This prevents deleted identities from reappearing after future ingestions/upserts.
+    """
+
+    __tablename__ = "document_tombstones"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    external_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    deleted_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
