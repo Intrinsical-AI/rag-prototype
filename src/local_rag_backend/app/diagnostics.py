@@ -1,8 +1,5 @@
 """
 Operational diagnostics for the app layer (health/readiness/status).
-
-Backward-compatibility:
-- `local_rag_backend.diagnostics` re-exports these symbols.
 """
 
 from __future__ import annotations

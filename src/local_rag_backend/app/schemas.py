@@ -3,9 +3,6 @@ Pydantic schemas for the HTTP API surface.
 
 These are intentionally kept in the app layer to avoid coupling infrastructure/core
 to transport concerns.
-
-Backward-compatibility:
-- `local_rag_backend.models` re-exports these symbols.
 """
 
 from __future__ import annotations

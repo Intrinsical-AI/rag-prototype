@@ -1,6 +1,6 @@
 import pytest
 
-from local_rag_backend.prompting import (
+from local_rag_backend.core.services.prompting import (
     PromptTemplateError,
     render_prompt_template,
     validate_prompt_template,
