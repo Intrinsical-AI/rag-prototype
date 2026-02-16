@@ -178,6 +178,25 @@ python run_query.py
 
 ---
 
+## CLI: ingesta desde ficheros/directorios (txt/md/csv)
+
+Para un flujo rápido sin escribir código, puedes ingestar desde rutas locales:
+
+```bash
+# Ingesta desde un fichero o un directorio (recursivo por defecto)
+rag-ingest ./docs ./notas.md ./data/faq.csv
+
+# Ver qué se procesaría sin escribir en SQLite/FAISS
+rag-ingest --dry-run ./docs
+```
+
+Notas:
+
+* En `dense`/`hybrid`, la CLI actualiza SQLite y FAISS de forma consistente (y borra chunks obsoletos si un fichero se acorta).
+* La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
+
+---
+
 ## Mantenimiento (dense/hybrid): borrado y rebuild idempotente del índice
 
 En modos `dense`/`hybrid`, el índice FAISS es **estado derivado** de SQLite. Si borras filas manualmente en SQL o editas ficheros del índice a mano, puedes provocar **deriva** (IDs en FAISS que ya no existen en SQL, o documentos en SQL sin vector).
