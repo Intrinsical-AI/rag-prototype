@@ -97,6 +97,18 @@ class DeleteDocsResponse(BaseModel):
     rebuilt_index: bool = False
 
 
+class DeleteDocsByExternalIdRequest(BaseModel):
+    external_ids: list[str] = Field(..., min_length=1, max_length=512)
+
+
+class DeleteDocsByExternalIdResponse(BaseModel):
+    deleted_sql: int
+    deleted_index: int | None = None
+    tombstoned: int = 0
+    missing_external_ids: list[str] = Field(default_factory=list)
+    rebuilt_index: bool = False
+
+
 class RebuildIndexResponse(BaseModel):
     indexed: int
 
