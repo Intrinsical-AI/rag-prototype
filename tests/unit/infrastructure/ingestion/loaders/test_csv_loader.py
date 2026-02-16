@@ -19,9 +19,9 @@ def test_csv_loader_with_header_two_columns():
 
         assert len(items) == 2
         assert items[0].text == "First Title\n\nFirst content"
-        assert items[0].metadata == {"title": "First Title"}
+        assert items[0].metadata == {"title": "First Title", "row_index": 1}
         assert items[1].text == "Second Title\n\nSecond content"
-        assert items[1].metadata == {"title": "Second Title"}
+        assert items[1].metadata == {"title": "Second Title", "row_index": 2}
     finally:
         Path(temp_path).unlink()
 
@@ -39,7 +39,7 @@ def test_csv_loader_without_header():
 
         assert len(items) == 2
         assert items[0].text == "First Title\n\nFirst content"
-        assert items[0].metadata == {"title": "First Title"}
+        assert items[0].metadata == {"title": "First Title", "row_index": 1}
     finally:
         Path(temp_path).unlink()
 
@@ -57,9 +57,9 @@ def test_csv_loader_single_column():
 
         assert len(items) == 2
         assert items[0].text == "Just content"
-        assert items[0].metadata is None
+        assert items[0].metadata == {"row_index": 1}
         assert items[1].text == "More content"
-        assert items[1].metadata is None
+        assert items[1].metadata == {"row_index": 2}
     finally:
         Path(temp_path).unlink()
 
@@ -96,7 +96,7 @@ def test_csv_loader_custom_delimiter():
 
         assert len(items) == 2
         assert items[0].text == "First Title\n\nFirst content"
-        assert items[0].metadata == {"title": "First Title"}
+        assert items[0].metadata == {"title": "First Title", "row_index": 1}
     finally:
         Path(temp_path).unlink()
 
@@ -114,7 +114,7 @@ def test_csv_loader_whitespace_handling():
 
         assert len(items) == 1
         assert items[0].text == "Spaced Title\n\nSpaced content"
-        assert items[0].metadata == {"title": "Spaced Title"}
+        assert items[0].metadata == {"title": "Spaced Title", "row_index": 1}
     finally:
         Path(temp_path).unlink()
 
@@ -153,7 +153,7 @@ def test_csv_loader_extra_columns():
         assert len(items) == 1
         # Only first two columns considered
         assert items[0].text == "T\n\nC"
-        assert items[0].metadata == {"title": "T"}
+        assert items[0].metadata == {"title": "T", "row_index": 1}
     finally:
         Path(temp_path).unlink()
 

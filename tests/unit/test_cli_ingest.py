@@ -1,0 +1,52 @@
+# tests/unit/test_cli_ingest.py
+
+from __future__ import annotations
+
+from click.testing import CliRunner
+
+from local_rag_backend.cli import cli
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.settings import settings
+
+
+def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
+    in_memory_sqlite, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    # Make chunking deterministic and small so we can assert chunk counts easily.
+    monkeypatch.setattr(settings, "ingest_chunk_chars", 10, raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_overlap", 0, raising=False)
+    monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
+
+    root = tmp_path / "in"
+    root.mkdir()
+    (root / "a.txt").write_text(
+        "0123456789ABCDEFGHIJXXXXX", encoding="utf-8"
+    )  # 25 chars -> 3 chunks
+    (root / "b.md").write_text("# T\n\nHi", encoding="utf-8")  # small -> 1 chunk
+    (root / "c.csv").write_text("title;body\nT1;B1\nT2;B2\n", encoding="utf-8")  # 2 rows -> 2 docs
+    (root / "bin.dat").write_bytes(b"\x00\x01\x02\x03")  # binary -> skipped
+
+    r1 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    assert r1.exit_code == 0, r1.output
+
+    docs1 = SqlDocumentStorage().get_all_documents()
+    assert len(docs1) == 6  # 3 (txt) + 1 (md) + 2 (csv rows)
+    assert all(d.external_id and d.external_id.startswith("file:") for d in docs1)
+    assert sum(1 for d in docs1 if (d.source_id or "").endswith("a.txt")) == 3
+
+    r2 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    assert r2.exit_code == 0, r2.output
+    assert "inserted=0" in r2.output
+
+    docs2 = SqlDocumentStorage().get_all_documents()
+    assert len(docs2) == 6  # idempotent
+
+    # Shrink file so it now produces only 1 chunk; old chunks should be deleted.
+    (root / "a.txt").write_text("short", encoding="utf-8")
+    r3 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    assert r3.exit_code == 0, r3.output
+
+    docs3 = SqlDocumentStorage().get_all_documents()
+    assert len(docs3) == 4  # 1 (txt) + 1 (md) + 2 (csv)
+    assert sum(1 for d in docs3 if (d.source_id or "").endswith("a.txt")) == 1
