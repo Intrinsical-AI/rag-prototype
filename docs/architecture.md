@@ -29,9 +29,11 @@ src/local_rag_backend/
 │   └── ingestion/              # CSV loader, etc.
 ├── app/                        # Application layer
 │   ├── main.py                 # FastAPI app + lifespan
-│   ├── api_router.py           # HTTP endpoints (/api/ask, /api/history)
+│   ├── api_router.py           # Root API router: health + RAG endpoints + subrouter composition
+│   ├── routers/                # Bounded routers (openrouter, meta/config, ...)
 │   ├── dependencies.py         # DI bridge to factory
 │   ├── schemas.py              # Pydantic request/response schemas (API transport)
+│   ├── error_mapping.py        # Typed domain/app errors -> HTTP transport mapping
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
 │   ├── factory.py              # Composition root (build retriever/LLM/services)
@@ -48,6 +50,11 @@ HTTP docs/index layering:
   and `app/services/index.py`, keeping `api_router.py` focused on transport concerns.
 - App-layer dependency contracts for these use-cases live in `app/services/ports.py`
   (`DocsMutationPorts`, `IndexMutationPorts`), reducing direct app->infra coupling.
+- Shared API/CLI wiring for these contracts lives in `app/services/mutation_ports.py`.
+
+Error layering:
+- Infra adapters raise typed runtime errors from `core/errors.py` (no FastAPI dependency).
+- HTTP translation lives in `app/error_mapping.py` so transport concerns stay at the edge.
 
 CLI layering:
 - `cli.py` is the composition/entrypoint module (group + helpers + command registration).
@@ -260,8 +267,9 @@ Because the application caches a process-local singleton `RagService`, API/CLI m
 
 ## HTTP API Surface
 
-The FastAPI router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`).
-In addition to `/api/ask` and `/api/history`, the project exposes:
+The API root router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`) and
+includes bounded routers from `src/local_rag_backend/app/routers/`.
+The project exposes:
 
 * `POST /api/docs` and `GET /api/docs` (ingest/list documents)
 * `POST /api/docs/upsert` (idempotent upsert by `external_id`)

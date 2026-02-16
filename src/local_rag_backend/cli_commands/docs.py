@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import click
 
+from local_rag_backend.app.services import docs as docs_service
+from local_rag_backend.app.services.mutation_ports import build_docs_mutation_ports
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -34,29 +36,20 @@ def delete_docs_cmd(ids: tuple[int, ...]) -> None:
     try:
         hooks = _hooks()
         hooks._ensure_sqlite_schema_for_cli()
-        from local_rag_backend.core.services.maintenance import delete_documents_multi_store
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        ports = build_docs_mutation_ports(build_embedder=hooks._build_dense_embedder)
 
-        def _delete_sync() -> tuple[int, int | None, bool]:
-            doc_repo = SqlDocumentStorage()
-            if settings.retrieval_mode in ("dense", "hybrid"):
-                vec = FaissVectorStorage(
-                    index_path=settings.index_path, id_map_path=settings.id_map_path, dim=None
-                )
-                return delete_documents_multi_store(
-                    doc_repo=doc_repo,
-                    vec_repo=vec,
-                    embedder_factory=hooks._build_dense_embedder,
-                    ids=list(ids),
-                    rebuild_on_index_failure=True,
-                )
-
-            deleted_sql, _, rebuilt = delete_documents_multi_store(doc_repo=doc_repo, ids=list(ids))
-            return deleted_sql, None, rebuilt
+        def _delete_sync() -> docs_service.DeleteDocsSummary:
+            return docs_service.delete_docs_sync(
+                ids=list(ids),
+                settings_obj=settings,
+                ports=ports,
+            )
 
         mutation_attempted = True
-        deleted_sql, deleted_index, rebuilt = hooks._run_with_multi_store_write_lock(_delete_sync)
+        summary = hooks._run_with_multi_store_write_lock(_delete_sync)
+        deleted_sql = summary.deleted_sql
+        deleted_index = summary.deleted_index
+        rebuilt = summary.rebuilt_index
         if deleted_index is None and settings.retrieval_mode not in ("dense", "hybrid"):
             click.echo(f"[OK] Deleted {deleted_sql} docs from SQL.")
             return
@@ -85,33 +78,22 @@ def delete_external_ids_cmd(external_ids: tuple[str, ...]) -> None:
     try:
         hooks = _hooks()
         hooks._ensure_sqlite_schema_for_cli()
-        from local_rag_backend.core.services.maintenance import delete_external_ids_multi_store
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        ports = build_docs_mutation_ports(build_embedder=hooks._build_dense_embedder)
 
-        def _delete_sync() -> tuple[int, int | None, list[str], int, bool]:
-            doc_repo = SqlDocumentStorage()
-            if settings.retrieval_mode in ("dense", "hybrid"):
-                vec = FaissVectorStorage(
-                    index_path=settings.index_path,
-                    id_map_path=settings.id_map_path,
-                    dim=None,
-                )
-                return delete_external_ids_multi_store(
-                    doc_repo=doc_repo,
-                    external_ids=list(external_ids),
-                    vec_repo=vec,
-                    embedder_factory=hooks._build_dense_embedder,
-                    rebuild_on_index_failure=True,
-                )
-            return delete_external_ids_multi_store(
-                doc_repo=doc_repo, external_ids=list(external_ids)
+        def _delete_sync() -> docs_service.DeleteDocsByExternalIdSummary:
+            return docs_service.delete_docs_by_external_id_sync(
+                external_ids=list(external_ids),
+                settings_obj=settings,
+                ports=ports,
             )
 
         mutation_attempted = True
-        deleted_sql, deleted_index, missing, tombstoned, rebuilt = hooks._run_with_multi_store_write_lock(
-            _delete_sync
-        )
+        summary = hooks._run_with_multi_store_write_lock(_delete_sync)
+        deleted_sql = summary.deleted_sql
+        deleted_index = summary.deleted_index
+        missing = summary.missing_external_ids
+        tombstoned = summary.tombstoned
+        rebuilt = summary.rebuilt_index
         click.echo(
             f"[OK] Deleted {deleted_sql} docs by external_id. "
             f"tombstoned={tombstoned} missing={len(missing)} "
@@ -157,7 +139,6 @@ def upsert_docs_cmd(
         hooks = _hooks()
         hooks._ensure_sqlite_schema_for_cli()
 
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
         docs_payload: list[dict[str, object]] = []
@@ -204,55 +185,27 @@ def upsert_docs_cmd(
         if len(set(ext_ids)) != len(ext_ids):
             raise ValueError("external_id values must be unique within the request")
 
-        def _upsert_sync() -> tuple[int, int, int, bool]:
-            doc_repo = SqlDocumentStorage()
-            tombstoned = doc_repo.get_tombstoned_external_ids([i.external_id for i in items])
-            if tombstoned:
-                raise RuntimeError(
-                    "Some external_id values are tombstoned (deleted): "
-                    + ", ".join(sorted(tombstoned)[:10])
-                )
-            embedder: EmbedderPort | None = None
-            vectors_by_external_id: dict[str, list[float]] = {}
-            if settings.retrieval_mode in ("dense", "hybrid"):
-                embedder = hooks._build_dense_embedder()
-                vectors_by_external_id = precompute_vectors_for_changed_items(
-                    items=items,
-                    doc_repo=doc_repo,
-                    embedder=embedder,
-                )
+        ports = build_docs_mutation_ports(build_embedder=hooks._build_dense_embedder)
 
-            results, _changed_content, updated_content_ids = (
-                doc_repo.upsert_documents_by_external_id(items)
+        def _upsert_sync() -> docs_service.UpsertDocsSummary:
+            return docs_service.upsert_docs_sync(
+                docs=items,
+                settings_obj=settings,
+                ports=ports,
             )
 
-            inserted = sum(1 for r in results if r.action == "inserted")
-            updated = sum(1 for r in results if r.action == "updated")
-            unchanged = sum(1 for r in results if r.action == "unchanged")
-
-            rebuilt = False
-            if settings.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-                vec = FaissVectorStorage(
-                    index_path=settings.index_path,
-                    id_map_path=settings.id_map_path,
-                    dim=embedder.dim,
-                )
-                rebuilt = sync_dense_after_upsert(
-                    results=results,
-                    updated_content_ids=updated_content_ids,
-                    vectors_by_external_id=vectors_by_external_id,
-                    vec_repo=vec,
-                    doc_repo=doc_repo,
-                    embedder=embedder,
-                )
-
-            return inserted, updated, unchanged, rebuilt
-
         mutation_attempted = True
-        inserted, updated, unchanged, rebuilt = hooks._run_with_multi_store_write_lock(_upsert_sync)
+        summary = hooks._run_with_multi_store_write_lock(_upsert_sync)
+        inserted = summary.inserted
+        updated = summary.updated
+        unchanged = summary.unchanged
+        rebuilt = summary.rebuilt_index
         click.echo(
             f"[OK] Upserted docs. inserted={inserted} updated={updated} unchanged={unchanged} rebuilt_index={rebuilt}"
         )
+    except docs_service.TombstonedExternalIdsError as e:
+        click.echo(f"[ERROR] Error upserting docs: {e}", err=True)
+        raise SystemExit(1)
     except Exception as e:
         click.echo(f"[ERROR] Error upserting docs: {e}", err=True)
         raise SystemExit(1)
