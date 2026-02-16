@@ -127,8 +127,8 @@ def build_rag_service() -> RagService:
 
 
 def _reload_token_path() -> Path:
-    # Keep it in the data dir so multi-worker deployments can coordinate via a shared volume.
-    return settings.data_dir / _RELOAD_TOKEN_FILENAME
+    # Keep it in the shared coordination dir so multi-worker/CLI processes stay in sync.
+    return settings.get_coordination_dir() / _RELOAD_TOKEN_FILENAME
 
 
 def _read_reload_token() -> str:

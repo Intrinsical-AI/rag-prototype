@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from local_rag_backend.app import factory
@@ -61,3 +63,13 @@ def test_write_reload_token_uses_unique_tmp_paths(tmp_path, monkeypatch):
     factory._write_reload_token("v2")
 
     assert token_path.read_text(encoding="utf-8") == "v2"
+
+
+def test_reload_token_path_uses_coordination_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        factory,
+        "settings",
+        SimpleNamespace(get_coordination_dir=lambda: tmp_path),
+        raising=True,
+    )
+    assert factory._reload_token_path() == tmp_path / ".rag_service_reload_token"
