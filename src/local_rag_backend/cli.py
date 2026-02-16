@@ -781,6 +781,7 @@ def ingest(
                 use_magic=use_magic,
                 csv_delimiter=delimiter_opt,
                 csv_has_header=has_header,
+                detection=det,
             )
             if loader is None:
                 total_skipped += 1
