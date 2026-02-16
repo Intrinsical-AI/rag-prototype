@@ -16,6 +16,7 @@ The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Port
 
 ```
 src/local_rag_backend/
+├── cli_commands/               # CLI commands partitioned by domain (docs/index/eval/server)
 ├── core/                       # Domain + application services (technology-agnostic)
 │   ├── domain/                 # Entities (Document, etc.)
 │   ├── ports/                  # Ports (Protocols) for core dependencies
@@ -45,6 +46,11 @@ Evaluation layering:
 HTTP docs/index layering:
 - `/api/docs*` and `/api/index/rebuild` delegate business orchestration to `app/services/docs.py`
   and `app/services/index.py`, keeping `api_router.py` focused on transport concerns.
+
+CLI layering:
+- `cli.py` is the composition/entrypoint module (group + helpers + command registration).
+- Domain commands live in `cli_commands/docs.py`, `cli_commands/index.py`,
+  `cli_commands/eval.py`, and `cli_commands/server.py`.
 
 ---
 
