@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from functools import lru_cache
 from time import time_ns
 from typing import TYPE_CHECKING
@@ -144,9 +145,19 @@ def _read_reload_token() -> str:
 def _write_reload_token(token: str) -> None:
     p = _reload_token_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(token, encoding="utf-8")
-    os.replace(tmp, p)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=p.name + ".",
+        suffix=".tmp",
+        dir=p.parent,
+        delete=False,
+    ) as tmp:
+        tmp.write(token)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_name = tmp.name
+    os.replace(tmp_name, p)
 
 
 @lru_cache(maxsize=1)
