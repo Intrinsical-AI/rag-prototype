@@ -118,6 +118,10 @@ loaders = [
   "langchain-community>=0.2,<1.0",
   "trafilatura>=1.8,<2.0"
 ]
+magic = [
+  # Optional file type detection via libmagic. Requires system libmagic on many distros.
+  "python-magic>=0.4,<1.0"
+]
 # CPU por defecto (retro-compat mantenida)
 performance = [
   "torch>=2.0,<3.0",
@@ -169,6 +173,7 @@ Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
 rag-delete-docs = "local_rag_backend.cli:rag_delete_docs"
+rag-ingest      = "local_rag_backend.cli:rag_ingest"
 rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
 rag-upsert-docs = "local_rag_backend.cli:rag_upsert_docs"
 rag-server      = "local_rag_backend.cli:rag_server"

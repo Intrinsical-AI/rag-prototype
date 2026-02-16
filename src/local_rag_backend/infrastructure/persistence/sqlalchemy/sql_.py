@@ -218,6 +218,34 @@ class SqlDocumentStorage(DocumentRepoPort):
 
         return results, changed_content, updated_content_ids
 
+    def list_ids_by_external_id_prefix(self, prefix: str) -> list[tuple[int, str]]:
+        """
+        Return existing (id, external_id) for rows whose external_id starts with `prefix`.
+
+        Used by file ingestion to delete stale chunks when a source shrinks or its chunking changes.
+        """
+        prefix_s = str(prefix)
+        if not prefix_s:
+            return []
+
+        # Escape LIKE wildcards so prefixes containing '%' or '_' behave as literals.
+        escaped = prefix_s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = escaped + "%"
+
+        with get_session(self._session_factory) as session:
+            rows = (
+                session.query(DbDocument.id, DbDocument.external_id)
+                .filter(DbDocument.external_id.is_not(None))
+                .filter(DbDocument.external_id.like(pattern, escape="\\"))
+                .all()
+            )
+            out: list[tuple[int, str]] = []
+            for doc_id, ext_id in rows:
+                if ext_id is None:
+                    continue
+                out.append((int(doc_id), str(ext_id)))
+            return out
+
 
 class HistorySqlStorage(QAHistoryPort):
     """SQL-based implementation of the history repository port."""
