@@ -56,6 +56,10 @@ from local_rag_backend.app.schemas import (
     UpsertDocsResponse,
 )
 from local_rag_backend.app.services import docs as docs_service, index as index_service
+from local_rag_backend.app.services.ports import (
+    DocsMutationPorts,
+    IndexMutationPorts,
+)
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -155,6 +159,30 @@ router = APIRouter()
 def _run_multi_store_write_locked(fn: Any) -> Any:
     with multi_store_write_lock():
         return fn()
+
+
+def _docs_mutation_ports() -> DocsMutationPorts:
+    return DocsMutationPorts(
+        build_embedder=_build_embedder_for_dense,
+        doc_repo_factory=cast("Any", lambda: SqlDocumentStorage()),
+        build_upsert_doc=SqlDocumentStorage.UpsertDoc,
+        vector_repo_factory=FaissVectorStorage,
+        precompute_vectors_fn=precompute_vectors_for_changed_items,
+        sync_dense_fn=sync_dense_after_upsert,
+        rebuild_fn=rebuild_index_from_db,
+        delete_docs_fn=delete_documents_multi_store,
+        delete_external_ids_fn=delete_external_ids_multi_store,
+    )
+
+
+def _index_mutation_ports() -> IndexMutationPorts:
+    return IndexMutationPorts(
+        build_embedder=_build_embedder_for_dense,
+        doc_repo_factory=lambda: SqlDocumentStorage(),
+        vector_repo_factory=FaissVectorStorage,
+        purge_index_artifacts_fn=purge_index_artifacts,
+        rebuild_fn=rebuild_index_from_db,
+    )
 
 
 # --- Health & Readiness --- #
@@ -417,12 +445,7 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
         return docs_service.ingest_docs_sync(
             texts=texts,
             settings_obj=settings,
-            build_embedder=_build_embedder_for_dense,
-            doc_repo_factory=SqlDocumentStorage,
-            vector_repo_factory=FaissVectorStorage,
-            precompute_vectors_fn=precompute_vectors_for_changed_items,
-            sync_dense_fn=sync_dense_after_upsert,
-            rebuild_fn=rebuild_index_from_db,
+            ports=_docs_mutation_ports(),
         )
 
     ok = False
@@ -471,10 +494,7 @@ async def delete_docs_by_external_id(
         return docs_service.delete_docs_by_external_id_sync(
             external_ids=payload.external_ids,
             settings_obj=settings,
-            build_embedder=_build_embedder_for_dense,
-            doc_repo_factory=SqlDocumentStorage,
-            vector_repo_factory=FaissVectorStorage,
-            delete_external_ids_fn=delete_external_ids_multi_store,
+            ports=_docs_mutation_ports(),
         )
 
     try:
@@ -501,10 +521,7 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
         return docs_service.delete_docs_sync(
             ids=payload.ids,
             settings_obj=settings,
-            build_embedder=_build_embedder_for_dense,
-            doc_repo_factory=SqlDocumentStorage,
-            vector_repo_factory=FaissVectorStorage,
-            delete_docs_fn=delete_documents_multi_store,
+            ports=_docs_mutation_ports(),
         )
 
     try:
@@ -529,12 +546,7 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
         return docs_service.upsert_docs_sync(
             docs=payload.docs,
             settings_obj=settings,
-            build_embedder=_build_embedder_for_dense,
-            doc_repo_factory=SqlDocumentStorage,
-            vector_repo_factory=FaissVectorStorage,
-            precompute_vectors_fn=precompute_vectors_for_changed_items,
-            sync_dense_fn=sync_dense_after_upsert,
-            rebuild_fn=rebuild_index_from_db,
+            ports=_docs_mutation_ports(),
         )
 
     try:
@@ -575,11 +587,7 @@ async def rebuild_index() -> RebuildIndexResponse:
     def _rebuild_operation() -> int:
         return index_service.rebuild_index_sync(
             settings_obj=settings,
-            build_embedder=_build_embedder_for_dense,
-            doc_repo_factory=SqlDocumentStorage,
-            vector_repo_factory=FaissVectorStorage,
-            purge_index_artifacts_fn=purge_index_artifacts,
-            rebuild_fn=rebuild_index_from_db,
+            ports=_index_mutation_ports(),
         )
 
     try:
