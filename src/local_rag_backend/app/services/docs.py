@@ -12,24 +12,15 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.dedup import chunk_dedup_sha256
-from local_rag_backend.core.services.dense_upsert import (
-    precompute_vectors_for_changed_items,
-    sync_dense_after_upsert,
-)
 from local_rag_backend.core.services.ingestion import (
     build_preprocess_fn_from_settings,
     default_formatter,
 )
-from local_rag_backend.core.services.maintenance import (
-    delete_documents_multi_store,
-    delete_external_ids_multi_store,
-    rebuild_index_from_db,
-)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
-    from local_rag_backend.core.ports import EmbedderPort
+    from local_rag_backend.app.services.ports import DocsMutationPorts
     from local_rag_backend.settings import Settings
 
 
@@ -102,17 +93,12 @@ def ingest_docs_sync(
     *,
     texts: Sequence[str],
     settings_obj: Settings,
-    build_embedder: Callable[[], EmbedderPort],
-    doc_repo_factory: Callable[[], Any],
-    vector_repo_factory: Callable[..., Any],
-    precompute_vectors_fn: Callable[..., dict[str, list[float]]] = precompute_vectors_for_changed_items,
-    sync_dense_fn: Callable[..., bool] = sync_dense_after_upsert,
-    rebuild_fn: Callable[..., int] = rebuild_index_from_db,
+    ports: DocsMutationPorts,
 ) -> list[int]:
     if not texts:
         return []
 
-    doc_repo = doc_repo_factory()
+    doc_repo = ports.doc_repo_factory()
     preprocess_fn = build_preprocess_fn_from_settings(settings_obj)
     chunker_version = str(settings_obj.ingest_chunker_version)
     embed_model = _embedding_model_name_for_dedup(settings_obj)
@@ -151,7 +137,7 @@ def ingest_docs_sync(
             md["parent_doc_id"] = f"api:/docs:text={i}"
 
             content = default_formatter(c.text, md)
-            items_by_extid[external_id] = doc_repo.UpsertDoc(
+            items_by_extid[external_id] = ports.build_upsert_doc(
                 external_id=external_id,
                 content=content,
                 source_id=source_id,
@@ -170,8 +156,8 @@ def ingest_docs_sync(
     embedder = None
     vectors_by_external_id: dict[str, list[float]] = {}
     if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        embedder = build_embedder()
-        vectors_by_external_id = precompute_vectors_fn(
+        embedder = ports.build_embedder()
+        vectors_by_external_id = ports.precompute_vectors_fn(
             items=unique_items,
             doc_repo=doc_repo,
             embedder=embedder,
@@ -183,19 +169,19 @@ def ingest_docs_sync(
     id_by_ext = {r.external_id: int(r.id) for r in results}
 
     if settings_obj.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-        vec = vector_repo_factory(
+        vec = ports.vector_repo_factory(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=embedder.dim,
         )
-        sync_dense_fn(
+        ports.sync_dense_fn(
             results=results,
             updated_content_ids=updated_content_ids,
             vectors_by_external_id=vectors_by_external_id,
             vec_repo=vec,
             doc_repo=doc_repo,
             embedder=embedder,
-            rebuild_fn=rebuild_fn,
+            rebuild_fn=ports.rebuild_fn,
         )
 
     return [id_by_ext[e] for e in unique_extids if e in id_by_ext]
@@ -205,10 +191,7 @@ def delete_docs_by_external_id_sync(
     *,
     external_ids: Sequence[str],
     settings_obj: Settings,
-    build_embedder: Callable[[], EmbedderPort],
-    doc_repo_factory: Callable[[], Any],
-    vector_repo_factory: Callable[..., Any],
-    delete_external_ids_fn: Callable[..., tuple[int, int | None, list[str], int, bool]] = delete_external_ids_multi_store,
+    ports: DocsMutationPorts,
 ) -> DeleteDocsByExternalIdSummary:
     ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
     if not ext_ids:
@@ -220,22 +203,22 @@ def delete_docs_by_external_id_sync(
             rebuilt_index=False,
         )
 
-    doc_repo = doc_repo_factory()
+    doc_repo = ports.doc_repo_factory()
     if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        vec = vector_repo_factory(
+        vec = ports.vector_repo_factory(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=None,
         )
-        deleted_sql, deleted_index, missing, tombstoned, rebuilt = delete_external_ids_fn(
+        deleted_sql, deleted_index, missing, tombstoned, rebuilt = ports.delete_external_ids_fn(
             doc_repo=doc_repo,
             external_ids=ext_ids,
             vec_repo=vec,
-            embedder_factory=build_embedder,
+            embedder_factory=ports.build_embedder,
             rebuild_on_index_failure=True,
         )
     else:
-        deleted_sql, deleted_index, missing, tombstoned, rebuilt = delete_external_ids_fn(
+        deleted_sql, deleted_index, missing, tombstoned, rebuilt = ports.delete_external_ids_fn(
             doc_repo=doc_repo, external_ids=ext_ids
         )
 
@@ -252,26 +235,23 @@ def delete_docs_sync(
     *,
     ids: Sequence[int],
     settings_obj: Settings,
-    build_embedder: Callable[[], EmbedderPort],
-    doc_repo_factory: Callable[[], Any],
-    vector_repo_factory: Callable[..., Any],
-    delete_docs_fn: Callable[..., tuple[int, int | None, bool]] = delete_documents_multi_store,
+    ports: DocsMutationPorts,
 ) -> DeleteDocsSummary:
     ids_list = [int(i) for i in ids]
     if not ids_list:
         return DeleteDocsSummary(deleted_sql=0, deleted_index=0, rebuilt_index=False)
 
-    doc_repo = doc_repo_factory()
+    doc_repo = ports.doc_repo_factory()
     if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        vec = vector_repo_factory(
+        vec = ports.vector_repo_factory(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=None,
         )
-        deleted_sql, deleted_index, rebuilt = delete_docs_fn(
+        deleted_sql, deleted_index, rebuilt = ports.delete_docs_fn(
             doc_repo=doc_repo,
             vec_repo=vec,
-            embedder_factory=build_embedder,
+            embedder_factory=ports.build_embedder,
             ids=ids_list,
             rebuild_on_index_failure=True,
         )
@@ -279,7 +259,7 @@ def delete_docs_sync(
             deleted_sql=deleted_sql, deleted_index=deleted_index, rebuilt_index=rebuilt
         )
 
-    deleted_sql, _, _ = delete_docs_fn(doc_repo=doc_repo, ids=ids_list)
+    deleted_sql, _, _ = ports.delete_docs_fn(doc_repo=doc_repo, ids=ids_list)
     return DeleteDocsSummary(deleted_sql=deleted_sql, deleted_index=None, rebuilt_index=False)
 
 
@@ -287,24 +267,19 @@ def upsert_docs_sync(
     *,
     docs: Sequence[UpsertDocInputLike],
     settings_obj: Settings,
-    build_embedder: Callable[[], EmbedderPort],
-    doc_repo_factory: Callable[[], Any],
-    vector_repo_factory: Callable[..., Any],
-    precompute_vectors_fn: Callable[..., dict[str, list[float]]] = precompute_vectors_for_changed_items,
-    sync_dense_fn: Callable[..., bool] = sync_dense_after_upsert,
-    rebuild_fn: Callable[..., int] = rebuild_index_from_db,
+    ports: DocsMutationPorts,
 ) -> UpsertDocsSummary:
     ext_ids = [d.external_id for d in docs]
     if len(set(ext_ids)) != len(ext_ids):
         raise ValueError("external_id values must be unique per request.")
 
-    doc_repo = doc_repo_factory()
+    doc_repo = ports.doc_repo_factory()
     tombstoned = doc_repo.get_tombstoned_external_ids([d.external_id for d in docs])
     if tombstoned:
         raise TombstonedExternalIdsError(set(tombstoned))
 
     items = [
-        doc_repo.UpsertDoc(
+        ports.build_upsert_doc(
             external_id=d.external_id,
             content=d.content,
             source_id=d.source_id,
@@ -316,8 +291,8 @@ def upsert_docs_sync(
     embedder = None
     vectors_by_external_id: dict[str, list[float]] = {}
     if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        embedder = build_embedder()
-        vectors_by_external_id = precompute_vectors_fn(
+        embedder = ports.build_embedder()
+        vectors_by_external_id = ports.precompute_vectors_fn(
             items=items,
             doc_repo=doc_repo,
             embedder=embedder,
@@ -330,19 +305,19 @@ def upsert_docs_sync(
 
     rebuilt_index = False
     if settings_obj.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-        vec = vector_repo_factory(
+        vec = ports.vector_repo_factory(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=embedder.dim,
         )
-        rebuilt_index = sync_dense_fn(
+        rebuilt_index = ports.sync_dense_fn(
             results=results,
             updated_content_ids=updated_content_ids,
             vectors_by_external_id=vectors_by_external_id,
             vec_repo=vec,
             doc_repo=doc_repo,
             embedder=embedder,
-            rebuild_fn=rebuild_fn,
+            rebuild_fn=ports.rebuild_fn,
         )
 
     return UpsertDocsSummary(
