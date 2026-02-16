@@ -19,7 +19,12 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from local_rag_backend.settings import settings
+
+if TYPE_CHECKING:
+    from local_rag_backend.settings import Settings
 
 MANIFEST_VERSION = 1
 
@@ -87,6 +92,19 @@ def build_expected_manifest_config(
         "chunker_strategy": str(chunker_strategy),
         "chunker_version": str(chunker_version),
     }
+
+
+def expected_manifest_config_from_settings(cfg: Settings = settings) -> dict[str, str]:
+    embedding_backend = "openai" if bool(cfg.openai_api_key) else "sentence_transformers"
+    embedding_model = (
+        cfg.openai_embedding_model if bool(cfg.openai_api_key) else cfg.st_embedding_model
+    )
+    return build_expected_manifest_config(
+        embedding_backend=embedding_backend,
+        embedding_model=embedding_model,
+        chunker_strategy=cfg.ingest_chunk_strategy,
+        chunker_version=cfg.ingest_chunker_version,
+    )
 
 
 def build_manifest(
