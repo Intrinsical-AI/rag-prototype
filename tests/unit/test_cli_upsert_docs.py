@@ -85,3 +85,43 @@ def test_cli_upsert_docs_failure_still_invalidates_cached_rag_service(
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert reset_calls == 1
+
+
+def test_cli_upsert_docs_rejects_duplicate_external_id_before_embedding(
+    in_memory_sqlite, tmp_path, monkeypatch
+):
+    class CountingEmbedder:
+        dim = 4
+
+        def __init__(self):
+            self.calls = 0
+
+        def embed(self, texts):
+            self.calls += 1
+            return [[0.0, 0.0, 0.0, 0.0] for _ in texts]
+
+    embedder = CountingEmbedder()
+    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
+        lambda *a, **k: embedder,
+        raising=True,
+    )
+
+    p = tmp_path / "dup_docs.json"
+    p.write_text(
+        json.dumps(
+            [
+                {"external_id": "doc-1", "content": "hello"},
+                {"external_id": "doc-1", "content": "world"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    r = CliRunner().invoke(cli, ["upsert-docs", "--json", str(p)])
+    assert r.exit_code == 1
+    assert "external_id values must be unique" in r.output
+    assert embedder.calls == 0
+    assert SqlDocumentStorage().get_all_documents() == []
