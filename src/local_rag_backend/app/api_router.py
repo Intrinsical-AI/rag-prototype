@@ -9,7 +9,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -50,6 +50,7 @@ from local_rag_backend.core.services.maintenance import (
 )
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -94,6 +95,8 @@ def validate_rag_config(config: AskEvalConfig) -> list[str]:
         errors.append(f"Invalid hybrid_alpha: {config.hybrid_alpha}. Must be between 0.0 and 1.0")
     if config.temperature is not None and not (0.0 <= config.temperature <= 2.0):
         errors.append(f"Invalid temperature: {config.temperature}. Must be between 0.0 and 2.0")
+    if config.top_p is not None and not (0.0 <= config.top_p <= 1.0):
+        errors.append(f"Invalid top_p: {config.top_p}. Must be between 0.0 and 1.0")
     if config.max_tokens is not None and not (1 <= config.max_tokens <= 4096):
         errors.append(f"Invalid max_tokens: {config.max_tokens}. Must be between 1 and 4096")
     if config.prompt_template is not None:
@@ -134,6 +137,12 @@ def _build_embedder_for_dense() -> EmbedderPort:
 
 
 router = APIRouter()
+
+
+def _run_multi_store_write_locked(fn: Any) -> Any:
+    with multi_store_write_lock():
+        return fn()
+
 
 # --- Health & Readiness --- #
 
@@ -521,7 +530,7 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
         return [id_by_ext[e] for e in unique_extids if e in id_by_ext]
 
     try:
-        ids = await run_blocking(_ingest_sync)
+        ids = cast("list[int]", await run_blocking(_run_multi_store_write_locked, _ingest_sync))
     except RuntimeError as e:
         if "sentence-transformers" in str(e) or "Dense/hybrid" in str(e):
             raise HTTPException(
@@ -594,7 +603,10 @@ async def delete_docs_by_external_id(
             rebuilt_index=False,
         )
 
-    resp = await run_blocking(_delete_sync)
+    resp = cast(
+        "DeleteDocsByExternalIdResponse",
+        await run_blocking(_run_multi_store_write_locked, _delete_sync),
+    )
     reset_rag_service()
     return resp
 
@@ -628,7 +640,9 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
         deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=ids)
         return DeleteDocsResponse(deleted_sql=deleted_sql, deleted_index=None, rebuilt_index=False)
 
-    resp = await run_blocking(_delete_sync)
+    resp = cast(
+        "DeleteDocsResponse", await run_blocking(_run_multi_store_write_locked, _delete_sync)
+    )
     reset_rag_service()
     return resp
 
@@ -763,7 +777,9 @@ async def upsert_docs(payload: Annotated[UpsertDocsRequest, Body(...)]) -> Upser
             ],
         )
 
-    resp = await run_blocking(_upsert_sync)
+    resp = cast(
+        "UpsertDocsResponse", await run_blocking(_run_multi_store_write_locked, _upsert_sync)
+    )
     reset_rag_service()
     return resp
 
@@ -790,7 +806,9 @@ async def rebuild_index() -> RebuildIndexResponse:
         n = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
         return RebuildIndexResponse(indexed=n)
 
-    resp = await run_blocking(_rebuild_sync)
+    resp = cast(
+        "RebuildIndexResponse", await run_blocking(_run_multi_store_write_locked, _rebuild_sync)
+    )
     reset_rag_service()
     return resp
 
@@ -934,9 +952,9 @@ class OpenRouterGenerateRequest(BaseModel):
     )
     system_instruction: str = Field(..., min_length=1, max_length=8000)
     user_content: str = Field(..., min_length=1, max_length=8000)
-    temperature: float | None = None
-    max_tokens: int | None = None
-    top_p: float | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=4096)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class OpenRouterGenerateResponse(BaseModel):
