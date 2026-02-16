@@ -145,6 +145,8 @@ Key variables (non-exhaustive):
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
 | `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
+| `INGEST_CHUNK_STRATEGY`          | `chars_v1`                | ingestion    | Chunking strategy identifier (deterministic)           |
+| `INGEST_CHUNKER_VERSION`         | `chars_v1`                | ingestion    | Version token included in chunk dedup hashes           |
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
@@ -198,6 +200,7 @@ following columns if missing:
 * `source_id` (nullable): traceability (e.g., filename/url)
 * `metadata` (JSON text): structured metadata (best-effort default `{}`)
 * `content_sha256`: content hash used by dedup/update policies
+* `chunk_dedup_sha256`: optional chunk-level dedup hash (unique when set)
 * `created_at`, `updated_at`: timestamps (best-effort backfilled for legacy rows)
 
 ---
@@ -215,6 +218,7 @@ Chunking parameters (in settings):
 
 * `INGEST_CHUNK_CHARS` (default 1200)
 * `INGEST_CHUNK_OVERLAP` (default 200)
+* `INGEST_CHUNKER_VERSION` (default `chars_v1`): changes the dedup key used by `/api/docs` to force re-chunk/re-embed.
 
 Available scripts:
 
