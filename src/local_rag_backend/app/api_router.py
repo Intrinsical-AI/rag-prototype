@@ -568,7 +568,6 @@ async def delete_docs_by_external_id(
                 id_map_path=settings.id_map_path,
                 dim=None,
             )
-            embedder = _build_embedder_for_dense()
             try:
                 deleted_index = int(vec.delete(deleted_ids))
                 return DeleteDocsByExternalIdResponse(
@@ -579,6 +578,7 @@ async def delete_docs_by_external_id(
                     rebuilt_index=False,
                 )
             except Exception:
+                embedder = _build_embedder_for_dense()
                 rebuilt_n = rebuild_index_from_db(
                     doc_repo=doc_repo, vec_repo=vec, embedder=embedder
                 )
@@ -621,11 +621,10 @@ async def delete_docs(payload: Annotated[DeleteDocsRequest, Body(...)]) -> Delet
                 id_map_path=settings.id_map_path,
                 dim=None,  # infer from existing index when possible
             )
-            embedder = _build_embedder_for_dense()
             deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
                 doc_repo=doc_repo,
                 vec_repo=vec,
-                embedder=embedder,
+                embedder_factory=_build_embedder_for_dense,
                 ids=ids,
                 rebuild_on_index_failure=True,
             )
