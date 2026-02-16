@@ -125,14 +125,14 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
     assert svc2 is not svc1
 
 
-def test_cached_rag_service_cache_does_not_accumulate_on_token_changes(monkeypatch):
-    # Simulate cross-process invalidation: token changes without calling reset_rag_service()
+def test_cached_rag_service_cache_does_not_accumulate_on_version_changes(monkeypatch):
+    # Simulate cross-process invalidation: shared version changes without local reset.
     factory._get_cached_rag_service.cache_clear()
 
     monkeypatch.setattr(factory, "build_rag_service", lambda: object(), raising=True)
-    _ = factory._get_cached_rag_service("t1")
-    _ = factory._get_cached_rag_service("t2")
-    _ = factory._get_cached_rag_service("t3")
+    _ = factory._get_cached_rag_service(1)
+    _ = factory._get_cached_rag_service(2)
+    _ = factory._get_cached_rag_service(3)
 
     info = factory._get_cached_rag_service.cache_info()
     assert info.maxsize == 1
