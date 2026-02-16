@@ -68,3 +68,12 @@ async def test_openrouter_generate_rejects_invalid_sampling_params(asgi_client, 
         },
     )
     assert r3.status_code == 422
+
+
+@pytest.mark.unit
+async def test_delete_by_external_id_rejects_overlong_values(asgi_client, in_memory_sqlite):
+    r = await asgi_client.post(
+        "/api/docs/delete_by_external_id",
+        json={"external_ids": ["x" * 513]},
+    )
+    assert r.status_code == 422
