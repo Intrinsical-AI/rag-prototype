@@ -261,3 +261,28 @@ rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
 
 Nota (dense/hybrid): al mutar el índice, se mantiene un `index_manifest.json` junto a `INDEX_PATH` para
 detectar drift de configuración (modelo/dim/chunker). Si cambias esos settings, ejecuta un rebuild.
+
+---
+
+## Operabilidad: métricas, evaluación y reranker
+
+Monitoring mínimo (Prometheus):
+
+```bash
+uv sync --frozen --extra monitoring
+export ENABLE_MONITORING=true
+curl -s http://localhost:8000/metrics | head
+```
+
+Evaluación offline reproducible (gate):
+
+```bash
+rag-eval --retrieval-mode sparse
+```
+
+Reranker opcional (mejora de calidad medible con `rag-eval`):
+
+```bash
+export ENABLE_RERANKER=true
+export RERANKER_CANDIDATE_K=20
+```
