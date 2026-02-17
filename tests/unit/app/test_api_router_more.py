@@ -2,8 +2,9 @@
 
 import pytest
 
-from local_rag_backend.app import api_router as api, dependencies as deps
+from local_rag_backend.app import dependencies as deps, wiring
 from local_rag_backend.app.main import app
+from local_rag_backend.app.routers import health as health_router
 from local_rag_backend.core.errors import LLMConnectionError, LLMTimeoutError
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
@@ -27,7 +28,7 @@ async def test_ready_endpoint_ok(asgi_client, monkeypatch):
     async def _override():
         return _Dummy()
 
-    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 200
     data = r.json()
@@ -49,7 +50,7 @@ async def test_ready_endpoint_not_ready_no_llm(asgi_client, monkeypatch):
     async def _override():
         return _Dummy()
 
-    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 503
     payload = r.json()
@@ -177,7 +178,7 @@ async def test_ask_eval_maps_typed_llm_connection_error_to_503(
             raise LLMConnectionError("provider unreachable")
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(api, "OpenAIGenerator", lambda **_k: _FailingGenerator(), raising=True)
+    monkeypatch.setattr(wiring, "OpenAIGenerator", lambda **_k: _FailingGenerator(), raising=True)
 
     r = await asgi_client.post(
         "/api/ask_eval",

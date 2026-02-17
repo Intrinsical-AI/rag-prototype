@@ -29,11 +29,12 @@ src/local_rag_backend/
 │   └── ingestion/              # CSV loader, etc.
 ├── app/                        # Application layer
 │   ├── main.py                 # FastAPI app + lifespan
-│   ├── api_router.py           # Root API router: health + RAG endpoints + subrouter composition
-│   ├── routers/                # Bounded routers (openrouter, meta/config, ...)
+│   ├── api_router.py           # Root API router composition (include_router only)
+│   ├── routers/                # Bounded routers (health, rag, docs, index, openrouter, meta)
 │   ├── dependencies.py         # DI bridge to factory
 │   ├── schemas.py              # Pydantic request/response schemas (API transport)
 │   ├── error_mapping.py        # Typed domain/app errors -> HTTP transport mapping
+│   ├── wiring.py               # Shared app-layer runtime wiring used by routers
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
 │   ├── factory.py              # Composition root (build retriever/LLM/services)

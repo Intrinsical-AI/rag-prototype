@@ -8,7 +8,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from local_rag_backend.app import api_router as api
+from local_rag_backend.app import wiring
+from local_rag_backend.app.routers import docs as docs_router
 from local_rag_backend.settings import settings
 
 
@@ -124,10 +125,10 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
     fake_vec = FakeVec()
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(api, "SqlDocumentStorage", FakeRepo, raising=True)
-    monkeypatch.setattr(api, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda *a, **k: fake_vec, raising=True)
-    monkeypatch.setattr(api, "reset_rag_service", lambda: None, raising=True)
+    monkeypatch.setattr(wiring, "SqlDocumentStorage", FakeRepo, raising=True)
+    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
+    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: fake_vec, raising=True)
+    monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     task_a = asyncio.create_task(
         asgi_client.post(
@@ -163,8 +164,8 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
         return func(*args, **kwargs)
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(api, "run_blocking", _fake_run_blocking, raising=True)
-    monkeypatch.setattr(api, "reset_rag_service", lambda: None, raising=True)
+    monkeypatch.setattr(docs_router, "run_blocking", _fake_run_blocking, raising=True)
+    monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     resp = await asgi_client.post("/api/docs", json={"texts": ["  hello world  "]})
     assert resp.status_code == 200
@@ -172,7 +173,7 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
     assert payload["count"] >= 1
 
     # Regression guard: /api/docs must run exactly one sync ingestion path under the lock wrapper.
-    assert called_funcs.count("_run_multi_store_write_locked") == 1
+    assert called_funcs.count("run_multi_store_write_locked") == 1
     assert called_task_types == ["mutation"]
     assert "_ingest_sync" not in called_funcs
 
@@ -242,11 +243,11 @@ async def test_upsert_failure_still_invalidates_cached_rag_service(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(api, "SqlDocumentStorage", FakeRepo, raising=True)
-    monkeypatch.setattr(api, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(api, "rebuild_index_from_db", _rebuild_fail, raising=True)
-    monkeypatch.setattr(api, "reset_rag_service", _count_reset, raising=True)
+    monkeypatch.setattr(wiring, "SqlDocumentStorage", FakeRepo, raising=True)
+    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
+    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    monkeypatch.setattr(wiring, "rebuild_index_from_db", _rebuild_fail, raising=True)
+    monkeypatch.setattr(docs_router, "reset_rag_service", _count_reset, raising=True)
 
     with pytest.raises(RuntimeError, match="rebuild failed"):
         await asgi_client.post(
