@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from local_rag_backend.app import api_router as api
+from local_rag_backend.app import wiring
+from local_rag_backend.app.routers import health as health_router
 from local_rag_backend.app.services import openrouter as openrouter_service
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
@@ -61,9 +62,9 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
             self.calls.append((list(ids), list(vectors)))
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
-    monkeypatch.setattr(api, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
+    monkeypatch.setattr(wiring, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     dummy_vec = DummyVec()
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda **k: dummy_vec)
+    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda **k: dummy_vec)
 
     payload = {"texts": ["X", "Y"]}
     r = await asgi_client.post("/api/docs", json=payload)
@@ -131,7 +132,7 @@ async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatc
             return "ans"
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(api, "OpenAIGenerator", lambda **k: DummyGen())
+    monkeypatch.setattr(wiring, "OpenAIGenerator", lambda **k: DummyGen())
 
     payload = {"question": "hello?", "config": {"retrieval_mode": "sparse", "k": 1}}
     r = await asgi_client.post("/api/ask_eval", json=payload)
@@ -179,7 +180,7 @@ async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_
     async def _override():
         return _Dummy()
 
-    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 200

@@ -87,6 +87,20 @@ class AskEvalResponse(AskResponse):
     latency_ms: int | None = Field(default=None, description="Server-side latency in ms")
 
 
+class IngestRequest(BaseModel):
+    texts: list[Annotated[str, Field(max_length=20000)]] = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Raw texts to ingest (max 64 items, 20k chars each)",
+    )
+
+
+class IngestResponse(BaseModel):
+    count: int
+    ids: list[int]
+
+
 class DeleteDocsRequest(BaseModel):
     ids: list[int] = Field(..., min_length=1, max_length=1000)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from local_rag_backend.app import api_router as api
+from local_rag_backend.app import wiring
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
@@ -31,7 +31,7 @@ async def test_delete_by_external_id_sparse_delete_does_not_reappear_on_reingest
             return "ans"
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(api, "OpenAIGenerator", lambda **k: DummyGen(), raising=True)
+    monkeypatch.setattr(wiring, "OpenAIGenerator", lambda **k: DummyGen(), raising=True)
 
     r_eval1 = await asgi_client.post(
         "/api/ask_eval", json={"question": "hello", "config": {"retrieval_mode": "sparse", "k": 1}}
@@ -103,9 +103,9 @@ async def test_delete_by_external_id_dense_is_consistent_and_survives_rebuild(
 
     dummy_vec = DummyVec()
     monkeypatch.setattr(
-        api, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder(), raising=True
+        wiring, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder(), raising=True
     )
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda **k: dummy_vec, raising=True)
+    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda **k: dummy_vec, raising=True)
 
     r1 = await asgi_client.post("/api/docs", json={"texts": ["alpha", "beta"]})
     assert r1.status_code == 200
@@ -179,8 +179,8 @@ async def test_delete_by_external_id_dense_does_not_require_embedder_on_successf
         def delete(self, ids):
             return len(list(ids))
 
-    monkeypatch.setattr(api, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda **_k: DummyVec(), raising=True)
+    monkeypatch.setattr(wiring, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
+    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda **_k: DummyVec(), raising=True)
 
     rd = await asgi_client.post(
         "/api/docs/delete_by_external_id",
@@ -216,8 +216,8 @@ async def test_delete_by_external_id_dense_preflight_failure_without_embedder_ab
     def _boom_embedder(**_kwargs):
         raise RuntimeError("embedder-unavailable")
 
-    monkeypatch.setattr(api, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda **_k: PreflightFailVec(), raising=True)
+    monkeypatch.setattr(wiring, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
+    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda **_k: PreflightFailVec(), raising=True)
 
     with pytest.raises(RuntimeError, match="Aborting SQL delete"):
         await asgi_client.post(
