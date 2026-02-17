@@ -24,7 +24,12 @@ from local_rag_backend.app.schemas import (
     UpsertDocsResponse,
 )
 from local_rag_backend.app.services import docs as docs_service
-from local_rag_backend.app.wiring import docs_mutation_ports, run_multi_store_write_locked
+from local_rag_backend.app.wiring import (
+    DENSE_BACKEND_ERROR_MESSAGE,
+    docs_mutation_ports,
+    run_multi_store_write_locked,
+)
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
 from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
 from local_rag_backend.settings import settings
@@ -72,16 +77,8 @@ async def ingest_docs(payload: Annotated[IngestRequest, Body(...)]) -> IngestRes
         )
         ok = True
         return IngestResponse(count=len(ids), ids=ids)
-    except RuntimeError as e:
-        if "sentence-transformers" in str(e) or "Dense/hybrid" in str(e):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Dense/hybrid ingestion requires an embeddings backend. "
-                    "Set OPENAI_API_KEY or install the 'dense-st' extra."
-                ),
-            ) from e
-        raise
+    except EmbeddingsBackendUnavailableError as e:
+        raise HTTPException(status_code=400, detail=DENSE_BACKEND_ERROR_MESSAGE) from e
     finally:
         observe_ingest(source="api:/docs", ok=ok, inserted=len(ids))
         log_event(

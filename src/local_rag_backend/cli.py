@@ -73,16 +73,7 @@ def _reset_rag_service_best_effort() -> None:
 
 def _build_dense_embedder() -> EmbedderPort:
     """Build the dense/hybrid embedder based on current settings."""
-    from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-    from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-        SentenceTransformerEmbedder,
-    )
-
-    return build_dense_embedder_from_settings(
-        settings_obj=settings,
-        openai_embedder_factory=OpenAIEmbedder,
-        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-    )
+    return build_dense_embedder_from_settings(settings_obj=settings)
 
 
 def _batched(values: list[T], batch_size: int) -> list[list[T]]:

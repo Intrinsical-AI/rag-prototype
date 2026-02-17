@@ -30,6 +30,116 @@ from local_rag_backend.settings import settings
 router = APIRouter()
 
 
+def _check_database(checks: dict[str, Any]) -> bool:
+    try:
+        with db_base.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+        return True
+    except Exception as e:
+        checks["database"] = f"failed: {e!s}"
+        return False
+
+
+def _check_sql_counts(checks: dict[str, Any]) -> tuple[bool, int | None]:
+    docs_count: int | None = None
+    is_ready = True
+    try:
+        docs_count = get_documents_count(db_base.engine)
+        checks["documents"] = {"count": docs_count}
+    except Exception as e:
+        checks["documents"] = f"failed: {e!s}"
+        is_ready = False
+
+    try:
+        checks["history"] = {"count": get_history_count(db_base.engine)}
+    except Exception as e:
+        checks["history"] = f"failed: {e!s}"
+    return is_ready, docs_count
+
+
+async def _check_rag_service(checks: dict[str, Any]) -> bool:
+    try:
+        service = await get_rag_service()
+        checks["rag_service"] = "ok" if service else "failed: not initialized"
+        return bool(service)
+    except Exception as e:
+        checks["rag_service"] = f"failed: {e!s}"
+        return False
+
+
+def _check_llm_providers(checks: dict[str, Any]) -> bool:
+    llm_providers = get_available_llm_providers()
+    if not llm_providers:
+        checks["llm_providers"] = "failed: no providers configured"
+        return False
+    checks["llm_providers"] = llm_providers
+    return True
+
+
+def _check_retrieval_index_id_set_drift(checks: dict[str, Any]) -> bool:
+    try:
+        db_ids = set(get_document_ids(db_base.engine))
+        index_ids = set(json.loads(Path(settings.id_map_path).read_text(encoding="utf-8")))
+        stale = sorted(index_ids - db_ids)
+        missing = sorted(db_ids - index_ids)
+        if not stale and not missing:
+            return True
+        checks["retrieval_index_drift"] = {
+            "stale_in_index": stale[:20],
+            "missing_in_index": missing[:20],
+            "stale_count": len(stale),
+            "missing_count": len(missing),
+        }
+        checks["retrieval_index"] = (
+            "failed: drift detected (ID set mismatch). "
+            "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
+        )
+        return False
+    except Exception as e:
+        checks["retrieval_index_drift"] = f"failed: {e!s}"
+        return True
+
+
+def _check_retrieval_index(checks: dict[str, Any], *, docs_count: int | None) -> bool:
+    if settings.retrieval_mode not in ("dense", "hybrid"):
+        return True
+
+    expected_manifest = expected_manifest_config_from_settings(settings)
+    stats = get_retrieval_index_stats(
+        index_path=settings.index_path,
+        id_map_path=settings.id_map_path,
+        dim=None,
+        expected_manifest=expected_manifest,
+    )
+    checks["retrieval_index_stats"] = stats
+
+    if stats.get("status") != "ok":
+        checks["retrieval_index"] = (
+            f"failed: {stats.get('status')} "
+            f"(index_path={stats.get('index_path')}, id_map_path={stats.get('id_map_path')}). "
+            f"Hint: {stats.get('hint')}"
+        )
+        return False
+
+    checks["retrieval_index"] = "ok"
+    if docs_count is None:
+        return True
+
+    vectors = int(stats.get("vectors") or 0)
+    id_map_len = int(stats.get("id_map_len") or 0)
+    if docs_count != id_map_len:
+        checks["retrieval_index"] = (
+            f"failed: drift detected (documents={docs_count}, vectors={vectors}). "
+            "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
+        )
+        return False
+
+    if docs_count <= 5000:
+        return _check_retrieval_index_id_set_drift(checks)
+    return True
+
+
 @router.get("/health", tags=["Health"], summary="Health check endpoint")
 async def health_check() -> dict[str, str]:
     """Basic health check for service availability (e.g., Docker/K8s)."""
@@ -48,94 +158,20 @@ async def readiness_check() -> dict[str, Any]:
     is_ready = True
     docs_count: int | None = None
 
-    try:
-        with db_base.engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        checks["database"] = "ok"
-    except Exception as e:
-        checks["database"] = f"failed: {e!s}"
+    db_ok = _check_database(checks)
+    if not db_ok:
         is_ready = False
-
-    if checks.get("database") == "ok":
-        try:
-            docs_count = get_documents_count(db_base.engine)
-            checks["documents"] = {"count": docs_count}
-        except Exception as e:
-            checks["documents"] = f"failed: {e!s}"
+    if db_ok:
+        db_ready, docs_count = _check_sql_counts(checks)
+        if not db_ready:
             is_ready = False
 
-        try:
-            checks["history"] = {"count": get_history_count(db_base.engine)}
-        except Exception as e:
-            checks["history"] = f"failed: {e!s}"
-
-    try:
-        service = await get_rag_service()
-        checks["rag_service"] = "ok" if service else "failed: not initialized"
-        if not service:
-            is_ready = False
-    except Exception as e:
-        checks["rag_service"] = f"failed: {e!s}"
+    if not await _check_rag_service(checks):
         is_ready = False
-
-    llm_providers = get_available_llm_providers()
-    if not llm_providers:
-        checks["llm_providers"] = "failed: no providers configured"
+    if not _check_llm_providers(checks):
         is_ready = False
-    else:
-        checks["llm_providers"] = llm_providers
-
-    if settings.retrieval_mode in ["dense", "hybrid"]:
-        expected_manifest = expected_manifest_config_from_settings(settings)
-        stats = get_retrieval_index_stats(
-            index_path=settings.index_path,
-            id_map_path=settings.id_map_path,
-            dim=None,
-            expected_manifest=expected_manifest,
-        )
-        checks["retrieval_index_stats"] = stats
-
-        if stats.get("status") != "ok":
-            checks["retrieval_index"] = (
-                f"failed: {stats.get('status')} "
-                f"(index_path={stats.get('index_path')}, id_map_path={stats.get('id_map_path')}). "
-                f"Hint: {stats.get('hint')}"
-            )
-            is_ready = False
-        else:
-            checks["retrieval_index"] = "ok"
-            if docs_count is not None:
-                vectors = int(stats.get("vectors") or 0)
-                id_map_len = int(stats.get("id_map_len") or 0)
-                if docs_count != id_map_len:
-                    checks["retrieval_index"] = (
-                        f"failed: drift detected (documents={docs_count}, vectors={vectors}). "
-                        "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
-                    )
-                    is_ready = False
-                else:
-                    if docs_count <= 5000:
-                        try:
-                            db_ids = set(get_document_ids(db_base.engine))
-                            index_ids = set(
-                                json.loads(Path(settings.id_map_path).read_text(encoding="utf-8"))
-                            )
-                            stale = sorted(index_ids - db_ids)
-                            missing = sorted(db_ids - index_ids)
-                            if stale or missing:
-                                checks["retrieval_index_drift"] = {
-                                    "stale_in_index": stale[:20],
-                                    "missing_in_index": missing[:20],
-                                    "stale_count": len(stale),
-                                    "missing_count": len(missing),
-                                }
-                                checks["retrieval_index"] = (
-                                    "failed: drift detected (ID set mismatch). "
-                                    "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
-                                )
-                                is_ready = False
-                        except Exception as e:
-                            checks["retrieval_index_drift"] = f"failed: {e!s}"
+    if not _check_retrieval_index(checks, docs_count=docs_count):
+        is_ready = False
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import HTTPException
 
 from local_rag_backend.app.composition import (
+    DEFAULT_DENSE_BACKEND_MESSAGE,
     build_dense_embedder_from_settings,
     build_generator_from_settings,
     build_retriever_with_default_embedder_from_settings,
@@ -21,6 +22,7 @@ from local_rag_backend.app.services.mutation_ports import (
     build_docs_mutation_ports,
     build_index_mutation_ports,
 )
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -60,9 +62,8 @@ if TYPE_CHECKING:
         RetrieverPort,
     )
 
-_DENSE_BACKEND_ERROR_MESSAGE = (
-    "Dense/hybrid operations require an embeddings backend. "
-    "Set OPENAI_API_KEY or install the 'dense-st' extra."
+DENSE_BACKEND_ERROR_MESSAGE = (
+    DEFAULT_DENSE_BACKEND_MESSAGE
 )
 
 
@@ -91,10 +92,10 @@ def build_embedder_for_dense() -> EmbedderPort:
             settings_obj=settings,
             openai_embedder_factory=OpenAIEmbedder,
             st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-            missing_backend_message=_DENSE_BACKEND_ERROR_MESSAGE,
+            missing_backend_message=DENSE_BACKEND_ERROR_MESSAGE,
         )
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=_DENSE_BACKEND_ERROR_MESSAGE) from e
+    except EmbeddingsBackendUnavailableError as e:
+        raise HTTPException(status_code=400, detail=DENSE_BACKEND_ERROR_MESSAGE) from e
 
 
 def run_multi_store_write_locked(fn: Callable[[], Any]) -> Any:
@@ -143,7 +144,7 @@ def build_retriever_from_config(
             doc_repo=doc_repo,
             openai_embedder_factory=OpenAIEmbedder,
             st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-            missing_backend_message=_DENSE_BACKEND_ERROR_MESSAGE,
+            missing_backend_message=DENSE_BACKEND_ERROR_MESSAGE,
             preloaded_docs=preloaded_docs,
             hybrid_alpha=cfg.hybrid_alpha,
             enable_reranker=settings.enable_reranker,

@@ -11,6 +11,10 @@ class RagBaseError(Exception):
     """Base error type for RAG runtime failures."""
 
 
+class EmbeddingsBackendUnavailableError(RagBaseError, RuntimeError):
+    """Dense/hybrid operation needs an embeddings backend that is not available."""
+
+
 class LLMProviderError(RagBaseError):
     """Base error for LLM/provider integration failures."""
 
@@ -29,4 +33,3 @@ class LLMConnectionError(LLMProviderError):
 
 class LLMResponseError(LLMProviderError):
     """Provider returned an invalid or failed response."""
-

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
@@ -40,6 +41,20 @@ DEFAULT_DENSE_BACKEND_MESSAGE = (
 )
 
 
+def _build_default_openai_embedder() -> EmbedderPort:
+    from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+
+    return OpenAIEmbedder()
+
+
+def _build_default_st_embedder(model_name: str) -> EmbedderPort:
+    from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
+        SentenceTransformerEmbedder,
+    )
+
+    return SentenceTransformerEmbedder(model_name=model_name)
+
+
 def get_available_llm_providers(*, settings_obj: Settings) -> dict[str, str]:
     providers: dict[str, str] = {}
     if settings_obj.openai_api_key:
@@ -56,17 +71,19 @@ def get_available_llm_providers(*, settings_obj: Settings) -> dict[str, str]:
 def build_dense_embedder_from_settings(
     *,
     settings_obj: Settings,
-    openai_embedder_factory: Callable[[], EmbedderPort],
-    st_embedder_factory: Callable[[str], EmbedderPort],
+    openai_embedder_factory: Callable[[], EmbedderPort] | None = None,
+    st_embedder_factory: Callable[[str], EmbedderPort] | None = None,
     missing_backend_message: str | None = None,
 ) -> EmbedderPort:
+    resolved_openai_factory = openai_embedder_factory or _build_default_openai_embedder
+    resolved_st_factory = st_embedder_factory or _build_default_st_embedder
     backend_message = missing_backend_message or DEFAULT_DENSE_BACKEND_MESSAGE
     if settings_obj.openai_api_key:
-        return openai_embedder_factory()
+        return resolved_openai_factory()
     try:
-        return st_embedder_factory(str(settings_obj.st_embedding_model))
+        return resolved_st_factory(str(settings_obj.st_embedding_model))
     except RuntimeError as e:
-        raise RuntimeError(backend_message) from e
+        raise EmbeddingsBackendUnavailableError(backend_message) from e
 
 
 def build_retriever_with_default_embedder_from_settings(
@@ -74,8 +91,8 @@ def build_retriever_with_default_embedder_from_settings(
     settings_obj: Settings,
     retrieval_mode: str,
     doc_repo: DocumentRepoPort,
-    openai_embedder_factory: Callable[[], EmbedderPort],
-    st_embedder_factory: Callable[[str], EmbedderPort],
+    openai_embedder_factory: Callable[[], EmbedderPort] | None = None,
+    st_embedder_factory: Callable[[str], EmbedderPort] | None = None,
     missing_backend_message: str | None = None,
     preloaded_docs: Sequence[DomainDocument] | None = None,
     hybrid_alpha: float | None = None,

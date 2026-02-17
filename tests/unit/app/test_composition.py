@@ -11,6 +11,7 @@ from local_rag_backend.app.composition import (
     build_retriever_with_default_embedder_from_settings,
     resolve_preferred_llm_provider,
 )
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 
 
 def test_build_dense_embedder_uses_default_missing_backend_message():
@@ -19,7 +20,10 @@ def test_build_dense_embedder_uses_default_missing_backend_message():
     def _st_fail(_model_name: str):
         raise RuntimeError("backend unavailable")
 
-    with pytest.raises(RuntimeError, match="Dense/hybrid retrieval requires an embeddings backend"):
+    with pytest.raises(
+        EmbeddingsBackendUnavailableError,
+        match="Dense/hybrid retrieval requires an embeddings backend",
+    ):
         build_dense_embedder_from_settings(
             settings_obj=cfg,
             openai_embedder_factory=lambda: object(),

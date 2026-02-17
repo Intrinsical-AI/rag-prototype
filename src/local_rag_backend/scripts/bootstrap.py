@@ -20,10 +20,6 @@ from local_rag_backend.core.services.ingestion import (
     build_preprocess_fn_from_settings,
     default_formatter,
 )
-from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-    SentenceTransformerEmbedder,
-)
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
 from local_rag_backend.infrastructure.persistence.sqlalchemy import (
@@ -82,11 +78,7 @@ def main(csv_path: str | Path | None = None, **kwargs: Any) -> None:
 
     if settings.retrieval_mode in ["dense", "hybrid"]:
         embedder: EmbedderPort
-        embedder = build_dense_embedder_from_settings(
-            settings_obj=settings,
-            openai_embedder_factory=OpenAIEmbedder,
-            st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-        )
+        embedder = build_dense_embedder_from_settings(settings_obj=settings)
         vector_repo = FaissVectorStorage(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,

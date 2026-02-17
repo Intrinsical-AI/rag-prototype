@@ -7,6 +7,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from local_rag_backend.core.errors import (
+    EmbeddingsBackendUnavailableError,
     LLMConfigurationError,
     LLMConnectionError,
     LLMProviderError,
@@ -17,6 +18,8 @@ from local_rag_backend.core.errors import (
 
 def raise_http_for_runtime_error(exc: Exception) -> None:
     """Raise an HTTPException if this error has a transport-level mapping."""
+    if isinstance(exc, EmbeddingsBackendUnavailableError):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if isinstance(exc, LLMTimeoutError):
         raise HTTPException(status_code=504, detail=str(exc)) from exc
     if isinstance(exc, LLMConnectionError):
@@ -27,4 +30,3 @@ def raise_http_for_runtime_error(exc: Exception) -> None:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if isinstance(exc, LLMProviderError):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-
