@@ -16,10 +16,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from local_rag_backend.app.composition import build_dense_embedder_from_settings
-from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-    SentenceTransformerEmbedder,
-)
 
 # Import models to ensure they are registered with Base.metadata
 # To ensure table creation
@@ -91,11 +87,7 @@ def main() -> None:
         logger.info(
             f"{settings.retrieval_mode.title()} retrieval mode detected. Initializing embedder for indexing."
         )
-        embedder_for_indexing = build_dense_embedder_from_settings(
-            settings_obj=settings,
-            openai_embedder_factory=OpenAIEmbedder,
-            st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-        )
+        embedder_for_indexing = build_dense_embedder_from_settings(settings_obj=settings)
 
     # 4. Use ETL logic directly (similar to bootstrap.py)
     try:

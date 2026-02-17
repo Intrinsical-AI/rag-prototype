@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from local_rag_backend.app.error_mapping import raise_http_for_runtime_error
 from local_rag_backend.core.errors import (
+    EmbeddingsBackendUnavailableError,
     LLMConfigurationError,
     LLMConnectionError,
     LLMProviderError,
@@ -16,6 +17,7 @@ from local_rag_backend.core.errors import (
 @pytest.mark.parametrize(
     ("exc", "expected_status"),
     [
+        (EmbeddingsBackendUnavailableError("embeddings"), 400),
         (LLMTimeoutError("timeout"), 504),
         (LLMConnectionError("connection"), 503),
         (LLMResponseError("response"), 502),
@@ -35,4 +37,3 @@ def test_raise_http_for_runtime_error_maps_typed_errors(
 
 def test_raise_http_for_runtime_error_ignores_unknown_error() -> None:
     raise_http_for_runtime_error(RuntimeError("unmapped"))
-
