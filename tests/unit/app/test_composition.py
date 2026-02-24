@@ -80,7 +80,11 @@ def test_build_retriever_with_default_embedder_uses_openai_factory_when_key_pres
         "id_map_path": "id_map.json",
         "dim": 7,
     }
-    assert seen["dense_kwargs"] == {"embedder": ANY, "faiss_index": "vec-repo", "doc_repo": doc_repo}
+    assert seen["dense_kwargs"] == {
+        "embedder": ANY,
+        "faiss_index": "vec-repo",
+        "doc_repo": doc_repo,
+    }
 
 
 @pytest.mark.parametrize(

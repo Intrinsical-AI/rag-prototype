@@ -8,7 +8,7 @@ import click
 
 from local_rag_backend.app.services import docs as docs_service
 from local_rag_backend.app.services.mutation_ports import build_docs_mutation_ports
-from local_rag_backend.cli_commands.docs_common import _hooks, _reset_if_mutated
+from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.settings import settings
 
 
@@ -27,7 +27,9 @@ def _load_docs_payload(
         return cast("list[dict[str, object]]", docs_payload)
 
     if not external_id or not content:
-        raise ValueError("Provide --json or both --external-id and --content for a single document.")
+        raise ValueError(
+            "Provide --json or both --external-id and --content for a single document."
+        )
 
     md_single = None
     if metadata_json:
@@ -54,7 +56,9 @@ def _build_upsert_items(
         if not isinstance(d, dict):
             raise ValueError("Each document must be a JSON object")
         md_obj = d.get("metadata")
-        md: dict[str, Any] | None = cast("dict[str, Any]", md_obj) if isinstance(md_obj, dict) else None
+        md: dict[str, Any] | None = (
+            cast("dict[str, Any]", md_obj) if isinstance(md_obj, dict) else None
+        )
         items.append(
             SqlDocumentStorage.UpsertDoc(
                 external_id=str(d.get("external_id") or "").strip(),
@@ -94,10 +98,7 @@ def upsert_docs_cmd(
     metadata_json: str | None,
 ) -> None:
     """Upsert documents by external_id (idempotent)."""
-    mutation_attempted = False
     try:
-        hooks = _hooks()
-        hooks._ensure_sqlite_schema_for_cli()
         docs_payload = _load_docs_payload(
             json_path=json_path,
             external_id=external_id,
@@ -107,7 +108,7 @@ def upsert_docs_cmd(
         )
         items = _build_upsert_items(docs_payload)
 
-        ports = build_docs_mutation_ports(build_embedder=hooks._build_dense_embedder)
+        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
 
         def _upsert_sync() -> docs_service.UpsertDocsSummary:
             return docs_service.upsert_docs_sync(
@@ -116,8 +117,7 @@ def upsert_docs_cmd(
                 ports=ports,
             )
 
-        mutation_attempted = True
-        summary = hooks._run_with_multi_store_write_lock(_upsert_sync)
+        summary = run_cli_mutation(_upsert_sync)
         inserted = summary.inserted
         updated = summary.updated
         unchanged = summary.unchanged
@@ -131,5 +131,3 @@ def upsert_docs_cmd(
     except Exception as e:
         click.echo(f"[ERROR] Error upserting docs: {e}", err=True)
         raise SystemExit(1)
-    finally:
-        _reset_if_mutated(mutation_attempted=mutation_attempted)

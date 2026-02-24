@@ -16,18 +16,17 @@ async def test_get_rag_service_cache_is_invalidated_by_system_state_version(
     We simulate an external process by bumping the shared DB-backed version directly.
     """
     state = SystemStateStorage(session_factory=in_memory_sqlite)
-    monkeypatch.setattr(factory, "_system_state", state, raising=True)
-
-    factory._get_cached_rag_service.cache_clear()
+    factory.reset_app_context()
+    monkeypatch.setattr(factory, "SystemStateStorage", lambda: state, raising=True)
 
     built: list[object] = []
 
-    def _build() -> object:
+    def _build(self) -> object:
         obj = object()
         built.append(obj)
         return obj
 
-    monkeypatch.setattr(factory, "build_rag_service", _build, raising=True)
+    monkeypatch.setattr(factory.AppContainer, "build_rag_service", _build, raising=True)
 
     svc1 = await factory.get_rag_service()
     svc2 = await factory.get_rag_service()
@@ -47,9 +46,9 @@ async def test_get_rag_service_cache_is_invalidated_by_system_state_version(
 
 def test_reset_rag_service_bumps_system_state_version(in_memory_sqlite, monkeypatch) -> None:
     state = SystemStateStorage(session_factory=in_memory_sqlite)
-    monkeypatch.setattr(factory, "_system_state", state, raising=True)
-
-    factory._get_cached_rag_service.cache_clear()
+    factory.reset_app_context()
+    monkeypatch.setattr(factory, "SystemStateStorage", lambda: state, raising=True)
+    _ = factory.get_app_context()
 
     assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 0
     factory.reset_rag_service()

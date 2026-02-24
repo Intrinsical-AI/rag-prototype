@@ -92,6 +92,23 @@ async def test_run_blocking_routes_task_type_and_releases_slot(monkeypatch):
 
 @pytest.mark.unit
 async def test_run_blocking_raises_when_queue_full(monkeypatch):
+    class _FakeTelemetry:
+        def __init__(self) -> None:
+            self.queue: list[tuple[str, int, int]] = []
+            self.runs: list[tuple[str, str]] = []
+
+        def observe_blocking_queue(self, *, task_type, pending, capacity) -> None:
+            self.queue.append((str(task_type), int(pending), int(capacity)))
+
+        def observe_blocking_run(self, *, task_type, status, duration_s) -> None:
+            self.runs.append((str(task_type), str(status)))
+
+        def observe_blocking_queue_wait(self, *, task_type, wait_s) -> None:
+            return None
+
+    telemetry = _FakeTelemetry()
+    monkeypatch.setattr(blocking, "get_telemetry", lambda: telemetry, raising=True)
+
     class _FullState:
         max_pending = 1
 
@@ -111,6 +128,9 @@ async def test_run_blocking_raises_when_queue_full(monkeypatch):
 
     with pytest.raises(RuntimeError, match="queue is full"):
         await blocking.run_blocking(lambda: 1, task_type="eval")
+
+    assert telemetry.queue == [("eval", 0, 1)]
+    assert telemetry.runs == [("eval", "rejected")]
 
 
 @pytest.mark.unit
@@ -148,6 +168,56 @@ async def test_run_blocking_releases_slot_when_sync_callable_raises(monkeypatch)
         await blocking.run_blocking(_boom, task_type="network")
 
     assert state.released == 1
+
+
+@pytest.mark.unit
+async def test_run_blocking_reports_queue_saturation_and_wait(monkeypatch):
+    class _FakeTelemetry:
+        def __init__(self) -> None:
+            self.queue: list[tuple[str, int, int]] = []
+            self.waits: list[tuple[str, float]] = []
+            self.runs: list[tuple[str, str]] = []
+
+        def observe_blocking_queue(self, *, task_type, pending, capacity) -> None:
+            self.queue.append((str(task_type), int(pending), int(capacity)))
+
+        def observe_blocking_queue_wait(self, *, task_type, wait_s) -> None:
+            self.waits.append((str(task_type), float(wait_s)))
+
+        def observe_blocking_run(self, *, task_type, status, duration_s) -> None:
+            self.runs.append((str(task_type), str(status)))
+
+    telemetry = _FakeTelemetry()
+    monkeypatch.setattr(blocking, "get_telemetry", lambda: telemetry, raising=True)
+
+    class _FakeExecutor:
+        def submit(self, call):
+            fut: Future[str] = Future()
+            fut.set_result(call())
+            return fut
+
+    class _FakeState:
+        def __init__(self) -> None:
+            self.executor = _FakeExecutor()
+            self.max_pending = 5
+            self.pending = 0
+
+        def try_acquire_slot(self) -> bool:
+            self.pending += 1
+            return True
+
+        def release_slot(self) -> None:
+            self.pending -= 1
+
+    state = _FakeState()
+    monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: state, raising=True)
+
+    out = await blocking.run_blocking(lambda: "ok", task_type="mutation")
+    assert out == "ok"
+    assert telemetry.queue[0] == ("mutation", 1, 5)
+    assert telemetry.queue[-1] == ("mutation", 0, 5)
+    assert telemetry.waits and telemetry.waits[0][0] == "mutation"
+    assert telemetry.runs == [("mutation", "ok")]
 
 
 @pytest.mark.unit

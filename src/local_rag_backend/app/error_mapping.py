@@ -1,11 +1,15 @@
-"""
-Map typed runtime errors to HTTP transport errors.
-"""
+"""Map typed runtime errors to app-level transport-agnostic errors."""
 
 from __future__ import annotations
 
-from fastapi import HTTPException
-
+from local_rag_backend.app.errors import (
+    AppError,
+    BadGatewayError,
+    BadRequestError,
+    GatewayTimeoutError,
+    InternalServerError,
+    ServiceUnavailableError,
+)
 from local_rag_backend.core.errors import (
     EmbeddingsBackendUnavailableError,
     LLMConfigurationError,
@@ -16,17 +20,18 @@ from local_rag_backend.core.errors import (
 )
 
 
-def raise_http_for_runtime_error(exc: Exception) -> None:
-    """Raise an HTTPException if this error has a transport-level mapping."""
+def map_runtime_error(exc: Exception) -> AppError | None:
+    """Return mapped AppError for known runtime error types."""
     if isinstance(exc, EmbeddingsBackendUnavailableError):
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return BadRequestError(str(exc))
     if isinstance(exc, LLMTimeoutError):
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
+        return GatewayTimeoutError(str(exc))
     if isinstance(exc, LLMConnectionError):
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return ServiceUnavailableError(str(exc))
     if isinstance(exc, LLMResponseError):
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return BadGatewayError(str(exc))
     if isinstance(exc, LLMConfigurationError):
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return InternalServerError(str(exc))
     if isinstance(exc, LLMProviderError):
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return BadGatewayError(str(exc))
+    return None

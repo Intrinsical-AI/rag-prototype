@@ -75,7 +75,9 @@ def test_cli_upsert_docs_failure_still_invalidates_cached_rag_service(
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.cli._reset_rag_service_best_effort", _count_reset, raising=True
+        "local_rag_backend.cli_commands.runtime._reset_rag_service_best_effort",
+        _count_reset,
+        raising=True,
     )
 
     r = CliRunner().invoke(

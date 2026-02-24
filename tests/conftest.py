@@ -45,6 +45,18 @@ def in_memory_sqlite(monkeypatch):
         engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def reset_app_context_between_tests():
+    """Ensure each test starts with a fresh app container/context."""
+    from local_rag_backend.app.factory import reset_app_context
+
+    reset_app_context()
+    try:
+        yield
+    finally:
+        reset_app_context()
+
+
 class DummyFaissIndex:
     def __init__(self, index_path, id_map_path, dim=None):  # <--- dim opcional
         self.index_path = index_path

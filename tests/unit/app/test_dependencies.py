@@ -106,12 +106,12 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
 
     calls: list[object] = []
 
-    def _build():
+    def _build(self):
         obj = object()
         calls.append(obj)
         return obj
 
-    monkeypatch.setattr(factory, "build_rag_service", _build, raising=True)
+    monkeypatch.setattr(factory.AppContainer, "build_rag_service", _build, raising=True)
 
     svc1 = await deps.get_rag_service()
     assert svc1 is calls[0]
@@ -125,15 +125,8 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
     assert svc2 is not svc1
 
 
-def test_cached_rag_service_cache_does_not_accumulate_on_version_changes(monkeypatch):
-    # Simulate cross-process invalidation: shared version changes without local reset.
-    factory._get_cached_rag_service.cache_clear()
-
-    monkeypatch.setattr(factory, "build_rag_service", lambda: object(), raising=True)
-    _ = factory._get_cached_rag_service(1)
-    _ = factory._get_cached_rag_service(2)
-    _ = factory._get_cached_rag_service(3)
-
-    info = factory._get_cached_rag_service.cache_info()
-    assert info.maxsize == 1
-    assert info.currsize == 1
+async def test_app_context_and_settings_dependencies_share_runtime_context() -> None:
+    deps.reset_rag_service()
+    ctx = deps.get_app_context()
+    assert await deps.get_settings_dependency() is ctx.settings
+    assert await deps.get_app_container_dependency() is ctx.container

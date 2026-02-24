@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, TypeVar
 import click
 
 from local_rag_backend import __version__
-from local_rag_backend.app.composition import build_dense_embedder_from_settings
 from local_rag_backend.cli_commands import (
     bootstrap_cmd,
     build_index_cmd,
@@ -17,11 +16,11 @@ from local_rag_backend.cli_commands import (
     eval_cmd,
     ingest_cmd,
     rebuild_index_cmd,
+    runtime as cli_runtime,
     server_cmd,
     status_cmd,
     upsert_docs_cmd,
 )
-from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,20 +31,7 @@ T = TypeVar("T")
 
 
 def _ensure_sqlite_schema_for_cli() -> None:
-    """
-    Ensure SQLite schema is compatible with the current ORM mappings.
-
-    CLI commands can be run without starting the FastAPI server, so they must
-    apply the same best-effort SQLite migrations that the app does at startup.
-    """
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    db_base.Base.metadata.create_all(bind=db_base.engine)
-    db_base.ensure_sqlite_documents_autoincrement(
-        engine_to_use=db_base.engine, id_map_path=str(settings.id_map_path)
-    )
-    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=db_base.engine)
+    cli_runtime.ensure_sqlite_schema_for_cli()
 
 
 @click.group()
@@ -56,29 +42,28 @@ def cli() -> None:
 
 
 def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
-    from local_rag_backend.core.services.write_lock import multi_store_write_lock
-
-    with multi_store_write_lock():
-        return operation()
+    return cli_runtime._run_with_multi_store_write_lock(operation)
 
 
 def _reset_rag_service_best_effort() -> None:
-    from local_rag_backend.app.factory import reset_rag_service
+    cli_runtime._reset_rag_service_best_effort()
 
-    try:
-        reset_rag_service()
-    except Exception:
-        return None
+
+def _run_cli_mutation(
+    operation: Callable[[], T],
+    *,
+    use_lock: bool = True,
+    ensure_schema: bool = True,
+) -> T:
+    return cli_runtime.run_cli_mutation(
+        operation,
+        use_lock=use_lock,
+        ensure_schema=ensure_schema,
+    )
 
 
 def _build_dense_embedder() -> EmbedderPort:
-    """Build the dense/hybrid embedder based on current settings."""
-    return build_dense_embedder_from_settings(settings_obj=settings)
-
-
-def _batched(values: list[T], batch_size: int) -> list[list[T]]:
-    size = max(1, int(batch_size))
-    return [values[i : i + size] for i in range(0, len(values), size)]
+    return cli_runtime.build_dense_embedder()
 
 
 cli.add_command(server_cmd)

@@ -1,6 +1,6 @@
 import pytest
 
-from local_rag_backend.app import wiring
+from local_rag_backend.app import factory
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
@@ -16,7 +16,7 @@ async def test_docs_dense_embed_failure_does_not_persist_sql(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: BadEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: BadEmbedder(), raising=True)
 
     with pytest.raises(RuntimeError, match="embed fail"):
         await asgi_client.post("/api/docs", json={"texts": ["hello world"]})
@@ -34,7 +34,7 @@ async def test_upsert_dense_embed_failure_does_not_persist_sql(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: BadEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: BadEmbedder(), raising=True)
 
     with pytest.raises(RuntimeError, match="embed fail"):
         await asgi_client.post(

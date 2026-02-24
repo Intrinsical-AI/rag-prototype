@@ -1,8 +1,8 @@
 import httpx
 import pytest
-from fastapi import HTTPException
 from starlette.requests import Request
 
+from local_rag_backend.app.errors import UnauthorizedError
 from local_rag_backend.app.main import app
 from local_rag_backend.app.security import require_api_key
 from local_rag_backend.settings import settings
@@ -66,7 +66,7 @@ async def test_unknown_client_host_requires_api_key_when_public_bind_guard_enabl
 
     # Some ASGI deployments/tests may provide no `client` tuple in scope.
     request = Request({"type": "http", "method": "GET", "path": "/api/health", "headers": []})
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(UnauthorizedError) as excinfo:
         await require_api_key(request)
 
     assert excinfo.value.status_code == 401

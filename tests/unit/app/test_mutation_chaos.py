@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from local_rag_backend.app import wiring
+from local_rag_backend.app import factory
 from local_rag_backend.app.routers import index as index_router
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
@@ -35,9 +35,9 @@ async def test_upsert_dense_vector_write_failure_triggers_rebuild_and_succeeds(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
-    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(wiring, "rebuild_index_from_db", _rebuild, raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild, raising=True)
 
     resp = await asgi_client.post(
         "/api/docs/upsert", json={"docs": [{"external_id": "doc-1", "content": "hello"}]}
@@ -58,7 +58,7 @@ async def test_upsert_mutation_fails_when_write_lock_cannot_be_acquired(
         yield
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(wiring, "multi_store_write_lock", _broken_lock, raising=True)
+    monkeypatch.setattr(factory, "multi_store_write_lock", _broken_lock, raising=True)
 
     with pytest.raises(RuntimeError, match="lock unavailable"):
         await asgi_client.post(
@@ -89,9 +89,9 @@ async def test_upsert_crash_window_keeps_sql_when_vector_and_rebuild_fail(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
-    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(wiring, "rebuild_index_from_db", _rebuild_fail, raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
 
     with pytest.raises(RuntimeError, match="rebuild failed"):
         await asgi_client.post(
@@ -127,9 +127,9 @@ async def test_index_rebuild_failure_still_invalidates_cached_rag_service(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
-    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: DummyVec(), raising=True)
-    monkeypatch.setattr(wiring, "rebuild_index_from_db", _rebuild_fail, raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: DummyVec(), raising=True)
+    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
     monkeypatch.setattr(index_router, "reset_rag_service", _count_reset, raising=True)
 
     with pytest.raises(RuntimeError, match="rebuild failed"):

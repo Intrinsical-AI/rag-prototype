@@ -46,4 +46,3 @@ def test_multi_store_write_lock_serializes_across_processes(tmp_path: Path) -> N
     assert p1.exitcode == 0
     assert p2.exitcode == 0
     assert max_active.value == 1
-

@@ -38,7 +38,7 @@ async def test_rebuild_index_dense_from_db(tmp_path, asgi_client, in_memory_sqli
             return [[float(len(t)), 0.0] for t in texts]
 
     monkeypatch.setattr(
-        "local_rag_backend.app.wiring.SentenceTransformerEmbedder",
+        "local_rag_backend.app.factory.SentenceTransformerEmbedder",
         lambda model_name=None: DummyEmbedder(),
         raising=True,
     )
@@ -90,12 +90,12 @@ async def test_delete_docs_dense_does_not_require_embedder_when_index_delete_suc
             return len(list(ids))
 
     monkeypatch.setattr(
-        "local_rag_backend.app.wiring.SentenceTransformerEmbedder",
+        "local_rag_backend.app.factory.SentenceTransformerEmbedder",
         _boom_embedder,
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.app.wiring.FaissVectorStorage",
+        "local_rag_backend.app.factory.FaissVectorStorage",
         lambda **_k: DummyVec(),
         raising=True,
     )

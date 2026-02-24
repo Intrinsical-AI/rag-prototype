@@ -166,7 +166,9 @@ def build_retriever_from_settings(
     doc_ids: list[int] | None = None
 
     if mode in {"sparse", "hybrid"}:
-        docs_for_sparse = list(preloaded_docs) if preloaded_docs is not None else doc_repo.get_all_documents()
+        docs_for_sparse = (
+            list(preloaded_docs) if preloaded_docs is not None else doc_repo.get_all_documents()
+        )
         corpus = [d.content for d in docs_for_sparse]
         doc_ids = [d.id for d in docs_for_sparse]
 
@@ -204,14 +206,18 @@ def build_retriever_from_settings(
                 doc_repo=doc_repo,
                 preloaded_docs=docs_for_sparse,
             )
-            alpha = hybrid_alpha if hybrid_alpha is not None else settings_obj.hybrid_retrieval_alpha
+            alpha = (
+                hybrid_alpha if hybrid_alpha is not None else settings_obj.hybrid_retrieval_alpha
+            )
             retriever = hybrid_retriever_factory(
                 dense=dense_retriever,
                 sparse=sparse_retriever,
                 alpha=alpha,
             )
 
-    reranker_enabled = settings_obj.enable_reranker if enable_reranker is None else bool(enable_reranker)
+    reranker_enabled = (
+        settings_obj.enable_reranker if enable_reranker is None else bool(enable_reranker)
+    )
     if reranker_enabled:
         retriever = reranker_factory(
             retriever,

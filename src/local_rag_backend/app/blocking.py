@@ -13,9 +13,12 @@ import atexit
 import functools
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+
+from local_rag_backend.app.telemetry import get_telemetry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,7 +83,9 @@ def _parse_task_type(task_type: str) -> BlockingTaskType:
     candidate = str(task_type).strip().lower()
     if candidate not in _TASK_TYPES:
         allowed = ", ".join(_TASK_TYPES)
-        raise ValueError(f"Unsupported blocking task_type={task_type!r}. Expected one of: {allowed}")
+        raise ValueError(
+            f"Unsupported blocking task_type={task_type!r}. Expected one of: {allowed}"
+        )
     return cast("BlockingTaskType", candidate)
 
 
@@ -102,6 +107,10 @@ class _ExecutorState:
         with self.lock:
             if self.pending > 0:
                 self.pending -= 1
+
+    def pending_snapshot(self) -> int:
+        with self.lock:
+            return int(self.pending)
 
 
 def _get_executor_state(task_type: BlockingTaskType) -> _ExecutorState:
@@ -137,23 +146,73 @@ async def run_blocking(
     **kwargs: Any,
 ) -> T:
     """Run a sync callable in a dedicated worker pool partitioned by task type."""
+    telemetry = get_telemetry()
     call = functools.partial(func, *args, **kwargs)
     state = _get_executor_state(task_type)
+    capacity = int(state.max_pending)
     if not state.try_acquire_slot():
+        telemetry.observe_blocking_queue(
+            task_type=task_type,
+            pending=_pending_snapshot(state),
+            capacity=capacity,
+        )
+        telemetry.observe_blocking_run(task_type=task_type, status="rejected", duration_s=0.0)
         raise RuntimeError(
             f"Blocking queue is full for task_type={task_type!r} (max_pending={state.max_pending})"
         )
+    telemetry.observe_blocking_queue(
+        task_type=task_type,
+        pending=_pending_snapshot(state),
+        capacity=capacity,
+    )
+
     # Note: `loop.run_in_executor()` / `asyncio.to_thread()` / `asyncio.wrap_future()` rely on
     # cross-thread wakeups (`loop.call_soon_threadsafe()`), which can deadlock under some
     # ASGI test harnesses. Polling avoids that class of deadlocks at the cost of a tiny
     # timer wakeup while the job runs.
-    fut = state.executor.submit(call)
+    enqueued_at = time.monotonic()
+    started_at = enqueued_at
+
+    def _instrumented_call() -> T:
+        nonlocal started_at
+        started_at = time.monotonic()
+        telemetry.observe_blocking_queue_wait(
+            task_type=task_type,
+            wait_s=max(0.0, started_at - enqueued_at),
+        )
+        return call()
+
+    fut = None
+    status: Literal["ok", "error", "cancelled"] = "ok"
     try:
+        fut = state.executor.submit(_instrumented_call)
         while not fut.done():
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
         return fut.result()
     except asyncio.CancelledError:  # pragma: no cover
-        fut.cancel()
+        status = "cancelled"
+        if fut is not None:
+            fut.cancel()
+        raise
+    except Exception:
+        status = "error"
         raise
     finally:
+        telemetry.observe_blocking_run(
+            task_type=task_type,
+            status=status,
+            duration_s=max(0.0, time.monotonic() - started_at),
+        )
         state.release_slot()
+        telemetry.observe_blocking_queue(
+            task_type=task_type,
+            pending=_pending_snapshot(state),
+            capacity=capacity,
+        )
+
+
+def _pending_snapshot(state: _ExecutorState) -> int:
+    if hasattr(state, "pending_snapshot"):
+        return int(state.pending_snapshot())
+    pending = getattr(state, "pending", 0)
+    return int(pending) if isinstance(pending, int) else 0

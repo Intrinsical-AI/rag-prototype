@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import HTTPException, Request
+from fastapi import Request  # noqa: TC002
 
+from local_rag_backend.app.errors import UnauthorizedError
 from local_rag_backend.settings import settings
 
 API_KEY_HEADER = "X-API-Key"
@@ -116,8 +117,7 @@ async def require_api_key(request: Request) -> None:
             return
         hosts = _request_hosts(request)
         if not hosts or any(host not in _LOCALHOST_HOSTS for host in hosts):
-            raise HTTPException(
-                status_code=401,
+            raise UnauthorizedError(
                 detail=(
                     "Unauthorized: API key is required for non-local requests. "
                     "Set API_KEY or disable PUBLIC_BIND_REQUIRES_API_KEY explicitly."
@@ -127,4 +127,4 @@ async def require_api_key(request: Request) -> None:
 
     provided = request.headers.get(API_KEY_HEADER) or ""
     if not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise UnauthorizedError("Unauthorized")

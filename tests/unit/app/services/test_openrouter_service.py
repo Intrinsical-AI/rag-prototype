@@ -30,7 +30,9 @@ def _payload() -> service.OpenRouterGenerateInput:
     )
 
 
-def test_generate_openrouter_sync_builds_headers_and_defaults_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generate_openrouter_sync_builds_headers_and_defaults_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class DummyUsage:
@@ -148,4 +150,3 @@ def test_generate_openrouter_sync_wraps_client_errors(monkeypatch: pytest.Monkey
 
     with pytest.raises(LLMResponseError, match="sdk failure"):
         service.generate_openrouter_sync(payload=_payload(), settings_obj=_settings())
-

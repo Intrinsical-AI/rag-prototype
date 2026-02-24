@@ -7,40 +7,15 @@ to provide a measurable knob for offline evaluation.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from local_rag_backend.core.services.text_processing import preprocess_text
+from local_rag_backend.core.services.schemas import OverlapV1Reranker
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from local_rag_backend.core.domain.entities import Document
     from local_rag_backend.core.ports import RetrieverPort
-
-
-def _tokens(text: str) -> set[str]:
-    # Keep tokenization aligned with the sparse retriever (preprocess_text + \\w+).
-    return set(re.findall(r"\w+", preprocess_text(text)))
-
-
-@dataclass(frozen=True)
-class OverlapV1Reranker:
-    """
-    Token overlap reranker (cheap heuristic).
-
-    Score: |tokens(query) ∩ tokens(doc)| / max(1, |tokens(query)|)
-    """
-
-    def score(self, *, query: str, doc_text: str) -> float:
-        qt = _tokens(query)
-        if not qt:
-            return 0.0
-        dt = _tokens(doc_text)
-        if not dt:
-            return 0.0
-        return float(len(qt & dt) / max(1, len(qt)))
 
 
 class RerankingRetriever:

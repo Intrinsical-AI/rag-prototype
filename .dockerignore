@@ -5,7 +5,7 @@
 .venv
 env
 venv
-.uv-cache
+.uv_cache
 .mypy_cache
 .ruff_cache
 .pytest_cache

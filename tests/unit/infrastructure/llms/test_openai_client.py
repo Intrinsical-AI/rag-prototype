@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from local_rag_backend.infrastructure.llms.openai_client import create_openai_client
+from local_rag_backend.infrastructure.llms.openai_chat import create_openai_client
 
 
 def test_create_openai_client_omits_none_optional_kwargs() -> None:

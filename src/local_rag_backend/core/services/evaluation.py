@@ -7,7 +7,6 @@ Focus: reproducible retrieval metrics without requiring an LLM provider.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,25 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
-@dataclass(frozen=True)
-class EvalDoc:
-    external_id: str
-    content: str
-    source_id: str | None = None
-
-
-@dataclass(frozen=True)
-class EvalQuery:
-    query: str
-    relevant_external_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class EvalDataset:
-    dataset_id: str
-    schema_version: int
-    docs: tuple[EvalDoc, ...]
-    queries: tuple[EvalQuery, ...]
+from local_rag_backend.core.services.schemas import EvalDataset, EvalDoc, EvalQuery, EvalResult
 
 
 def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
@@ -100,17 +81,6 @@ def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
     )
 
 
-@dataclass(frozen=True)
-class EvalResult:
-    dataset_id: str
-    retrieval_mode: str
-    reranker_enabled: bool
-    k: int
-    queries: int
-    hit_rate: float
-    mrr: float
-
-
 def run_retrieval_eval(
     *,
     dataset: EvalDataset,
@@ -138,9 +108,7 @@ def run_retrieval_eval(
     if not qs:
         raise ValueError("No queries to evaluate after max_queries.")
     if retrieve_external_ids is None:
-        raise ValueError(
-            "retrieve_external_ids callback is required for sparse evaluation."
-        )
+        raise ValueError("retrieve_external_ids callback is required for sparse evaluation.")
 
     hits = 0
     rr_sum = 0.0
