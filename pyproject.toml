@@ -42,26 +42,22 @@ dependencies = [
   "fastapi>=0.111,<0.112",
   "uvicorn[standard]>=0.29,<1.0",
   "anyio>=4.3,<4.4",
-
   # AI/ML Core (lightweight defaults; heavy deps are optional extras)
   "rank-bm25>=0.2,<1.0",
   "numpy>=2.0,<2.3",
-
   # LLM Integrations
   "openai>=1.24,<2.0",
   "httpx>=0.27,<0.28",
-
   # Database & ORM
   "sqlalchemy>=2.0,<3.0",
-
   # Configuration & Validation
   "pydantic>=2.0,<3.0",
   "pydantic-settings>=2.2,<3.0",
   "python-dotenv>=1.0,<2.0",
-
   # CLI & Utilities
   "click>=8.0,<9.0",
-  "rich>=13.0,<14.0"
+  "rich>=13.0,<14.0",
+  "pre-commit>=4.5.1",
 ]
 
 [project.optional-dependencies]
@@ -86,7 +82,8 @@ lint = [
 dev = [
   "pre-commit>=4.2.0,<5.0",
   "ipython>=8.0,<9.0",
-  "jupyter>=1.0,<2.0"
+  "jupyter>=1.0,<2.0",
+  "precommit>=4.5.1"
 ]
 sec = [
   "bandit[toml]>=1.7,<2.0",
@@ -131,7 +128,8 @@ all = [
   "orjson>=3.10,<4.0",
   "prometheus-client>=0.19,<1.0",
   "structlog>=23.0,<24.0",
-  "sentry-sdk[fastapi]>=1.40,<2.0"
+  "sentry-sdk[fastapi]>=1.40,<2.0",
+  "precommit>=4.5.1"
 ]
 
 [project.urls]
