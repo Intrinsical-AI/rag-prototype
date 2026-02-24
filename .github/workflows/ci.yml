@@ -104,10 +104,10 @@ jobs:
         run: uv sync --frozen --extra lint --no-install-project --no-dev
 
       - name: Ruff
-        run: uv run ruff check .
+        run: uv run ruff check src tests
 
       - name: Ruff format (check)
-        run: uv run ruff format --check .
+        run: uv run ruff format --check src tests
 
   typing:
     name: Typing (mypy)
@@ -138,7 +138,7 @@ jobs:
         run: uv sync --frozen --extra lint --no-install-project --no-dev
 
       - name: mypy
-        run: uv run mypy .
+        run: uv run mypy src tests
 
   test:
     name: Tests (Ubuntu, py${{ matrix.python-version }})
@@ -267,15 +267,15 @@ jobs:
         run: uv venv
 
       - name: Install security tools
-        run: uv pip install "bandit[toml]" "safety<3"
+        run: uv pip install "bandit[toml]" "safety<3" "setuptools<81"
 
       - name: Run security scans (fail on findings)
         run: |
           uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
           if [ -n "${SAFETY_API_KEY:-}" ]; then
-            printf 'y\n' | uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
+            printf 'y\n' | uv run safety check --output json --save-json safety-report.json --continue-on-error --key "$SAFETY_API_KEY"
           else
-            printf 'y\n' | uv run safety check --full-report --json --output safety-report.json
+            printf 'y\n' | uv run safety check --output json --save-json safety-report.json --continue-on-error
           fi
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}

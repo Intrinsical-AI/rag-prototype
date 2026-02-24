@@ -43,6 +43,7 @@ repos:
       - id: bandit
         name: "Security scan (Bandit)"
         args: ["-r", "src/", "-ll", "-ii"]
+        pass_filenames: false
         exclude: "^tests/"
 
 ci:

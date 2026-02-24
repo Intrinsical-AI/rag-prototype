@@ -66,7 +66,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             return "<unmatched>"
 
         # Best-effort fallback. Keep this as stable as possible.
-        raw_path = request.url.path
+        raw_path = str(request.url.path)
         if raw_path.startswith("/assets/"):
             return "/assets/*"
         return raw_path

@@ -93,7 +93,7 @@ def _map_import_error(
     if isinstance(exc, ImportFileTooLargeError):
         return PayloadTooLargeError(str(exc))
     if isinstance(
-        exc, (ImportPayloadEmptyError, UnsupportedImportFormatError, InvalidImportPayloadError)
+        exc, ImportPayloadEmptyError | UnsupportedImportFormatError | InvalidImportPayloadError
     ):
         return UnprocessableEntityError(str(exc))
     if isinstance(exc, EmbeddingsBackendUnavailableError):

@@ -126,6 +126,6 @@ async def test_api_ask_schema_with_sources(asgi_client):
     assert "content" in source["document"]
     assert source["document"]["id"] == 42
     assert source["document"]["content"] == "Test document"
-    assert isinstance(source["score"], (int, float))
+    assert isinstance(source["score"], int | float)
     assert 0.0 <= source["score"] <= 1.0
     app.dependency_overrides.clear()

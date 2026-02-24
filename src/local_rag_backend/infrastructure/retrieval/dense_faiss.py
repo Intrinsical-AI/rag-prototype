@@ -45,7 +45,7 @@ class DenseFaissRetriever(RetrieverPort):
 
         # Ensure correct order and pairing
         docs_by_id = {doc.id: doc for doc in docs}
-        ordered_pairs = [(doc_id, score) for doc_id, score in zip(doc_ids, scores, strict=False)]
+        ordered_pairs = list(zip(doc_ids, scores, strict=False))
         ordered_docs = [docs_by_id[doc_id] for doc_id, _ in ordered_pairs if doc_id in docs_by_id]
         ordered_scores = [score for doc_id, score in ordered_pairs if doc_id in docs_by_id]
 
