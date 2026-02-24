@@ -43,7 +43,7 @@ def eval_cmd(
     json_out: Path | None,
 ) -> None:
     """Offline retrieval evaluation (reproducible, dependency-free by default)."""
-    from local_rag_backend.app.services.evaluation import run_retrieval_eval
+    from local_rag_backend.app.application.evaluation import run_retrieval_eval
     from local_rag_backend.core.services.evaluation import (
         eval_result_to_json,
         format_eval_result,

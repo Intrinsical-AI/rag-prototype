@@ -4,29 +4,20 @@ Bounded router for metadata/config endpoints.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, Depends
 
 from local_rag_backend.app.composition import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
 )
-from local_rag_backend.settings import settings
+from local_rag_backend.app.dependencies import get_settings_dependency
+from local_rag_backend.app.schemas.meta import ConfigResponse, TemplateResponse
+
+if TYPE_CHECKING:
+    from local_rag_backend.settings import Settings
 
 router = APIRouter()
-
-
-class TemplateResponse(BaseModel):
-    name: str
-    template: str
-    description: str
-
-
-class ConfigResponse(BaseModel):
-    retrieval_mode: str
-    hybrid_alpha: float
-    temperature: float
-    max_tokens: int
-    available_providers: list[str]
 
 
 @router.get(
@@ -35,16 +26,18 @@ class ConfigResponse(BaseModel):
     tags=["RAG"],
     summary="Get available prompt templates",
 )
-async def get_templates() -> list[TemplateResponse]:
+async def get_templates(
+    settings_obj: Settings = Depends(get_settings_dependency),
+) -> list[TemplateResponse]:
     templates = [
         TemplateResponse(
             name="default",
-            template=settings.openai_prompt_template,
+            template=settings_obj.openai_prompt_template,
             description="Default template for OpenAI/OpenRouter models",
         ),
         TemplateResponse(
             name="ollama",
-            template=settings.ollama_prompt_template,
+            template=settings_obj.ollama_prompt_template,
             description="Template optimized for Ollama models",
         ),
         TemplateResponse(
@@ -67,14 +60,13 @@ async def get_templates() -> list[TemplateResponse]:
     tags=["RAG"],
     summary="Get backend configuration defaults",
 )
-async def get_config() -> ConfigResponse:
-    providers = get_available_llm_providers_from_settings(settings_obj=settings)
+async def get_config(settings_obj: Settings = Depends(get_settings_dependency)) -> ConfigResponse:
+    providers = get_available_llm_providers_from_settings(settings_obj=settings_obj)
     available_providers = list(providers.keys())
     return ConfigResponse(
-        retrieval_mode=settings.retrieval_mode,
-        hybrid_alpha=settings.hybrid_retrieval_alpha,
-        temperature=settings.openai_temperature,
-        max_tokens=settings.openai_max_tokens,
+        retrieval_mode=settings_obj.retrieval_mode,
+        hybrid_alpha=settings_obj.hybrid_retrieval_alpha,
+        temperature=settings_obj.openai_temperature,
+        max_tokens=settings_obj.openai_max_tokens,
         available_providers=available_providers,
     )
-

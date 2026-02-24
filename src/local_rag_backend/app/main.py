@@ -1,4 +1,3 @@
-# src/app/main.py
 """
 FastAPI application entry point.
 """
@@ -14,12 +13,15 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
+from local_rag_backend.app.errors import NotFoundError
+from local_rag_backend.app.factory import reset_app_context
+from local_rag_backend.app.http.exception_handlers import register_exception_handlers
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
 from local_rag_backend.app.security import enforce_safe_bind_config, require_api_key
 from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
@@ -45,21 +47,22 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Ensure the data directory exists (SQLite cannot create parent directories).
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
-    db_base.Base.metadata.create_all(bind=db_base.engine)
-    db_base.ensure_sqlite_documents_autoincrement(engine_to_use=db_base.engine)
-    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=db_base.engine)
+    db_base.ensure_sqlite_schema_compatible(engine_to_use=db_base.engine)
     # Best-effort preload: don't prevent the API from starting just because an LLM
     # provider isn't configured yet (readiness endpoint should report not_ready).
     try:
         await get_rag_service()
     except Exception as e:
         logger.warning("RAG service preload failed (will initialize lazily): %s", e)
+        # Avoid caching a half-initialized runtime context after preload failures.
+        reset_app_context()
     logger.info("Service initialized.")
     yield
     logger.info("Shutting down.")
 
 
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
+register_exception_handlers(app)
 
 # CORS: keep permissive defaults ONLY in debug mode.
 cors_allow_origins = ["*"] if settings.debug else list(settings.cors_allow_origins)
@@ -113,7 +116,7 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
     """
     posix = PurePosixPath(asset_path)
     if posix.is_absolute() or ".." in posix.parts:
-        raise HTTPException(status_code=404, detail="Asset not found.")
+        raise NotFoundError("Asset not found.")
 
     # 1) Packaged assets
     try:
@@ -133,7 +136,7 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
         mt = mimetypes.guess_type(fs_file.name)[0] or "application/octet-stream"
         return data, mt
 
-    raise HTTPException(status_code=404, detail="Asset not found.")
+    raise NotFoundError("Asset not found.")
 
 
 @app.get("/assets/{asset_path:path}", include_in_schema=False)

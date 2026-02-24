@@ -89,6 +89,42 @@ def _embedding_model_name_for_dedup(settings_obj: Settings) -> str:
     return str(settings_obj.st_embedding_model)
 
 
+def _uses_vector_index(settings_obj: Settings) -> bool:
+    return settings_obj.retrieval_mode in ("dense", "hybrid")
+
+
+def _build_vector_repo(
+    *,
+    settings_obj: Settings,
+    ports: DocsMutationPorts,
+    dim: int | None,
+) -> Any:
+    return ports.vector_repo_factory(
+        index_path=settings_obj.index_path,
+        id_map_path=settings_obj.id_map_path,
+        dim=dim,
+    )
+
+
+def _precompute_vectors_if_needed(
+    *,
+    settings_obj: Settings,
+    ports: DocsMutationPorts,
+    doc_repo: Any,
+    items: Sequence[Any],
+) -> tuple[Any | None, dict[str, list[float]]]:
+    if not _uses_vector_index(settings_obj):
+        return None, {}
+
+    embedder = ports.build_embedder()
+    vectors_by_external_id = ports.precompute_vectors_fn(
+        items=items,
+        doc_repo=doc_repo,
+        embedder=embedder,
+    )
+    return embedder, vectors_by_external_id
+
+
 def ingest_docs_sync(
     *,
     texts: Sequence[str],
@@ -153,27 +189,20 @@ def ingest_docs_sync(
     if not unique_items:
         return []
 
-    embedder = None
-    vectors_by_external_id: dict[str, list[float]] = {}
-    if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        embedder = ports.build_embedder()
-        vectors_by_external_id = ports.precompute_vectors_fn(
-            items=unique_items,
-            doc_repo=doc_repo,
-            embedder=embedder,
-        )
+    embedder, vectors_by_external_id = _precompute_vectors_if_needed(
+        settings_obj=settings_obj,
+        ports=ports,
+        doc_repo=doc_repo,
+        items=unique_items,
+    )
 
     results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
         unique_items
     )
     id_by_ext = {r.external_id: int(r.id) for r in results}
 
-    if settings_obj.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-        vec = ports.vector_repo_factory(
-            index_path=settings_obj.index_path,
-            id_map_path=settings_obj.id_map_path,
-            dim=embedder.dim,
-        )
+    if embedder is not None:
+        vec = _build_vector_repo(settings_obj=settings_obj, ports=ports, dim=embedder.dim)
         ports.sync_dense_fn(
             results=results,
             updated_content_ids=updated_content_ids,
@@ -204,12 +233,8 @@ def delete_docs_by_external_id_sync(
         )
 
     doc_repo = ports.doc_repo_factory()
-    if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        vec = ports.vector_repo_factory(
-            index_path=settings_obj.index_path,
-            id_map_path=settings_obj.id_map_path,
-            dim=None,
-        )
+    if _uses_vector_index(settings_obj):
+        vec = _build_vector_repo(settings_obj=settings_obj, ports=ports, dim=None)
         deleted_sql, deleted_index, missing, tombstoned, rebuilt = ports.delete_external_ids_fn(
             doc_repo=doc_repo,
             external_ids=ext_ids,
@@ -242,12 +267,8 @@ def delete_docs_sync(
         return DeleteDocsSummary(deleted_sql=0, deleted_index=0, rebuilt_index=False)
 
     doc_repo = ports.doc_repo_factory()
-    if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        vec = ports.vector_repo_factory(
-            index_path=settings_obj.index_path,
-            id_map_path=settings_obj.id_map_path,
-            dim=None,
-        )
+    if _uses_vector_index(settings_obj):
+        vec = _build_vector_repo(settings_obj=settings_obj, ports=ports, dim=None)
         deleted_sql, deleted_index, rebuilt = ports.delete_docs_fn(
             doc_repo=doc_repo,
             vec_repo=vec,
@@ -274,7 +295,7 @@ def upsert_docs_sync(
         raise ValueError("external_id values must be unique per request.")
 
     doc_repo = ports.doc_repo_factory()
-    tombstoned = doc_repo.get_tombstoned_external_ids([d.external_id for d in docs])
+    tombstoned = doc_repo.get_tombstoned_external_ids(ext_ids)
     if tombstoned:
         raise TombstonedExternalIdsError(set(tombstoned))
 
@@ -288,15 +309,12 @@ def upsert_docs_sync(
         for d in docs
     ]
 
-    embedder = None
-    vectors_by_external_id: dict[str, list[float]] = {}
-    if settings_obj.retrieval_mode in ("dense", "hybrid"):
-        embedder = ports.build_embedder()
-        vectors_by_external_id = ports.precompute_vectors_fn(
-            items=items,
-            doc_repo=doc_repo,
-            embedder=embedder,
-        )
+    embedder, vectors_by_external_id = _precompute_vectors_if_needed(
+        settings_obj=settings_obj,
+        ports=ports,
+        doc_repo=doc_repo,
+        items=items,
+    )
 
     results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(items)
     inserted = sum(1 for r in results if r.action == "inserted")
@@ -304,12 +322,8 @@ def upsert_docs_sync(
     unchanged = sum(1 for r in results if r.action == "unchanged")
 
     rebuilt_index = False
-    if settings_obj.retrieval_mode in ("dense", "hybrid") and embedder is not None:
-        vec = ports.vector_repo_factory(
-            index_path=settings_obj.index_path,
-            id_map_path=settings_obj.id_map_path,
-            dim=embedder.dim,
-        )
+    if embedder is not None:
+        vec = _build_vector_repo(settings_obj=settings_obj, ports=ports, dim=embedder.dim)
         rebuilt_index = ports.sync_dense_fn(
             results=results,
             updated_content_ids=updated_content_ids,

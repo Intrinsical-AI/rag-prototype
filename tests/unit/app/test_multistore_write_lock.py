@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from local_rag_backend.app import wiring
+from local_rag_backend.app import factory
 from local_rag_backend.app.routers import docs as docs_router
 from local_rag_backend.settings import settings
 
@@ -125,9 +125,9 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
     fake_vec = FakeVec()
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "SqlDocumentStorage", FakeRepo, raising=True)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: fake_vec, raising=True)
+    monkeypatch.setattr(factory, "SqlDocumentStorage", FakeRepo, raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: fake_vec, raising=True)
     monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     task_a = asyncio.create_task(
@@ -243,10 +243,10 @@ async def test_upsert_failure_still_invalidates_cached_rag_service(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "SqlDocumentStorage", FakeRepo, raising=True)
-    monkeypatch.setattr(wiring, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(wiring, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(wiring, "rebuild_index_from_db", _rebuild_fail, raising=True)
+    monkeypatch.setattr(factory, "SqlDocumentStorage", FakeRepo, raising=True)
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
     monkeypatch.setattr(docs_router, "reset_rag_service", _count_reset, raising=True)
 
     with pytest.raises(RuntimeError, match="rebuild failed"):

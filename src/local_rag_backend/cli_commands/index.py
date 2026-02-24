@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import click
 
@@ -10,77 +9,65 @@ from local_rag_backend.app.diagnostics import (
     get_history_count,
     get_retrieval_index_stats,
 )
+from local_rag_backend.cli_commands.runtime import (
+    build_dense_embedder,
+    ensure_sqlite_schema_for_cli,
+    run_cli_mutation,
+)
 from local_rag_backend.infrastructure.persistence.faiss.manifest import (
     expected_manifest_config_from_settings,
 )
 from local_rag_backend.settings import settings
 
 
-def _hooks() -> Any:
-    from local_rag_backend import cli as cli_module
-
-    return cli_module
-
-
 @click.command("build-index")
 def build_index_cmd() -> None:
     """Build FAISS index from existing documents."""
-    mutation_attempted = False
     try:
-        hooks = _hooks()
-        hooks._ensure_sqlite_schema_for_cli()
-        from local_rag_backend.scripts.build_index import main as build_main
+        from local_rag_backend.app.application import index as index_service
+        from local_rag_backend.app.services.mutation_ports import build_build_index_ports
+
+        ports = build_build_index_ports()
+
+        def _build_sync() -> int:
+            return index_service.build_index_sync(
+                settings_obj=settings,
+                ports=ports,
+            )
 
         click.echo("[INFO] Building FAISS index...")
         with click.progressbar(length=1, label="Building index") as bar:
-            mutation_attempted = True
-            hooks._run_with_multi_store_write_lock(build_main)
+            run_cli_mutation(_build_sync, use_lock=False, ensure_schema=False)
             bar.update(1)
         click.echo("[OK] Index built successfully!")
     except Exception as e:
         click.echo(f"[ERROR] Error building index: {e}", err=True)
         raise SystemExit(1)
-    finally:
-        if mutation_attempted:
-            _hooks()._reset_rag_service_best_effort()
 
 
 @click.command("rebuild-index")
 def rebuild_index_cmd() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
-    mutation_attempted = False
     try:
-        hooks = _hooks()
-        hooks._ensure_sqlite_schema_for_cli()
-        from local_rag_backend.core.services.maintenance import rebuild_index_from_db
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.app.application import index as index_service
+        from local_rag_backend.app.services.mutation_ports import build_index_mutation_ports
 
         if settings.retrieval_mode not in ("dense", "hybrid"):
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
 
+        ports = build_index_mutation_ports(build_embedder=build_dense_embedder)
+
         def _rebuild_sync() -> int:
-            doc_repo = SqlDocumentStorage()
-            embedder = hooks._build_dense_embedder()
-            from local_rag_backend.infrastructure.persistence.faiss.manifest import (
-                purge_index_artifacts,
+            return index_service.rebuild_index_sync(
+                settings_obj=settings,
+                ports=ports,
             )
 
-            purge_index_artifacts(index_path=settings.index_path, id_map_path=settings.id_map_path)
-            vec = FaissVectorStorage(
-                index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
-            )
-            return rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
-
-        mutation_attempted = True
-        n = hooks._run_with_multi_store_write_lock(_rebuild_sync)
+        n = run_cli_mutation(_rebuild_sync)
         click.echo(f"[OK] Rebuilt index with {n} vectors.")
     except Exception as e:
         click.echo(f"[ERROR] Error rebuilding index: {e}", err=True)
         raise SystemExit(1)
-    finally:
-        if mutation_attempted:
-            _hooks()._reset_rag_service_best_effort()
 
 
 @click.command("status")
@@ -88,7 +75,7 @@ def status_cmd() -> None:
     """Display system status and configuration."""
     from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 
-    _hooks()._ensure_sqlite_schema_for_cli()
+    ensure_sqlite_schema_for_cli()
 
     title_fg = "cyan"
     key_fg = "blue"

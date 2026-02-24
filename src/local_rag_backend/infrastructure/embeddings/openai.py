@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from openai import OpenAI
 
 from local_rag_backend.core.ports import EmbedderPort
-from local_rag_backend.infrastructure.llms.openai_client import create_openai_client
+from local_rag_backend.infrastructure.llms.openai_chat import create_openai_client
 from local_rag_backend.settings import settings
 
 _MODEL_DIM: dict[str, int] = {

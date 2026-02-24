@@ -99,7 +99,7 @@ __pypackages__/
 .pdm.toml
 .pdm-python
 .pdm-build/
-.uv-cache/
+.uv_cache/
 
 # === CELERY ===
 celerybeat-schedule

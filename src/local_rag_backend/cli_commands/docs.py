@@ -12,4 +12,3 @@ __all__ = [
     "ingest_cmd",
     "upsert_docs_cmd",
 ]
-

@@ -25,6 +25,22 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
+def ensure_sqlite_schema_compatible(
+    *,
+    engine_to_use: Engine | None = None,
+    id_map_path: str | None = None,
+) -> None:
+    """
+    Ensure ORM tables and best-effort SQLite migrations expected at runtime.
+
+    This is the canonical startup/bootstrap entrypoint used by API, CLI, and scripts.
+    """
+    eng = engine_to_use or engine
+    Base.metadata.create_all(bind=eng)
+    ensure_sqlite_documents_autoincrement(engine_to_use=eng, id_map_path=id_map_path)
+    ensure_sqlite_documents_identity_columns(engine_to_use=eng)
+
+
 def _is_sqlite_duplicate_column_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "duplicate column name" in msg or "already exists" in msg

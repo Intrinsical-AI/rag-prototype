@@ -2,7 +2,7 @@
 
 import pytest
 
-from local_rag_backend.app import dependencies as deps, wiring
+from local_rag_backend.app import dependencies as deps, factory
 from local_rag_backend.app.main import app
 from local_rag_backend.app.routers import health as health_router
 from local_rag_backend.core.errors import LLMConnectionError, LLMTimeoutError
@@ -178,7 +178,7 @@ async def test_ask_eval_maps_typed_llm_connection_error_to_503(
             raise LLMConnectionError("provider unreachable")
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(wiring, "OpenAIGenerator", lambda **_k: _FailingGenerator(), raising=True)
+    monkeypatch.setattr(factory, "OpenAIGenerator", lambda **_k: _FailingGenerator(), raising=True)
 
     r = await asgi_client.post(
         "/api/ask_eval",

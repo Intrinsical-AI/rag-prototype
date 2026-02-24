@@ -7,7 +7,7 @@ The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Port
 * **Dependency Inversion**: the core depends on *ports* (interfaces), never on concrete implementations.
 * **Stable Core**: domain entities and services are tech-agnostic.
 * **Adapters at the Edge**: infrastructure code implements the ports.
-* **Composition Root**: `app/factory.py` wires ports to adapters based on settings, using shared adapter-selection helpers from `app/composition.py`.
+* **Composition Root**: `app/container.py` composes adapters/use-cases; `app/factory.py` manages runtime app context and compatibility entrypoints, using shared selection helpers from `app/composition.py`.
 * **Testability**: adapters can be swapped for fakes/mocks; ports are `Protocol`s.
 
 ---
@@ -27,18 +27,20 @@ src/local_rag_backend/
 │   ├── persistence/            # SQLAlchemy (SQL), FAISS (vectors)
 │   ├── retrieval/              # BM25 (sparse), FAISS (dense), Hybrid
 │   └── ingestion/              # CSV loader, etc.
-├── app/                        # Application layer
+├── app/                        # Application + HTTP transport layer
 │   ├── main.py                 # FastAPI app + lifespan
 │   ├── api_router.py           # Root API router composition (include_router only)
-│   ├── routers/                # Bounded routers (health, rag, docs, index, openrouter, meta)
-│   ├── dependencies.py         # DI bridge to factory
-│   ├── schemas.py              # Pydantic request/response schemas (API transport)
-│   ├── error_mapping.py        # Typed domain/app errors -> HTTP transport mapping
-│   ├── wiring.py               # Shared app-layer runtime wiring used by routers
+│   ├── routers/                # HTTP handlers by bounded context
+│   ├── http/                   # HTTP-only concerns (exception handlers, transport boundary)
+│   ├── application/            # Use-case orchestration (transport-agnostic)
+│   ├── dependencies.py         # DI bridge to app context/container
+│   ├── app_context.py          # Runtime context (settings + AppContainer)
+│   ├── container.py            # App composition container used by routers/CLI
+│   ├── schemas/                # Pydantic request/response schemas by bounded context
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
-│   ├── factory.py              # Composition root (build retriever/LLM/services)
-│   └── services/               # App use-cases + app ports (docs/index mutations, eval orchestration, etc.)
+│   ├── factory.py              # App-context lifecycle + compatibility entrypoints
+│   └── services/               # Transitional app modules/ports reused by API+CLI
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
 
@@ -47,18 +49,22 @@ Evaluation layering:
 - `app/services/evaluation.py` owns ephemeral SQL/retriever wiring for `rag-eval`.
 
 HTTP docs/index layering:
-- `/api/docs*` and `/api/index/rebuild` delegate business orchestration to `app/services/docs.py`
-  and `app/services/index.py`, keeping `api_router.py` focused on transport concerns.
-- App-layer dependency contracts for these use-cases live in `app/services/ports.py`
-  (`DocsMutationPorts`, `IndexMutationPorts`), reducing direct app->infra coupling.
-- Shared API/CLI wiring for these contracts lives in `app/services/mutation_ports.py`.
+- Routers are thin adapters in `app/routers/*` and call use-case orchestration in
+  `app/application/*` and `app/services/*`.
+- Shared mutation execution (`run_api_mutation` / `run_cli_mutation`) lives in
+  `app/application/mutations.py`.
+- App-layer dependency contracts for docs/index mutations live in `app/services/ports.py`
+  (`DocsMutationPorts`, `IndexMutationPorts`), with shared wiring in
+  `app/services/mutation_ports.py`.
 
 Error layering:
 - Infra adapters raise typed runtime errors from `core/errors.py` (no FastAPI dependency).
-- HTTP translation lives in `app/error_mapping.py` so transport concerns stay at the edge.
+- Runtime error mapping lives in `app/error_mapping.py`.
+- HTTP registration/rendering lives in `app/http/exception_handlers.py`.
 
 CLI layering:
-- `cli.py` is the composition/entrypoint module (group + helpers + command registration).
+- `cli.py` is the entrypoint module (group + command registration).
+- Shared command runtime helpers live in `cli_commands/runtime.py`.
 - Domain commands live in `cli_commands/docs.py`, `cli_commands/index.py`,
   `cli_commands/eval.py`, and `cli_commands/server.py`.
 
@@ -94,7 +100,9 @@ graph TD
   A -->|DI via factory| C1 & C2 & C3 & D1 & D2 & E1 & S1 & V1
 ```
 
-The composition root `app/factory.py` chooses specific adapters (BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`, with policy centralized in `app/composition.py` and reused by API/CLI/scripts.
+The composition root (`app/container.py` + `app/factory.py`) chooses specific adapters
+(BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`, with policy centralized in
+`app/composition.py` and reused by API/CLI/scripts.
 
 ---
 
@@ -168,7 +176,7 @@ class LoaderPort(Protocol):
 
 **App transport**
 
-* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas.py`.
+* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas/` (split by bounded context: `rag`, `docs`, `index`, `meta`).
 
 **Ingestion**
 
@@ -178,9 +186,10 @@ All of these implement the ports above and can be swapped at composition time.
 
 ---
 
-## Composition Root (Factory)
+## Composition Root
 
-`app/factory.py` wires the system from configuration (source of truth: `src/local_rag_backend/app/factory.py`):
+`app/container.py` wires the system from configuration (factory/providers + runtime cache),
+while `app/factory.py` owns app-context lifecycle and compatibility accessors.
 
 * Chooses **retriever** by `settings.retrieval_mode` (`sparse`, `dense`, `hybrid`)
 * Chooses **generator**: Ollama (if `OLLAMA_ENABLED`) or OpenAI (if `OPENAI_API_KEY`)
@@ -363,4 +372,5 @@ class SparseBM25Retriever(RetrieverPort):
         ...
 ```
 
-**Factory wiring:** see `src/local_rag_backend/app/factory.py` (kept as the single source of truth to avoid drift).
+**Container wiring:** see `src/local_rag_backend/app/container.py` and
+`src/local_rag_backend/app/factory.py`.

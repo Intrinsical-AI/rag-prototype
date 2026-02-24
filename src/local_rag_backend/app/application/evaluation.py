@@ -1,10 +1,4 @@
-"""
-Application-layer orchestration for offline retrieval evaluation.
-
-The core module (`core.services.evaluation`) keeps dataset parsing and metric
-computation pure. This module owns infrastructure wiring for ephemeral storage
-and sparse retrieval execution.
-"""
+"""Application-layer orchestration for offline retrieval evaluation."""
 
 from __future__ import annotations
 
@@ -29,7 +23,6 @@ if TYPE_CHECKING:
 
 
 def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
-    # StaticPool ensures all sessions share the same in-memory DB connection.
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -37,14 +30,11 @@ def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-    # Ensure models are registered with Base.metadata.
     from local_rag_backend.infrastructure.persistence.sqlalchemy import (  # noqa: F401
         models as _models,
     )
 
-    db_base.Base.metadata.create_all(bind=engine)
-    db_base.ensure_sqlite_documents_autoincrement(engine_to_use=engine)
-    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=engine)
+    db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
     return SqlDocumentStorage(session_factory=session_local)
 
 
@@ -118,4 +108,3 @@ def run_retrieval_eval(
         reranker_enabled=reranker_enabled,
         max_queries=max_queries,
     )
-

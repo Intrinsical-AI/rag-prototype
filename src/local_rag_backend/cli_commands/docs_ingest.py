@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from local_rag_backend.cli_commands.docs_common import _hooks, _reset_if_mutated
+from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -21,7 +21,9 @@ IngestPlan = tuple[Path, str, tuple[Any, ...], tuple[str, ...]]
 BatchSyncResult = tuple[int, int, int, bool, int, int, list[tuple[Path, int]]]
 
 
-def _resolve_loader_options(*, csv_delimiter: str, csv_has_header: bool | None) -> tuple[str | None, bool]:
+def _resolve_loader_options(
+    *, csv_delimiter: str, csv_has_header: bool | None
+) -> tuple[str | None, bool]:
     delimiter_opt = None if csv_delimiter.strip().lower() == "auto" else csv_delimiter
     has_header = settings.csv_has_header if csv_has_header is None else bool(csv_has_header)
     return delimiter_opt, has_header
@@ -267,7 +269,9 @@ def _ingest_batch_sync(
     results: list[Any] = []
     updated_content_ids: list[int] = []
     if unique_items:
-        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(unique_items)
+        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
+            unique_items
+        )
 
     inserted = sum(1 for r in results if r.action == "inserted")
     updated = sum(1 for r in results if r.action == "updated")
@@ -305,7 +309,6 @@ def _ingest_batch_sync(
 
 def _execute_ingest_batches(
     *,
-    hooks: Any,
     ingest_plans: list[IngestPlan],
     doc_repo: Any,
     embedder: EmbedderPort | None,
@@ -317,7 +320,8 @@ def _execute_ingest_batches(
     total_chunks = 0
     rebuilt_any = False
 
-    for plan_batch in hooks._batched(ingest_plans, 64):
+    for i in range(0, len(ingest_plans), 64):
+        plan_batch = ingest_plans[i : i + 64]
         (
             inserted,
             updated,
@@ -326,13 +330,11 @@ def _execute_ingest_batches(
             _deleted_stale,
             ingested_chunks,
             stale_by_file,
-        ) = hooks._run_with_multi_store_write_lock(
-            lambda plans_bound=tuple(plan_batch): _ingest_batch_sync(
-                plans_bound=plans_bound,
-                doc_repo=doc_repo,
-                embedder=embedder,
-                vec=vec,
-            )
+        ) = _ingest_batch_sync(
+            plans_bound=tuple(plan_batch),
+            doc_repo=doc_repo,
+            embedder=embedder,
+            vec=vec,
         )
         total_chunks += ingested_chunks
         total_inserted += inserted
@@ -387,10 +389,7 @@ def ingest_cmd(
         click.echo("[ERROR] Provide one or more paths (file or directory).", err=True)
         raise SystemExit(2)
 
-    mutation_attempted = False
     try:
-        hooks = _hooks()
-        hooks._ensure_sqlite_schema_for_cli()
         from local_rag_backend.core.services.ingestion import build_preprocess_fn_from_settings
         from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
@@ -405,7 +404,7 @@ def ingest_cmd(
         embedder: EmbedderPort | None = None
         vec = None
         if settings.retrieval_mode in ("dense", "hybrid") and not dry_run:
-            embedder = hooks._build_dense_embedder()
+            embedder = build_dense_embedder()
             vec = FaissVectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
@@ -424,8 +423,6 @@ def ingest_cmd(
             click.echo("[WARN] No files found under limits. Nothing to ingest.")
             return
 
-        if not dry_run:
-            mutation_attempted = True
         ingest_plans, total_files, dry_run_chunks, total_skipped = _build_ingest_plans(
             files=files,
             preprocess_fn=preprocess_fn,
@@ -443,14 +440,16 @@ def ingest_cmd(
             )
             return
 
-        total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any = (
-            _execute_ingest_batches(
-                hooks=hooks,
+        def _ingest_sync() -> tuple[int, int, int, int, bool]:
+            return _execute_ingest_batches(
                 ingest_plans=ingest_plans,
                 doc_repo=doc_repo,
                 embedder=embedder,
                 vec=vec,
             )
+
+        total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any = (
+            run_cli_mutation(_ingest_sync)
         )
         click.echo(
             f"[OK] Ingest completed. files={total_files} chunks={total_chunks} "
@@ -460,5 +459,3 @@ def ingest_cmd(
     except Exception as e:
         click.echo(f"[ERROR] Error ingesting files: {e}", err=True)
         raise SystemExit(1)
-    finally:
-        _reset_if_mutated(mutation_attempted=mutation_attempted)

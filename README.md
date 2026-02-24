@@ -61,6 +61,101 @@
 
 ---
 
+## Strict Request-Flow Architecture (`/api/ask`)
+
+The following diagram maps the real runtime path of a request from
+`src/local_rag_backend/app/routers/rag.py` to `core/ports` and into
+`infrastructure/retrieval`.
+
+```mermaid
+flowchart TD
+    C[Client HTTP] --> M[FastAPI app\napp/main.py]
+    M --> AR[API Router\napp/api_router.py]
+    AR --> RR[RAG Router\napp/routers/rag.py::ask]
+
+    RR --> D1[Dependency\napp/dependencies.py::get_rag_service]
+    D1 --> F1[Factory\napp/factory.py::get_rag_service]
+    F1 --> AC[AppContainer\napp/container.py::get_rag_service]
+    AC --> BRS[build_rag_service\napp/container.py]
+
+    BRS --> RS[core/services/rag.py::RagService]
+
+    BRS --> COMP[composition.build_retriever_with_default_embedder_from_settings\napp/composition.py]
+    COMP --> RP[core/ports::RetrieverPort]
+    RP --> SBR[infrastructure/retrieval/sparse_bm25.py::SparseBM25Retriever]
+    RP --> DFR[infrastructure/retrieval/dense_faiss.py::DenseFaissRetriever]
+    RP --> HR[infrastructure/retrieval/hybrid.py::HybridRetriever]
+    COMP --> RER[core/services/reranking.py::RerankingRetriever]
+    RER --> RP
+
+    BRS --> GP[core/ports::GeneratorPort]
+    GP --> OAI[infrastructure/llms/openai_chat.py::OpenAIGenerator]
+    GP --> OLL[infrastructure/llms/ollama_chat.py::OllamaGenerator]
+
+    BRS --> HP[core/ports::QAHistoryPort]
+    HP --> HSQL[infrastructure/persistence/sqlalchemy/sql_.py::HistorySqlStorage]
+
+    RR --> RB[app/blocking.py::run_blocking]
+    RB --> RS
+    RS --> RP
+    RS --> GP
+    RS --> HP
+    RS --> RR
+    RR --> RESP[HTTP response\nAskResponse]
+```
+
+### Strict sequence (runtime)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Router as app/routers/rag.py::ask
+    participant Dep as app/dependencies.py::get_rag_service
+    participant Factory as app/factory.py::get_rag_service
+    participant Container as app/container.py::AppContainer
+    participant RagService as core/services/rag.py::RagService
+    participant Retriever as core/ports::RetrieverPort
+    participant InfraRet as infrastructure/retrieval/*
+    participant Gen as core/ports::GeneratorPort
+    participant Hist as core/ports::QAHistoryPort
+
+    Client->>Router: POST /api/ask {question, k}
+    Router->>Dep: resolve RagService dependency
+    Dep->>Factory: get_rag_service()
+    Factory->>Container: get_rag_service() (cached by version)
+    Container-->>Factory: RagService instance
+    Factory-->>Dep: RagService
+    Dep-->>Router: RagService
+
+    Router->>RagService: run_blocking(service.ask, question, k)
+    RagService->>Retriever: retrieve(question, k)
+    Retriever->>InfraRet: SparseBM25Retriever OR DenseFaissRetriever OR HybridRetriever
+    InfraRet-->>Retriever: (docs, scores)
+    Retriever-->>RagService: (docs, scores)
+
+    RagService->>Gen: generate(question, contexts)
+    Gen-->>RagService: answer
+    RagService->>Hist: save(question, answer, source_ids)
+    RagService-->>Router: {answer, docs, scores}
+    Router-->>Client: AskResponse
+```
+
+### Retrieval adapter resolution (strict)
+
+* `RETRIEVAL_MODE=sparse`:
+  `RetrieverPort := SparseBM25Retriever` (BM25 corpus + SQL doc repo)
+* `RETRIEVAL_MODE=dense`:
+  `RetrieverPort := DenseFaissRetriever` (embedder + FAISS + SQL doc repo)
+* `RETRIEVAL_MODE=hybrid`:
+  `RetrieverPort := HybridRetriever(DenseFaissRetriever, SparseBM25Retriever, alpha)`
+* If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
+  `RetrieverPort := RerankingRetriever(base=<selected>)`
+
+This boundary is enforced in `app/composition.py` and consumed by `AppContainer`.
+
+---
+
 ## Docs
 
 * `docs/architecture.md`
@@ -85,7 +180,7 @@ cd rag-prototype
 
 # Recommended: uv-managed local venv + lockfile installs
 # If your environment has a non-writable home directory, keep uv cache local:
-# export UV_CACHE_DIR=.uv-cache
+# export UV_CACHE_DIR=.uv_cache
 uv venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
@@ -99,8 +194,8 @@ uv sync --frozen
 # (Optional) SentenceTransformers embeddings (heavy: torch/transformers)
 # uv sync --frozen --extra dense-st
 
-# (Optional) Dev/Test deps
-# uv sync --frozen --extra dev --extra test
+# (Optional) Dev/Test/Lint deps
+# uv sync --frozen --extra dev --extra test --extra lint
 ```
 
 Initialize sample data and start:
@@ -442,8 +537,8 @@ curl -X POST "http://localhost:8000/api/ask" \
 ## Tests
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run --active --no-sync pytest -q
-UV_CACHE_DIR=.uv-cache uv run --active --no-sync ruff check src tests
+UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
+UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
 uv run pre-commit run --all-files
 ```
 
@@ -505,7 +600,7 @@ mkdocs serve
 
 ## Current limitations
 
-* Synchronous LLM clients (requests/OpenAI SDK); migration to async is straightforward but not included.
+* Synchronous LLM clients (httpx/OpenAI SDK); migration to async is straightforward but not included.
 * Minimal UI without front-end tests.
 * Minimal API-key auth is available (`API_KEY`), but there is no user/role authZ or rate limiting.
 * FAISS index type `IndexFlatL2` (simple). For large volumes, consider IVF/HNSW or other backends.

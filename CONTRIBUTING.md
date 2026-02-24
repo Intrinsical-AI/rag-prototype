@@ -20,8 +20,8 @@ Run these before opening/updating a PR:
 
 ```bash
 uv run pre-commit run --all-files
-UV_CACHE_DIR=.uv-cache uv run --active --no-sync ruff check src tests
-UV_CACHE_DIR=.uv-cache uv run --active --no-sync pytest -q
+UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
+UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
 ```
 
 Additional gates used in CI:

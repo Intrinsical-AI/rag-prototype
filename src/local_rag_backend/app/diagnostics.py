@@ -78,7 +78,9 @@ def _build_ok_index_payload(
     }
 
 
-def _apply_vector_integrity_status(payload: dict[str, Any], *, vectors: int, id_map_len: int) -> None:
+def _apply_vector_integrity_status(
+    payload: dict[str, Any], *, vectors: int, id_map_len: int
+) -> None:
     duplicates = int(payload.get("duplicates") or 0)
     if vectors != id_map_len:
         payload["status"] = "corrupt"
@@ -143,9 +145,7 @@ def _apply_manifest_status(
         if payload["status"] == "ok":
             payload["status"] = "corrupt"
             payload["error"] = f"manifest read/validation failed: {type(e).__name__}: {e}"
-            payload["hint"] = (
-                "Rebuild the index to repair the manifest (e.g. `rag-rebuild-index`)."
-            )
+            payload["hint"] = "Rebuild the index to repair the manifest (e.g. `rag-rebuild-index`)."
 
 
 def get_retrieval_index_stats(

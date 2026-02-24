@@ -4,7 +4,7 @@ import click
 
 from local_rag_backend.app.services import docs as docs_service
 from local_rag_backend.app.services.mutation_ports import build_docs_mutation_ports
-from local_rag_backend.cli_commands.docs_common import _hooks, _reset_if_mutated
+from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.settings import settings
 
 
@@ -16,11 +16,8 @@ def delete_docs_cmd(ids: tuple[int, ...]) -> None:
         click.echo("[ERROR] Provide one or more document IDs.", err=True)
         raise SystemExit(2)
 
-    mutation_attempted = False
     try:
-        hooks = _hooks()
-        hooks._ensure_sqlite_schema_for_cli()
-        ports = build_docs_mutation_ports(build_embedder=hooks._build_dense_embedder)
+        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
 
         def _delete_sync() -> docs_service.DeleteDocsSummary:
             return docs_service.delete_docs_sync(
@@ -29,8 +26,7 @@ def delete_docs_cmd(ids: tuple[int, ...]) -> None:
                 ports=ports,
             )
 
-        mutation_attempted = True
-        summary = hooks._run_with_multi_store_write_lock(_delete_sync)
+        summary = run_cli_mutation(_delete_sync)
         deleted_sql = summary.deleted_sql
         deleted_index = summary.deleted_index
         rebuilt = summary.rebuilt_index
@@ -45,8 +41,6 @@ def delete_docs_cmd(ids: tuple[int, ...]) -> None:
     except Exception as e:
         click.echo(f"[ERROR] Error deleting docs: {e}", err=True)
         raise SystemExit(1)
-    finally:
-        _reset_if_mutated(mutation_attempted=mutation_attempted)
 
 
 @click.command("delete-external-ids")
@@ -57,11 +51,8 @@ def delete_external_ids_cmd(external_ids: tuple[str, ...]) -> None:
         click.echo("[ERROR] Provide one or more external_ids.", err=True)
         raise SystemExit(2)
 
-    mutation_attempted = False
     try:
-        hooks = _hooks()
-        hooks._ensure_sqlite_schema_for_cli()
-        ports = build_docs_mutation_ports(build_embedder=hooks._build_dense_embedder)
+        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
 
         def _delete_sync() -> docs_service.DeleteDocsByExternalIdSummary:
             return docs_service.delete_docs_by_external_id_sync(
@@ -70,8 +61,7 @@ def delete_external_ids_cmd(external_ids: tuple[str, ...]) -> None:
                 ports=ports,
             )
 
-        mutation_attempted = True
-        summary = hooks._run_with_multi_store_write_lock(_delete_sync)
+        summary = run_cli_mutation(_delete_sync)
         deleted_sql = summary.deleted_sql
         deleted_index = summary.deleted_index
         missing = summary.missing_external_ids
@@ -87,6 +77,3 @@ def delete_external_ids_cmd(external_ids: tuple[str, ...]) -> None:
     except Exception as e:
         click.echo(f"[ERROR] Error deleting by external_id: {e}", err=True)
         raise SystemExit(1)
-    finally:
-        _reset_if_mutated(mutation_attempted=mutation_attempted)
-

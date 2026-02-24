@@ -4,21 +4,30 @@ Bounded router for core RAG query/evaluation endpoints.
 
 from __future__ import annotations
 
-import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
+from local_rag_backend.app.application.rag import (
+    execute_ask_eval_sync,
+    list_history_entries_sync,
+)
 from local_rag_backend.app.blocking import run_blocking
-from local_rag_backend.app.dependencies import get_rag_service
-from local_rag_backend.app.error_mapping import raise_http_for_runtime_error
+from local_rag_backend.app.composition import DEFAULT_DENSE_BACKEND_MESSAGE
+from local_rag_backend.app.dependencies import (
+    get_app_container_dependency,
+    get_db,
+    get_rag_service,
+    get_settings_dependency,
+)
+from local_rag_backend.app.errors import BadRequestError, InternalServerError
 from local_rag_backend.app.observability import (
     Timer,
     fingerprint_question,
     log_event,
     observe_query,
 )
-from local_rag_backend.app.schemas import (
+from local_rag_backend.app.schemas.rag import (
     AskEvalRequest,
     AskEvalResponse,
     AskRequest,
@@ -27,39 +36,72 @@ from local_rag_backend.app.schemas import (
     HistoryItem,
     QueryResult,
 )
-from local_rag_backend.app.wiring import (
-    build_generator_from_config,
-    build_retriever_from_config,
-    validate_rag_config,
-)
-from local_rag_backend.core.services.rag import RagService
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
-from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
-    HistorySqlStorage,
-    SqlDocumentStorage,
-)
-from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.orm import Session
+
+    from local_rag_backend.app.container import AppContainer
+    from local_rag_backend.app.schemas.rag import AskEvalConfig
+    from local_rag_backend.core.domain.entities import Document as DomainDocument
+    from local_rag_backend.core.ports import DocumentRepoPort, GeneratorPort, RetrieverPort
+    from local_rag_backend.core.services.rag import RagService
+    from local_rag_backend.settings import Settings
 
 router = APIRouter()
 
 
+def _build_retriever_from_config(
+    *,
+    container: AppContainer,
+    cfg: AskEvalConfig,
+    doc_repo: DocumentRepoPort,
+    preloaded_docs: Sequence[DomainDocument] | None = None,
+) -> RetrieverPort:
+    try:
+        return container.build_retriever_from_config(
+            cfg,
+            doc_repo,
+            preloaded_docs=preloaded_docs,
+            missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE,
+        )
+    except ValueError as e:
+        raise BadRequestError(str(e)) from e
+
+
+def _build_generator_from_config(
+    *,
+    container: AppContainer,
+    cfg: AskEvalConfig,
+) -> GeneratorPort:
+    try:
+        return container.build_generator_from_config(cfg)
+    except RuntimeError as e:
+        raise InternalServerError(str(e)) from e
+    except ValueError as e:
+        raise BadRequestError(str(e)) from e
+
+
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
-async def ask(request: AskRequest, service: RagService = Depends(get_rag_service)) -> AskResponse:
+async def ask(
+    request: AskRequest,
+    service: RagService = Depends(get_rag_service),
+    settings_obj: Settings = Depends(get_settings_dependency),
+) -> AskResponse:
     """Ask a question using Retrieval-Augmented Generation."""
     t = Timer()
     ok = False
     try:
         rag_result = await run_blocking(service.ask, request.question, request.k)
         ok = True
-    except Exception as e:
-        raise_http_for_runtime_error(e)
-        raise
     finally:
-        observe_query(ok=ok, duration_s=t.seconds())
+        observe_query(
+            retrieval_mode=str(settings_obj.retrieval_mode),
+            reranker_enabled=bool(settings_obj.enable_reranker),
+            ok=ok,
+            duration_s=t.seconds(),
+        )
 
     docs = rag_result["docs"]
     scores = rag_result["scores"]
@@ -67,8 +109,8 @@ async def ask(request: AskRequest, service: RagService = Depends(get_rag_service
         "rag_query",
         **fingerprint_question(request.question),
         k=int(request.k),
-        retrieval_mode=str(settings.retrieval_mode),
-        reranker_enabled=bool(settings.enable_reranker),
+        retrieval_mode=str(settings_obj.retrieval_mode),
+        reranker_enabled=bool(settings_obj.enable_reranker),
         sources=len(docs),
         duration_ms=int(1000 * t.seconds()),
     )
@@ -90,7 +132,7 @@ async def history(
     db: Session = Depends(get_db),
 ) -> list[HistoryItem]:
     """Retrieve historical Q&A pairs from the database."""
-    history_entries = get_history(db=db, limit=limit, offset=offset)
+    history_entries = list_history_entries_sync(db=db, limit=limit, offset=offset)
 
     return [
         HistoryItem(
@@ -114,31 +156,35 @@ async def history(
     tags=["RAG"],
     summary="Ask a question with per-request ephemeral RAG configuration",
 )
-async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
+async def ask_eval(
+    payload: AskEvalRequest,
+    container: AppContainer = Depends(get_app_container_dependency),
+) -> AskEvalResponse:
     """Execute a RAG query with per-request configuration."""
     cfg = payload.config
-    if validation_errors := validate_rag_config(cfg):
-        raise HTTPException(status_code=400, detail=f"Invalid config: {'; '.join(validation_errors)}")
+    if validation_errors := container.validate_rag_config(cfg):
+        raise BadRequestError(f"Invalid config: {'; '.join(validation_errors)}")
 
-    def _run_eval_sync() -> tuple[dict[str, Any], int]:
-        doc_repo = SqlDocumentStorage()
-        docs = doc_repo.get_all_documents()
-        retriever = build_retriever_from_config(cfg, doc_repo, preloaded_docs=docs)
-        generator = build_generator_from_config(cfg)
+    outcome = await run_blocking(
+        execute_ask_eval_sync,
+        question=payload.question,
+        cfg=cfg,
+        build_retriever_from_config=lambda cfg, doc_repo, *, preloaded_docs=None: (
+            _build_retriever_from_config(
+                container=container,
+                cfg=cfg,
+                doc_repo=doc_repo,
+                preloaded_docs=preloaded_docs,
+            )
+        ),
+        build_generator_from_config=lambda cfg: _build_generator_from_config(
+            container=container,
+            cfg=cfg,
+        ),
+        task_type="eval",
+    )
 
-        history_storage = HistorySqlStorage()
-        service = RagService(retriever, generator, history_storage)
-        t0 = time.perf_counter()
-        rag_result = service.ask(question=payload.question, top_k=cfg.k)
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-        return rag_result, latency_ms
-
-    try:
-        rag_result, latency_ms = await run_blocking(_run_eval_sync, task_type="eval")
-    except Exception as e:
-        raise_http_for_runtime_error(e)
-        raise
-
+    rag_result = outcome.rag_result
     docs = rag_result["docs"]
     scores = rag_result["scores"]
     sources = [
@@ -148,4 +194,8 @@ async def ask_eval(payload: AskEvalRequest) -> AskEvalResponse:
         )
         for doc, score in zip(docs, scores, strict=False)
     ]
-    return AskEvalResponse(answer=rag_result["answer"], sources=sources, latency_ms=latency_ms)
+    return AskEvalResponse(
+        answer=rag_result["answer"],
+        sources=sources,
+        latency_ms=outcome.latency_ms,
+    )

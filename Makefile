@@ -1,52 +1,62 @@
 # Simple developer helpers (uv-first).
 
-.PHONY: venv sync lint type test sec sec-hard sec-soft clean docker-build compose-up compose-down
+.PHONY: help venv sync sync-sec lint type test sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
-UV_CACHE_DIR ?= .uv-cache
+UV_CACHE_DIR ?= .uv_cache
 UV := UV_CACHE_DIR=$(UV_CACHE_DIR) uv
+IMAGE_NAME ?= intrinsical/rag-prototype
+IMAGE_TAG ?= latest
 
-venv:
-	@if [ -d .venv ]; then \
-		echo "Using existing virtualenv at .venv"; \
-	else \
-		$(UV) venv .venv; \
-	fi
+.venv/.python-stamp:
+	$(UV) venv .venv
+	@touch $@
 
-sync: venv
+.venv/.uv-sync-stamp: .venv/.python-stamp pyproject.toml uv.lock
 	$(UV) sync --frozen --extra test --extra lint
+	@touch $@
 
-lint: sync
+.venv/.uv-sec-stamp: .venv/.python-stamp pyproject.toml uv.lock
+	$(UV) sync --frozen --extra test --extra lint --extra sec
+	@touch $@
+
+help: ## Show available targets
+	@grep -E '^[a-zA-Z0-9_.-]+:.*##' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*##"}; {printf "  %-14s %s\n", $$1, $$2}'
+
+venv: .venv/.python-stamp ## Create local virtual environment
+
+sync: .venv/.uv-sync-stamp ## Sync locked test and lint dependencies
+
+sync-sec: .venv/.uv-sec-stamp ## Sync locked security tooling dependencies
+
+lint: sync ## Run Ruff lint and format checks
 	$(UV) run --active --no-sync ruff check .
 	$(UV) run --active --no-sync ruff format --check .
 
-type: sync
+type: sync ## Run mypy type checking
 	$(UV) run --active --no-sync mypy .
 
-test: sync
+test: sync ## Run test suite
 	$(UV) run --active --no-sync pytest -q
 
-sec: sec-hard
+sec: sec-hard ## Run strict security checks
 
-sec-hard: sync
-	$(UV) pip install "bandit[toml]" safety
-	$(UV) run bandit -r src/ -ll -ii
-	@if [ -n "$(SAFETY_API_KEY)" ]; then \
+sec-run: sync-sec
+	$(SEC_IGNORE)$(UV) run bandit -r src/ -ll -ii
+	$(SEC_IGNORE)@if [ -n "$(SAFETY_API_KEY)" ]; then \
 		$(UV) run safety check --full-report --key "$(SAFETY_API_KEY)"; \
 	else \
 		$(UV) run safety check --full-report; \
 	fi
 
-sec-soft: sync
-	- $(UV) pip install "bandit[toml]" safety
-	- $(UV) run bandit -r src/ -ll -ii
-	- @if [ -n "$(SAFETY_API_KEY)" ]; then \
-		$(UV) run safety check --full-report --key "$(SAFETY_API_KEY)"; \
-	else \
-		$(UV) run safety check --full-report; \
-	fi
+sec-hard: SEC_IGNORE=
+sec-hard: sec-run ## Run security checks and fail on findings
 
-clean:
+sec-soft: SEC_IGNORE=-
+sec-soft: sec-run ## Run security checks without failing the target
+
+clean: ## Remove cache, coverage, and Python build artifacts
 	rm -rf \
 		.pytest_cache .mypy_cache .ruff_cache \
 		htmlcov .coverage coverage.xml pytest-results.xml \
@@ -55,11 +65,14 @@ clean:
 	find src tests -type f -name "*.py[cod]" -delete
 	rm -rf src/*.egg-info
 
-docker-build:
-	docker build -t intrinsical/rag-prototype:latest --target production .
+clean-all: clean ## Also remove local virtualenv and uv cache
+	rm -rf .venv .uv_cache
 
-compose-up:
+docker-build: ## Build production Docker image (IMAGE_NAME/IMAGE_TAG overridable)
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) --target production .
+
+compose-up: ## Start docker compose stack
 	docker compose up -d --build
 
-compose-down:
+compose-down: ## Stop docker compose stack
 	docker compose down

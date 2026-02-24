@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import importlib
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any
 
+from local_rag_backend.core.services.schemas import DetectedFormat, Detection
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.ingestion.loaders.markdown_loader import MarkdownLoader
 from local_rag_backend.infrastructure.ingestion.loaders.text_loader import TextFileLoader
@@ -24,15 +24,7 @@ if TYPE_CHECKING:
 
     from local_rag_backend.core.ports import LoaderPort
 
-DetectedFormat = Literal["csv", "markdown", "text", "binary", "unknown"]
 _MIN_TEXT_RATIO = 0.95
-
-
-@dataclass(frozen=True)
-class Detection:
-    fmt: DetectedFormat
-    reason: str
-    mime: str | None = None
 
 
 def detect_file_format(path: Path, *, sniff_bytes: int = 4096, use_magic: bool = True) -> Detection:
@@ -191,3 +183,82 @@ def _looks_like_csv(text: str) -> bool:
         if max(counts) - min(counts) <= 1 and max(counts) >= 1:
             return True
     return False
+
+
+# --- JSON export detection (for UploadFile/import endpoint) ---
+
+
+def _is_chatgpt_export(data: list[Any]) -> bool:
+    """
+    Structural heuristic: ChatGPT export has list of objects each with a 'mapping' dict key.
+    We inspect at most the first 3 elements to avoid O(n) scanning of large exports.
+    """
+    if not data:
+        return False
+    samples = data[:3]
+    return all(isinstance(item, dict) and "mapping" in item for item in samples)
+
+
+def _is_gemini_export(data: list[Any]) -> bool:
+    """
+    Structural heuristic: Gemini export has list of objects each with a 'messages' list key
+    whose items have 'role' and 'content' fields.
+    """
+    if not data:
+        return False
+    samples = data[:3]
+    if not all(isinstance(item, dict) and "messages" in item for item in samples):
+        return False
+
+    message_lists: list[list[Any]] = []
+    for item in samples:
+        msgs = item.get("messages")
+        if not isinstance(msgs, list):
+            return False
+        message_lists.append(msgs)
+
+    # Accept minimal Gemini exports where sampled conversations may contain no messages yet.
+    if all(len(msgs) == 0 for msgs in message_lists):
+        return True
+
+    # If messages exist, at least one sampled message should carry role/content.
+    for msgs in message_lists:
+        for msg in msgs:
+            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                return True
+    return False
+
+
+def detect_json_export_format(raw: bytes) -> Detection:
+    """
+    Detect if a bytes payload is a ChatGPT or Gemini export JSON.
+
+    Returns Detection with fmt in {"chatgpt_export", "gemini_export", "unknown"}.
+    Does NOT call detect_file_format (that requires a Path).
+
+    This function is intentionally conservative: only returns a non-unknown format
+    when the structural heuristic is unambiguous.
+    """
+    import json as _json
+
+    stripped = raw.lstrip()
+    if not stripped:
+        return Detection("unknown", "not-a-json-array")
+
+    try:
+        data = _json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return Detection("unknown", "json-parse-error")
+
+    if not isinstance(data, list):
+        if data is None:
+            # Keep backward-compatible reason for JSON null payloads.
+            return Detection("unknown", "not-a-json-array")
+        return Detection("unknown", "not-a-list")
+
+    if _is_chatgpt_export(data):
+        return Detection("chatgpt_export", "structural-heuristic")
+    if _is_gemini_export(data):
+        return Detection("gemini_export", "structural-heuristic")
+
+    return Detection("unknown", "json-array-unrecognized")

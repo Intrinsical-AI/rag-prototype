@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import requests
+import httpx
 
 from local_rag_backend.core.errors import (
     LLMConnectionError,
@@ -53,7 +53,7 @@ class OllamaGenerator(GeneratorPort):
             payload["options"] = {"temperature": self.temperature}
 
         try:
-            response = requests.post(
+            response = httpx.post(
                 self.api_url, json=payload, timeout=settings.ollama_request_timeout
             )
             response.raise_for_status()
@@ -63,14 +63,16 @@ class OllamaGenerator(GeneratorPort):
                 return response_data["response"].strip()
             raise LLMResponseError("Ollama response malformed")
 
-        except requests.exceptions.Timeout as e:
+        except httpx.TimeoutException as e:
             raise LLMTimeoutError(f"Ollama request timed out to {self.api_url}") from e
-        except requests.exceptions.ConnectionError as e:
+        except httpx.ConnectError as e:
             raise LLMConnectionError(f"Could not connect to Ollama at {self.api_url}") from e
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPStatusError as e:
             status = e.response.status_code if e.response is not None else 500
             detail = e.response.text if e.response is not None else str(e)
             raise LLMResponseError(f"Ollama API error (status={status}): {detail}") from e
+        except httpx.RequestError as e:
+            raise LLMResponseError(f"Ollama API error: {e!s}") from e
         except Exception as e:
             logger.error(f"Unexpected error calling Ollama: {e}", exc_info=True)
             raise LLMResponseError(f"Unexpected error calling Ollama: {e!s}") from e

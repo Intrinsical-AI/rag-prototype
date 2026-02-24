@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from local_rag_backend.app.services.ports import DocsMutationPorts, IndexMutationPorts
+from local_rag_backend.app.services.ports import (
+    BuildIndexPorts,
+    DocsMutationPorts,
+    IndexMutationPorts,
+)
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -32,17 +36,21 @@ def build_docs_mutation_ports(
     doc_repo_factory: Callable[[], Any] | None = None,
     build_upsert_doc: Any | None = None,
     vector_repo_factory: Callable[..., Any] | None = None,
-    precompute_vectors_fn: Callable[..., dict[str, list[float]]] = precompute_vectors_for_changed_items,
+    precompute_vectors_fn: Callable[
+        ..., dict[str, list[float]]
+    ] = precompute_vectors_for_changed_items,
     sync_dense_fn: Callable[..., bool] = sync_dense_after_upsert,
     rebuild_fn: Callable[..., int] = rebuild_index_from_db,
     delete_docs_fn: Callable[..., tuple[int, int | None, bool]] = delete_documents_multi_store,
-    delete_external_ids_fn: Callable[..., tuple[int, int | None, list[str], int, bool]] = delete_external_ids_multi_store,
+    delete_external_ids_fn: Callable[
+        ..., tuple[int, int | None, list[str], int, bool]
+    ] = delete_external_ids_multi_store,
 ) -> DocsMutationPorts:
     if doc_repo_factory is None or build_upsert_doc is None:
         from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 
-        repo_factory: Callable[[], Any] = (
-            doc_repo_factory or cast("Callable[[], Any]", lambda: SqlDocumentStorage())
+        repo_factory: Callable[[], Any] = doc_repo_factory or cast(
+            "Callable[[], Any]", lambda: SqlDocumentStorage()
         )
         upsert_doc_builder = build_upsert_doc or SqlDocumentStorage.UpsertDoc
     else:
@@ -96,3 +104,16 @@ def build_index_mutation_ports(
         purge_index_artifacts_fn=purge_index_artifacts_fn,
         rebuild_fn=rebuild_fn,
     )
+
+
+def build_build_index_ports(
+    *,
+    run_sample_data_ingestion_fn: Callable[..., int] | None = None,
+) -> BuildIndexPorts:
+    if run_sample_data_ingestion_fn is None:
+        from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
+
+        runner: Callable[..., int] = run_sample_data_ingestion
+    else:
+        runner = run_sample_data_ingestion_fn
+    return BuildIndexPorts(run_sample_data_ingestion_fn=runner)

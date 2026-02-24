@@ -161,14 +161,18 @@ def delete_external_ids_multi_store(
                 ) from preflight_err
 
     # SQL delete+tombstone first. If index delete fails afterward, rebuild from DB.
-    deleted_sql, deleted_ids, missing_external_ids, tombstoned = doc_repo.delete_by_external_ids(ext_ids)
+    deleted_sql, deleted_ids, missing_external_ids, tombstoned = doc_repo.delete_by_external_ids(
+        ext_ids
+    )
 
     if vec_repo is None:
         return deleted_sql, None, missing_external_ids, tombstoned, False
 
     try:
         deleted_index_raw = vec_repo.delete(deleted_ids)
-        deleted_index = int(deleted_index_raw) if deleted_index_raw is not None else len(deleted_ids)
+        deleted_index = (
+            int(deleted_index_raw) if deleted_index_raw is not None else len(deleted_ids)
+        )
         return deleted_sql, deleted_index, missing_external_ids, tombstoned, False
     except Exception as delete_err:
         if not rebuild_on_index_failure:
@@ -185,7 +189,9 @@ def delete_external_ids_multi_store(
                 "Configure embeddings and run `rag-rebuild-index` / POST /api/index/rebuild."
             ) from delete_err
         try:
-            rebuilt = rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder)
+            rebuilt = rebuild_index_from_db(
+                doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder
+            )
             return deleted_sql, None, missing_external_ids, tombstoned, rebuilt >= 0
         except Exception as rebuild_err:
             raise RuntimeError(
