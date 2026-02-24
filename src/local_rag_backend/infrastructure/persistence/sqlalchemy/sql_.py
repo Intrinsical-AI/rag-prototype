@@ -52,6 +52,20 @@ def _normalize_external_ids(external_ids: Sequence[str]) -> list[str]:
     return normalized
 
 
+@dataclass(frozen=True)
+class _DocumentChanges:
+    """Per-field change flags computed when evaluating an upsert against an existing row."""
+
+    content: bool
+    metadata: bool
+    source: bool
+    dedup: bool
+
+    @property
+    def any_changed(self) -> bool:
+        return self.content or self.metadata or self.source or self.dedup
+
+
 def _to_domain_document(d: DbDocument) -> DomainDocument:
     """Map a single ORM row to its domain entity."""
     return DomainDocument(
@@ -304,22 +318,9 @@ class SqlDocumentStorage(DocumentRepoPort):
                     changed_content.append((int(new_doc.id), content))
                     continue
 
-                old_sha = db_doc.content_sha256 or ""
-                content_changed = (old_sha != sha) or (db_doc.content != content)
+                changes = _detect_document_changes(db_doc, item, content, sha)
 
-                metadata_changed = False
-                if item.metadata is not None:
-                    metadata_changed = dict(item.metadata) != (db_doc.metadata_ or {})
-
-                source_changed = False
-                if item.source_id is not None:
-                    source_changed = item.source_id != db_doc.source_id
-
-                dedup_changed = False
-                if item.chunk_dedup_sha256 is not None:
-                    dedup_changed = item.chunk_dedup_sha256 != db_doc.chunk_dedup_sha256
-
-                if not (content_changed or metadata_changed or source_changed or dedup_changed):
+                if not changes.any_changed:
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
@@ -330,7 +331,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                     )
                     continue
 
-                if content_changed:
+                if changes.content:
                     db_doc.content = content
                     db_doc.content_sha256 = sha
                     updated_content_ids.append(int(db_doc.id))
@@ -348,7 +349,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                         external_id=external_id,
                         id=int(db_doc.id),
                         action="updated",
-                        content_changed=content_changed,
+                        content_changed=changes.content,
                     )
                 )
 
@@ -462,6 +463,45 @@ class SqlDocumentStorage(DocumentRepoPort):
                 )
             session.commit()
             return int(deleted_sql or 0), deleted_ids, missing, len(to_tombstone)
+
+
+def _detect_document_changes(
+    db_doc: DbDocument,
+    item: SqlDocumentStorage.UpsertDoc,
+    new_content: str,
+    new_sha: str,
+) -> _DocumentChanges:
+    """Compare an incoming UpsertDoc against the persisted row to find what changed.
+
+    Args:
+        db_doc: Existing ORM row.
+        item: Incoming upsert payload.
+        new_content: Stripped content string (pre-computed by caller).
+        new_sha: SHA-256 of new_content (pre-computed by caller).
+
+    Returns:
+        _DocumentChanges with per-field change flags.
+    """
+    content_changed = (db_doc.content_sha256 or "") != new_sha or db_doc.content != new_content
+
+    metadata_changed = False
+    if item.metadata is not None:
+        metadata_changed = dict(item.metadata) != (db_doc.metadata_ or {})
+
+    source_changed = False
+    if item.source_id is not None:
+        source_changed = item.source_id != db_doc.source_id
+
+    dedup_changed = False
+    if item.chunk_dedup_sha256 is not None:
+        dedup_changed = item.chunk_dedup_sha256 != db_doc.chunk_dedup_sha256
+
+    return _DocumentChanges(
+        content=content_changed,
+        metadata=metadata_changed,
+        source=source_changed,
+        dedup=dedup_changed,
+    )
 
 
 class HistorySqlStorage(QAHistoryPort):

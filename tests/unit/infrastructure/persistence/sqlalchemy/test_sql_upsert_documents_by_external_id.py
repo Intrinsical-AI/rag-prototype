@@ -61,6 +61,67 @@ def test_upsert_updates_content_and_hash(in_memory_sqlite):
     assert doc.content_sha256 == hashlib.sha256(b"HELLO2").hexdigest()
 
 
+def test_upsert_metadata_only_change(in_memory_sqlite):
+    """Metadata update triggers action=updated with content_changed=False."""
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    first, *_ = repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="doc-1", content="same", metadata={"v": 1})]
+    )
+    doc_id = first[0].id
+
+    res, changed, updated_ids = repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="doc-1", content="same", metadata={"v": 2})]
+    )
+    assert res[0].action == "updated"
+    assert res[0].content_changed is False
+    assert changed == []
+    assert updated_ids == []
+    assert repo.get([doc_id])[0].metadata == {"v": 2}
+
+
+def test_upsert_source_only_change(in_memory_sqlite):
+    """Source update triggers action=updated with content_changed=False."""
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    first, *_ = repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="doc-1", content="text", source_id="src-a")]
+    )
+    doc_id = first[0].id
+
+    res, changed, updated_ids = repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="doc-1", content="text", source_id="src-b")]
+    )
+    assert res[0].action == "updated"
+    assert res[0].content_changed is False
+    assert changed == []
+    assert updated_ids == []
+    assert repo.get([doc_id])[0].source_id == "src-b"
+
+
+def test_upsert_dedup_only_change(in_memory_sqlite):
+    """chunk_dedup_sha256 update triggers action=updated with content_changed=False."""
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    first, *_ = repo.upsert_documents_by_external_id(
+        [
+            SqlDocumentStorage.UpsertDoc(
+                external_id="doc-1", content="text", chunk_dedup_sha256="sha-v1"
+            )
+        ]
+    )
+    doc_id = first[0].id
+
+    res, changed, updated_ids = repo.upsert_documents_by_external_id(
+        [
+            SqlDocumentStorage.UpsertDoc(
+                external_id="doc-1", content="text", chunk_dedup_sha256="sha-v2"
+            )
+        ]
+    )
+    assert res[0].action == "updated"
+    assert res[0].content_changed is False
+    assert changed == []
+    assert updated_ids == []
+
+
 def test_upsert_rejects_duplicate_external_ids(in_memory_sqlite):
     repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     with pytest.raises(ValueError, match="unique within the request"):
