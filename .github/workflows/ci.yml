@@ -267,23 +267,15 @@ jobs:
         run: uv venv
 
       - name: Install security tools
-        run: uv sync --frozen --extra sec --no-install-project --no-dev
+        run: uv pip install "bandit[toml]" "safety<3"
 
       - name: Run security scans (fail on findings)
         run: |
           uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
-          if uv run safety --help | grep -qE '(^|[[:space:]])scan([[:space:]]|$)'; then
-            if [ -n "${SAFETY_API_KEY:-}" ]; then
-              uv run safety scan --key "$SAFETY_API_KEY" > safety-report.txt
-            else
-              uv run safety scan > safety-report.txt
-            fi
+          if [ -n "${SAFETY_API_KEY:-}" ]; then
+            uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
           else
-            if [ -n "${SAFETY_API_KEY:-}" ]; then
-              uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
-            else
-              uv run safety check --full-report --json --output safety-report.json
-            fi
+            uv run safety check --full-report --json --output safety-report.json
           fi
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
@@ -296,7 +288,6 @@ jobs:
           path: |
             bandit-report.json
             safety-report.json
-            safety-report.txt
           retention-days: 7
 
   docker:
