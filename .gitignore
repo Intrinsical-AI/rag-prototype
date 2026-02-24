@@ -219,3 +219,5 @@ medium-blog/
 curso/
 
 openai**
+
+.pre-commit-cache
