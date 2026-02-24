@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from openai import OpenAI
 
@@ -45,7 +45,7 @@ def generate_openrouter_sync(
     *,
     payload: OpenRouterGenerateInput,
     settings_obj: Settings,
-    create_openai_client_fn: Callable[..., object] | None = None,
+    create_openai_client_fn: Callable[..., OpenAIClient] | None = None,
     openai_client_factory: type[OpenAIClient] | None = None,
 ) -> OpenRouterGenerateOutput:
     create_client = create_openai_client_fn or create_openai_client
@@ -58,12 +58,15 @@ def generate_openrouter_sync(
         headers["X-Title"] = settings_obj.openrouter_app_title
 
     try:
-        client = create_client(
+        client = cast(
+            "OpenAIClient",
+            create_client(
             api_key=settings_obj.openrouter_api_key,
             base_url=settings_obj.openrouter_base_url,
             default_headers=headers or None,
             timeout=settings_obj.openai_request_timeout,
             client_factory=client_factory,
+            ),
         )
         resp = client.chat.completions.create(
             model=(payload.model or settings_obj.openrouter_model),

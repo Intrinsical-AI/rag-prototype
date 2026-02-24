@@ -235,7 +235,7 @@ jobs:
 
       - name: Run smoke tests (cross-platform persistence paths)
         run: >
-          uv run pytest -q
+          uv run pytest -o addopts='' -q
           tests/unit/infrastructure/persistence/faiss/test_faiss_index.py
           tests/unit/infrastructure/persistence/faiss/test_faiss_index_race.py
           tests/unit/infrastructure/persistence/faiss/test_vector_storage_manifest_guard.py
@@ -267,15 +267,23 @@ jobs:
         run: uv venv
 
       - name: Install security tools
-        run: uv pip install "bandit[toml]" safety
+        run: uv sync --frozen --extra sec --no-install-project --no-dev
 
       - name: Run security scans (fail on findings)
         run: |
           uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
-          if [ -n "${SAFETY_API_KEY:-}" ]; then
-            uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
+          if uv run safety --help | grep -qE '(^|[[:space:]])scan([[:space:]]|$)'; then
+            if [ -n "${SAFETY_API_KEY:-}" ]; then
+              uv run safety scan --key "$SAFETY_API_KEY" > safety-report.txt
+            else
+              uv run safety scan > safety-report.txt
+            fi
           else
-            uv run safety check --full-report --json --output safety-report.json
+            if [ -n "${SAFETY_API_KEY:-}" ]; then
+              uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
+            else
+              uv run safety check --full-report --json --output safety-report.json
+            fi
           fi
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
@@ -288,6 +296,7 @@ jobs:
           path: |
             bandit-report.json
             safety-report.json
+            safety-report.txt
           retention-days: 7
 
   docker:
