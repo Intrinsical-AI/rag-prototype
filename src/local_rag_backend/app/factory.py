@@ -49,12 +49,8 @@ _APP_CONTEXT: AppContext | None = None
 _APP_CONTEXT_LOCK = Lock()
 
 
-def _build_container(
-    *,
-    system_state_factory: Callable[[], SystemStateStorage] | None = None,
-) -> AppContainer:
-    resolved_system_state_factory = system_state_factory or SystemStateStorage
-
+def _collect_container_overrides() -> dict[str, Any]:
+    """Collect explicit test-time overrides for AppContainer seams."""
     # Keep AppContainer as the default composition source.
     # We only inject explicit overrides when tests monkeypatch factory-level seams.
     overrides: dict[str, Any] = {}
@@ -102,6 +98,15 @@ def _build_container(
         overrides["write_lock"] = multi_store_write_lock
     if RagService is not app_container_module.RagService:
         overrides["rag_service_factory"] = RagService
+    return overrides
+
+
+def _build_container(
+    *,
+    system_state_factory: Callable[[], SystemStateStorage] | None = None,
+) -> AppContainer:
+    resolved_system_state_factory = system_state_factory or SystemStateStorage
+    overrides = _collect_container_overrides()
 
     return AppContainer(
         settings_obj=settings,

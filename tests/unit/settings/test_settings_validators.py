@@ -22,6 +22,26 @@ def test_chunk_overlap_lt_chars_validator():
         Settings(ingest_chunk_chars=100, ingest_chunk_overlap=100)
 
 
+def test_ingest_batch_size_accepts_minimum():
+    s = Settings(ingest_batch_size=1)
+    assert s.ingest_batch_size == 1
+
+
+def test_ingest_batch_size_accepts_maximum():
+    s = Settings(ingest_batch_size=512)
+    assert s.ingest_batch_size == 512
+
+
+def test_ingest_batch_size_rejects_below_minimum():
+    with pytest.raises(ValueError):
+        Settings(ingest_batch_size=0)
+
+
+def test_ingest_batch_size_rejects_above_maximum():
+    with pytest.raises(ValueError):
+        Settings(ingest_batch_size=513)
+
+
 def test_log_level_is_normalized_to_uppercase():
     s = Settings(log_level="debug")
     assert s.log_level == "DEBUG"
