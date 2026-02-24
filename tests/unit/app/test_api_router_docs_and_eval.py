@@ -3,7 +3,9 @@
 import numpy as np
 import pytest
 
-from local_rag_backend.app import api_router as api
+from local_rag_backend.app import factory
+from local_rag_backend.app.application import openrouter as openrouter_service
+from local_rag_backend.app.routers import health as health_router
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
@@ -31,7 +33,7 @@ async def test_post_docs_sparse_and_list(asgi_client, in_memory_sqlite, monkeypa
     [
         (["  A  ", "", " B "], 2),
         (["á", "漢字", "   "], 2),
-        (["dup", "dup", "  dup  "], 3),  # API stores all non-empty entries; no dedup here
+        (["dup", "dup", "  dup  "], 1),  # hash-based dedup (post-clean)
     ],
 )
 async def test_post_docs_sparse_various_inputs(
@@ -60,9 +62,9 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
             self.calls.append((list(ids), list(vectors)))
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
-    monkeypatch.setattr(api, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
+    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     dummy_vec = DummyVec()
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda **k: dummy_vec)
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: dummy_vec)
 
     payload = {"texts": ["X", "Y"]}
     r = await asgi_client.post("/api/docs", json=payload)
@@ -72,6 +74,47 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
     assert len(dummy_vec.calls) == 1
     ids_called, vectors_called = dummy_vec.calls[0]
     assert len(ids_called) == 2 and len(vectors_called) == 2
+
+
+async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlite, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "ingest_chunker_version", "v1", raising=False)
+
+    payload = {"texts": ["  DU P  ", "du p", "DU P"]}
+    r1 = await asgi_client.post("/api/docs", json=payload)
+    assert r1.status_code == 200
+    ids1 = r1.json()["ids"]
+    assert len(ids1) == 1
+
+    docs1 = SqlDocumentStorage().get_all_documents()
+    assert len(docs1) == 1
+
+    r2 = await asgi_client.post("/api/docs", json=payload)
+    assert r2.status_code == 200
+    ids2 = r2.json()["ids"]
+    assert ids2 == ids1
+
+    docs2 = SqlDocumentStorage().get_all_documents()
+    assert len(docs2) == 1
+
+
+async def test_post_docs_sparse_chunker_version_change_inserts_new(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "ingest_chunker_version", "v1", raising=False)
+    payload = {"texts": ["hello world"]}
+
+    r1 = await asgi_client.post("/api/docs", json=payload)
+    assert r1.status_code == 200
+    assert r1.json()["count"] == 1
+    assert len(SqlDocumentStorage().get_all_documents()) == 1
+
+    monkeypatch.setattr(settings, "ingest_chunker_version", "v2", raising=False)
+    r2 = await asgi_client.post("/api/docs", json=payload)
+    assert r2.status_code == 200
+    assert r2.json()["count"] == 1
+    assert len(SqlDocumentStorage().get_all_documents()) == 2
 
 
 async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatch):
@@ -89,7 +132,7 @@ async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatc
             return "ans"
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(api, "OpenAIGenerator", lambda **k: DummyGen())
+    monkeypatch.setattr(factory, "OpenAIGenerator", lambda **k: DummyGen())
 
     payload = {"question": "hello?", "config": {"retrieval_mode": "sparse", "k": 1}}
     r = await asgi_client.post("/api/ask_eval", json=payload)
@@ -118,12 +161,14 @@ async def test_ask_eval_rejects_unsafe_prompt_template(asgi_client, in_memory_sq
     assert "prompt_template" in r.json().get("detail", "")
 
 
-async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch):
-    # Create dummy index file
+async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_path, monkeypatch):
+    # Create a minimal valid on-disk index + id-map.
+    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+
     idx = tmp_path / "index.faiss"
-    idx.write_text("")
     id_map = tmp_path / "id_map.json"
-    id_map.write_bytes(b"")  # only need to exist for readiness
+    monkeypatch.setattr(settings, "openai_api_key", "x", raising=False)
+    FaissVectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
@@ -135,8 +180,7 @@ async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch)
     async def _override():
         return _Dummy()
 
-    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
-    monkeypatch.setattr(settings, "openai_api_key", "x", raising=False)
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 200
@@ -147,6 +191,8 @@ async def test_ready_retrieval_index_present(asgi_client, tmp_path, monkeypatch)
 async def test_openrouter_generate_success(asgi_client, monkeypatch):
     monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
+    monkeypatch.setattr(settings, "openai_request_timeout", 19, raising=False)
+    captured: dict[str, object] = {}
 
     class DummyUsage:
         prompt_tokens = 1
@@ -165,7 +211,7 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
 
     class DummyClient:
         def __init__(self, *args, **kwargs):
-            pass
+            captured.update(kwargs)
 
         class chat:
             class completions:
@@ -173,7 +219,7 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(api, "OpenAI", DummyClient)
+    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
 
     r = await asgi_client.post(
         "/api/openrouter/generate",
@@ -190,3 +236,39 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
     data = r.json()
     assert data["text"] == "hi"
     assert data["usage"]["prompt_tokens"] == 1
+    assert captured.get("timeout") == 19
+
+
+async def test_openrouter_generate_malformed_response_is_502(asgi_client, monkeypatch):
+    monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
+
+    class DummyResp:
+        choices: list[object] = []
+        usage = None
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return DummyResp()
+
+    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
+
+    r = await asgi_client.post(
+        "/api/openrouter/generate",
+        json={
+            "model": None,
+            "system_instruction": "sys",
+            "user_content": "hi",
+            "temperature": 0.5,
+            "max_tokens": 10,
+            "top_p": 1.0,
+        },
+    )
+    assert r.status_code == 502
+    assert "malformed response" in r.json()["detail"]

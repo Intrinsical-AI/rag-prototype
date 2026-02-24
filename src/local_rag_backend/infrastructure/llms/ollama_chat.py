@@ -8,11 +8,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import requests
-from fastapi import HTTPException
+import httpx
 
+from local_rag_backend.core.errors import (
+    LLMConnectionError,
+    LLMResponseError,
+    LLMTimeoutError,
+)
 from local_rag_backend.core.ports import GeneratorPort
-from local_rag_backend.prompting import render_prompt_template
+from local_rag_backend.core.services.prompting import render_prompt_template
 from local_rag_backend.settings import (
     settings,  # settings.ollama_base_url y settings.ollama_request_timeout exists
 )
@@ -49,7 +53,7 @@ class OllamaGenerator(GeneratorPort):
             payload["options"] = {"temperature": self.temperature}
 
         try:
-            response = requests.post(
+            response = httpx.post(
                 self.api_url, json=payload, timeout=settings.ollama_request_timeout
             )
             response.raise_for_status()
@@ -57,16 +61,18 @@ class OllamaGenerator(GeneratorPort):
 
             if "response" in response_data and isinstance(response_data["response"], str):
                 return response_data["response"].strip()
-            raise HTTPException(500, "Ollama response malformed")
+            raise LLMResponseError("Ollama response malformed")
 
-        except requests.exceptions.Timeout as e:
-            raise HTTPException(504, f"Ollama request timed out to {self.api_url}") from e
-        except requests.exceptions.ConnectionError as e:
-            raise HTTPException(503, f"Could not connect to Ollama at {self.api_url}") from e
-        except requests.exceptions.RequestException as e:
+        except httpx.TimeoutException as e:
+            raise LLMTimeoutError(f"Ollama request timed out to {self.api_url}") from e
+        except httpx.ConnectError as e:
+            raise LLMConnectionError(f"Could not connect to Ollama at {self.api_url}") from e
+        except httpx.HTTPStatusError as e:
             status = e.response.status_code if e.response is not None else 500
             detail = e.response.text if e.response is not None else str(e)
-            raise HTTPException(status, f"Ollama API error: {detail}") from e
+            raise LLMResponseError(f"Ollama API error (status={status}): {detail}") from e
+        except httpx.RequestError as e:
+            raise LLMResponseError(f"Ollama API error: {e!s}") from e
         except Exception as e:
             logger.error(f"Unexpected error calling Ollama: {e}", exc_info=True)
-            raise HTTPException(500, f"Unexpected error calling Ollama: {e!s}") from e
+            raise LLMResponseError(f"Unexpected error calling Ollama: {e!s}") from e

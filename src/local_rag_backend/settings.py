@@ -15,6 +15,7 @@ Example:
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
         "INFO", description="Logging level."
     )
     enable_monitoring: bool = Field(False, description="Enable Prometheus metrics.")
+    enable_reranker: bool = Field(
+        False, description="Enable reranking of retrieved documents (best-effort)."
+    )
 
     # --- Security / HTTP --- #
     api_key: str | None = Field(
@@ -84,6 +88,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = Field(
         "text-embedding-3-small", description="Default OpenAI embedding model."
     )
+    openai_request_timeout: int = Field(
+        60,
+        ge=1,
+        le=600,
+        description="Timeout in seconds for OpenAI-compatible HTTP requests.",
+    )
     openai_temperature: float = Field(0.2, ge=0.0, le=2.0, description="OpenAI temperature.")
     openai_top_p: float = Field(1.0, ge=0.0, le=1.0, description="OpenAI top_p parameter.")
     openai_max_tokens: int = Field(256, ge=1, le=4096, description="OpenAI max tokens.")
@@ -113,9 +123,36 @@ class Settings(BaseSettings):
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
 
     # --- Ingestion --- #
+    ingest_chunk_strategy: Literal["chars_v1"] = Field(
+        "chars_v1", description="Chunking strategy identifier (deterministic)."
+    )
+    ingest_chunker_version: str = Field(
+        "chars_v1",
+        description=(
+            "Version token included in dedup hashes to force re-chunk/re-embed when changed "
+            "(even if the strategy name stays the same)."
+        ),
+    )
     ingest_chunk_chars: int = Field(1200, ge=200, le=8000, description="Chunk size in characters.")
     ingest_chunk_overlap: int = Field(200, ge=0, le=4000, description="Overlap between chunks.")
     csv_has_header: bool = Field(True, description="Whether CSV files have header rows.")
+    ingest_clean_lowercase: bool = Field(True, description="Lowercase during ingestion cleaning.")
+    ingest_clean_remove_html: bool = Field(True, description="Remove HTML tags during cleaning.")
+    ingest_clean_collapse_whitespace: bool = Field(
+        True, description="Collapse whitespace during cleaning."
+    )
+    ingest_clean_strip: bool = Field(True, description="Strip leading/trailing whitespace first.")
+
+    # --- Retrieval quality (optional) --- #
+    reranker_strategy: Literal["overlap_v1"] = Field(
+        "overlap_v1", description="Reranker strategy identifier."
+    )
+    reranker_candidate_k: int = Field(
+        20,
+        ge=3,
+        le=200,
+        description="Candidates to fetch before reranking (top-k is returned).",
+    )
 
     # --- Prompt Templates --- #
     openai_prompt_template: str = Field(
@@ -202,6 +239,29 @@ class Settings(BaseSettings):
             db_path = self.sqlite_url[10:]  # Remove 'sqlite:///'
             return Path(db_path)
         raise ValueError("Invalid SQLite URL format")
+
+    def get_coordination_dir(self) -> Path:
+        """
+        Return the directory used for cross-process coordination artifacts.
+
+        Priority:
+        - Explicit absolute `data_dir` (user intent).
+        - Parent dir of absolute SQLite path (keeps workers aligned on shared DB).
+        - Resolved `data_dir` for purely relative deployments.
+
+        Rationale:
+        - A relative `data_dir` can resolve differently per process (different CWD),
+          splitting write locks while sharing the same absolute SQLite database.
+          Prefer the DB parent in that case to avoid multi-process lock drift.
+        """
+        data_dir = Path(self.data_dir).expanduser()
+        if data_dir.is_absolute():
+            return data_dir.resolve()
+        with suppress(Exception):
+            db_path = self.get_database_path().expanduser()
+            if db_path.is_absolute():
+                return db_path.parent.resolve()
+        return data_dir.resolve()
 
 
 # Global settings instance

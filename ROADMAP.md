@@ -1,77 +1,34 @@
-# Roadmap 
-## Brainstorm
-- Ingestion Pipeline - ¿Flex. base skeleton + adapters?
-    -- Extract
-    --- Suport formats: .csv, .txt, .md, .pdf [F]
-    --- metadata contract
-    -- Clean
-    -- Chunk
-        --- Fixed (logs, flat texts) chunk size and overlap
-        --- Parent-Doc Retrieval [F]
-        --- Custom heuristics RegEx based (emails structured docs) [F]
-        ** Caution with tables; easy to break semantic coherence intrachunk
-    -- Dedup (hash-based)
-        --- Add external_id/source_id + content_hash + version
-    -- Embed 
-        --- Re-embedding policy / updating
-    -- Store
-    -- Update (Insert/Upsert) policy
+# Roadmap
 
-- Retrieval 
-    -- Bi-Encoders
-    -- Cross-Encoders [F]
-    -- ColBERT / ColBERTv2 [F]
+## Current Snapshot
+- Architecture is solid (hexagonal + clear adapter seams), but still has transitional overlap between `app/application` and `app/services`.
+- Core HTTP/API and CLI flows are stable and well-tested.
+- Main technical debt is structural simplification, not missing features.
 
-- Monitoring Module
-    -- Opentelemetry / Prometheus
+## Near Term (Now -> Next 2 PRs)
+1. Keep transport boundaries strict:
+   - No infra imports in `app/routers`.
+   - No transport/schema imports in `app/application`.
+2. Remove CLI indirection legacy:
+   - Eliminate `_hooks` dynamic bridge.
+   - Use explicit runtime helpers in `cli_commands/runtime.py`.
+3. Keep docs aligned with real structure (`app/http`, `app/application`, `app/container`).
 
-- Evaluation Module
-    -- Offline Metrics
-    -- Online Metrics
+## Mid Term
+1. Consolidate app-layer use cases:
+   - Gradually move orchestration to `app/application`.
+   - Leave compatibility shims in `app/services` temporarily.
+2. Reduce composition duplication:
+   - Keep `AppContainer` as the single composition source.
+   - Keep `factory` focused on app-context lifecycle/cache invalidation.
+3. Centralize runtime error mapping in one HTTP boundary path.
 
-- Safety
-    -- PII [F]
-    -- Direct Prompt Injection
-    -- Indirect Prompt Injection 
+## Long Term
+1. Unify ingestion paths (sparse/dense) to remove duplicate control flow.
+2. Split mixed type modules (e.g. `core/services/schemas.py`) by domain concern.
+3. Continue tightening architecture tests to prevent regressions.
 
-
-## Proposal
-1. **PR1: Operabilidad y diagnóstico (status/ready)**
-- Scope: mejorar `rag-status` y `/api/ready` para reportar consistencia y causas.
-- DoD: `rag-status` incluye conteos (docs/vectores) y paths; `/api/ready` da error 503 con detalle accionable si falta índice en `dense/hybrid`.
-
-2. **PR2: Identidad de documento (external_id) + modelo de metadata**
-- Scope: añadir `external_id/source_id`, `metadata`, `content_hash`, timestamps; contrato estable.
-- DoD: schema + migración; tests de persistencia y lectura; docs actualizadas de identidad.
-
-3. **PR3: Upsert idempotente (API/CLI)**
-- Scope: endpoint/CLI `upsert` por `external_id` y política de actualización.
-- DoD: re-ingesta misma fuente no duplica; update de contenido actualiza solo lo afectado (o marca rebuild requerido); tests de idempotencia/update.
-
-4. **PR4: Extract adapters (txt/md/csv) + `rag-ingest` por path/dir**
-- Scope: loaders por formato + CLI para ingestar ficheros/directorios.
-- DoD: ingest de dir mixto; límites/tamaños; tests con fixtures.
-
-5. **PR5: Clean + Chunk pipeline configurable**
-- Scope: normalización/cleaning y chunker determinista configurable por settings.
-- DoD: chunking determinista; tests de boundaries/overlap/metadata.
-
-6. **PR6: Dedup hash-based + constraints**
-- Scope: hashing por chunk + constraint/índice SQL para dedup.
-- DoD: reingesta => 0 inserts; cambio de `chunker_version` => re-chunk esperado; tests de dedup.
-
-7. **PR7: Borrado por `external_id` + (opcional) tombstones**
-- Scope: delete consistente por identidad; decidir hard vs soft delete.
-- DoD: delete no reaparece tras rebuild; dense/hybrid consistente; tests delete+ask+rebuild.
-
-8. **PR8: Manifest del índice + detección de drift (model/dim/chunker)**
-- Scope: `index_manifest.json` y validación en `/ready`/CLI.
-- DoD: mismatch detectado y explicado; rebuild corrige; tests de mismatch.
-
-9. **PR9: Evaluación offline como gate (`rag-eval`)**
-- Scope: dataset versionado + script que compute recall@k/MRR@k/latencia.
-- DoD: comando reproducible; subset rápido en CI; tests de parser/reporte.
-
-10. **PR10: Retrieval quality (reranker opcional) + monitoring mínimo**
-- Scope: reranker opcional (flag) y métricas/logs estructurados ingest/query.
-- DoD: toggle seguro; latencias medidas; `/metrics` consistente cuando habilitado; tests smoke de métricas y reranker.
+## Quality Gates (Every Refactor PR)
+- `uv run ruff check .`
+- `uv run mypy src`
+- `uv run pytest` (or targeted subset for the changed area)

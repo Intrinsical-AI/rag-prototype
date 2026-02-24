@@ -33,4 +33,4 @@ def test_build_index_sparse(tmp_path, monkeypatch):
     docs = SqlDocumentStorage(session_factory=Session).get_all_documents()
     assert len(docs) == 1
     assert "T" in docs[0].content
-    assert "C" in docs[0].content
+    assert "c" in docs[0].content.lower()

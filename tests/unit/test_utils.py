@@ -1,7 +1,8 @@
 # tests/test_utils.py
 
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.utils import get_corpus_and_ids, preprocess_text
+from local_rag_backend.core.services.corpus import get_corpus_and_ids
+from local_rag_backend.core.services.text_processing import preprocess_text
 
 
 class DummyRepo:
@@ -88,3 +89,13 @@ def test_preprocess_malformed_html():
 
     # Invalid tag syntax (should not be removed)
     assert preprocess_text("Hello<>World") == "hello<>world"
+
+
+def test_preprocess_text_options_respected():
+    raw = "  <b>Hello</b>\nWorld  "
+    assert preprocess_text(raw, lowercase=False) == "Hello World"
+    assert preprocess_text(raw, remove_html=False) == "<b>hello</b> world"
+    assert "\n" in preprocess_text(raw, collapse_whitespace=False)
+    assert preprocess_text(
+        raw, strip=False, collapse_whitespace=False, remove_html=False
+    ).startswith("  ")

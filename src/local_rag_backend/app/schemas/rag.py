@@ -1,17 +1,10 @@
-# src/models.py
-"""
-Models for the application.
-"""
+"""RAG bounded-context transport schemas."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-
-class DocumentInDB(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    content: str
+from local_rag_backend.app.schemas.shared import DocumentInDB
 
 
 class QueryResult(BaseModel):
@@ -19,7 +12,6 @@ class QueryResult(BaseModel):
     score: float
 
 
-# API
 class AskRequest(BaseModel):
     """Request schema for the `/ask` endpoint."""
 
@@ -57,14 +49,13 @@ class AskEvalConfig(BaseModel):
         default=None, ge=0.0, le=1.0, description="Hybrid alpha (weight for sparse) in [0,1]"
     )
 
-    # Optional generator overrides
     llm_provider: str | None = Field(
         default=None, description="Optional override for generator provider: 'openai'|'ollama'"
     )
     model: str | None = Field(default=None, max_length=256)
-    temperature: float | None = None
-    top_p: float | None = None
-    max_tokens: int | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=4096)
     prompt_template: str | None = Field(default=None, max_length=20000)
 
 
@@ -83,17 +74,3 @@ class AskEvalRequest(BaseModel):
 
 class AskEvalResponse(AskResponse):
     latency_ms: int | None = Field(default=None, description="Server-side latency in ms")
-
-
-class DeleteDocsRequest(BaseModel):
-    ids: list[int] = Field(..., min_length=1, max_length=1000)
-
-
-class DeleteDocsResponse(BaseModel):
-    deleted_sql: int
-    deleted_index: int | None = None
-    rebuilt_index: bool = False
-
-
-class RebuildIndexResponse(BaseModel):
-    indexed: int

@@ -42,26 +42,22 @@ dependencies = [
   "fastapi>=0.111,<0.112",
   "uvicorn[standard]>=0.29,<1.0",
   "anyio>=4.3,<4.4",
-
   # AI/ML Core (lightweight defaults; heavy deps are optional extras)
   "rank-bm25>=0.2,<1.0",
   "numpy>=2.0,<2.3",
-
   # LLM Integrations
   "openai>=1.24,<2.0",
-  "requests>=2.31,<3.0",
-
+  "httpx>=0.27,<0.28",
   # Database & ORM
   "sqlalchemy>=2.0,<3.0",
-
   # Configuration & Validation
   "pydantic>=2.0,<3.0",
   "pydantic-settings>=2.2,<3.0",
   "python-dotenv>=1.0,<2.0",
-
   # CLI & Utilities
   "click>=8.0,<9.0",
-  "rich>=13.0,<14.0"
+  "rich>=13.0,<14.0",
+  "pre-commit>=4.5.1",
 ]
 
 [project.optional-dependencies]
@@ -72,40 +68,25 @@ dense-st = [
   # Heavy dependency chain (torch/transformers). Prefer OpenAI embeddings when possible.
   "sentence-transformers>=2.7,<3.0"
 ]
-dev = [
-  # Testing
-  "pytest>=8.2,<9.0",
-  "pytest-cov>=6.1.1,<7.0",
-  "pytest-asyncio>=0.23,<1.0",
-  "pytest-xdist>=3.5,<4.0",
-  "httpx>=0.27,<0.28",
-
-  # Code Quality & Formatting
-  "ruff>=0.4,<1.0",
-  "black>=24.0,<25.0",
-  "isort>=5.13,<6.0",
-  "pre-commit>=4.2.0,<5.0",
-
-  # Type Checking
-  "mypy>=1.10,<2.0",
-  "types-requests>=2.31,<3.0",
-
-  # Dev Tools
-  "ipython>=8.0,<9.0",
-  "jupyter>=1.0,<2.0"
-]
 test = [
   "pytest>=8.2,<9.0",
   "pytest-cov>=6.1.1,<7.0",
   "pytest-asyncio>=0.23,<1.0",
+  "pytest-xdist>=3.5,<4.0",
   "httpx>=0.27,<0.28"
 ]
 lint = [
   "ruff>=0.4,<1.0",
-  "black>=24.0,<25.0",
-  "isort>=5.13,<6.0",
-  "mypy>=1.10,<2.0",
-  "types-requests>=2.31,<3.0"
+  "mypy>=1.10,<2.0"
+]
+dev = [
+  "pre-commit>=4.2.0,<5.0",
+  "ipython>=8.0,<9.0",
+  "jupyter>=1.0,<2.0"
+]
+sec = [
+  "bandit[toml]>=1.7,<2.0",
+  "safety>=3.2,<4.0"
 ]
 docs = [
   "mkdocs>=1.5,<2.0",
@@ -117,6 +98,10 @@ docs = [
 loaders = [
   "langchain-community>=0.2,<1.0",
   "trafilatura>=1.8,<2.0"
+]
+magic = [
+  # Optional file type detection via libmagic. Requires system libmagic on many distros.
+  "python-magic>=0.4,<1.0"
 ]
 # CPU por defecto (retro-compat mantenida)
 performance = [
@@ -135,24 +120,11 @@ monitoring = [
 all = [
   "faiss-cpu>=1.8.0,<2.0",
   "sentence-transformers>=2.7,<3.0",
-  "pytest>=8.2,<9.0",
-  "pytest-cov>=6.1.1,<7.0",
-  "pytest-asyncio>=0.23,<1.0",
-  "pytest-xdist>=3.5,<4.0",
-  "httpx>=0.27,<0.28",
-  "ruff>=0.4,<1.0",
-  "black>=24.0,<25.0",
-  "isort>=5.13,<6.0",
-  "pre-commit>=4.2.0,<5.0",
-  "mypy>=1.10,<2.0",
-  "types-requests>=2.31,<3.0",
-  "ipython>=8.0,<9.0",
-  "jupyter>=1.0,<2.0",
-  "mkdocs>=1.5,<2.0",
-  "mkdocs-material>=9.5,<10.0",
-  "mkdocstrings[python]>=0.24,<1.0",
-  "mkdocs-mermaid2-plugin>=1.1,<2.0",
-  "mkdocs-include-markdown-plugin>=6.0,<7.0",
+  "langchain-community>=0.2,<1.0",
+  "trafilatura>=1.8,<2.0",
+  "python-magic>=0.4,<1.0",
+  "torch>=2.0,<3.0",
+  "orjson>=3.10,<4.0",
   "prometheus-client>=0.19,<1.0",
   "structlog>=23.0,<24.0",
   "sentry-sdk[fastapi]>=1.40,<2.0"
@@ -169,9 +141,13 @@ Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
 rag-delete-docs = "local_rag_backend.cli:rag_delete_docs"
+rag-delete-external-ids = "local_rag_backend.cli:rag_delete_external_ids"
+rag-ingest      = "local_rag_backend.cli:rag_ingest"
 rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
+rag-upsert-docs = "local_rag_backend.cli:rag_upsert_docs"
 rag-server      = "local_rag_backend.cli:rag_server"
 rag-status      = "local_rag_backend.cli:rag_status"
+rag-eval        = "local_rag_backend.cli:rag_eval"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -199,7 +175,7 @@ target-version = "py311"
 fix = true
 
 [tool.ruff.lint]
-select = ["E","W","F","I","B","C4","UP","ARG","SIM","TCH","S","N","RUF","PERF"]
+select = ["E","W","F","I","B","C4","UP","ARG","SIM","S","N","RUF","PERF"]
 ignore = ["E501","B008","B904","S101","S603","S607"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -215,32 +191,6 @@ ignore = ["E501","B008","B904","S101","S603","S607"]
 [tool.ruff.lint.isort]
 known-first-party = ["local_rag_backend"]
 combine-as-imports = true
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
-[tool.isort]
-profile = "black"
-line_length = 100
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
 
 [tool.mypy]
 python_version = "3.11"

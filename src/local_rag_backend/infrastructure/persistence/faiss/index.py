@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from local_rag_backend.core.services.file_lock import exclusive_file_lock
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from typing import Any
 
     from numpy.typing import NDArray
 
@@ -58,56 +59,16 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
 
     - POSIX: fcntl.flock
     - Windows: msvcrt.locking
-    - Else: no-op (still keeps atomic replaces)
+    - Else: fail-closed
     """
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    f = lock_path.open("a+b")
-    locked = False
-    try:
-        try:  # POSIX
-            import fcntl
-
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            locked = True
-        except Exception:  # pragma: no cover
-            locked = False
-
-        if not locked:  # pragma: no cover
-            try:  # Windows  # pragma: no cover
-                import msvcrt  # pragma: no cover
-
-                msvcrt_any: Any = msvcrt  # pragma: no cover
-
-                # Ensure the file has at least one byte to lock.
-                f.seek(0, os.SEEK_END)  # pragma: no cover
-                if f.tell() == 0:  # pragma: no cover
-                    f.write(b"0")  # pragma: no cover
-                    f.flush()  # pragma: no cover
-                f.seek(0)  # pragma: no cover
-                msvcrt_any.locking(  # pragma: no cover
-                    f.fileno(), getattr(msvcrt_any, "LK_LOCK", 1), 1
-                )
-                locked = True  # pragma: no cover
-            except Exception:  # pragma: no cover
-                locked = False  # pragma: no cover
-
+    with exclusive_file_lock(
+        lock_path,
+        error_message=(
+            f"Unable to acquire FAISS file lock at {lock_path}. "
+            "Refusing to mutate index state without a cross-process lock."
+        ),
+    ):
         yield
-    finally:
-        if locked:
-            with suppress(Exception):  # pragma: no cover
-                import fcntl
-
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-            with suppress(Exception):  # pragma: no cover
-                import msvcrt  # pragma: no cover
-
-                msvcrt_mod: Any = msvcrt  # pragma: no cover
-                f.seek(0)  # pragma: no cover
-                msvcrt_mod.locking(  # pragma: no cover
-                    f.fileno(), getattr(msvcrt_mod, "LK_UNLCK", 0), 1
-                )
-        f.close()
 
 
 class FaissIndex:
@@ -133,6 +94,19 @@ class FaissIndex:
         if dim is None:
             self.dim = self._infer_dim_or_raise()
         self._load_or_initialize()
+
+    @property
+    def backend(self) -> str:
+        return "faiss" if self._faiss is not None else "numpy"
+
+    @property
+    def ntotal(self) -> int:
+        with self._state_lock:
+            if self._faiss is not None:
+                return int(getattr(self.index, "ntotal", 0) or 0)
+            if self._vectors is None:
+                return 0
+            return int(self._vectors.shape[0])
 
     def _infer_dim_or_raise(self) -> int:
         if not self.index_path.exists():

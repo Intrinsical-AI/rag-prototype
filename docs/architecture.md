@@ -7,7 +7,7 @@ The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Port
 * **Dependency Inversion**: the core depends on *ports* (interfaces), never on concrete implementations.
 * **Stable Core**: domain entities and services are tech-agnostic.
 * **Adapters at the Edge**: infrastructure code implements the ports.
-* **Composition Root**: `app/factory.py` wires ports to adapters based on settings.
+* **Composition Root**: `app/container.py` composes adapters/use-cases; `app/factory.py` manages runtime app context and compatibility entrypoints, using shared selection helpers from `app/composition.py`.
 * **Testability**: adapters can be swapped for fakes/mocks; ports are `Protocol`s.
 
 ---
@@ -16,6 +16,7 @@ The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Port
 
 ```
 src/local_rag_backend/
+├── cli_commands/               # CLI commands partitioned by domain (docs/index/eval/server)
 ├── core/                       # Domain + application services (technology-agnostic)
 │   ├── domain/                 # Entities (Document, etc.)
 │   ├── ports/                  # Ports (Protocols) for core dependencies
@@ -26,13 +27,46 @@ src/local_rag_backend/
 │   ├── persistence/            # SQLAlchemy (SQL), FAISS (vectors)
 │   ├── retrieval/              # BM25 (sparse), FAISS (dense), Hybrid
 │   └── ingestion/              # CSV loader, etc.
-├── app/                        # Application layer
+├── app/                        # Application + HTTP transport layer
 │   ├── main.py                 # FastAPI app + lifespan
-│   ├── api_router.py           # HTTP endpoints (/api/ask, /api/history)
-│   ├── dependencies.py         # DI bridge to factory
-│   └── factory.py              # Composition root (build retriever/LLM/services)
+│   ├── api_router.py           # Root API router composition (include_router only)
+│   ├── routers/                # HTTP handlers by bounded context
+│   ├── http/                   # HTTP-only concerns (exception handlers, transport boundary)
+│   ├── application/            # Use-case orchestration (transport-agnostic)
+│   ├── dependencies.py         # DI bridge to app context/container
+│   ├── app_context.py          # Runtime context (settings + AppContainer)
+│   ├── container.py            # App composition container used by routers/CLI
+│   ├── schemas/                # Pydantic request/response schemas by bounded context
+│   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
+│   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
+│   ├── factory.py              # App-context lifecycle + compatibility entrypoints
+│   └── services/               # Transitional app modules/ports reused by API+CLI
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
+
+Evaluation layering:
+- `core/services/evaluation.py` is technology-agnostic (dataset parsing + metric computation).
+- `app/services/evaluation.py` owns ephemeral SQL/retriever wiring for `rag-eval`.
+
+HTTP docs/index layering:
+- Routers are thin adapters in `app/routers/*` and call use-case orchestration in
+  `app/application/*` and `app/services/*`.
+- Shared mutation execution (`run_api_mutation` / `run_cli_mutation`) lives in
+  `app/application/mutations.py`.
+- App-layer dependency contracts for docs/index mutations live in `app/services/ports.py`
+  (`DocsMutationPorts`, `IndexMutationPorts`), with shared wiring in
+  `app/services/mutation_ports.py`.
+
+Error layering:
+- Infra adapters raise typed runtime errors from `core/errors.py` (no FastAPI dependency).
+- Runtime error mapping lives in `app/error_mapping.py`.
+- HTTP registration/rendering lives in `app/http/exception_handlers.py`.
+
+CLI layering:
+- `cli.py` is the entrypoint module (group + command registration).
+- Shared command runtime helpers live in `cli_commands/runtime.py`.
+- Domain commands live in `cli_commands/docs.py`, `cli_commands/index.py`,
+  `cli_commands/eval.py`, and `cli_commands/server.py`.
 
 ---
 
@@ -66,7 +100,9 @@ graph TD
   A -->|DI via factory| C1 & C2 & C3 & D1 & D2 & E1 & S1 & V1
 ```
 
-The composition root `app/factory.py` chooses specific adapters (BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`.
+The composition root (`app/container.py` + `app/factory.py`) chooses specific adapters
+(BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`, with policy centralized in
+`app/composition.py` and reused by API/CLI/scripts.
 
 ---
 
@@ -104,7 +140,7 @@ class DocumentRepoPort(Protocol):
 @runtime_checkable
 class VectorRepoPort(Protocol):
     def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
-    def delete(self, ids: Sequence[int]) -> None: ...
+    def delete(self, ids: Sequence[int]) -> int: ...
     def rebuild(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]: ...
 
@@ -138,6 +174,10 @@ class LoaderPort(Protocol):
 * `FaissVectorStorage` (vector index + ID map)
 * `HistorySqlStorage` (Q\&A history)
 
+**App transport**
+
+* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas/` (split by bounded context: `rag`, `docs`, `index`, `meta`).
+
 **Ingestion**
 
 * `CSVLoader` → `IngestionPipeline` → `ETLService` (store docs, embed, upsert vectors)
@@ -146,14 +186,17 @@ All of these implement the ports above and can be swapped at composition time.
 
 ---
 
-## Composition Root (Factory)
+## Composition Root
 
-`app/factory.py` wires the system from configuration (source of truth: `src/local_rag_backend/app/factory.py`):
+`app/container.py` wires the system from configuration (factory/providers + runtime cache),
+while `app/factory.py` owns app-context lifecycle and compatibility accessors.
 
 * Chooses **retriever** by `settings.retrieval_mode` (`sparse`, `dense`, `hybrid`)
 * Chooses **generator**: Ollama (if `OLLAMA_ENABLED`) or OpenAI (if `OPENAI_API_KEY`)
 * Instantiates `RagService(retriever, generator, history_storage)`
-* Provides a process-local singleton via `get_rag_service()` (and `reset_rag_service()` for tests)
+* Provides a process-local singleton via `get_rag_service()`
+* Cross-process cache invalidation uses DB-backed `system_state.version` (key: `rag_service`),
+  bumped by `reset_rag_service()`
 
 ---
 
@@ -184,6 +227,11 @@ sequenceDiagram
 
 `/api/history` reads persisted Q\&A with pagination.
 
+Async/sync boundary:
+- FastAPI handlers call sync core/infra paths via `app/blocking.py`.
+- Blocking work is partitioned by task type (`default`, `mutation`, `network`, `eval`) with
+  dedicated worker pools and queue limits to reduce event-loop starvation risk.
+
 ---
 
 ## Multi-Store Consistency (SQLite + FAISS)
@@ -193,6 +241,23 @@ In dense/hybrid retrieval, the system has **two stores**:
 * **SQLite** (`documents` table) is the source of truth for document text.
 * **FAISS** (`INDEX_PATH` + `ID_MAP_PATH`) is derived state: it maps `document_id -> embedding vector`.
 
+### Document Identity Contract
+
+The `documents` table is designed to support idempotent ingestion and upserts (already available via API and CLI):
+
+* `id`: internal integer primary key (stable due to SQLite `AUTOINCREMENT`)
+* `external_id`: optional stable identifier for a source document (unique when set)
+* `source_id`: optional provenance identifier (e.g., file path, URL)
+* `metadata`: JSON metadata captured at extraction time (stored as JSON text in SQLite)
+* `content_sha256`: hash of the stored `content` (dedup/update decisions)
+* `created_at`, `updated_at`: timestamps
+
+These fields allow you to track and update documents without relying on brittle “row order” or
+manual deletion. Current user-facing upsert flows are:
+
+* `POST /api/docs/upsert`
+* `rag-upsert-docs`
+
 The invariants that matter:
 
 * Document IDs must be stable (SQLite uses `AUTOINCREMENT` to avoid ID reuse after deletes).
@@ -200,7 +265,10 @@ The invariants that matter:
 
 Maintenance logic lives in `src/local_rag_backend/core/services/maintenance.py`:
 
-* `delete_documents_multi_store(...)`: delete from SQLite, attempt to delete vectors, and optionally rebuild the full index if index deletion fails.
+* `delete_documents_multi_store(...)`:
+  * preflights index mutability (`vec_repo.delete([])`) before SQL delete when rebuild fallback would require a not-yet-resolved embedder,
+  * aborts before SQL mutation if preflight fails and no embedder is available for safe rebuild,
+  * otherwise deletes from SQLite, attempts vector deletion, and falls back to full rebuild when configured.
 * `rebuild_index_from_db(...)`: idempotent rebuild of FAISS from the current SQLite docs.
 
 Because the application caches a process-local singleton `RagService`, API/CLI maintenance operations call `reset_rag_service()` after mutating the DB and/or index so subsequent queries see the updated state.
@@ -209,11 +277,14 @@ Because the application caches a process-local singleton `RagService`, API/CLI m
 
 ## HTTP API Surface
 
-The FastAPI router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`).
-In addition to `/api/ask` and `/api/history`, the project exposes:
+The API root router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`) and
+includes bounded routers from `src/local_rag_backend/app/routers/`.
+The project exposes:
 
 * `POST /api/docs` and `GET /api/docs` (ingest/list documents)
+* `POST /api/docs/upsert` (idempotent upsert by `external_id`)
 * `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
+* `POST /api/docs/delete_by_external_id` (delete by `external_id` + tombstones)
 * `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/ask_eval` (ephemeral per-request RAG configuration)
 * `POST /api/openrouter/generate` (OpenRouter proxy when configured)
@@ -301,4 +372,5 @@ class SparseBM25Retriever(RetrieverPort):
         ...
 ```
 
-**Factory wiring:** see `src/local_rag_backend/app/factory.py` (kept as the single source of truth to avoid drift).
+**Container wiring:** see `src/local_rag_backend/app/container.py` and
+`src/local_rag_backend/app/factory.py`.

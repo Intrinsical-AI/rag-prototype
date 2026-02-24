@@ -1,4 +1,3 @@
-# src/app/middleware.py
 """
 Middleware for observability and monitoring.
 """
@@ -10,62 +9,23 @@ from typing import TYPE_CHECKING, Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from local_rag_backend.app import metrics_backend as mb
 from local_rag_backend.settings import settings
 
-# prometheus-client is optional. Keep stable module-level symbols so tests can
-# monkeypatch them even when the optional dependency isn't installed.
+# Keep stable module-level symbols so tests can monkeypatch middleware directly.
 PROMETHEUS_AVAILABLE: bool
 CONTENT_TYPE_LATEST: str
 Counter: Any
 Histogram: Any
+Gauge: Any
 generate_latest: Any
 
-
-class _NoopMetric:  # pragma: no cover
-    def __init__(self, *_a: object, **_k: object) -> None:
-        return None
-
-    def labels(self, **_kwargs: object) -> _NoopMetric:
-        return self
-
-    def inc(self, *_a: object, **_k: object) -> None:
-        return None
-
-    def observe(self, *_a: object, **_k: object) -> None:
-        return None
-
-
-def _noop_counter(*_args: Any, **_kwargs: Any) -> _NoopMetric:  # pragma: no cover
-    return _NoopMetric()
-
-
-def _noop_histogram(*_args: Any, **_kwargs: Any) -> _NoopMetric:  # pragma: no cover
-    return _NoopMetric()
-
-
-def _noop_generate_latest(*_args: Any, **_kwargs: Any) -> bytes:  # pragma: no cover
-    return b""
-
-
-try:  # pragma: no cover
-    from prometheus_client import (
-        CONTENT_TYPE_LATEST as _CONTENT_TYPE_LATEST,
-        Counter as _PromCounter,
-        Histogram as _PromHistogram,
-        generate_latest as _prom_generate_latest,
-    )
-
-    PROMETHEUS_AVAILABLE = True
-    CONTENT_TYPE_LATEST = _CONTENT_TYPE_LATEST
-    Counter = _PromCounter
-    Histogram = _PromHistogram
-    generate_latest = _prom_generate_latest
-except ImportError:  # pragma: no cover
-    PROMETHEUS_AVAILABLE = False
-    CONTENT_TYPE_LATEST = "text/plain"
-    Counter = _noop_counter
-    Histogram = _noop_histogram
-    generate_latest = _noop_generate_latest
+PROMETHEUS_AVAILABLE = mb.PROMETHEUS_AVAILABLE
+CONTENT_TYPE_LATEST = mb.CONTENT_TYPE_LATEST
+Counter = mb.Counter
+Histogram = mb.Histogram
+Gauge = mb.Gauge
+generate_latest = mb.generate_latest
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -106,7 +66,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             return "<unmatched>"
 
         # Best-effort fallback. Keep this as stable as possible.
-        raw_path = request.url.path
+        raw_path = str(request.url.path)
         if raw_path.startswith("/assets/"):
             return "/assets/*"
         return raw_path

@@ -37,7 +37,7 @@ async def test_openrouter_generate_runs_in_worker_thread(asgi_client, monkeypatc
     monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
 
-    from local_rag_backend.app import api_router as api
+    from local_rag_backend.app.application import openrouter as openrouter_service
 
     class DummyUsage:
         prompt_tokens = 1
@@ -64,7 +64,7 @@ async def test_openrouter_generate_runs_in_worker_thread(asgi_client, monkeypatc
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(api, "OpenAI", DummyClient)
+    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
 
     r = await asgi_client.post(
         "/api/openrouter/generate",
@@ -79,7 +79,7 @@ async def test_ollama_health_check_runs_in_worker_thread(asgi_client, monkeypatc
     main_tid = threading.get_ident()
     seen: dict[str, int] = {}
 
-    from local_rag_backend.app import api_router as api
+    from local_rag_backend.app.routers import health as health_router
 
     class DummyResp:
         def raise_for_status(self):
@@ -89,7 +89,7 @@ async def test_ollama_health_check_runs_in_worker_thread(asgi_client, monkeypatc
         seen["tid"] = threading.get_ident()
         return DummyResp()
 
-    monkeypatch.setattr(api.requests, "get", _fake_get)
+    monkeypatch.setattr(health_router.httpx, "get", _fake_get)
     r = await asgi_client.get("/api/health/ollama")
     assert r.status_code == 200
     assert seen["tid"] != main_tid
@@ -102,7 +102,7 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
     main_tid = threading.get_ident()
     seen: dict[str, int] = {}
 
-    from local_rag_backend.app import api_router as api
+    from local_rag_backend.app import factory
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
@@ -123,8 +123,8 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
         def upsert(self, ids, vectors):
             return None
 
-    monkeypatch.setattr(api, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(api, "FaissVectorStorage", lambda **k: DummyVec())
+    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
+    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: DummyVec())
 
     r = await asgi_client.post("/api/docs", json={"texts": ["X"]})
     assert r.status_code == 200

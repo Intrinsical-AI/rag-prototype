@@ -99,7 +99,7 @@ __pypackages__/
 .pdm.toml
 .pdm-python
 .pdm-build/
-.uv-cache/
+.uv_cache/
 
 # === CELERY ===
 celerybeat-schedule
@@ -212,3 +212,12 @@ figures/
 
 build_package.py
 concatenate_src.py
+
+/pr
+
+medium-blog/
+curso/
+
+openai**
+
+.pre-commit-cache

@@ -1,25 +1,13 @@
-# src/utils.py
 """
-General utility functions: text processing, data loading..
+Helpers around the document corpus used by retrievers.
 """
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import DocumentRepoPort
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-
-def preprocess_text(text: str) -> str:
-    """Normalize text by lowercasing, removing HTML tags, and collapsing whitespace."""
-    text = text.lower().strip()
-    text = _HTML_TAG_RE.sub(" ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
 
 
 def get_corpus_and_ids(doc_repo: DocumentRepoPort) -> tuple[list[str], list[int]]:

@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 
 from local_rag_backend.app import dependencies as deps, factory
+from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.settings import settings
 
 
@@ -16,7 +17,11 @@ async def test_get_rag_service_sparse_openai(monkeypatch):
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
     # Minimal dummies
-    monkeypatch.setattr(factory, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+    class DummyDocRepo:
+        def get_all_documents(self):
+            return [Document(id=1, content="doc1"), Document(id=2, content="doc2")]
+
+    monkeypatch.setattr(factory, "SqlDocumentStorage", lambda *a, **k: DummyDocRepo())
     monkeypatch.setattr(factory, "SparseBM25Retriever", lambda **k: SimpleNamespace())
 
     class DummyRS:
@@ -66,8 +71,11 @@ async def test_get_rag_service_hybrid_openai(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 
-    # Mock DB access for sparse retriever in hybrid mode
-    monkeypatch.setattr(factory, "get_corpus_and_ids", lambda *a, **k: (["doc1", "doc2"], [1, 2]))
+    class DummyDocRepo:
+        def get_all_documents(self):
+            return [Document(id=1, content="doc1"), Document(id=2, content="doc2")]
+
+    monkeypatch.setattr(factory, "SqlDocumentStorage", lambda *a, **k: DummyDocRepo())
 
     class DummyEmbedder:
         dim = 4
@@ -98,12 +106,12 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
 
     calls: list[object] = []
 
-    def _build():
+    def _build(self):
         obj = object()
         calls.append(obj)
         return obj
 
-    monkeypatch.setattr(factory, "build_rag_service", _build, raising=True)
+    monkeypatch.setattr(factory.AppContainer, "build_rag_service", _build, raising=True)
 
     svc1 = await deps.get_rag_service()
     assert svc1 is calls[0]
@@ -117,15 +125,8 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
     assert svc2 is not svc1
 
 
-def test_cached_rag_service_cache_does_not_accumulate_on_token_changes(monkeypatch):
-    # Simulate cross-process invalidation: token changes without calling reset_rag_service()
-    factory._get_cached_rag_service.cache_clear()
-
-    monkeypatch.setattr(factory, "build_rag_service", lambda: object(), raising=True)
-    _ = factory._get_cached_rag_service("t1")
-    _ = factory._get_cached_rag_service("t2")
-    _ = factory._get_cached_rag_service("t3")
-
-    info = factory._get_cached_rag_service.cache_info()
-    assert info.maxsize == 1
-    assert info.currsize == 1
+async def test_app_context_and_settings_dependencies_share_runtime_context() -> None:
+    deps.reset_rag_service()
+    ctx = deps.get_app_context()
+    assert await deps.get_settings_dependency() is ctx.settings
+    assert await deps.get_app_container_dependency() is ctx.container

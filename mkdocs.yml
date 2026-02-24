@@ -16,4 +16,3 @@ nav:
   - Architecture: architecture.md
   - Advanced Usage (Ollama): custom_usage_guide.md
   - LangChain Loaders: langchain_loaders.md
-

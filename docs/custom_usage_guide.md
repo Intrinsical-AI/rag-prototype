@@ -178,6 +178,26 @@ python run_query.py
 
 ---
 
+## CLI: ingesta desde ficheros/directorios (txt/md/csv)
+
+Para un flujo rápido sin escribir código, puedes ingestar desde rutas locales:
+
+```bash
+# Ingesta desde un fichero o un directorio (recursivo por defecto)
+rag-ingest ./docs ./notas.md ./data/faq.csv
+
+# Ver qué se procesaría sin escribir en SQLite/FAISS
+rag-ingest --dry-run ./docs
+```
+
+Notas:
+
+* En `dense`/`hybrid`, la CLI actualiza SQLite y FAISS de forma consistente (y borra chunks obsoletos si un fichero se acorta).
+* La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
+* Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.
+
+---
+
 ## Mantenimiento (dense/hybrid): borrado y rebuild idempotente del índice
 
 En modos `dense`/`hybrid`, el índice FAISS es **estado derivado** de SQLite. Si borras filas manualmente en SQL o editas ficheros del índice a mano, puedes provocar **deriva** (IDs en FAISS que ya no existen en SQL, o documentos en SQL sin vector).
@@ -190,9 +210,15 @@ Opciones recomendadas:
 # Borrar documentos por ID (SQL + FAISS cuando aplique)
 rag-delete-docs 10 11 12
 
+# Borrar por external_id (añade tombstones para que no reaparezcan en futuras ingestas)
+rag-delete-external-ids "chunk:<sha256>" "file:/abs/path:part=file:chunk=0"
+
 # Rebuild completo del índice desde SQLite (idempotente; dense/hybrid)
 rag-rebuild-index
 ```
+
+Nota operativa:
+* En `dense`/`hybrid`, los borrados intentan primero la eliminación incremental del índice y sólo hacen rebuild completo si esa sincronización falla.
 
 ### 2) API (FastAPI)
 
@@ -201,6 +227,11 @@ rag-rebuild-index
 curl -X POST "http://localhost:8000/api/docs/delete" \
   -H "Content-Type: application/json" \
   -d '{"ids":[10,11,12]}'
+
+# Borrar por external_id
+curl -X POST "http://localhost:8000/api/docs/delete_by_external_id" \
+  -H "Content-Type: application/json" \
+  -d '{"external_ids":["chunk:<sha256>","file:/abs/path:part=file:chunk=0"]}'
 
 # Rebuild del índice (dense/hybrid)
 curl -X POST "http://localhost:8000/api/index/rebuild"
@@ -222,12 +253,40 @@ from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVecto
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 
 doc_repo = SqlDocumentStorage()
-vec_repo = FaissVectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=None)
 embedder = OpenAIEmbedder()
+vec_repo = FaissVectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=embedder.dim)
 
 # 1) Borrado consistente
 delete_documents_multi_store(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder, ids=[10, 11, 12])
 
 # 2) Rebuild idempotente desde SQLite
 rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
+```
+
+Nota (dense/hybrid): al mutar el índice, se mantiene un `index_manifest.json` junto a `INDEX_PATH` para
+detectar drift de configuración (modelo/dim/chunker). Si cambias esos settings, ejecuta un rebuild.
+
+---
+
+## Operabilidad: métricas, evaluación y reranker
+
+Monitoring mínimo (Prometheus):
+
+```bash
+uv sync --frozen --extra monitoring
+export ENABLE_MONITORING=true
+curl -s http://localhost:8000/metrics | head
+```
+
+Evaluación offline reproducible (gate):
+
+```bash
+rag-eval --retrieval-mode sparse
+```
+
+Reranker opcional (mejora de calidad medible con `rag-eval`):
+
+```bash
+export ENABLE_RERANKER=true
+export RERANKER_CANDIDATE_K=20
 ```

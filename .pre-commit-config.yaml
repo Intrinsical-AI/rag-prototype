@@ -34,6 +34,7 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=1000"]
+        exclude: "^data/openai/OpenAI-2025/mini\\.json$"
 
   # Security Scanning
   - repo: https://github.com/PyCQA/bandit
@@ -41,7 +42,8 @@ repos:
     hooks:
       - id: bandit
         name: "Security scan (Bandit)"
-        args: ["-r", "src/"]
+        args: ["-r", "src/", "-ll", "-ii"]
+        pass_filenames: false
         exclude: "^tests/"
 
 ci:

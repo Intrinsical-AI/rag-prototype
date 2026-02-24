@@ -17,21 +17,38 @@ if TYPE_CHECKING:
 
 
 class CSVLoader(LoaderPort):
-    def __init__(self, path: str | Path, delimiter: str = ";", has_header: bool = True):
+    def __init__(
+        self, path: str | Path, delimiter: str | None = None, has_header: bool = True
+    ) -> None:
         self.path = Path(path)
         self.delimiter = delimiter
         self.has_header = has_header
 
     def load(self) -> Iterable[LoadedItem]:
         with self.path.open(encoding="utf-8", newline="") as fh:
-            reader = csv.reader(fh, delimiter=self.delimiter)
+            delimiter = self.delimiter
+            if delimiter is None:
+                sample = fh.read(4096)
+                fh.seek(0)
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+                    delimiter = str(dialect.delimiter)
+                except Exception:
+                    delimiter = ";"
+
+            reader = csv.reader(fh, delimiter=delimiter)
             if self.has_header:
                 next(reader, None)
+            row_index = 0
             for row in reader:
                 if not row:
                     continue
+                row_index += 1
                 if len(row) >= 2:
                     title, body = row[0].strip(), row[1].strip()
-                    yield LoadedItem(text=f"{title}\n\n{body}", metadata={"title": title})
+                    yield LoadedItem(
+                        text=f"{title}\n\n{body}",
+                        metadata={"title": title, "row_index": row_index},
+                    )
                 else:
-                    yield LoadedItem(text=row[0].strip(), metadata=None)
+                    yield LoadedItem(text=row[0].strip(), metadata={"row_index": row_index})

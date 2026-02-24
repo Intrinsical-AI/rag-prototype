@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
@@ -16,7 +17,6 @@ from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRet
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
-from local_rag_backend.utils import get_corpus_and_ids
 
 
 class _DummyEmbeddingItem:

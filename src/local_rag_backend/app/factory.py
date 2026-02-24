@@ -1,19 +1,26 @@
-"""
-Composition root (hex architecture).
-
-This module is the stable import path for wiring ports to adapters based on `settings`.
-FastAPI dependencies re-export `get_rag_service()` for DI convenience.
-"""
+"""Factory/DI entrypoints backed by the centralized app container."""
 
 from __future__ import annotations
 
 import logging
-import os
-from functools import lru_cache
-from time import time_ns
-from typing import TYPE_CHECKING
+from threading import Lock
+from typing import TYPE_CHECKING, Any
 
+from local_rag_backend.app import container as app_container_module
+from local_rag_backend.app.app_context import AppContext
+from local_rag_backend.app.container import AppContainer
+from local_rag_backend.core.services.dense_upsert import (
+    precompute_vectors_for_changed_items,
+    sync_dense_after_upsert,
+)
+from local_rag_backend.core.services.maintenance import (
+    delete_documents_multi_store,
+    delete_external_ids_multi_store,
+    rebuild_index_from_db,
+)
 from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.reranking import RerankingRetriever
+from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -21,145 +28,138 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.faiss.manifest import purge_index_artifacts
 from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
     HistorySqlStorage,
     SqlDocumentStorage,
+    SystemStateStorage,
 )
 from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
-from local_rag_backend.utils import get_corpus_and_ids
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_RAG_SERVICE_STATE_KEY = AppContainer.RAG_SERVICE_STATE_KEY
+_APP_CONTEXT: AppContext | None = None
+_APP_CONTEXT_LOCK = Lock()
 
-    from local_rag_backend.core.ports import (
-        DocumentRepoPort,
-        EmbedderPort,
-        GeneratorPort,
-        QAHistoryPort,
-        RetrieverPort,
-        VectorRepoPort,
+
+def _build_container(
+    *,
+    system_state_factory: Callable[[], SystemStateStorage] | None = None,
+) -> AppContainer:
+    resolved_system_state_factory = system_state_factory or SystemStateStorage
+
+    # Keep AppContainer as the default composition source.
+    # We only inject explicit overrides when tests monkeypatch factory-level seams.
+    overrides: dict[str, Any] = {}
+    if OpenAIEmbedder is not app_container_module.OpenAIEmbedder:
+        overrides["openai_embedder_factory"] = OpenAIEmbedder
+    if SentenceTransformerEmbedder is not app_container_module.SentenceTransformerEmbedder:
+        overrides["st_embedder_factory"] = lambda model_name: SentenceTransformerEmbedder(
+            model_name=model_name
+        )
+    if OpenAIGenerator is not app_container_module.OpenAIGenerator:
+        overrides["openai_generator_factory"] = OpenAIGenerator
+    if OllamaGenerator is not app_container_module.OllamaGenerator:
+        overrides["ollama_generator_factory"] = OllamaGenerator
+    if SqlDocumentStorage is not app_container_module.SqlDocumentStorage:
+        overrides["doc_repo_factory"] = SqlDocumentStorage
+        overrides["build_upsert_doc"] = getattr(SqlDocumentStorage, "UpsertDoc", None)
+    if HistorySqlStorage is not app_container_module.HistorySqlStorage:
+        overrides["history_repo_factory"] = HistorySqlStorage
+    if SparseBM25Retriever is not app_container_module.SparseBM25Retriever:
+        overrides["sparse_retriever_factory"] = SparseBM25Retriever
+    if DenseFaissRetriever is not app_container_module.DenseFaissRetriever:
+        overrides["dense_retriever_factory"] = DenseFaissRetriever
+    if HybridRetriever is not app_container_module.HybridRetriever:
+        overrides["hybrid_retriever_factory"] = HybridRetriever
+    if FaissVectorStorage is not app_container_module.FaissVectorStorage:
+        overrides["vector_repo_factory"] = FaissVectorStorage
+    if RerankingRetriever is not app_container_module.RerankingRetriever:
+        overrides["reranker_factory"] = RerankingRetriever
+    if (
+        precompute_vectors_for_changed_items
+        is not app_container_module.precompute_vectors_for_changed_items
+    ):
+        overrides["precompute_vectors_fn"] = precompute_vectors_for_changed_items
+    if sync_dense_after_upsert is not app_container_module.sync_dense_after_upsert:
+        overrides["sync_dense_fn"] = sync_dense_after_upsert
+    if rebuild_index_from_db is not app_container_module.rebuild_index_from_db:
+        overrides["rebuild_fn"] = rebuild_index_from_db
+    if delete_documents_multi_store is not app_container_module.delete_documents_multi_store:
+        overrides["delete_docs_fn"] = delete_documents_multi_store
+    if delete_external_ids_multi_store is not app_container_module.delete_external_ids_multi_store:
+        overrides["delete_external_ids_fn"] = delete_external_ids_multi_store
+    if purge_index_artifacts is not app_container_module.purge_index_artifacts:
+        overrides["purge_index_artifacts_fn"] = purge_index_artifacts
+    if multi_store_write_lock is not app_container_module.multi_store_write_lock:
+        overrides["write_lock"] = multi_store_write_lock
+    if RagService is not app_container_module.RagService:
+        overrides["rag_service_factory"] = RagService
+
+    return AppContainer(
+        settings_obj=settings,
+        system_state_factory=resolved_system_state_factory,
+        **overrides,
     )
 
-_RELOAD_TOKEN_FILENAME = ".rag_service_reload_token"  # noqa: S105
+
+def _build_app_context(
+    *,
+    system_state_factory: Callable[[], SystemStateStorage] | None = None,
+) -> AppContext:
+    container = _build_container(system_state_factory=system_state_factory)
+    return AppContext(settings_obj=settings, container=container)
 
 
-def _build_embedder() -> EmbedderPort:
-    """
-    Choose an embedder for dense/hybrid retrieval.
+def get_app_context() -> AppContext:
+    global _APP_CONTEXT
+    if _APP_CONTEXT is not None:
+        return _APP_CONTEXT
+    with _APP_CONTEXT_LOCK:
+        if _APP_CONTEXT is None:
+            _APP_CONTEXT = _build_app_context()
+        assert _APP_CONTEXT is not None
+        return _APP_CONTEXT
 
-    Preference order:
-    1) OpenAI embeddings when `OPENAI_API_KEY` is configured (no heavy deps).
-    2) SentenceTransformers when installed (requires `dense-st` extra).
-    """
-    if settings.openai_api_key:
-        return OpenAIEmbedder()
-    try:
-        return SentenceTransformerEmbedder(model_name=settings.st_embedding_model)
-    except RuntimeError as e:
-        raise RuntimeError(
-            "Dense/hybrid retrieval requires an embeddings backend. "
-            "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
-            "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
-        ) from e
+
+def reset_app_context() -> None:
+    global _APP_CONTEXT
+    with _APP_CONTEXT_LOCK:
+        _APP_CONTEXT = None
 
 
 def build_rag_service() -> RagService:
     """Build a RagService instance based on current settings (no caching)."""
-    logger.info("Creating RAG service with retrieval mode: '%s'", settings.retrieval_mode)
-
-    # 1. Persistence Ports
-    doc_repo: DocumentRepoPort = SqlDocumentStorage()
-
-    # 2. Retriever Port
-    if settings.retrieval_mode == "sparse":
-        corpus, doc_ids = get_corpus_and_ids(doc_repo)
-        retriever: RetrieverPort = SparseBM25Retriever(
-            documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
-        )
-    else:
-        embedder: EmbedderPort = _build_embedder()
-
-        vector_repo: VectorRepoPort = FaissVectorStorage(
-            index_path=settings.index_path, id_map_path=settings.id_map_path, dim=embedder.dim
-        )
-        dense_retriever = DenseFaissRetriever(
-            embedder=embedder, faiss_index=vector_repo, doc_repo=doc_repo
-        )
-        if settings.retrieval_mode == "dense":
-            retriever = dense_retriever
-        else:  # hybrid
-            corpus, doc_ids = get_corpus_and_ids(doc_repo)
-            sparse_retriever = SparseBM25Retriever(
-                documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo
-            )
-            retriever = HybridRetriever(
-                dense=dense_retriever,
-                sparse=sparse_retriever,
-                alpha=settings.hybrid_retrieval_alpha,
-            )
-
-    # 3. Generator Port
-    generator: GeneratorPort
-    if settings.ollama_enabled:
-        generator = OllamaGenerator()
-    elif settings.openai_api_key:
-        generator = OpenAIGenerator()
-    else:
-        raise RuntimeError("No LLM configured. Set OPENAI_API_KEY or enable OLLAMA_ENABLED.")
-
-    # 4. History Storage
-    history_repo: QAHistoryPort = HistorySqlStorage()
-    return RagService(retriever=retriever, generator=generator, history_storage=history_repo)
-
-
-def _reload_token_path() -> Path:
-    # Keep it in the data dir so multi-worker deployments can coordinate via a shared volume.
-    return settings.data_dir / _RELOAD_TOKEN_FILENAME
-
-
-def _read_reload_token() -> str:
-    p = _reload_token_path()
-    try:
-        return p.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return ""
-    except Exception as e:  # pragma: no cover
-        logger.warning("Failed to read RAG reload token at %s: %s", p, e)
-        return ""
-
-
-def _write_reload_token(token: str) -> None:
-    p = _reload_token_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(token, encoding="utf-8")
-    os.replace(tmp, p)
-
-
-@lru_cache(maxsize=1)
-def _get_cached_rag_service(_reload_token: str) -> RagService:
-    return build_rag_service()
+    ctx = get_app_context()
+    logger.info("Creating RAG service with retrieval mode: '%s'", ctx.settings.retrieval_mode)
+    return ctx.container.build_rag_service()
 
 
 async def get_rag_service() -> RagService:
-    """FastAPI dependency wrapper (async to avoid anyio threadpool for sync callables)."""
-    # Multi-worker invalidation: other processes can "bust" the cache by updating the token file.
-    return _get_cached_rag_service(_read_reload_token())
+    """Return cached RagService from the app container."""
+    return get_app_context().container.get_rag_service()
 
 
 def reset_rag_service() -> None:
-    """Clear the cached singleton (useful for tests)."""
-    try:
-        _write_reload_token(str(time_ns()))
-    except Exception as e:  # pragma: no cover
-        # Don't fail request handlers/tests just because the cache token couldn't be persisted.
-        logger.warning("Failed to write RAG reload token: %s", e)
-    _get_cached_rag_service.cache_clear()
+    """Invalidate cached RagService across processes and refresh local app context."""
+    if _APP_CONTEXT is None:
+        _build_container().reset_rag_service()
+        return
+    get_app_context().container.reset_rag_service()
+    reset_app_context()
 
 
-__all__ = ["build_rag_service", "get_rag_service", "reset_rag_service"]
+__all__ = [
+    "build_rag_service",
+    "get_app_context",
+    "get_rag_service",
+    "reset_app_context",
+    "reset_rag_service",
+]

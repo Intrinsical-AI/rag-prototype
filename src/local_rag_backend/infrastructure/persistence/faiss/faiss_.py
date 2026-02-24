@@ -9,6 +9,15 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+    create_manifest_if_missing_for_settings,
+    expected_manifest_config_from_settings,
+    manifest_path_for,
+    overwrite_manifest_for_settings,
+    read_manifest,
+    validate_manifest,
+)
+from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -23,17 +32,88 @@ class FaissVectorStorage(VectorRepoPort):
     def __init__(self, index_path: str, id_map_path: str, dim: int | None = 384):
         self.faiss_index = FaissIndex(index_path, id_map_path, dim)
 
+    def _expected_manifest_config(self) -> dict[str, str]:
+        return expected_manifest_config_from_settings(settings)
+
+    def _ensure_manifest(self, *, overwrite: bool) -> None:
+        """
+        Keep drift detection meaningful:
+        - For incremental writes (upsert/delete): create manifest if missing; refuse to overwrite drift.
+        - For full rebuilds: overwrite to the new config.
+        """
+        # Some tests monkeypatch `FaissIndex` with a lightweight dummy object. In that case,
+        # skip manifest persistence; production uses the real `FaissIndex`.
+        idx_path = getattr(self.faiss_index, "index_path", None)
+        dim_attr = getattr(self.faiss_index, "dim", None)
+        backend_attr = getattr(self.faiss_index, "backend", None)
+        if idx_path is None or dim_attr is None or backend_attr is None:
+            return
+
+        expected = self._expected_manifest_config()
+        dim = int(dim_attr)
+        backend = str(backend_attr)
+
+        if overwrite:
+            overwrite_manifest_for_settings(
+                index_path=idx_path,
+                expected=expected,
+                dimension=dim,
+                index_backend=backend,
+            )
+            return
+
+        manifest_path = manifest_path_for(idx_path)
+        manifest = read_manifest(manifest_path)
+        if manifest is None:
+            vectors = int(getattr(self.faiss_index, "ntotal", 0) or 0)
+            id_map = getattr(self.faiss_index, "id_map", [])
+            id_map_len = len(id_map) if isinstance(id_map, list) else 0
+            # Fail closed for legacy non-empty indexes without manifest.
+            # Auto-creating here would "bless" unknown historical config and hide drift.
+            if vectors > 0 or id_map_len > 0:
+                raise RuntimeError(
+                    "Index manifest missing for a non-empty index; rebuild is required "
+                    "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
+                )
+
+        create_manifest_if_missing_for_settings(
+            index_path=idx_path,
+            expected=expected,
+            dimension=dim,
+            index_backend=backend,
+        )
+
+        manifest = read_manifest(manifest_path)
+        if manifest is None:  # pragma: no cover
+            raise RuntimeError("Index manifest is missing after creation attempt.")
+        mismatches, errors = validate_manifest(
+            manifest=manifest,
+            expected_config=expected,
+            actual_dimension=dim,
+            actual_index_backend=backend,
+        )
+        if errors or mismatches:
+            raise RuntimeError(
+                "Index manifest drift detected; rebuild is required "
+                "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
+            )
+
     def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         """Add vectors to the FAISS index."""
+        # Guard first: if manifest drifts from current settings, fail before mutating index files.
+        self._ensure_manifest(overwrite=False)
         self.faiss_index.add_to_index(list(ids), list(vectors))
 
-    def delete(self, ids: Sequence[int]) -> None:
+    def delete(self, ids: Sequence[int]) -> int:
         """Delete vectors from the index (may rebuild the underlying index)."""
-        self.faiss_index.delete_ids(list(ids))
+        # Guard first: if manifest drifts from current settings, fail before mutating index files.
+        self._ensure_manifest(overwrite=False)
+        return self.faiss_index.delete_ids(list(ids))
 
     def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
         """Rebuild the full index from scratch (idempotent)."""
         self.faiss_index.rebuild(ids, vectors)
+        self._ensure_manifest(overwrite=True)
 
     def search(
         self, query_vector: Sequence[float], k: int

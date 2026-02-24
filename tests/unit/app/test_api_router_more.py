@@ -2,7 +2,11 @@
 
 import pytest
 
-from local_rag_backend.app import api_router as api, dependencies as deps
+from local_rag_backend.app import dependencies as deps, factory
+from local_rag_backend.app.main import app
+from local_rag_backend.app.routers import health as health_router
+from local_rag_backend.core.errors import LLMConnectionError, LLMTimeoutError
+from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -24,7 +28,7 @@ async def test_ready_endpoint_ok(asgi_client, monkeypatch):
     async def _override():
         return _Dummy()
 
-    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 200
     data = r.json()
@@ -46,7 +50,7 @@ async def test_ready_endpoint_not_ready_no_llm(asgi_client, monkeypatch):
     async def _override():
         return _Dummy()
 
-    monkeypatch.setattr(api, "get_rag_service", _override, raising=True)
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
     r = await asgi_client.get("/api/ready")
     assert r.status_code == 503
     payload = r.json()
@@ -98,10 +102,12 @@ async def test_ask_eval_invalid_config(asgi_client, monkeypatch):
         ({"retrieval_mode": "dense", "k": 11}, 422),  # k too large (schema)
         ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": -0.1}, 422),  # schema
         ({"retrieval_mode": "hybrid", "k": 3, "hybrid_alpha": 1.1}, 422),  # schema
-        ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 400),  # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 400),  # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 0}, 400),  # runtime validation
-        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 999999}, 400),  # runtime validation
+        ({"retrieval_mode": "sparse", "k": 3, "temperature": -0.5}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "temperature": 2.5}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "top_p": -0.1}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "top_p": 1.1}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 0}, 422),  # schema
+        ({"retrieval_mode": "sparse", "k": 3, "max_tokens": 999999}, 422),  # schema
     ],
 )
 async def test_ask_eval_invalid_config_parametrized_async(asgi_client, config, expected_status):
@@ -142,3 +148,41 @@ async def test_metrics_endpoint_disabled(asgi_client, monkeypatch):
     assert r.status_code == 200
     assert r.headers.get("content-type", "").startswith("text/plain")
     assert r.text.startswith("# Monitoring disabled")
+
+
+async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite):
+    class _FailingService:
+        def ask(self, question, top_k=3):
+            raise LLMTimeoutError("provider timeout")
+
+    async def _override():
+        return _FailingService()
+
+    app.dependency_overrides[deps.get_rag_service] = _override
+    try:
+        r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
+    finally:
+        app.dependency_overrides.pop(deps.get_rag_service, None)
+
+    assert r.status_code == 504
+    assert "provider timeout" in r.json()["detail"]
+
+
+async def test_ask_eval_maps_typed_llm_connection_error_to_503(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    SqlDocumentStorage().store_documents(["hello world"])
+
+    class _FailingGenerator:
+        def generate(self, question, contexts):
+            raise LLMConnectionError("provider unreachable")
+
+    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
+    monkeypatch.setattr(factory, "OpenAIGenerator", lambda **_k: _FailingGenerator(), raising=True)
+
+    r = await asgi_client.post(
+        "/api/ask_eval",
+        json={"question": "hello", "config": {"retrieval_mode": "sparse", "k": 1}},
+    )
+    assert r.status_code == 503
+    assert "provider unreachable" in r.json()["detail"]
