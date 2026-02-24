@@ -4,6 +4,65 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [Unreleased]
+
+_Nothing yet._
+
+## [1.0.0] - 2026-02-24
+
+### Added
+- New ingestion pipeline for files/directories with loader discovery for `.txt`, `.md`, and `.csv`, plus optional `python-magic` detection.
+- New CLI capabilities: `rag-ingest`, `rag-delete-external-ids`, and `rag-eval` (dataset-based offline regression gate).
+- New API mutation capabilities for document lifecycle and maintenance (`/api/docs/upsert`, `/api/docs/delete_by_external_id`, `/api/index/rebuild`).
+- Manifest-backed dense index diagnostics with drift checks surfaced in readiness/status flows.
+- Optional overlap reranker and expanded observability (structured logs + ingestion/query metrics).
+- DB-backed `system_state` versioning to invalidate cached RAG services across processes.
+- Task-type blocking pools with explicit pending limits for mutation/network/eval workloads.
+
+### Changed
+- Release line normalized for `release/02-2026` at `v1.0.0`.
+- API transport split into bounded routers (health/rag/docs/index/openrouter) with composition-focused root wiring.
+- Mutation orchestration moved to app-layer services and shared mutation ports reused by API and CLI.
+- CLI reorganized by bounded contexts while preserving command surface.
+- Runtime composition policy centralized for retriever/embedder/provider resolution across API, CLI, and scripts.
+- Default Ollama model consolidated to `lfm2.5-thinking` and ingestion batching formalized via `INGEST_BATCH_SIZE`.
+
+### Fixed
+- Multi-store consistency hardening: dense embeddings are precomputed before SQL upserts to avoid SQL/vector drift on provider failures.
+- Mutating operations now serialize under a shared cross-process write lock and fail closed on lock acquisition errors.
+- FAISS/index consistency hardening: manifest preflight checks, stricter lock behavior, safer persistence and recovery paths.
+- Ingestion correctness fixes: external_id prefix collision handling, symlink no-follow behavior, duplicate external_id validation, and robust unreadable-file handling.
+- API hardening fixes: malformed OpenRouter responses mapped cleanly (502), stricter sampling parameter validation, and deterministic cache invalidation after mutation attempts.
+- SQLite compatibility hardening: identity migration race tolerance and safer compatibility migrations for CLI/scripts.
+
+### Security
+- Runtime API-key enforcement for non-local exposure, including forwarded/proxied requests (`X-Forwarded-*` / `Forwarded`) with fail-closed behavior on ambiguity.
+- Additional validation guards for generation/evaluation request parameters and non-local request handling.
+- CI/security posture hardened (workflow gate tightening, pinned actions, and security-check workflow improvements).
+
+### Performance
+- Ingestion batching optimizations to reduce write-lock and upsert churn.
+- Sparse retrieval hot-path optimization via in-memory document caching and reduced duplicate SQL loads.
+- Reduced ingestion overhead by reusing file-format detection results and precompiling whitespace cleanup regexes.
+
+### Refactor
+- Removal of root shims and stricter app/core module boundaries.
+- Typed cross-layer provider errors and centralized HTTP error mapping.
+- Consolidated dense upsert/delete consistency flow and shared locking/client helpers.
+- RAG service invalidation refactored from file token strategy to DB-backed versioning (`system_state`).
+
+### Docs
+- Updated architecture and usage guides for bounded routers/services, new CLI/API mutation flows, eval workflow, and observability.
+- Documented manifest drift behavior, ingestion dedup/chunking strategy, delete-by-external-id semantics, and contributor verification gates.
+- Added/updated operational notes for rebuild/delete maintenance and release stabilization roadmap.
+
+### Migration / Upgrade notes
+- Upgrading from `0.1.x`: run app/CLI once per SQLite database so compatibility migrations can add identity and consistency fields.
+- Dense/hybrid mode now depends on manifest integrity (`index_manifest.json`); if readiness reports drift/corruption, run index rebuild.
+- Delete semantics changed: deleting by `external_id` creates tombstones and blocks future re-ingest/upsert of those identities.
+- Ingestion dedup now uses `chunk_dedup_sha256` + `INGEST_CHUNKER_VERSION`; changing chunker version intentionally creates new chunk identities.
+- Review production env before rollout: set `API_KEY` for non-local binds and tune ingestion concurrency with `INGEST_BATCH_SIZE`.
+- Release tag for this cut: `v1.0.0` on `release/02-2026`.
 
 ## [0.1.2] - 2026-02-16
 
