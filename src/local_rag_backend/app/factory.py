@@ -125,7 +125,8 @@ def get_app_context() -> AppContext:
     with _APP_CONTEXT_LOCK:
         if _APP_CONTEXT is None:
             _APP_CONTEXT = _build_app_context()
-        assert _APP_CONTEXT is not None
+        if _APP_CONTEXT is None:
+            raise RuntimeError("AppContext failed to initialize")
         return _APP_CONTEXT
 
 

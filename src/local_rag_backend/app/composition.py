@@ -173,9 +173,10 @@ def build_retriever_from_settings(
         doc_ids = [d.id for d in docs_for_sparse]
 
     if mode == "sparse":
-        assert corpus is not None
-        assert doc_ids is not None
-        assert docs_for_sparse is not None
+        if corpus is None or doc_ids is None or docs_for_sparse is None:
+            raise RuntimeError(
+                f"Internal error: sparse retrieval vars uninitialized for mode '{mode}'"
+            )
         retriever = sparse_retriever_factory(
             documents=corpus,
             doc_ids=doc_ids,
@@ -197,9 +198,10 @@ def build_retriever_from_settings(
         if mode == "dense":
             retriever = dense_retriever
         else:
-            assert corpus is not None
-            assert doc_ids is not None
-            assert docs_for_sparse is not None
+            if corpus is None or doc_ids is None or docs_for_sparse is None:
+                raise RuntimeError(
+                    f"Internal error: hybrid retrieval vars uninitialized for mode '{mode}'"
+                )
             sparse_retriever = sparse_retriever_factory(
                 documents=corpus,
                 doc_ids=doc_ids,

@@ -259,7 +259,10 @@ def _ingest_batch_sync(
 
     vectors_by_external_id: dict[str, list[float]] = {}
     if settings.retrieval_mode in ("dense", "hybrid") and unique_items:
-        assert embedder is not None
+        if embedder is None:
+            raise RuntimeError(
+                "Dense embedder is required for dense/hybrid retrieval mode but was not initialized"
+            )
         vectors_by_external_id = precompute_vectors_for_changed_items(
             items=unique_items,
             doc_repo=doc_repo,
@@ -281,8 +284,10 @@ def _ingest_batch_sync(
     stale_ids_unique = sorted({int(x) for x in stale_ids_all})
 
     if settings.retrieval_mode in ("dense", "hybrid"):
-        assert embedder is not None
-        assert vec is not None
+        if embedder is None or vec is None:
+            raise RuntimeError(
+                "Dense embedder and vector repo are required for dense/hybrid retrieval mode"
+            )
         rebuilt, deleted_stale = _sync_and_cleanup_dense_batch(
             results=results,
             updated_content_ids=updated_content_ids,
@@ -320,8 +325,9 @@ def _execute_ingest_batches(
     total_chunks = 0
     rebuilt_any = False
 
-    for i in range(0, len(ingest_plans), 64):
-        plan_batch = ingest_plans[i : i + 64]
+    batch_size = settings.ingest_batch_size
+    for i in range(0, len(ingest_plans), batch_size):
+        plan_batch = ingest_plans[i : i + batch_size]
         (
             inserted,
             updated,

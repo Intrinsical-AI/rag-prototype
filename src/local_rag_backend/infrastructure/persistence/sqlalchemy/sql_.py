@@ -52,6 +52,20 @@ def _normalize_external_ids(external_ids: Sequence[str]) -> list[str]:
     return normalized
 
 
+def _to_domain_document(d: DbDocument) -> DomainDocument:
+    """Map a single ORM row to its domain entity."""
+    return DomainDocument(
+        id=d.id,
+        content=d.content,
+        external_id=d.external_id,
+        source_id=d.source_id,
+        metadata=d.metadata_,
+        content_sha256=d.content_sha256,
+        created_at=d.created_at,
+        updated_at=d.updated_at,
+    )
+
+
 @contextmanager
 def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
     """Provide a transactional scope around a series of operations."""
@@ -164,37 +178,13 @@ class SqlDocumentStorage(DocumentRepoPort):
         """Retrieve documents by their IDs."""
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).filter(DbDocument.id.in_(ids)).all()
-            return [
-                DomainDocument(
-                    id=d.id,
-                    content=d.content,
-                    external_id=getattr(d, "external_id", None),
-                    source_id=getattr(d, "source_id", None),
-                    metadata=getattr(d, "metadata_", None),
-                    content_sha256=getattr(d, "content_sha256", None),
-                    created_at=getattr(d, "created_at", None),
-                    updated_at=getattr(d, "updated_at", None),
-                )
-                for d in db_docs
-            ]
+            return [_to_domain_document(d) for d in db_docs]
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).order_by(DbDocument.id).all()
-            return [
-                DomainDocument(
-                    id=d.id,
-                    content=d.content,
-                    external_id=getattr(d, "external_id", None),
-                    source_id=getattr(d, "source_id", None),
-                    metadata=getattr(d, "metadata_", None),
-                    content_sha256=getattr(d, "content_sha256", None),
-                    created_at=getattr(d, "created_at", None),
-                    updated_at=getattr(d, "updated_at", None),
-                )
-                for d in db_docs
-            ]
+            return [_to_domain_document(d) for d in db_docs]
 
     @dataclass(frozen=True)
     class UpsertDoc:
@@ -299,7 +289,10 @@ class SqlDocumentStorage(DocumentRepoPort):
                     )
                     session.add(new_doc)
                     session.flush()  # allocate PK
-                    assert new_doc.id is not None
+                    if new_doc.id is None:
+                        raise RuntimeError(
+                            f"Failed to allocate primary key for document '{external_id}' after flush"
+                        )
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
@@ -311,23 +304,20 @@ class SqlDocumentStorage(DocumentRepoPort):
                     changed_content.append((int(new_doc.id), content))
                     continue
 
-                old_sha = getattr(db_doc, "content_sha256", None) or ""
-                content_changed = (old_sha != sha) or (getattr(db_doc, "content", "") != content)
+                old_sha = db_doc.content_sha256 or ""
+                content_changed = (old_sha != sha) or (db_doc.content != content)
 
                 metadata_changed = False
                 if item.metadata is not None:
-                    current_md = getattr(db_doc, "metadata_", None)
-                    metadata_changed = dict(item.metadata) != (current_md or {})
+                    metadata_changed = dict(item.metadata) != (db_doc.metadata_ or {})
 
                 source_changed = False
                 if item.source_id is not None:
-                    source_changed = item.source_id != getattr(db_doc, "source_id", None)
+                    source_changed = item.source_id != db_doc.source_id
 
                 dedup_changed = False
                 if item.chunk_dedup_sha256 is not None:
-                    dedup_changed = item.chunk_dedup_sha256 != getattr(
-                        db_doc, "chunk_dedup_sha256", None
-                    )
+                    dedup_changed = item.chunk_dedup_sha256 != db_doc.chunk_dedup_sha256
 
                 if not (content_changed or metadata_changed or source_changed or dedup_changed):
                     results.append(
