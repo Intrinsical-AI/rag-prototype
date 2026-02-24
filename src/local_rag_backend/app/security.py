@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import Request  # noqa: TC002
+from fastapi import Request
 
 from local_rag_backend.app.errors import UnauthorizedError
 from local_rag_backend.settings import settings

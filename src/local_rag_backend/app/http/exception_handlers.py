@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import Request  # noqa: TC002
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from local_rag_backend.app.error_mapping import map_runtime_error

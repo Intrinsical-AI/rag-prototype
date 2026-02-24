@@ -46,10 +46,11 @@ def add_history(
 
 def get_history(db: Session, limit: int = 10, offset: int = 0) -> Sequence[QaHistory]:
     """Retrieve the most recent question-answer interactions."""
-    return (
+    rows: Sequence[QaHistory] = (
         db.query(QaHistory)
         .order_by(QaHistory.created_at.desc(), QaHistory.id.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
+    return rows

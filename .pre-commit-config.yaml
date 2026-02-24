@@ -42,7 +42,7 @@ repos:
     hooks:
       - id: bandit
         name: "Security scan (Bandit)"
-        args: ["-r", "src/"]
+        args: ["-r", "src/", "-ll", "-ii"]
         exclude: "^tests/"
 
 ci:

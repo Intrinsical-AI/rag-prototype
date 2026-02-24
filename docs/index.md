@@ -12,4 +12,3 @@ This folder contains the project documentation.
 
 - [Hex architecture diagram](hex-arch.png)
 - [Colored diagram](hex-arch-colors.png)
-

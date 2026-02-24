@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from local_rag_backend.app.composition import build_dense_embedder_from_settings
 from local_rag_backend.settings import settings
@@ -63,8 +63,9 @@ def run_cli_mutation(
         return fn()
 
     ensure_fn: Callable[[], None] = ensure_sqlite_schema_for_cli if ensure_schema else _noop_ensure
-    run_locked_fn: Callable[[Callable[[], T]], T] = (
-        _run_with_multi_store_write_lock if use_lock else _no_lock
+    run_locked_fn = cast(
+        "Callable[[Callable[[], T]], T]",
+        _run_with_multi_store_write_lock if use_lock else _no_lock,
     )
 
     return run_cli_mutation_core(

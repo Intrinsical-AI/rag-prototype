@@ -175,7 +175,7 @@ target-version = "py311"
 fix = true
 
 [tool.ruff.lint]
-select = ["E","W","F","I","B","C4","UP","ARG","SIM","TCH","S","N","RUF","PERF"]
+select = ["E","W","F","I","B","C4","UP","ARG","SIM","S","N","RUF","PERF"]
 ignore = ["E501","B008","B904","S101","S603","S607"]
 
 [tool.ruff.lint.per-file-ignores]

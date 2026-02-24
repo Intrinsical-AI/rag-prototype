@@ -273,9 +273,9 @@ jobs:
         run: |
           uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
           if [ -n "${SAFETY_API_KEY:-}" ]; then
-            uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
+            printf 'y\n' | uv run safety check --full-report --json --output safety-report.json --key "$SAFETY_API_KEY"
           else
-            uv run safety check --full-report --json --output safety-report.json
+            printf 'y\n' | uv run safety check --full-report --json --output safety-report.json
           fi
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
