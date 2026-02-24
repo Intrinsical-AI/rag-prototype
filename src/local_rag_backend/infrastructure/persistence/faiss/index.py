@@ -108,6 +108,12 @@ class FaissIndex:
                 return 0
             return int(self._vectors.shape[0])
 
+    @contextmanager
+    def _locked_write(self) -> Iterator[None]:
+        """Acquire in-process state lock + cross-process file lock for write operations."""
+        with self._state_lock, _exclusive_file_lock(self._lock_path):
+            yield
+
     def _infer_dim_or_raise(self) -> int:
         if not self.index_path.exists():
             raise ValueError("dim is required when creating a new index (no existing index file).")
@@ -132,7 +138,7 @@ class FaissIndex:
         return int(vectors.shape[1])
 
     def _load_or_initialize(self) -> None:
-        with self._state_lock, _exclusive_file_lock(self._lock_path):
+        with self._locked_write():
             self._load_or_initialize_locked()
 
     def _load_or_initialize_locked(self) -> None:
@@ -202,7 +208,7 @@ class FaissIndex:
         if vectors.ndim != 2:
             raise ValueError("Embeddings must be a 2D array-like (n, dim)")
 
-        with self._state_lock, _exclusive_file_lock(self._lock_path):
+        with self._locked_write():
             # Reload under the lock so multi-worker ingestion appends to the latest state.
             self._load_or_initialize_locked()
             try:
@@ -217,7 +223,10 @@ class FaissIndex:
                         raise ValueError(
                             f"FAISS dim mismatch: vector dimension {vectors.shape[1]} != index dimension {self.dim}"
                         )
-                    assert self._vectors is not None
+                    if self._vectors is None:
+                        raise RuntimeError(
+                            "Numpy fallback vectors unexpectedly uninitialized in add_to_index"
+                        )
                     self._vectors = (
                         np.vstack([self._vectors, vectors]) if len(self._vectors) else vectors
                     )
@@ -243,7 +252,7 @@ class FaissIndex:
         if not to_delete:
             return 0
 
-        with self._state_lock, _exclusive_file_lock(self._lock_path):
+        with self._locked_write():
             self._load_or_initialize_locked()
 
             if not self.id_map:
@@ -271,7 +280,10 @@ class FaissIndex:
                     new_index.add(kept_vecs)
                 self.index = new_index
             else:
-                assert self._vectors is not None
+                if self._vectors is None:
+                    raise RuntimeError(
+                        "Numpy fallback vectors unexpectedly uninitialized in delete_ids"
+                    )
                 self._vectors = np.asarray(self._vectors[keep_positions], dtype="float32")
 
             self.id_map = [self.id_map[i] for i in keep_positions]
@@ -290,7 +302,7 @@ class FaissIndex:
                 f"Dim mismatch: vectors have dim {vecs.shape[1]} but index dim is {self.dim}"
             )
 
-        with self._state_lock, _exclusive_file_lock(self._lock_path):
+        with self._locked_write():
             if self._faiss is not None:
                 self.index = self._faiss.IndexFlatL2(self.dim)
                 if len(ids):
@@ -319,7 +331,8 @@ class FaissIndex:
                 distances, indices = self.index.search(query_np, k)
                 return indices[0], distances[0]
 
-            assert self._vectors is not None
+            if self._vectors is None:
+                raise RuntimeError("Numpy fallback vectors unexpectedly uninitialized in search")
             if self._vectors.size == 0:
                 idxs = np.full((k,), -1, dtype=np.int64)
                 dists = np.full((k,), np.inf, dtype=np.float32)
@@ -343,7 +356,7 @@ class FaissIndex:
 
     def save(self) -> None:
         """Save the index and ID map to disk."""
-        with self._state_lock, _exclusive_file_lock(self._lock_path):
+        with self._locked_write():
             self._save_locked()
 
     def _save_locked(self) -> None:
@@ -355,7 +368,10 @@ class FaissIndex:
             self._faiss.write_index(self.index, str(tmp_index))
             os.replace(tmp_index, self.index_path)
         else:
-            assert self._vectors is not None
+            if self._vectors is None:
+                raise RuntimeError(
+                    "Numpy fallback vectors unexpectedly uninitialized in _save_locked"
+                )
             with tempfile.NamedTemporaryFile(
                 mode="wb",
                 prefix=self.index_path.name + ".",

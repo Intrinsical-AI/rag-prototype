@@ -111,7 +111,7 @@ class Settings(BaseSettings):
         None, description="Application title for OpenRouter usage headers."
     )
     ollama_enabled: bool = Field(False, description="Enable Ollama integration.")
-    ollama_model: str = Field("gemma3:4b", description="Default Ollama model.")
+    ollama_model: str = Field("lfm2.5-thinking", description="Default Ollama model.")
     ollama_base_url: str = Field("http://localhost:11434", description="Ollama server URL.")
     ollama_request_timeout: int = Field(180, description="Ollama request timeout in seconds.")
 
@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     ingest_chunk_chars: int = Field(1200, ge=200, le=8000, description="Chunk size in characters.")
     ingest_chunk_overlap: int = Field(200, ge=0, le=4000, description="Overlap between chunks.")
     csv_has_header: bool = Field(True, description="Whether CSV files have header rows.")
+    ingest_batch_size: int = Field(
+        64, ge=1, le=512, description="Number of file-plans processed per ingestion batch."
+    )
     ingest_clean_lowercase: bool = Field(True, description="Lowercase during ingestion cleaning.")
     ingest_clean_remove_html: bool = Field(True, description="Remove HTML tags during cleaning.")
     ingest_clean_collapse_whitespace: bool = Field(

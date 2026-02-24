@@ -52,6 +52,34 @@ def _normalize_external_ids(external_ids: Sequence[str]) -> list[str]:
     return normalized
 
 
+@dataclass(frozen=True)
+class _DocumentChanges:
+    """Per-field change flags computed when evaluating an upsert against an existing row."""
+
+    content: bool
+    metadata: bool
+    source: bool
+    dedup: bool
+
+    @property
+    def any_changed(self) -> bool:
+        return self.content or self.metadata or self.source or self.dedup
+
+
+def _to_domain_document(d: DbDocument) -> DomainDocument:
+    """Map a single ORM row to its domain entity."""
+    return DomainDocument(
+        id=d.id,
+        content=d.content,
+        external_id=d.external_id,
+        source_id=d.source_id,
+        metadata=d.metadata_,
+        content_sha256=d.content_sha256,
+        created_at=d.created_at,
+        updated_at=d.updated_at,
+    )
+
+
 @contextmanager
 def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:
     """Provide a transactional scope around a series of operations."""
@@ -164,37 +192,13 @@ class SqlDocumentStorage(DocumentRepoPort):
         """Retrieve documents by their IDs."""
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).filter(DbDocument.id.in_(ids)).all()
-            return [
-                DomainDocument(
-                    id=d.id,
-                    content=d.content,
-                    external_id=getattr(d, "external_id", None),
-                    source_id=getattr(d, "source_id", None),
-                    metadata=getattr(d, "metadata_", None),
-                    content_sha256=getattr(d, "content_sha256", None),
-                    created_at=getattr(d, "created_at", None),
-                    updated_at=getattr(d, "updated_at", None),
-                )
-                for d in db_docs
-            ]
+            return [_to_domain_document(d) for d in db_docs]
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).order_by(DbDocument.id).all()
-            return [
-                DomainDocument(
-                    id=d.id,
-                    content=d.content,
-                    external_id=getattr(d, "external_id", None),
-                    source_id=getattr(d, "source_id", None),
-                    metadata=getattr(d, "metadata_", None),
-                    content_sha256=getattr(d, "content_sha256", None),
-                    created_at=getattr(d, "created_at", None),
-                    updated_at=getattr(d, "updated_at", None),
-                )
-                for d in db_docs
-            ]
+            return [_to_domain_document(d) for d in db_docs]
 
     @dataclass(frozen=True)
     class UpsertDoc:
@@ -299,7 +303,10 @@ class SqlDocumentStorage(DocumentRepoPort):
                     )
                     session.add(new_doc)
                     session.flush()  # allocate PK
-                    assert new_doc.id is not None
+                    if new_doc.id is None:
+                        raise RuntimeError(
+                            f"Failed to allocate primary key for document '{external_id}' after flush"
+                        )
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
@@ -311,25 +318,9 @@ class SqlDocumentStorage(DocumentRepoPort):
                     changed_content.append((int(new_doc.id), content))
                     continue
 
-                old_sha = getattr(db_doc, "content_sha256", None) or ""
-                content_changed = (old_sha != sha) or (getattr(db_doc, "content", "") != content)
+                changes = _detect_document_changes(db_doc, item, content, sha)
 
-                metadata_changed = False
-                if item.metadata is not None:
-                    current_md = getattr(db_doc, "metadata_", None)
-                    metadata_changed = dict(item.metadata) != (current_md or {})
-
-                source_changed = False
-                if item.source_id is not None:
-                    source_changed = item.source_id != getattr(db_doc, "source_id", None)
-
-                dedup_changed = False
-                if item.chunk_dedup_sha256 is not None:
-                    dedup_changed = item.chunk_dedup_sha256 != getattr(
-                        db_doc, "chunk_dedup_sha256", None
-                    )
-
-                if not (content_changed or metadata_changed or source_changed or dedup_changed):
+                if not changes.any_changed:
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
@@ -340,7 +331,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                     )
                     continue
 
-                if content_changed:
+                if changes.content:
                     db_doc.content = content
                     db_doc.content_sha256 = sha
                     updated_content_ids.append(int(db_doc.id))
@@ -358,7 +349,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                         external_id=external_id,
                         id=int(db_doc.id),
                         action="updated",
-                        content_changed=content_changed,
+                        content_changed=changes.content,
                     )
                 )
 
@@ -472,6 +463,45 @@ class SqlDocumentStorage(DocumentRepoPort):
                 )
             session.commit()
             return int(deleted_sql or 0), deleted_ids, missing, len(to_tombstone)
+
+
+def _detect_document_changes(
+    db_doc: DbDocument,
+    item: SqlDocumentStorage.UpsertDoc,
+    new_content: str,
+    new_sha: str,
+) -> _DocumentChanges:
+    """Compare an incoming UpsertDoc against the persisted row to find what changed.
+
+    Args:
+        db_doc: Existing ORM row.
+        item: Incoming upsert payload.
+        new_content: Stripped content string (pre-computed by caller).
+        new_sha: SHA-256 of new_content (pre-computed by caller).
+
+    Returns:
+        _DocumentChanges with per-field change flags.
+    """
+    content_changed = (db_doc.content_sha256 or "") != new_sha or db_doc.content != new_content
+
+    metadata_changed = False
+    if item.metadata is not None:
+        metadata_changed = dict(item.metadata) != (db_doc.metadata_ or {})
+
+    source_changed = False
+    if item.source_id is not None:
+        source_changed = item.source_id != db_doc.source_id
+
+    dedup_changed = False
+    if item.chunk_dedup_sha256 is not None:
+        dedup_changed = item.chunk_dedup_sha256 != db_doc.chunk_dedup_sha256
+
+    return _DocumentChanges(
+        content=content_changed,
+        metadata=metadata_changed,
+        source=source_changed,
+        dedup=dedup_changed,
+    )
 
 
 class HistorySqlStorage(QAHistoryPort):

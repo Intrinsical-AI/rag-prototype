@@ -4,7 +4,7 @@ Este documento describe cómo utilizar `rag-prototype` como una librería de Pyt
 
 ## Requisitos Previos
 
-1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull gemma3:4b`).
+1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull lfm2.5-thinking`).
 2.  **Proyecto instalado**: Instala el proyecto en modo editable para facilitar el desarrollo:
 
     ```bash
@@ -25,7 +25,7 @@ La librería se configura mediante variables de entorno o un archivo `.env`. Par
 
 # Habilitar el generador de Ollama
 OLLAMA_ENABLED=True
-OLLAMA_MODEL="gemma3:4b" # O el modelo que prefieras
+OLLAMA_MODEL="lfm2.5-thinking" # O el modelo que prefieras
 
 # Configurar el modo de recuperación (sparse, dense, o hybrid)
 # Para empezar, 'sparse' es el más sencillo ya que no requiere embeddings.

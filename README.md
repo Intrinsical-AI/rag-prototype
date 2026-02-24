@@ -242,6 +242,7 @@ Key variables (non-exhaustive):
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
 | `INGEST_CHUNK_STRATEGY`          | `chars_v1`                | ingestion    | Chunking strategy identifier (deterministic)           |
 | `INGEST_CHUNKER_VERSION`         | `chars_v1`                | ingestion    | Version token included in chunk dedup hashes           |
+| `INGEST_BATCH_SIZE`              | `64`                      | ingestion    | File-plans per ingestion batch (`1..512`)              |
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
@@ -262,7 +263,7 @@ Key variables (non-exhaustive):
 | `OPENAI_TEMPERATURE`             | `0.2`                     | OpenAI       | Temperature                                            |
 | `OPENAI_MAX_TOKENS`              | `256`                     | OpenAI       | Max tokens                                             |
 | `OLLAMA_ENABLED`                 | `false`                   | Ollama       | Enable Ollama                                          |
-| `OLLAMA_MODEL`                   | `gemma3:4b`               | Ollama       | Model served by Ollama                                 |
+| `OLLAMA_MODEL`                   | `lfm2.5-thinking`               | Ollama       | Model served by Ollama                                 |
 | `OLLAMA_BASE_URL`                | `http://localhost:11434`  | Ollama       | Server URL                                             |
 | `OLLAMA_REQUEST_TIMEOUT`         | `180`                     | Ollama       | Timeout (s)                                            |
 
@@ -331,6 +332,7 @@ Chunking parameters (in settings):
 * `INGEST_CHUNK_CHARS` (default 1200)
 * `INGEST_CHUNK_OVERLAP` (default 200)
 * `INGEST_CHUNKER_VERSION` (default `chars_v1`): changes the dedup key used by `/api/docs` to force re-chunk/re-embed.
+* `INGEST_BATCH_SIZE` (default `64`, valid range `1..512`): file-plans processed per ingestion batch.
 
 Available scripts:
 
@@ -464,7 +466,7 @@ Prerequisites: Docker Desktop/Engine.
 docker compose up -d --build
 
 # (Optional) Pull a model into Ollama once the service is up
-docker exec -it ollama ollama pull gemma3:4b
+docker exec -it ollama ollama pull lfm2.5-thinking
 
 # Verify services
 curl http://localhost:8000/api/health

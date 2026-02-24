@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,8 +18,28 @@ if TYPE_CHECKING:
 
     from local_rag_backend.core.ports import EmbedderPort
 
-IngestPlan = tuple[Path, str, tuple[Any, ...], tuple[str, ...]]
-BatchSyncResult = tuple[int, int, int, bool, int, int, list[tuple[Path, int]]]
+
+@dataclass(frozen=True)
+class IngestPlan:
+    """Parsed file ready for ingestion: chunks + their desired external IDs."""
+
+    file_path: Path
+    file_prefix: str
+    items: tuple[Any, ...]
+    desired_external_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BatchSyncResult:
+    """Counters returned after processing one batch of IngestPlans."""
+
+    inserted: int
+    updated: int
+    unchanged: int
+    rebuilt: bool
+    deleted_stale: int
+    ingested_chunks: int
+    stale_by_file: list[tuple[Path, int]]
 
 
 def _resolve_loader_options(
@@ -127,7 +148,12 @@ def _build_file_ingest_plan(
 
     if not items:
         return None
-    return (file_path, file_prefix, tuple(items), tuple(desired_external_ids))
+    return IngestPlan(
+        file_path=file_path,
+        file_prefix=file_prefix,
+        items=tuple(items),
+        desired_external_ids=tuple(desired_external_ids),
+    )
 
 
 def _build_ingest_plans(
@@ -160,7 +186,7 @@ def _build_ingest_plans(
 
         total_files += 1
         if dry_run:
-            total_chunks += len(plan[2])
+            total_chunks += len(plan.items)
             continue
         plans.append(plan)
     return plans, total_files, total_chunks, total_skipped
@@ -176,20 +202,20 @@ def _collect_batch_items_and_stale(
     stale_by_file: list[tuple[Path, int]] = []
     ingested_chunks = 0
 
-    for file_path_bound, file_prefix_bound, items_bound, desired_bound in plans_bound:
-        desired_external_ids_local = set(desired_bound)
-        items_local = list(items_bound)
+    for plan in plans_bound:
+        desired_external_ids_local = set(plan.desired_external_ids)
+        items_local = list(plan.items)
 
         tombstoned = doc_repo.get_tombstoned_external_ids(list(desired_external_ids_local))
         if tombstoned:
             desired_external_ids_local -= tombstoned
             items_local = [it for it in items_local if it.external_id not in tombstoned]
 
-        existing = doc_repo.list_ids_by_external_id_prefix(file_prefix_bound)
+        existing = doc_repo.list_ids_by_external_id_prefix(plan.file_prefix)
         stale_ids = [doc_id for doc_id, ext in existing if ext not in desired_external_ids_local]
         if stale_ids:
             stale_ids_all.extend(stale_ids)
-            stale_by_file.append((file_path_bound, len(stale_ids)))
+            stale_by_file.append((plan.file_path, len(stale_ids)))
 
         ingested_chunks += len(items_local)
         all_items.extend(items_local)
@@ -259,7 +285,10 @@ def _ingest_batch_sync(
 
     vectors_by_external_id: dict[str, list[float]] = {}
     if settings.retrieval_mode in ("dense", "hybrid") and unique_items:
-        assert embedder is not None
+        if embedder is None:
+            raise RuntimeError(
+                "Dense embedder is required for dense/hybrid retrieval mode but was not initialized"
+            )
         vectors_by_external_id = precompute_vectors_for_changed_items(
             items=unique_items,
             doc_repo=doc_repo,
@@ -281,8 +310,10 @@ def _ingest_batch_sync(
     stale_ids_unique = sorted({int(x) for x in stale_ids_all})
 
     if settings.retrieval_mode in ("dense", "hybrid"):
-        assert embedder is not None
-        assert vec is not None
+        if embedder is None or vec is None:
+            raise RuntimeError(
+                "Dense embedder and vector repo are required for dense/hybrid retrieval mode"
+            )
         rebuilt, deleted_stale = _sync_and_cleanup_dense_batch(
             results=results,
             updated_content_ids=updated_content_ids,
@@ -296,14 +327,14 @@ def _ingest_batch_sync(
         deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=stale_ids_unique)
         deleted_stale = int(deleted_sql)
 
-    return (
-        inserted,
-        updated,
-        unchanged,
-        rebuilt,
-        deleted_stale,
-        ingested_chunks,
-        stale_by_file,
+    return BatchSyncResult(
+        inserted=inserted,
+        updated=updated,
+        unchanged=unchanged,
+        rebuilt=rebuilt,
+        deleted_stale=deleted_stale,
+        ingested_chunks=ingested_chunks,
+        stale_by_file=stale_by_file,
     )
 
 
@@ -320,28 +351,21 @@ def _execute_ingest_batches(
     total_chunks = 0
     rebuilt_any = False
 
-    for i in range(0, len(ingest_plans), 64):
-        plan_batch = ingest_plans[i : i + 64]
-        (
-            inserted,
-            updated,
-            unchanged,
-            rebuilt,
-            _deleted_stale,
-            ingested_chunks,
-            stale_by_file,
-        ) = _ingest_batch_sync(
+    batch_size = settings.ingest_batch_size
+    for i in range(0, len(ingest_plans), batch_size):
+        plan_batch = ingest_plans[i : i + batch_size]
+        batch = _ingest_batch_sync(
             plans_bound=tuple(plan_batch),
             doc_repo=doc_repo,
             embedder=embedder,
             vec=vec,
         )
-        total_chunks += ingested_chunks
-        total_inserted += inserted
-        total_updated += updated
-        total_unchanged += unchanged
-        rebuilt_any = rebuilt_any or rebuilt
-        for stale_file_path, stale_count in stale_by_file:
+        total_chunks += batch.ingested_chunks
+        total_inserted += batch.inserted
+        total_updated += batch.updated
+        total_unchanged += batch.unchanged
+        rebuilt_any = rebuilt_any or batch.rebuilt
+        for stale_file_path, stale_count in batch.stale_by_file:
             click.echo(f"[INFO] Deleted {stale_count} stale chunks for {stale_file_path}.")
 
     return total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any
