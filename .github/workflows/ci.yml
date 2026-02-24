@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches:
+      - 'main'
+      - 'master'
+      - 'develop'
+      - 'release**'
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -10,7 +14,11 @@ on:
       - 'LICENSE'
       - 'CHANGELOG*'
   pull_request:
-    branches: [main, master, develop]
+    branches:
+      - 'main'
+      - 'master'
+      - 'develop'
+      - 'release**'
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
