@@ -206,73 +206,81 @@ Notas:
 
 ---
 
-## Mantenimiento (dense/hybrid): borrado y rebuild idempotente del índice
+## Mantenimiento (dense/hybrid): mutación canónica + repair explícito
 
-En modos `dense`/`hybrid`, el índice FAISS es **estado derivado** de SQLite. Si borras filas manualmente en SQL o editas ficheros del índice a mano, puedes provocar **deriva** (IDs en FAISS que ya no existen en SQL, o documentos en SQL sin vector).
+En `dense`/`hybrid`, SQLite es el store de entidad y el índice vectorial es estado operacional incremental.
+El write-path canónico usa `MutationCoordinator` (`DURABLE_SAGA`) con journal duradero.
 
-Opciones recomendadas:
-
-### 1) CLI
+### 1) CLI (canónico)
 
 ```bash
-# Borrar documentos por ID (SQL + FAISS cuando aplique)
-rag-delete-docs 10 11 12
+# Upsert (idempotente por op_id)
+cat > /tmp/mutate_upsert.json <<'JSON'
+{"op_id":"op-upsert-1","upserts":[{"external_id":"doc-1","content":"hola"}]}
+JSON
+rag-mutate-docs --json /tmp/mutate_upsert.json
 
-# Borrar por external_id (añade tombstones para que no reaparezcan en futuras ingestas)
-rag-delete-external-ids "chunk:<sha256>" "file:/abs/path:part=file:chunk=0"
+# Delete por IDs SQL
+cat > /tmp/mutate_delete_ids.json <<'JSON'
+{"op_id":"op-del-ids-1","delete_ids":["doc:...","doc:..."]}
+JSON
+rag-mutate-docs --json /tmp/mutate_delete_ids.json
 
-# Rebuild completo del índice desde SQLite (idempotente; dense/hybrid)
+# Delete por external_id (crea tombstones)
+cat > /tmp/mutate_delete_ext.json <<'JSON'
+{"op_id":"op-del-ext-1","delete_external_ids":["chunk:<sha256>","file:/abs/path:part=file:chunk=0"]}
+JSON
+rag-mutate-docs --json /tmp/mutate_delete_ext.json
+
+# Repair explícito del índice
 rag-rebuild-index
 ```
-
-Nota operativa:
-* En `dense`/`hybrid`, los borrados intentan primero la eliminación incremental del índice y sólo hacen rebuild completo si esa sincronización falla.
 
 ### 2) API (FastAPI)
 
 ```bash
-# Borrar por IDs
-curl -X POST "http://localhost:8000/api/docs/delete" \
+curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \
-  -d '{"ids":[10,11,12]}'
+  -d '{"op_id":"op-1","upserts":[{"external_id":"doc-1","content":"hola"}]}'
 
-# Borrar por external_id
-curl -X POST "http://localhost:8000/api/docs/delete_by_external_id" \
+curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \
-  -d '{"external_ids":["chunk:<sha256>","file:/abs/path:part=file:chunk=0"]}'
+  -d '{"op_id":"op-2","delete_external_ids":["chunk:<sha256>"]}'
 
-# Rebuild del índice (dense/hybrid)
 curl -X POST "http://localhost:8000/api/index/rebuild"
 ```
 
-Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"` a las llamadas.
+Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"`.
 
-### 3) Como librería (flujo programático)
-
-Si orquestas tu propio pipeline y necesitas mantenimiento consistente entre stores:
+### 3) Como librería (flujo programático recomendado)
 
 ```python
-from local_rag_backend.core.services.maintenance import (
-    delete_documents_multi_store,
-    rebuild_index_from_db,
+from local_rag_backend.app.application.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
 )
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
-from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
+from local_rag_backend.app.wiring.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.app.composition import build_dense_embedder_from_settings
+from local_rag_backend.settings import settings
 
-doc_repo = SqlDocumentStorage()
-embedder = OpenAIEmbedder()
-vec_repo = VectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=embedder.dim)
+ports = build_docs_mutation_ports(
+    build_embedder=lambda: build_dense_embedder_from_settings(settings_obj=settings),
+)
+coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
 
-# 1) Borrado consistente
-delete_documents_multi_store(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder, ids=[10, 11, 12])
-
-# 2) Rebuild idempotente desde SQLite
-rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
+summary = coordinator.execute(
+    MutationIntent(
+        op_id="script-op-1",
+        upserts=(MutationUpsertInput(external_id="doc-1", content="hola"),),
+        delete_external_ids=("chunk:<sha256>",),
+        source="script:custom",
+    )
+)
+print(summary)
 ```
 
-Nota (dense/hybrid): al mutar el índice, se mantiene un `index_manifest.json` junto a `INDEX_PATH` para
-detectar drift de configuración (modelo/dim/chunker). Si cambias esos settings, ejecuta un rebuild.
+Nota: el rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
 
 ---
 

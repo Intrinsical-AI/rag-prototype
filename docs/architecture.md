@@ -1,386 +1,204 @@
-# Architecture Guide: Hexagonal (Ports & Adapters)
+# Architecture Guide: Hexagonal + Durable Multi-Store Writes
 
-The **Intrinsical RAG Prototype** uses a **Hexagonal architecture** (a.k.a. Ports & Adapters) to maximize modularity, testability, and maintainability. Business logic lives in the core; external tech (LLMs, vector stores, databases) are plugged in via adapters.
+`rag-prototype` uses a hexagonal architecture (Ports & Adapters) with an explicit app layer for orchestration and transport boundaries.
 
-## Core Principles
+## Core principles
 
-* **Dependency Inversion**: the core depends on *ports* (interfaces), never on concrete implementations.
-* **Stable Core**: domain entities and services are tech-agnostic.
-* **Adapters at the Edge**: infrastructure code implements the ports.
-* **Composition Root**: `app/container.py` composes adapters/use-cases; `app/factory.py` manages runtime app context and compatibility entrypoints, using shared selection helpers from `app/composition.py`.
-* **Testability**: adapters can be swapped for fakes/mocks; ports are `Protocol`s.
+- Core domain logic depends on ports, never on infrastructure implementations.
+- HTTP/CLI are transport adapters; business orchestration lives in `app/application`.
+- Persistence and model providers are swappable through ports and wiring factories.
+- Multi-store writes (SQL + vector index) are centralized in one coordinator (`DURABLE_SAGA`).
 
 ---
 
-## Project Structure
+## Current structure
 
-```
+```text
 src/local_rag_backend/
-├── cli_commands/               # CLI commands partitioned by domain (docs/index/eval/server)
-├── core/                       # Domain + application services (technology-agnostic)
-│   ├── domain/                 # Entities (Document, etc.)
-│   ├── ports/                  # Ports (Protocols) for core dependencies
-│   └── services/               # ETL, IngestionPipeline, RagService
-├── infrastructure/             # Adapters (technology-specific)
-│   ├── embeddings/             # ST/OpenAI embedders
-│   ├── llms/                   # OpenAI / Ollama generators
-│   ├── persistence/            # sql/, vector/, shared/
-│   ├── retrieval/              # BM25 (sparse), dense vector, Hybrid
-│   └── ingestion/              # CSV loader, etc.
-├── app/                        # Application + HTTP transport layer
-│   ├── main.py                 # FastAPI app + lifespan
-│   ├── api_router.py           # Root API router composition (include_router only)
-│   ├── routers/                # HTTP handlers by bounded context
-│   ├── http/                   # HTTP-only concerns (exception handlers, transport boundary)
-│   ├── application/            # Use-case orchestration (transport-agnostic)
-│   ├── dependencies.py         # DI bridge to app context/container
-│   ├── app_context.py          # Runtime context (settings + AppContainer)
-│   ├── container.py            # App composition container used by routers/CLI
-│   ├── schemas/                # Pydantic request/response schemas by bounded context
-│   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
-│   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
-│   ├── factory.py              # App-context lifecycle + compatibility entrypoints
-│   └── services/               # Use-case orchestration + app-layer contracts/results
-└── scripts/                    # CLI helpers (bootstrap, build_index)
+├── app/
+│   ├── application/            # transport-agnostic use cases/orchestration
+│   │   ├── docs_mutation.py    # MutationCoordinator (canonical write path)
+│   │   ├── docs_*_use_case.py  # ingest/import/query docs use cases
+│   │   ├── rag_query_use_case.py
+│   │   ├── mutations.py        # shared API/CLI mutation execution wrapper
+│   │   └── storage_profiles.py # capability gates (ATOMIC/DURABLE_SAGA/READ_ONLY)
+│   ├── contracts/              # app-layer contracts (ports/results)
+│   ├── wiring/                 # default wiring builders for mutation ports
+│   ├── routers/                # FastAPI transport adapters
+│   ├── schemas/                # HTTP Pydantic models
+│   ├── container.py            # composition root for app runtime
+│   └── factory.py              # app context lifecycle and compatibility shims
+├── core/
+│   ├── domain/                 # entities/value objects
+│   ├── ports/                  # Embedder/Generator/Retriever/Repo ports
+│   └── services/               # domain-oriented services (rag_runtime, ingestion, etc.)
+├── infrastructure/
+│   ├── persistence/            # sql + vector + shared
+│   ├── retrieval/              # sparse/dense/hybrid adapters
+│   ├── llms/                   # OpenAI/Ollama adapters
+│   └── embeddings/             # OpenAI/ST adapters
+└── cli_commands/               # CLI transport adapters
 ```
 
-Evaluation layering:
-- `core/services/evaluation.py` is technology-agnostic (dataset parsing + metric computation).
-- `app/services/evaluation.py` owns ephemeral SQL/retriever wiring for `rag-eval`.
+`app/services` does not exist anymore by design. Its old responsibilities were split into:
 
-HTTP docs/index layering:
-- Routers are thin adapters in `app/routers/*` and call use-case orchestration in
-  `app/application/*` and `app/services/*`.
-- Shared mutation execution (`run_api_mutation` / `run_cli_mutation`) lives in
-  `app/application/mutations.py`.
-- App-layer dependency contracts for docs/index mutations live in `app/services/ports.py`
-  (`DocsMutationPorts`, `IndexMutationPorts`), with shared wiring in
-  `app/services/mutation_ports.py`.
-- App-layer docs mutation outcomes live in `app/services/results.py`
-  (`UpsertDocsSummary`, `DeleteDocsSummary`, etc.).
-
-Type taxonomy (enforced by module naming):
-- `app/schemas/*`: HTTP transport contracts (Pydantic only).
-- `app/services/results.py` and `core/services/types.py`: internal DTOs/results (transport-agnostic).
-- `core/domain/entities.py`: domain entities and invariants.
-- `infrastructure/persistence/*/models.py`: ORM persistence models.
-
-Error layering:
-- Infra adapters raise typed runtime errors from `core/errors.py` (no FastAPI dependency).
-- Runtime error mapping lives in `app/error_mapping.py`.
-- HTTP registration/rendering lives in `app/http/exception_handlers.py`.
-
-CLI layering:
-- `cli.py` is the entrypoint module (group + command registration).
-- Shared command runtime helpers live in `cli_commands/runtime.py`.
-- Domain commands live in `cli_commands/docs.py`, `cli_commands/index.py`,
-  `cli_commands/eval.py`, and `cli_commands/server.py`.
+- `app/contracts/*` for contracts/DTOs.
+- `app/wiring/*` for adapter wiring.
+- `app/application/*` for use-case orchestration.
 
 ---
 
-## Dependency Flow (High-Level)
+## Layer boundaries
 
-```mermaid
-graph TD
-  A[FastAPI Router] --> B[RagService]
-  B --> C[RetrieverPort]
-  B --> D[GeneratorPort]
-  B --> E[QAHistoryPort]
+- `app/routers/*` must not import `infrastructure/*` directly.
+- `app/application/*` must not import HTTP transport (`fastapi`, routers, schemas).
+- `core/*` must not import `app/*` or concrete infrastructure.
+- Cross-layer runtime error mapping is centralized in `app/error_mapping.py` + `app/http/exception_handlers.py`.
 
-  subgraph Core
-    B
-    C
-    D
-    E
-  end
-
-  subgraph Infrastructure (Adapters)
-    C1[SparseBM25Retriever]
-    C2[DenseVectorRetriever]
-    C3[HybridRetriever]
-    D1[OpenAIGenerator]
-    D2[OllamaGenerator]
-    E1[HistorySqlStorage]
-    S1[SqlDocumentStorage]
-    V1[VectorStorage]
-  end
-
-  A -->|DI via factory| C1 & C2 & C3 & D1 & D2 & E1 & S1 & V1
-```
-
-The composition root (`app/container.py` + `app/factory.py`) chooses specific adapters
-(BM25/FAISS/Hybrid; OpenAI/Ollama) using `settings.py`, with policy centralized in
-`app/composition.py` and reused by API/CLI/scripts.
+These boundaries are enforced by architecture tests under `tests/unit/app/test_architecture_*`.
 
 ---
 
-## Key Ports (Core Interfaces)
+## Multi-store write model
 
-Source of truth: `src/local_rag_backend/core/ports/__init__.py`.
+### Why
+
+In dense/hybrid modes, writes affect:
+
+- SQL documents (entity store),
+- vector index (operational index).
+
+Physical atomicity across both stores is not assumed. The system guarantees `DURABLE_SAGA` semantics through journaling, compensation, and recovery.
+
+### Canonical write path
+
+All document mutations must go through:
+
+- `MutationCoordinator.execute(...)`
+
+Used by:
+
+- `POST /api/docs/mutate`
+- `POST /api/docs` ingestion flow (internally builds mutation intents)
+- `POST /api/docs/import` flow (internally builds mutation intents)
+- `rag-mutate-docs`
+- `rag-ingest`
+
+### Write capabilities
+
+`StorageProfile` declares capabilities:
+
+- `ATOMIC`
+- `DURABLE_SAGA`
+- `READ_ONLY`
+
+Writes are rejected if the active profile does not satisfy `DURABLE_SAGA` for write-enabled modes.
+
+### Mutation states
+
+Journal records move through:
+
+- `PREPARED`
+- `SQL_COMMITTED`
+- `VECTOR_COMMITTED`
+- `COMMITTED`
+- `COMPENSATING`
+- `ROLLED_BACK`
+- `FAILED_NEEDS_RECOVERY`
+
+### Normal write flow
+
+1. Acquire multi-store write lock (`WRITE_LOCK_TIMEOUT_S` / `WRITE_LOCK_POLL_S`).
+2. Journal `PREPARED`.
+3. Capture SQL `before_image`.
+4. Apply SQL mutation and commit.
+5. Journal `SQL_COMMITTED`.
+6. Compute vector delta from changed content only.
+7. Apply vector delta atomically (`VectorRepoPort.apply_delta_atomic`).
+8. Journal `VECTOR_COMMITTED`.
+9. Journal `COMMITTED` and cleanup.
+
+### Failure handling
+
+If vector apply fails after SQL commit:
+
+1. Journal `COMPENSATING`.
+2. Roll back SQL via `before_image`.
+3. Mark `ROLLED_BACK` if success, otherwise `FAILED_NEEDS_RECOVERY`.
+
+Startup and background recovery loops replay incomplete journal records until convergence.
+
+---
+
+## API surface (v1.0)
+
+Kept:
+
+- `GET /api/docs`
+- `POST /api/docs`
+- `POST /api/docs/import`
+- `POST /api/docs/mutate`
+- `POST /api/index/rebuild`
+- `POST /api/ask`
+- `POST /api/ask_eval`
+- `GET /api/history`
+- `GET /api/health`
+- `GET /api/ready`
+
+Removed:
+
+- `POST /api/docs/upsert`
+- `POST /api/docs/delete`
+- `POST /api/docs/delete_by_external_id`
+
+---
+
+## CLI surface (v1.0)
+
+Kept:
+
+- `rag-ingest`
+- `rag-mutate-docs`
+- `rag-rebuild-index`
+- `rag-build-index`
+- `rag-bootstrap`
+- `rag-status`
+- `rag-eval`
+- `rag-server`
+
+Removed:
+
+- `rag-upsert-docs`
+- `rag-delete-docs`
+- `rag-delete-external-ids`
+
+---
+
+## Swappability contract
+
+The architecture assumes backends can be swapped (e.g., SQL-only vector plugin, Postgres+Milvus, Elastic+vector). Current hard requirements for write-enabled dense/hybrid profiles:
+
+- document repo supports mutation primitives used by `MutationCoordinator`,
+- vector adapter implements:
 
 ```python
-# src/local_rag_backend/core/ports/__init__.py
-from collections.abc import Iterable, Sequence
-from typing import Protocol, runtime_checkable
-
-from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
-
-@runtime_checkable
-class EmbedderPort(Protocol):
-    dim: int
-    def embed(self, texts: Sequence[str]) -> Sequence[Embedding]: ...
-
-@runtime_checkable
-class GeneratorPort(Protocol):
-    def generate(self, question: str, contexts: Sequence[str]) -> str: ...
-
-@runtime_checkable
-class RetrieverPort(Protocol):
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
-
-@runtime_checkable
-class DocumentRepoPort(Protocol):
-    def store_documents(self, contents: Sequence[str]) -> Sequence[str]: ...
-    def delete_documents(self, ids: Sequence[str]) -> None: ...
-    def get(self, ids: Sequence[str]) -> Sequence[Document]: ...
-    def get_all_documents(self) -> Sequence[Document]: ...
-
-@runtime_checkable
-class VectorRepoPort(Protocol):
-    def upsert(self, ids: Sequence[str], vectors: Sequence[Embedding]) -> None: ...
-    def delete(self, ids: Sequence[str]) -> int: ...
-    def rebuild(self, ids: Sequence[str], vectors: Sequence[Embedding]) -> None: ...
-    def similar(self, vector: Embedding, k: int) -> Sequence[tuple[str, float]]: ...
-
-@runtime_checkable
-class QAHistoryPort(Protocol):
-    def save(self, q: str, a: str, source_ids: Sequence[str]) -> None: ...
-
-@runtime_checkable
-class LoaderPort(Protocol):
-    def load(self) -> Iterable[LoadedItem]: ...
+def apply_delta_atomic(
+    *,
+    delete_ids: Sequence[DocId],
+    upserts: Sequence[tuple[DocId, Embedding]],
+) -> None: ...
 ```
 
----
-
-## Representative Adapters
-
-**Retrievers**
-
-* `SparseBM25Retriever` (BM25 over preprocessed text; SQL for doc lookup)
-* `DenseVectorRetriever` (SentenceTransformers/OpenAI embeddings + FAISS; SQL for doc lookup)
-* `HybridRetriever` (linear blend of dense + sparse, configurable `alpha`)
-
-**LLMs**
-
-* `OpenAIGenerator` (chat completions)
-* `OllamaGenerator` (HTTP to local Ollama server)
-
-**Persistence**
-
-* `SqlDocumentStorage` (documents via SQLAlchemy/SQLite)
-* `VectorStorage` (vector index + ID map)
-* `HistorySqlStorage` (Q\&A history)
-
-**App transport**
-
-* Pydantic HTTP schemas live in `src/local_rag_backend/app/schemas/` (split by bounded context: `rag`, `docs`, `index`, `meta`).
-
-**Ingestion**
-
-* `CSVLoader` → `IngestionPipeline` → `ETLService` (store docs, embed, upsert vectors)
-
-All of these implement the ports above and can be swapped at composition time.
+If a vector adapter does not implement `apply_delta_atomic`, writes fail closed.
 
 ---
 
-## Composition Root
+## Operational guidance
 
-`app/container.py` wires the system from configuration (factory/providers + runtime cache),
-while `app/factory.py` owns app-context lifecycle and compatibility accessors.
-
-* Chooses **retriever** by `settings.retrieval_mode` (`sparse`, `dense`, `hybrid`)
-* Chooses **generator**: Ollama (if `OLLAMA_ENABLED`) or OpenAI (if `OPENAI_API_KEY`)
-* Instantiates `RagService(retriever, generator, history_storage)`
-* Provides a process-local singleton via `get_rag_service()`
-* Cross-process cache invalidation uses DB-backed `system_state.version` (key: `rag_service`),
-  bumped by `reset_rag_service()`
-
----
-
-## Request Flow (End-to-End)
-
-```mermaid
-sequenceDiagram
-  participant U as Client
-  participant API as FastAPI /api/ask
-  participant S as RagService
-  participant R as RetrieverPort
-  participant G as GeneratorPort
-  participant H as QAHistoryPort
-
-  U->>API: POST /api/ask {"question": "...", "k": 3}
-  API->>S: ask(question, top_k=k)
-  S->>R: retrieve(query, k)
-  R-->>S: (docs, scores)
-  alt no docs
-    S-->>API: {"answer": "No hay documentos indexados para responder a tu pregunta.", "sources": []}
-  else docs
-    S->>G: generate(question, [doc.content...])
-    G-->>S: answer
-    S->>H: save(question, answer, source_ids=[...])
-    S-->>API: {"answer": answer, "sources": [{document, score}, ...]}
-  end
-```
-
-`/api/history` reads persisted Q\&A with pagination.
-
-Async/sync boundary:
-- FastAPI handlers call sync core/infra paths via `app/blocking.py`.
-- Blocking work is partitioned by task type (`default`, `mutation`, `network`, `eval`) with
-  dedicated worker pools and queue limits to reduce event-loop starvation risk.
-
----
-
-## Multi-Store Consistency (SQLite + FAISS)
-
-In dense/hybrid retrieval, the system has **two stores**:
-
-* **SQLite** (`documents` table) is the source of truth for document text.
-* **FAISS** (`INDEX_PATH` + `ID_MAP_PATH`) is derived state: it maps `document_id -> embedding vector`.
-
-### Document Identity Contract
-
-The `documents` table is designed to support idempotent ingestion and upserts (already available via API and CLI):
-
-Fresh-install policy: runtime does not auto-migrate legacy schemas/id-maps.
-
-* `doc_id`: internal canonical string ID (`doc:<uuid7>`, primary key)
-* `external_id`: optional stable identifier for a source document (unique when set)
-* `source_id`: optional provenance identifier (e.g., file path, URL)
-* `metadata`: JSON metadata captured at extraction time (stored as JSON text in SQLite)
-* `content_sha256`: hash of the stored `content` (dedup/update decisions)
-* `created_at`, `updated_at`: timestamps
-
-These fields allow you to track and update documents without relying on brittle “row order” or
-manual deletion. Current user-facing upsert flows are:
-
-* `POST /api/docs/upsert`
-* `rag-upsert-docs`
-
-The invariants that matter:
-
-* Document IDs are opaque strings and stable across SQL and vector index.
-* Writes must keep SQL and FAISS consistent, or fall back to a safe recovery path.
-
-Maintenance logic lives in `src/local_rag_backend/core/services/maintenance.py`:
-
-* `delete_documents_multi_store(...)`:
-  * preflights index mutability (`vec_repo.delete([])`) before SQL delete when rebuild fallback would require a not-yet-resolved embedder,
-  * aborts before SQL mutation if preflight fails and no embedder is available for safe rebuild,
-  * otherwise deletes from SQLite, attempts vector deletion, and falls back to full rebuild when configured.
-* `rebuild_index_from_db(...)`: idempotent rebuild of FAISS from the current SQLite docs.
-
-Because the application caches a process-local singleton `RagService`, API/CLI maintenance operations call `reset_rag_service()` after mutating the DB and/or index so subsequent queries see the updated state.
-
----
-
-## HTTP API Surface
-
-The API root router lives in `src/local_rag_backend/app/api_router.py` (mounted under `/api`) and
-includes bounded routers from `src/local_rag_backend/app/routers/`.
-The project exposes:
-
-* `POST /api/docs` and `GET /api/docs` (ingest/list documents)
-* `POST /api/docs/upsert` (idempotent upsert by `external_id`)
-* `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
-* `POST /api/docs/delete_by_external_id` (delete by `external_id` + tombstones)
-* `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
-* `POST /api/ask_eval` (ephemeral per-request RAG configuration)
-* `POST /api/openrouter/generate` (OpenRouter proxy when configured)
-* `GET /api/config` and `GET /api/templates`
-* `GET /api/health`, `GET /api/ready`, `GET /api/health/ollama`
-
-For current request/response shapes, prefer the OpenAPI schema at `GET /openapi.json` (or `GET /docs` in dev).
-
----
-
-## Extending the System
-
-**Add a new retriever (e.g., Elasticsearch):**
-
-1. Implement `RetrieverPort`.
-2. Resolve documents (by ID) via your `DocumentRepoPort` implementation.
-3. Expose a setting (e.g., `RETRIEVAL_MODE=elasticsearch`) and branch in `factory.py`.
-
-**Add a new LLM (e.g., Anthropic):**
-
-1. Implement `GeneratorPort`.
-2. Add settings (API key, model, etc.).
-3. Select in `factory.get_generator()` based on settings.
-
-**Swap embeddings backend:**
-
-* Implement `EmbedderPort` (or reuse `OpenAIEmbedder` / `SentenceTransformerEmbedder`).
-* Ensure FAISS index dimensionality matches `embedder.dim`.
-* Rebuild the index after changing the embedding model.
-
----
-
-## Testing Strategy
-
-* **Unit tests**: mock the ports to isolate core services (`RagService`, `ETLService`, `IngestionPipeline`).
-* **Integration tests**: real SQLite (temp), optional FAISS, real BM25; adapters tested together.
-* **E2E tests**: FastAPI `TestClient` hitting `/api/ask` and `/`.
-
-The codebase already includes fixtures (e.g., in-memory SQLite with `StaticPool`), adapter fakes, and coverage for edge cases (dim mismatches, missing docs, error propagation).
-
----
-
-## Trade-offs & Considerations
-
-* More files/indirection than a simple script, but greatly improved swapability and testability.
-* FAISS `IndexFlatL2` is chosen for simplicity; for larger corpora, consider IVF/HNSW and external vector DBs.
-* The RAG prompt templates live in settings; adapt them to your safety/grounding needs.
-
----
-
-## Minimal Code Examples
-
-**Port usage in a service (core):**
-
-```python
-# src/local_rag_backend/core/services/rag.py
-class RagService:
-    def __init__(self, retriever, generator, history):
-        self.retriever = retriever
-        self.generator = generator
-        self.history = history
-
-    def ask(self, question: str, top_k: int = 3):
-        docs, scores = self.retriever.retrieve(question, top_k)
-        if not docs:
-            answer = "No hay documentos indexados para responder a tu pregunta."
-            self.history.save(question, answer, [])
-            return {"answer": answer, "docs": [], "scores": []}
-        answer = self.generator.generate(question, [d.content for d in docs])
-        self.history.save(question, answer, [d.id for d in docs])
-        return {"answer": answer, "docs": docs, "scores": scores}
-```
-
-**Adapter implementing a port (sparse example):**
-
-```python
-# src/local_rag_backend/infrastructure/retrieval/sparse_bm25.py
-class SparseBM25Retriever(RetrieverPort):
-    def __init__(self, documents, doc_ids, doc_repo):
-        # tokenize+fit BM25; keep doc_repo to resolve IDs -> Document
-        ...
-
-    def retrieve(self, query: str, k: int = 5):
-        # BM25 scores -> normalize -> map to Document via repo -> return (docs, scores)
-        ...
-```
-
-**Container wiring:** see `src/local_rag_backend/app/container.py` and
-`src/local_rag_backend/app/factory.py`.
+- Treat rebuild as explicit repair only:
+  - `POST /api/index/rebuild`
+  - `rag-rebuild-index`
+- Monitor readiness:
+  - index drift/corruption checks,
+  - mutation journal incomplete-record warnings.
+- Do not mutate SQL/vector stores independently in normal operation.
