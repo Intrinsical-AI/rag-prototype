@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from local_rag_backend.app.wiring.mutation_ports import (
-    build_build_index_ports,
     build_docs_mutation_ports,
     build_index_mutation_ports,
 )
@@ -133,23 +132,3 @@ def test_build_index_mutation_ports_defaults_and_overrides(
     assert custom_ports.vector_repo_factory is _vec_factory
     assert custom_ports.purge_index_artifacts_fn is _purge
     assert custom_ports.rebuild_fn is _rebuild
-
-
-def test_build_build_index_ports_defaults_and_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _default_runner(**kwargs: object) -> int:
-        return 5
-
-    monkeypatch.setattr(
-        "local_rag_backend.scripts.sample_data_ingestion.run_sample_data_ingestion",
-        _default_runner,
-        raising=True,
-    )
-
-    default_ports = build_build_index_ports()
-    assert default_ports.run_sample_data_ingestion_fn is _default_runner
-
-    def _custom_runner(**kwargs: object) -> int:
-        return 7
-
-    custom_ports = build_build_index_ports(run_sample_data_ingestion_fn=_custom_runner)
-    assert custom_ports.run_sample_data_ingestion_fn is _custom_runner

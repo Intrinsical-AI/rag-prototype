@@ -1,7 +1,6 @@
 """Application contracts (ports + result DTOs)."""
 
 from local_rag_backend.app.contracts.ports import (
-    BuildIndexPorts,
     DocsMutationPorts,
     DocsRepositoryPort,
     IndexMutationPorts,
@@ -20,7 +19,6 @@ from local_rag_backend.app.contracts.results import (
 )
 
 __all__ = [
-    "BuildIndexPorts",
     "DeleteDocsByExternalIdSummary",
     "DeleteDocsSummary",
     "DocsMutationPorts",

@@ -103,8 +103,3 @@ class IndexMutationPorts:
     vector_repo_factory: Callable[..., Any]
     purge_index_artifacts_fn: Callable[..., None]
     rebuild_fn: Callable[..., int]
-
-
-@dataclass(frozen=True)
-class BuildIndexPorts:
-    run_sample_data_ingestion_fn: Callable[..., int]
