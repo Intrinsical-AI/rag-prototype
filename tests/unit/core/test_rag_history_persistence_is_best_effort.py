@@ -1,4 +1,4 @@
-from local_rag_backend.core.services.rag_runtime import RagService
+from local_rag_backend.core.services.rag_runtime import NO_DOCS_ANSWER, RagService
 
 
 class _DummyRetriever:
@@ -41,4 +41,4 @@ def test_rag_history_failure_does_not_break_empty_retrieval():
         history_storage=_FailingHistory(),
     )
     out = svc.ask("q", top_k=1)
-    assert "No hay documentos" in out["answer"]
+    assert out["answer"] == NO_DOCS_ANSWER

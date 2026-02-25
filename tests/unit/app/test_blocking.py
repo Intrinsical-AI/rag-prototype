@@ -67,13 +67,19 @@ async def test_run_blocking_routes_task_type_and_releases_slot(monkeypatch):
             self.max_pending = 10
             self.acquired = 0
             self.released = 0
+            self._pending = 0
 
         def try_acquire_slot(self) -> bool:
             self.acquired += 1
+            self._pending += 1
             return True
 
         def release_slot(self) -> None:
             self.released += 1
+            self._pending -= 1
+
+        def pending_snapshot(self) -> int:
+            return self._pending
 
     state = _FakeState()
 
@@ -124,6 +130,9 @@ async def test_run_blocking_raises_when_queue_full(monkeypatch):
         def release_slot(self) -> None:
             raise AssertionError("release_slot must not be called when slot was not acquired")
 
+        def pending_snapshot(self) -> int:
+            return 0
+
     monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: _FullState(), raising=True)
 
     with pytest.raises(RuntimeError, match="queue is full"):
@@ -157,6 +166,9 @@ async def test_run_blocking_releases_slot_when_sync_callable_raises(monkeypatch)
 
         def release_slot(self) -> None:
             self.released += 1
+
+        def pending_snapshot(self) -> int:
+            return 0
 
     state = _FakeState()
     monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: state, raising=True)
@@ -208,6 +220,9 @@ async def test_run_blocking_reports_queue_saturation_and_wait(monkeypatch):
 
         def release_slot(self) -> None:
             self.pending -= 1
+
+        def pending_snapshot(self) -> int:
+            return self.pending
 
     state = _FakeState()
     monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: state, raising=True)

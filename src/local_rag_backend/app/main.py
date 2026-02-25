@@ -197,7 +197,7 @@ async def serve_frontend() -> HTMLResponse:
         html_content = index_path.read_text(encoding="utf-8")
         return HTMLResponse(content=html_content)
     except Exception as e:
-        logger.error(f"Error reading frontend file: {e}")
+        logger.error("Error reading frontend file: %s", e)
         return HTMLResponse("<h1>Failed to load frontend</h1>", status_code=500)
 
 

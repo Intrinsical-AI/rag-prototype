@@ -13,16 +13,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+NO_DOCS_ANSWER = "No documents are indexed to answer your question."
+
 
 class RagService:
     """Orchestrates the retrieval-augmented generation process."""
 
     def __init__(
-        self, retriever: RetrieverPort, generator: GeneratorPort, history_storage: QAHistoryPort
+        self,
+        retriever: RetrieverPort,
+        generator: GeneratorPort,
+        history_storage: QAHistoryPort,
+        no_docs_answer: str = NO_DOCS_ANSWER,
     ):
         self.retriever = retriever
         self.generator = generator
         self.history_storage = history_storage
+        self.no_docs_answer = no_docs_answer
 
     def ask(self, question: str, top_k: int = 3) -> dict[str, Any]:
         """Processes a question through the RAG pipeline.
@@ -43,7 +50,7 @@ class RagService:
 
         # 2. Handle empty retrieval results
         if not docs:
-            answer = "No hay documentos indexados para responder a tu pregunta."
+            answer = self.no_docs_answer
             try:
                 self.history_storage.save(question, answer, [])
             except Exception as e:  # pragma: no cover
