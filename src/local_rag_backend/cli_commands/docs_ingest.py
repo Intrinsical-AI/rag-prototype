@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
 
 from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
+from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.services.dense_upsert import (
     precompute_vectors_for_changed_items,
     sync_dense_after_upsert,
@@ -109,6 +111,7 @@ def _build_file_ingest_plan(
 
     for loaded in loader.load():
         md = dict(loaded.metadata) if loaded.metadata else {}
+        md["_lineage"] = json.loads(json.dumps(asdict(loaded.lineage), default=str))
         md.setdefault("source", str(file_path))
         md.setdefault("format", det.fmt)
         md.setdefault("filename", file_path.name)
@@ -196,9 +199,9 @@ def _collect_batch_items_and_stale(
     *,
     plans_bound: tuple[IngestPlan, ...],
     doc_repo: Any,
-) -> tuple[list[Any], list[int], list[tuple[Path, int]], int]:
+) -> tuple[list[Any], list[str], list[tuple[Path, int]], int]:
     all_items: list[Any] = []
-    stale_ids_all: list[int] = []
+    stale_ids_all: list[str] = []
     stale_by_file: list[tuple[Path, int]] = []
     ingested_chunks = 0
 
@@ -237,18 +240,18 @@ def _deduplicate_items_by_external_id(items: list[Any]) -> list[Any]:
 def _sync_and_cleanup_dense_batch(
     *,
     results: list[Any],
-    updated_content_ids: list[int],
+    updated_content_ids: list[str],
     vectors_by_external_id: dict[str, list[float]],
     doc_repo: Any,
     embedder: EmbedderPort,
     vec: Any,
-    stale_ids_unique: list[int],
+    stale_ids_unique: list[str],
 ) -> tuple[bool, int]:
     from local_rag_backend.core.services.maintenance import delete_documents_multi_store
 
     rebuilt = sync_dense_after_upsert(
         results=results,
-        updated_content_ids=updated_content_ids,
+        updated_content_ids=[DocId(x) for x in updated_content_ids],
         vectors_by_external_id=vectors_by_external_id,
         vec_repo=vec,
         doc_repo=doc_repo,
@@ -258,7 +261,7 @@ def _sync_and_cleanup_dense_batch(
     if stale_ids_unique:
         deleted_sql, _, rebuilt_del = delete_documents_multi_store(
             doc_repo=doc_repo,
-            ids=stale_ids_unique,
+            ids=[DocId(x) for x in stale_ids_unique],
             vec_repo=vec,
             embedder=embedder,
             rebuild_on_index_failure=True,
@@ -296,7 +299,7 @@ def _ingest_batch_sync(
         )
 
     results: list[Any] = []
-    updated_content_ids: list[int] = []
+    updated_content_ids: list[str] = []
     if unique_items:
         results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
             unique_items
@@ -307,7 +310,7 @@ def _ingest_batch_sync(
     unchanged = sum(1 for r in results if r.action == "unchanged")
     rebuilt = False
     deleted_stale = 0
-    stale_ids_unique = sorted({int(x) for x in stale_ids_all})
+    stale_ids_unique = sorted({str(x) for x in stale_ids_all})
 
     if settings.retrieval_mode in ("dense", "hybrid"):
         if embedder is None or vec is None:
@@ -324,7 +327,10 @@ def _ingest_batch_sync(
             stale_ids_unique=stale_ids_unique,
         )
     elif stale_ids_unique:
-        deleted_sql, _, _ = delete_documents_multi_store(doc_repo=doc_repo, ids=stale_ids_unique)
+        deleted_sql, _, _ = delete_documents_multi_store(
+            doc_repo=doc_repo,
+            ids=[DocId(x) for x in stale_ids_unique],
+        )
         deleted_stale = int(deleted_sql)
 
     return BatchSyncResult(

@@ -104,9 +104,9 @@ def run_sample_data_ingestion(
     preprocess_fn = build_preprocess_fn_from_settings(settings_obj)
     chunk = build_chunk_fn_from_settings(settings_obj)
 
-    def _ingest_sparse_locked() -> list[int]:
+    def _ingest_sparse_locked() -> list[str]:
         buf: list[str] = []
-        ids: list[int] = []
+        ids: list[str] = []
         batch = 128
         for item in loader.load():
             metadata = dict(item.metadata) if item.metadata else None
