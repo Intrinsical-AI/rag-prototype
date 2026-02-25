@@ -62,7 +62,8 @@ async def openrouter_generate(
         task_type="network",
     )
 
-    assert isinstance(out, OpenRouterGenerateOutput)
+    if not isinstance(out, OpenRouterGenerateOutput):
+        raise RuntimeError(f"OpenRouter generation returned unexpected type: {type(out).__name__}")
     usage = out.usage
     usage_obj = (
         OpenRouterUsage(
