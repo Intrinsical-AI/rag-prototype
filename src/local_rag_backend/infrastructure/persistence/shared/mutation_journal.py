@@ -40,6 +40,11 @@ def _record_path(root: Path, op_id: str) -> Path:
 def _record_from_dict(obj: dict[str, Any]) -> MutationRecord:
     state_raw = str(obj.get("state") or "PREPARED")
     if state_raw not in _MUTATION_STATES:
+        logger.warning(
+            "Unrecognized mutation journal state %r; resetting to PREPARED. "
+            "This may indicate a version mismatch or a corrupted journal file.",
+            state_raw,
+        )
         state_raw = "PREPARED"
     return MutationRecord(
         op_id=str(obj.get("op_id") or ""),
