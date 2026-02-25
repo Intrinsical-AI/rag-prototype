@@ -13,8 +13,8 @@ from local_rag_backend.settings import settings
 
 
 @click.command("delete-docs")
-@click.argument("ids", nargs=-1, type=int)
-def delete_docs_cmd(ids: tuple[int, ...]) -> None:
+@click.argument("ids", nargs=-1, type=str)
+def delete_docs_cmd(ids: tuple[str, ...]) -> None:
     """Delete documents by ID from SQLite (and FAISS in dense/hybrid mode)."""
     if not ids:
         click.echo("[ERROR] Provide one or more document IDs.", err=True)
@@ -25,7 +25,7 @@ def delete_docs_cmd(ids: tuple[int, ...]) -> None:
 
         def _delete_sync() -> DeleteDocsSummary:
             return docs_service.delete_docs_sync(
-                ids=list(ids),
+                ids=[str(x) for x in ids],
                 settings_obj=settings,
                 ports=ports,
             )
