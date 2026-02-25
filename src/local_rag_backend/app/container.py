@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         GeneratorPort,
         QAHistoryPort,
         RetrieverPort,
+        VectorRepoPort,
     )
     from local_rag_backend.settings import Settings
 
@@ -83,7 +84,7 @@ class AppContainer:
         sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
         dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
         hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
-        vector_repo_factory: Callable[..., Any] = VectorStorage,
+        vector_repo_factory: Callable[..., VectorRepoPort] = VectorStorage,
         reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
         rebuild_fn: Callable[..., int] = rebuild_index_from_db,
         purge_index_artifacts_fn: Callable[..., None] = purge_index_artifacts,
@@ -186,7 +187,7 @@ class AppContainer:
             build_embedder=lambda: self.build_dense_embedder(
                 missing_backend_message=missing_backend_message
             ),
-            doc_repo_factory=cast("Any", self.doc_repo_factory),
+            doc_repo_factory=self.doc_repo_factory,
             vector_repo_factory=self.vector_repo_factory,
             purge_index_artifacts_fn=self.purge_index_artifacts_fn,
             rebuild_fn=self.rebuild_fn,
