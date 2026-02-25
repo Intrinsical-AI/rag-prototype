@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from local_rag_backend.app import container as app_container_module
 from local_rag_backend.app.app_context import AppContext
 from local_rag_backend.app.container import AppContainer
 from local_rag_backend.core.services.dense_upsert import (
@@ -49,69 +48,35 @@ _APP_CONTEXT: AppContext | None = None
 _APP_CONTEXT_LOCK = Lock()
 
 
-def _collect_container_overrides() -> dict[str, Any]:
-    """Collect explicit test-time overrides for AppContainer seams."""
-    # Keep AppContainer as the default composition source.
-    # We only inject explicit overrides when tests monkeypatch factory-level seams.
-    overrides: dict[str, Any] = {}
-    if OpenAIEmbedder is not app_container_module.OpenAIEmbedder:
-        overrides["openai_embedder_factory"] = OpenAIEmbedder
-    if SentenceTransformerEmbedder is not app_container_module.SentenceTransformerEmbedder:
-        overrides["st_embedder_factory"] = lambda model_name: SentenceTransformerEmbedder(
-            model_name=model_name
-        )
-    if OpenAIGenerator is not app_container_module.OpenAIGenerator:
-        overrides["openai_generator_factory"] = OpenAIGenerator
-    if OllamaGenerator is not app_container_module.OllamaGenerator:
-        overrides["ollama_generator_factory"] = OllamaGenerator
-    if SqlDocumentStorage is not app_container_module.SqlDocumentStorage:
-        overrides["doc_repo_factory"] = SqlDocumentStorage
-        overrides["build_upsert_doc"] = getattr(SqlDocumentStorage, "UpsertDoc", None)
-    if HistorySqlStorage is not app_container_module.HistorySqlStorage:
-        overrides["history_repo_factory"] = HistorySqlStorage
-    if SparseBM25Retriever is not app_container_module.SparseBM25Retriever:
-        overrides["sparse_retriever_factory"] = SparseBM25Retriever
-    if DenseVectorRetriever is not app_container_module.DenseVectorRetriever:
-        overrides["dense_retriever_factory"] = DenseVectorRetriever
-    if HybridRetriever is not app_container_module.HybridRetriever:
-        overrides["hybrid_retriever_factory"] = HybridRetriever
-    if VectorStorage is not app_container_module.VectorStorage:
-        overrides["vector_repo_factory"] = VectorStorage
-    if RerankingRetriever is not app_container_module.RerankingRetriever:
-        overrides["reranker_factory"] = RerankingRetriever
-    if (
-        precompute_vectors_for_changed_items
-        is not app_container_module.precompute_vectors_for_changed_items
-    ):
-        overrides["precompute_vectors_fn"] = precompute_vectors_for_changed_items
-    if sync_dense_after_upsert is not app_container_module.sync_dense_after_upsert:
-        overrides["sync_dense_fn"] = sync_dense_after_upsert
-    if rebuild_index_from_db is not app_container_module.rebuild_index_from_db:
-        overrides["rebuild_fn"] = rebuild_index_from_db
-    if delete_documents_multi_store is not app_container_module.delete_documents_multi_store:
-        overrides["delete_docs_fn"] = delete_documents_multi_store
-    if delete_external_ids_multi_store is not app_container_module.delete_external_ids_multi_store:
-        overrides["delete_external_ids_fn"] = delete_external_ids_multi_store
-    if purge_index_artifacts is not app_container_module.purge_index_artifacts:
-        overrides["purge_index_artifacts_fn"] = purge_index_artifacts
-    if multi_store_write_lock is not app_container_module.multi_store_write_lock:
-        overrides["write_lock"] = multi_store_write_lock
-    if RagService is not app_container_module.RagService:
-        overrides["rag_service_factory"] = RagService
-    return overrides
-
-
 def _build_container(
     *,
     system_state_factory: Callable[[], SystemStateStorage] | None = None,
 ) -> AppContainer:
     resolved_system_state_factory = system_state_factory or SystemStateStorage
-    overrides = _collect_container_overrides()
 
     return AppContainer(
         settings_obj=settings,
+        openai_embedder_factory=OpenAIEmbedder,
+        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
+        openai_generator_factory=OpenAIGenerator,
+        ollama_generator_factory=OllamaGenerator,
+        doc_repo_factory=SqlDocumentStorage,
+        build_upsert_doc=getattr(SqlDocumentStorage, "UpsertDoc", None),
+        history_repo_factory=HistorySqlStorage,
+        sparse_retriever_factory=SparseBM25Retriever,
+        dense_retriever_factory=DenseVectorRetriever,
+        hybrid_retriever_factory=HybridRetriever,
+        vector_repo_factory=VectorStorage,
+        reranker_factory=RerankingRetriever,
+        precompute_vectors_fn=precompute_vectors_for_changed_items,
+        sync_dense_fn=sync_dense_after_upsert,
+        rebuild_fn=rebuild_index_from_db,
+        delete_docs_fn=delete_documents_multi_store,
+        delete_external_ids_fn=delete_external_ids_multi_store,
+        purge_index_artifacts_fn=purge_index_artifacts,
+        write_lock=multi_store_write_lock,
+        rag_service_factory=RagService,
         system_state_factory=resolved_system_state_factory,
-        **overrides,
     )
 
 
