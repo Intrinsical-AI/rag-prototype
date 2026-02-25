@@ -5,21 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from local_rag_backend.app.contracts.ports import BuildIndexPorts, IndexMutationPorts
+    from local_rag_backend.app.contracts.ports import IndexMutationPorts
     from local_rag_backend.settings import Settings
-
-
-def build_index_sync(
-    *,
-    settings_obj: Settings,
-    ports: BuildIndexPorts,
-) -> int:
-    return int(
-        ports.run_sample_data_ingestion_fn(
-            settings_obj=settings_obj,
-            schema_error_message="Unable to ensure SQLite schema before build-index.",
-        )
-    )
 
 
 def rebuild_index_sync(

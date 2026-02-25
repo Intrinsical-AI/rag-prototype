@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from local_rag_backend.app.application.storage_profiles import StorageProfileRegistry
 from local_rag_backend.app.contracts.ports import (
-    BuildIndexPorts,
     DocsMutationPorts,
     IndexMutationPorts,
 )
@@ -122,16 +121,3 @@ def build_index_mutation_ports(
         purge_index_artifacts_fn=purge_index_artifacts_fn,
         rebuild_fn=rebuild_fn,
     )
-
-
-def build_build_index_ports(
-    *,
-    run_sample_data_ingestion_fn: Callable[..., int] | None = None,
-) -> BuildIndexPorts:
-    if run_sample_data_ingestion_fn is None:
-        from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
-
-        runner: Callable[..., int] = run_sample_data_ingestion
-    else:
-        runner = run_sample_data_ingestion_fn
-    return BuildIndexPorts(run_sample_data_ingestion_fn=runner)
