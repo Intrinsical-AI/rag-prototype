@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 
 DELIMITER = ";"
 _ = _models
+
+logger = logging.getLogger(__name__)
 
 
 def _run_with_multi_store_write_lock(settings_obj: Any, operation: Callable[[], Any]) -> Any:
@@ -97,7 +100,7 @@ def run_sample_data_ingestion(
             chunk_fn=build_chunk_fn_from_settings(settings_obj),
         )
         chunk_count = int(_run_with_multi_store_write_lock(settings_obj, pipeline.run))
-        print(f"[OK] Ingested {chunk_count} docs into SQL and FAISS.")
+        logger.info("Ingested %d docs into SQL and FAISS.", chunk_count)
         return chunk_count
 
     loader = CSVLoader(csv_path_obj, delimiter=DELIMITER, has_header=settings_obj.csv_has_header)
@@ -107,7 +110,7 @@ def run_sample_data_ingestion(
     def _ingest_sparse_locked() -> list[str]:
         buf: list[str] = []
         ids: list[str] = []
-        batch = 128
+        batch = settings_obj.ingest_batch_size
         for item in loader.load():
             metadata = dict(item.metadata) if item.metadata else None
             clean = preprocess_fn(item.text, metadata)
@@ -121,5 +124,5 @@ def run_sample_data_ingestion(
         return ids
 
     ids = list(_run_with_multi_store_write_lock(settings_obj, _ingest_sparse_locked))
-    print(f"[OK] Ingested {len(ids)} docs into SQL only (sparse mode).")
+    logger.info("Ingested %d docs into SQL only (sparse mode).", len(ids))
     return len(ids)
