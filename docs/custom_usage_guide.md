@@ -80,8 +80,8 @@ from sqlalchemy.orm import sessionmaker
 
 # 1. Importar componentes de la librería
 from local_rag_backend.settings import settings
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.base import Base
 
 # 2. Importar tu Loader personalizado
 from my_custom_loader import DictListLoader
@@ -248,13 +248,13 @@ from local_rag_backend.core.services.maintenance import (
     delete_documents_multi_store,
     rebuild_index_from_db,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 
 doc_repo = SqlDocumentStorage()
 embedder = OpenAIEmbedder()
-vec_repo = FaissVectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=embedder.dim)
+vec_repo = VectorStorage(index_path="data/index.faiss", id_map_path="data/id_map.json", dim=embedder.dim)
 
 # 1) Borrado consistente
 delete_documents_multi_store(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder, ids=[10, 11, 12])

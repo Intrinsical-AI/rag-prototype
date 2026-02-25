@@ -24,8 +24,8 @@ src/local_rag_backend/
 ├── infrastructure/             # Adapters (technology-specific)
 │   ├── embeddings/             # ST/OpenAI embedders
 │   ├── llms/                   # OpenAI / Ollama generators
-│   ├── persistence/            # SQLAlchemy (SQL), FAISS (vectors)
-│   ├── retrieval/              # BM25 (sparse), FAISS (dense), Hybrid
+│   ├── persistence/            # sql/, vector/, shared/
+│   ├── retrieval/              # BM25 (sparse), dense vector, Hybrid
 │   └── ingestion/              # CSV loader, etc.
 ├── app/                        # Application + HTTP transport layer
 │   ├── main.py                 # FastAPI app + lifespan
@@ -40,7 +40,7 @@ src/local_rag_backend/
 │   ├── diagnostics.py          # Readiness/status diagnostics used by API/CLI
 │   ├── composition.py          # Shared adapter selection policy (embedder/retriever/generator)
 │   ├── factory.py              # App-context lifecycle + compatibility entrypoints
-│   └── services/               # Transitional app modules/ports reused by API+CLI
+│   └── services/               # Use-case orchestration + app-layer contracts/results
 └── scripts/                    # CLI helpers (bootstrap, build_index)
 ```
 
@@ -56,6 +56,14 @@ HTTP docs/index layering:
 - App-layer dependency contracts for docs/index mutations live in `app/services/ports.py`
   (`DocsMutationPorts`, `IndexMutationPorts`), with shared wiring in
   `app/services/mutation_ports.py`.
+- App-layer docs mutation outcomes live in `app/services/results.py`
+  (`UpsertDocsSummary`, `DeleteDocsSummary`, etc.).
+
+Type taxonomy (enforced by module naming):
+- `app/schemas/*`: HTTP transport contracts (Pydantic only).
+- `app/services/results.py` and `core/services/types.py`: internal DTOs/results (transport-agnostic).
+- `core/domain/entities.py`: domain entities and invariants.
+- `infrastructure/persistence/*/models.py`: ORM persistence models.
 
 Error layering:
 - Infra adapters raise typed runtime errors from `core/errors.py` (no FastAPI dependency).
@@ -88,13 +96,13 @@ graph TD
 
   subgraph Infrastructure (Adapters)
     C1[SparseBM25Retriever]
-    C2[DenseFaissRetriever]
+    C2[DenseVectorRetriever]
     C3[HybridRetriever]
     D1[OpenAIGenerator]
     D2[OllamaGenerator]
     E1[HistorySqlStorage]
     S1[SqlDocumentStorage]
-    V1[FaissVectorStorage]
+    V1[VectorStorage]
   end
 
   A -->|DI via factory| C1 & C2 & C3 & D1 & D2 & E1 & S1 & V1
@@ -160,7 +168,7 @@ class LoaderPort(Protocol):
 **Retrievers**
 
 * `SparseBM25Retriever` (BM25 over preprocessed text; SQL for doc lookup)
-* `DenseFaissRetriever` (SentenceTransformers/OpenAI embeddings + FAISS; SQL for doc lookup)
+* `DenseVectorRetriever` (SentenceTransformers/OpenAI embeddings + FAISS; SQL for doc lookup)
 * `HybridRetriever` (linear blend of dense + sparse, configurable `alpha`)
 
 **LLMs**
@@ -171,7 +179,7 @@ class LoaderPort(Protocol):
 **Persistence**
 
 * `SqlDocumentStorage` (documents via SQLAlchemy/SQLite)
-* `FaissVectorStorage` (vector index + ID map)
+* `VectorStorage` (vector index + ID map)
 * `HistorySqlStorage` (Q\&A history)
 
 **App transport**
