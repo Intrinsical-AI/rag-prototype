@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
+from local_rag_backend.core.domain.types import DocId, new_doc_id
 from local_rag_backend.infrastructure.persistence.sql.models import Document, QaHistory
 
 if TYPE_CHECKING:
@@ -16,30 +17,39 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def add_documents(db: Session, texts: list[str]) -> list[int]:
+def add_documents(db: Session, texts: list[str]) -> list[DocId]:
     """Store new documents and return their IDs."""
     docs = [
-        Document(content=text, content_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest())
+        Document(
+            doc_id=str(new_doc_id()),
+            content=text,
+            content_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        )
         for text in texts
     ]
     db.add_all(docs)
     db.commit()
-    return [doc.id for doc in docs]
+    return [DocId(doc.doc_id) for doc in docs]
 
 
-def delete_documents(db: Session, ids: list[int]) -> None:
+def delete_documents(db: Session, ids: Sequence[DocId]) -> None:
     """Delete documents by IDs (best-effort rollback helper for multi-store ETL)."""
-    if not ids:
+    ids_list = [str(x) for x in ids if str(x).strip()]
+    if not ids_list:
         return
-    db.query(Document).filter(Document.id.in_(ids)).delete(synchronize_session=False)
+    db.query(Document).filter(Document.doc_id.in_(ids_list)).delete(synchronize_session=False)
     db.commit()
 
 
 def add_history(
-    db: Session, question: str, answer: str, source_ids: list[int] | None = None
+    db: Session, question: str, answer: str, source_ids: list[DocId] | None = None
 ) -> None:
     """Save a question-answer interaction to the history."""
-    history_entry = QaHistory(question=question, answer=answer, source_ids=source_ids)
+    history_entry = QaHistory(
+        question=question,
+        answer=answer,
+        source_ids=([str(x) for x in source_ids] if source_ids is not None else None),
+    )
     db.add(history_entry)
     db.commit()
 
