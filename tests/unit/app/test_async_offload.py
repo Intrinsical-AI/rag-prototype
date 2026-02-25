@@ -124,7 +124,7 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
             return None
 
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: DummyVec())
+    monkeypatch.setattr(factory, "VectorStorage", lambda **k: DummyVec())
 
     r = await asgi_client.post("/api/docs", json={"texts": ["X"]})
     assert r.status_code == 200

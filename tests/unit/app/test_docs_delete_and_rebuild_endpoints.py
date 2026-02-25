@@ -95,7 +95,7 @@ async def test_delete_docs_dense_does_not_require_embedder_when_index_delete_suc
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.app.factory.FaissVectorStorage",
+        "local_rag_backend.app.factory.VectorStorage",
         lambda **_k: DummyVec(),
         raising=True,
     )

@@ -1,7 +1,7 @@
 import pytest
 
 from local_rag_backend.app import factory
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 

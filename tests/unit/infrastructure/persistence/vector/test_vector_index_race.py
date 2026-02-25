@@ -4,7 +4,7 @@ from threading import Event, Thread
 
 import numpy as np
 
-from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
 
 def test_search_during_add_does_not_raise_or_mis_map_ids(tmp_path):
@@ -15,7 +15,7 @@ def test_search_during_add_does_not_raise_or_mis_map_ids(tmp_path):
 
     index_path = tmp_path / "i.faiss"
     id_map_path = tmp_path / "m.json"
-    fi = FaissIndex(index_path, id_map_path, dim=4)
+    fi = VectorIndex(index_path, id_map_path, dim=4)
 
     extend_called = Event()
     release_extend = Event()
@@ -28,10 +28,16 @@ def test_search_during_add_does_not_raise_or_mis_map_ids(tmp_path):
 
     # Block the id-map update mid-write to simulate an unlucky interleaving.
     # Note: `add_to_index()` reloads on-disk state and reassigns `self.id_map`, so we
-    # patch the loader to force our blocking list to be used after reload as well.
+    # patch the internal reloader to force our blocking list to be used after reload as well.
     blocking_list = _BlockingList()
     fi.id_map = blocking_list
-    fi._load_id_map_locked = lambda: blocking_list  # type: ignore[method-assign]
+    original_load = fi._load_or_initialize_locked
+
+    def _patched_load_or_initialize_locked():
+        original_load()
+        fi.id_map = blocking_list
+
+    fi._load_or_initialize_locked = _patched_load_or_initialize_locked  # type: ignore[method-assign]
 
     vec = np.zeros(4, dtype="float32")
 

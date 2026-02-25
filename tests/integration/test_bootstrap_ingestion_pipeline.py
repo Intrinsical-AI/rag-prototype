@@ -37,8 +37,8 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.base import Base
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -61,8 +61,8 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
         def embed(self, texts):
             return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
 
-    class DummyFaissIndex:
-        def __init__(self, index_path, id_map_path, dim=None):
+    class DummyVectorIndex:
+        def __init__(self, index_path, id_map_path, dim=None, **_kwargs):
             self.index_path = index_path
             self.id_map_path = id_map_path
             self.dim = 4
@@ -101,8 +101,8 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
-        DummyFaissIndex,
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
+        DummyVectorIndex,
     )
 
     from local_rag_backend.scripts import bootstrap
@@ -142,8 +142,8 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.base import Base
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -195,8 +195,10 @@ def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, capsys):
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+            SqlDocumentStorage,
+        )
+        from local_rag_backend.infrastructure.persistence.sql.base import Base
 
         engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
         SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

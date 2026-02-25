@@ -5,7 +5,7 @@ import re
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -30,7 +30,7 @@ def test_rag_status_reports_missing_index_in_dense_mode(in_memory_sqlite, tmp_pa
 
 
 def test_rag_status_reports_manifest_missing_in_dense_mode(in_memory_sqlite, tmp_path, monkeypatch):
-    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+    from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
@@ -38,7 +38,7 @@ def test_rag_status_reports_manifest_missing_in_dense_mode(in_memory_sqlite, tmp
     monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id_map.json"), raising=False)
 
     # Create index + id_map but no manifest.
-    FaissIndex(settings.index_path, settings.id_map_path, dim=4).rebuild([], [])
+    VectorIndex(settings.index_path, settings.id_map_path, dim=4).rebuild([], [])
 
     r = CliRunner().invoke(cli, ["status"])
     assert r.exit_code == 0, r.output

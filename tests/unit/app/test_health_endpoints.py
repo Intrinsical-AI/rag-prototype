@@ -63,15 +63,15 @@ async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path
 async def test_ready_endpoint_503_when_dense_index_drifts_from_sql(
     asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
-    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
 
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
-    FaissVectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
+    VectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
 
@@ -96,8 +96,8 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
     Counts can match while the actual ID set differs (stale vectors + missing docs).
     /api/ready should catch this for small corpora and return actionable drift details.
     """
-    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
@@ -108,7 +108,7 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
     # Index has ids {1,3} (same count, different set)
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
-    FaissVectorStorage(str(idx), str(id_map), dim=4).rebuild(
+    VectorStorage(str(idx), str(id_map), dim=4).rebuild(
         [1, 3], [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]
     )
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
@@ -133,14 +133,14 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
 async def test_ready_endpoint_503_when_dense_id_map_is_corrupt(
     asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
-    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+    from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
 
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
-    FaissIndex(idx, id_map, dim=4).rebuild([], [])
+    VectorIndex(idx, id_map, dim=4).rebuild([], [])
     id_map.write_bytes(b"")  # invalid/empty format
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
@@ -159,7 +159,7 @@ async def test_ready_endpoint_503_when_dense_id_map_is_corrupt(
 async def test_ready_endpoint_503_when_dense_manifest_missing(
     asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
-    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+    from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
@@ -167,7 +167,7 @@ async def test_ready_endpoint_503_when_dense_manifest_missing(
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
     # Create index files but deliberately do NOT create a manifest.
-    FaissIndex(idx, id_map, dim=4).rebuild([], [])
+    VectorIndex(idx, id_map, dim=4).rebuild([], [])
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
 
@@ -186,8 +186,8 @@ async def test_ready_endpoint_503_when_dense_manifest_missing(
 async def test_ready_endpoint_503_when_dense_manifest_mismatch_embedding_model(
     asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
-    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
-    from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+    from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
+    from local_rag_backend.infrastructure.persistence.vector.manifest import (
         build_expected_manifest_config,
         build_manifest,
         manifest_path_for,
@@ -199,7 +199,7 @@ async def test_ready_endpoint_503_when_dense_manifest_mismatch_embedding_model(
 
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
-    FaissIndex(idx, id_map, dim=4).rebuild([], [])
+    VectorIndex(idx, id_map, dim=4).rebuild([], [])
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
 
@@ -239,8 +239,8 @@ async def test_rebuild_index_rewrites_manifest_and_ready_becomes_ok(
 ):
     from pathlib import Path
 
-    from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
-    from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+    from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
+    from local_rag_backend.infrastructure.persistence.vector.manifest import (
         build_expected_manifest_config,
         build_manifest,
         manifest_path_for,
@@ -253,7 +253,7 @@ async def test_rebuild_index_rewrites_manifest_and_ready_becomes_ok(
     monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id_map.json"), raising=False)
 
     # Create an empty index + a bad manifest.
-    FaissIndex(Path(settings.index_path), Path(settings.id_map_path), dim=4).rebuild([], [])
+    VectorIndex(Path(settings.index_path), Path(settings.id_map_path), dim=4).rebuild([], [])
     expected = build_expected_manifest_config(
         embedding_backend="openai",
         embedding_model=settings.openai_embedding_model,

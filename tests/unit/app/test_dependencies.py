@@ -49,8 +49,8 @@ async def test_get_rag_service_dense_ollama(monkeypatch):
         dim = 4
 
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(factory, "DenseFaissRetriever", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "VectorStorage", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "DenseVectorRetriever", lambda **k: SimpleNamespace())
     monkeypatch.setattr(factory, "OllamaGenerator", lambda *a, **k: SimpleNamespace())
 
     class DummyRS:
@@ -81,8 +81,8 @@ async def test_get_rag_service_hybrid_openai(monkeypatch):
         dim = 4
 
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: SimpleNamespace())
-    monkeypatch.setattr(factory, "DenseFaissRetriever", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "VectorStorage", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(factory, "DenseVectorRetriever", lambda **k: SimpleNamespace())
     monkeypatch.setattr(factory, "HybridRetriever", lambda **k: SimpleNamespace())
     monkeypatch.setattr(factory, "OpenAIGenerator", lambda *a, **k: SimpleNamespace())
 

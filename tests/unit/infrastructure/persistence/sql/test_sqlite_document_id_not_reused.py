@@ -1,8 +1,8 @@
 import pytest
 from sqlalchemy import create_engine, text
 
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
 
 def test_sqlite_document_ids_are_not_reused_after_delete(in_memory_sqlite):

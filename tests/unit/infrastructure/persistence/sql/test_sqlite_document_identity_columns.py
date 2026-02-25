@@ -1,4 +1,4 @@
-# tests/unit/infrastructure/persistence/sqlalchemy/test_sqlite_document_identity_columns.py
+# tests/unit/infrastructure/persistence/sql/test_sqlite_document_identity_columns.py
 
 import hashlib
 
@@ -8,9 +8,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 
 
 def test_ensure_sqlite_schema_compatible_runs_bootstrap_steps(monkeypatch):

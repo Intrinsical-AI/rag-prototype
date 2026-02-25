@@ -6,7 +6,7 @@ from local_rag_backend.app import dependencies as deps, factory
 from local_rag_backend.app.main import app
 from local_rag_backend.app.routers import health as health_router
 from local_rag_backend.core.errors import LLMConnectionError, LLMTimeoutError
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 

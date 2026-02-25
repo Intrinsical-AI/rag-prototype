@@ -26,8 +26,11 @@ def _lock_worker(lock_dir: str, active: object, max_active: object) -> None:
 @pytest.mark.integration
 def test_multi_store_write_lock_serializes_across_processes(tmp_path: Path) -> None:
     ctx = mp.get_context("spawn")
-    active = ctx.Value("i", 0)
-    max_active = ctx.Value("i", 0)
+    try:
+        active = ctx.Value("i", 0)
+        max_active = ctx.Value("i", 0)
+    except PermissionError as e:
+        pytest.skip(f"spawn shared-memory primitives unavailable in this environment: {e}")
     lock_dir = tmp_path / "coord"
     lock_dir.mkdir(parents=True, exist_ok=True)
 

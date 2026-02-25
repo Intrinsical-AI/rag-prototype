@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 
-from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
 
 def test_dim_inference_from_numpy_index(tmp_path):
@@ -15,6 +15,6 @@ def test_dim_inference_from_numpy_index(tmp_path):
         np.save(f, vectors, allow_pickle=False)
     id_map_path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
 
-    idx = FaissIndex(index_path, id_map_path, dim=None)
+    idx = VectorIndex(index_path, id_map_path, dim=None)
     assert idx.dim == 7
     assert idx.id_map == [1, 2, 3]

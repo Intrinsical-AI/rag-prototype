@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
@@ -28,7 +28,7 @@ class DummyDocRepo:
         return self.docs
 
 
-class DummyFaissIndex:
+class DummyVectorIndex:
     def __init__(self):
         self.id_map = [1, 2]
         # To query=[1,0], returns idx=0 (Doc A), to query=[0,1], returns idx=1 (Doc B)
@@ -51,10 +51,10 @@ class DummyFaissIndex:
             return [(1, 0.5)]
 
 
-def test_dense_faiss_retriever_basic():
-    retriever = DenseFaissRetriever(
+def test_dense_vector_retriever_basic():
+    retriever = DenseVectorRetriever(
         embedder=DummyEmbedder(),
-        faiss_index=DummyFaissIndex(),
+        vector_repo=DummyVectorIndex(),
         doc_repo=DummyDocRepo(),
     )
     docs, scores = retriever.retrieve("Doc A", k=1)

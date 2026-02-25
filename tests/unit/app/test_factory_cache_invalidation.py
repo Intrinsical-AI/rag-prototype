@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from local_rag_backend.app import factory
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SystemStateStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SystemStateStorage
 
 
 @pytest.mark.unit

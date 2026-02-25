@@ -33,7 +33,7 @@ def test_docs_mutation_ports_bind_factory_injected_symbols(monkeypatch: pytest.M
         return 0, None, [], 0, False
 
     monkeypatch.setattr(factory, "SqlDocumentStorage", DummyRepo, raising=True)
-    monkeypatch.setattr(factory, "FaissVectorStorage", _dummy_vec_factory, raising=True)
+    monkeypatch.setattr(factory, "VectorStorage", _dummy_vec_factory, raising=True)
     monkeypatch.setattr(
         factory, "precompute_vectors_for_changed_items", _dummy_precompute, raising=True
     )
@@ -73,7 +73,7 @@ def test_index_mutation_ports_bind_factory_injected_symbols(
         return 0
 
     monkeypatch.setattr(factory, "SqlDocumentStorage", DummyRepo, raising=True)
-    monkeypatch.setattr(factory, "FaissVectorStorage", _dummy_vec_factory, raising=True)
+    monkeypatch.setattr(factory, "VectorStorage", _dummy_vec_factory, raising=True)
     monkeypatch.setattr(factory, "purge_index_artifacts", _dummy_purge, raising=True)
     monkeypatch.setattr(factory, "rebuild_index_from_db", _dummy_rebuild, raising=True)
 

@@ -3,7 +3,7 @@
 import numpy as np
 
 from local_rag_backend.app import factory
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -91,7 +91,7 @@ async def test_upsert_docs_dense_updates_only_changed_content(
     dummy_vec = DummyVec()
 
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: dummy_embedder)
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: dummy_vec)
+    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: dummy_vec)
 
     payload = {"docs": [{"external_id": "doc-1", "content": "hello"}]}
     r1 = await asgi_client.post("/api/docs/upsert", json=payload)

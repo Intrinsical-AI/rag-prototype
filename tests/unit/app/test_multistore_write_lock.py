@@ -127,7 +127,7 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(factory, "SqlDocumentStorage", FakeRepo, raising=True)
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: fake_vec, raising=True)
+    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: fake_vec, raising=True)
     monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     task_a = asyncio.create_task(
@@ -245,7 +245,7 @@ async def test_upsert_failure_still_invalidates_cached_rag_service(
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(factory, "SqlDocumentStorage", FakeRepo, raising=True)
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
     monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
     monkeypatch.setattr(docs_router, "reset_rag_service", _count_reset, raising=True)
 

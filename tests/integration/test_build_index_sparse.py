@@ -5,8 +5,8 @@ import importlib
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.base import Base
 from local_rag_backend.settings import settings
 
 

@@ -12,7 +12,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
             return [[0.0] * self.dim for _ in texts]
 
     # Mock FAISS Index to ensure consistent dim
-    class DummyFaissIndex:
+    class DummyVectorIndex:
         def __init__(self, index_path, id_map_path, dim=None):  # <-- Aquí el cambio
             self.index_path = index_path
             self.id_map_path = id_map_path
@@ -34,10 +34,10 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
         lambda model_name=None: DummyEmbedder(),
         raising=True,
     )
-    # Patch the class in the module where FaissVectorStorage uses it
+    # Patch the class in the module where VectorStorage uses it
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
-        DummyFaissIndex,
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
+        DummyVectorIndex,
     )
 
     # Temporary CSV and settings
@@ -73,7 +73,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url)
     Session = sessionmaker(bind=engine)

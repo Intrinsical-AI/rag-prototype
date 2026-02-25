@@ -103,7 +103,7 @@ def test_build_index_raises_when_storage_fails(tmp_path, monkeypatch):
         raise RuntimeError("forced store failure")
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.sqlalchemy.sql_.SqlDocumentStorage.store_documents",
+        "local_rag_backend.infrastructure.persistence.sql.alchemy_engine.SqlDocumentStorage.store_documents",
         _boom,
         raising=True,
     )
@@ -129,7 +129,7 @@ def test_build_index_raises_when_schema_ensure_fails(tmp_path, monkeypatch):
         raise RuntimeError("forced schema failure")
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.sqlalchemy.base.ensure_sqlite_documents_identity_columns",
+        "local_rag_backend.infrastructure.persistence.sql.base.ensure_sqlite_documents_identity_columns",
         _boom_schema,
         raising=True,
     )
