@@ -32,7 +32,7 @@
 * **Persistence**
 
   * SQLite via SQLAlchemy: documents and Q\&A history.
-  * FAISS on disk for dense/hybrid mode.
+  * Vector index on disk for dense/hybrid mode (`faiss` or `numpy` backend).
 * **API**
 
   * FastAPI with validation and OpenAPI at `/docs`.
@@ -62,7 +62,7 @@
 ## Type boundaries
 
 * `app/schemas/*`: HTTP request/response contracts (Pydantic transport layer).
-* `app/services/results.py`: app use-case outputs shared by API/CLI.
+* `app/contracts/results.py`: app-layer use-case outputs shared by API/CLI.
 * `core/services/types.py`: transport-agnostic core DTOs (chunking/eval/detection).
 * `core/domain/entities.py`: domain entities and business invariants.
 * `infrastructure/persistence/*/models.py`: ORM persistence models.
@@ -72,21 +72,21 @@
 ## Strict Request-Flow Architecture (`/api/ask`)
 
 The following diagram maps the real runtime path of a request from
-`src/local_rag_backend/app/routers/rag.py` to `core/ports` and into
+`src/local_rag_backend/app/routers/rag_router.py` to `core/ports` and into
 `infrastructure/retrieval`.
 
 ```mermaid
 flowchart TD
     C[Client HTTP] --> M[FastAPI app\napp/main.py]
     M --> AR[API Router\napp/api_router.py]
-    AR --> RR[RAG Router\napp/routers/rag.py::ask]
+    AR --> RR[RAG Router\napp/routers/rag_router.py::ask]
 
     RR --> D1[Dependency\napp/dependencies.py::get_rag_service]
     D1 --> F1[Factory\napp/factory.py::get_rag_service]
     F1 --> AC[AppContainer\napp/container.py::get_rag_service]
     AC --> BRS[build_rag_service\napp/container.py]
 
-    BRS --> RS[core/services/rag.py::RagService]
+    BRS --> RS[core/services/rag_runtime.py::RagService]
 
     BRS --> COMP[composition.build_retriever_with_default_embedder_from_settings\napp/composition.py]
     COMP --> RP[core/ports::RetrieverPort]
@@ -101,7 +101,7 @@ flowchart TD
     GP --> OLL[infrastructure/llms/ollama_chat.py::OllamaGenerator]
 
     BRS --> HP[core/ports::QAHistoryPort]
-    HP --> HSQL[infrastructure/persistence/sql/sql_.py::HistorySqlStorage]
+    HP --> HSQL[infrastructure/persistence/sql/alchemy_engine.py::HistorySqlStorage]
 
     RR --> RB[app/blocking.py::run_blocking]
     RB --> RS
@@ -118,11 +118,11 @@ flowchart TD
 sequenceDiagram
     autonumber
     participant Client
-    participant Router as app/routers/rag.py::ask
+    participant Router as app/routers/rag_router.py::ask
     participant Dep as app/dependencies.py::get_rag_service
     participant Factory as app/factory.py::get_rag_service
     participant Container as app/container.py::AppContainer
-    participant RagService as core/services/rag.py::RagService
+    participant RagService as core/services/rag_runtime.py::RagService
     participant Retriever as core/ports::RetrieverPort
     participant InfraRet as infrastructure/retrieval/*
     participant Gen as core/ports::GeneratorPort
@@ -167,6 +167,7 @@ This boundary is enforced in `app/composition.py` and consumed by `AppContainer`
 ## Docs
 
 * `docs/architecture.md`
+* `docs/architecture/app.md`
 * `docs/custom_usage_guide.md`
 * `docs/langchain_loaders.md`
 
@@ -254,6 +255,12 @@ Key variables (non-exhaustive):
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
 | `VECTOR_BACKEND`                 | `auto`                    | dense/hybrid | Vector backend selector: `auto` \| `faiss` \| `numpy` |
+| `STORAGE_PROFILE`                | _(auto)_                  | consistency  | Optional explicit storage profile (`sql_only_local`, `sql_faiss_local`, `sql_numpy_local`) |
+| `WRITE_LOCK_TIMEOUT_S`           | `30.0`                    | consistency  | Timeout (seconds) for multi-store write lock           |
+| `WRITE_LOCK_POLL_S`              | `0.05`                    | consistency  | Poll interval (seconds) while waiting for lock         |
+| `MUTATION_JOURNAL_BACKEND`       | `file`                    | consistency  | Durable mutation journal backend (filesystem default)  |
+| `MUTATION_RECOVERY_ENABLED`      | `true`                    | consistency  | Enable startup/background replay of incomplete mutations |
+| `MUTATION_RECOVERY_INTERVAL_S`   | `30.0`                    | consistency  | Background recovery interval (seconds)                 |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
 | `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
 | (derived) `index_manifest.json`  | `data/index_manifest.json`| dense/hybrid | Index manifest (model/dim/chunker) for drift detection |
@@ -356,16 +363,23 @@ rag-build-index
 rag-rebuild-index
 
 
-# Delete documents by ID from SQLite (and FAISS in dense/hybrid mode)
-rag-delete-docs 1 2 3
+# Unified docs mutation (canonical write path)
+cat > /tmp/mutate_upsert.json <<'JSON'
+{"op_id":"op-upsert-1","upserts":[{"external_id":"doc-1","content":"hello"}]}
+JSON
+rag-mutate-docs --json /tmp/mutate_upsert.json
 
+# Delete by SQL doc IDs
+cat > /tmp/mutate_delete_ids.json <<'JSON'
+{"op_id":"op-del-ids-1","delete_ids":["doc:...","doc:..."]}
+JSON
+rag-mutate-docs --json /tmp/mutate_delete_ids.json
 
-# Delete documents by external_id (adds tombstones to prevent reappearance)
-rag-delete-external-ids chunk:abcd... file:/path/to/x:part=file:chunk=0
-
-
-# Upsert documents by external_id (idempotent)
-rag-upsert-docs --external-id doc-1 --content "hello"
+# Delete by external IDs (creates tombstones)
+cat > /tmp/mutate_delete_external_ids.json <<'JSON'
+{"op_id":"op-del-ext-1","delete_external_ids":["chunk:abcd...","file:/path:part=file:chunk=0"]}
+JSON
+rag-mutate-docs --json /tmp/mutate_delete_external_ids.json
 
 
 # Summarized system and files status
@@ -511,9 +525,8 @@ docker build --target production .
   * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
-* `POST /api/docs/upsert` (idempotent upsert by `external_id`)
-* `POST /api/docs/delete` (delete docs by ID; keeps SQL + FAISS consistent when applicable)
-* `POST /api/docs/delete_by_external_id` (delete by `external_id` + tombstones)
+* `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
+* `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/index/rebuild` (idempotent rebuild of FAISS from SQLite; dense/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
 
@@ -521,8 +534,10 @@ Notes:
 
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources.
-* In dense/hybrid mode, **FAISS is derived state**; use `/api/docs/delete`, `/api/docs/delete_by_external_id` (or `rag-delete-docs` / `rag-delete-external-ids`) instead of deleting rows manually.
-* Dense/hybrid delete flows try incremental index deletion first and trigger full rebuild only on failure.
+* In dense/hybrid mode, **FAISS is derived operational state**; write via `/api/docs/mutate` (or `rag-mutate-docs`) rather than mutating stores independently.
+* Write-path consistency uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
+* Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
+* v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
 * In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
 * For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
