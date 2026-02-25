@@ -202,8 +202,8 @@ uv sync --frozen
 # (Optional) SentenceTransformers embeddings (heavy: torch/transformers)
 # uv sync --frozen --extra dense-st
 
-# (Optional) Dev/Test/Lint deps
-# uv sync --frozen --extra dev --extra test --extra lint
+# (Optional) Dev/Test/Lint groups
+# uv sync --frozen --group dev --group test --group lint --no-default-groups
 ```
 
 Initialize sample data and start:
@@ -539,6 +539,7 @@ curl -X POST "http://localhost:8000/api/ask" \
 ## Tests
 
 ```bash
+UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --no-default-groups
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
 uv run pre-commit run --all-files
@@ -573,7 +574,7 @@ make sec-soft   # non-blocking local audit
 
 ## Documentation site (optional)
 
-If you install docs extras (`uv sync --extra docs`), you can run:
+If you install docs tooling (`uv sync --group docs --no-default-groups`), you can run:
 
 ```bash
 mkdocs serve
