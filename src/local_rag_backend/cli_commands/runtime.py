@@ -82,7 +82,6 @@ def build_dense_embedder() -> EmbedderPort:
 
 
 __all__ = [
-    "_reset_rag_service_best_effort",
     "build_dense_embedder",
     "ensure_sqlite_schema_for_cli",
     "run_cli_mutation",
