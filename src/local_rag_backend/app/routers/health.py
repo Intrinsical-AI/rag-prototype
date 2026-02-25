@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from local_rag_backend.app.application import health as health_application
 from local_rag_backend.app.application.health import (
     check_database,
+    check_mutation_journal,
     check_retrieval_index,
     check_sql_counts,
     ping_database,
@@ -83,6 +84,7 @@ async def readiness_check(
         is_ready = False
     if not check_retrieval_index(checks=checks, docs_count=docs_count, settings_obj=settings_obj):
         is_ready = False
+    check_mutation_journal(checks=checks, settings_obj=settings_obj)
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:
