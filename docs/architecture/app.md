@@ -1,4 +1,4 @@
-# App 
+# App
 
 App (FastAPI) (/src/local_rag_backend/app)
 La capa app es la capa de entrega/orquestación: convierte HTTP en casos de uso, aplica seguridad, observabilidad y concurrencia, y estandariza errores sin contaminar el dominio. No sustituye a core ni a infrastructure; los compone (instancia + conecta + ejecuta).
