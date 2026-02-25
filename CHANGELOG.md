@@ -6,7 +6,14 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
-_Nothing yet._
+### Refactor
+- Internal type/module taxonomy normalized by layer:
+  - `core/services/schemas.py` replaced by `core/services/types.py` for data-only DTOs.
+  - `OverlapV1Reranker` moved to `core/services/reranking.py` (behavioral strategy).
+  - `app/services/results.py` added for docs mutation use-case outcomes.
+  - `app/services/ports.py` kept focused on dependency contracts and bundles.
+- Removed residual `core/services/models.py` (unused/empty).
+- Internal imports updated across app/core/infra/CLI to align with new boundaries.
 
 ## [1.0.0] - 2026-02-24
 

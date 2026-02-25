@@ -59,6 +59,14 @@
 └── tests/                     # unit + integration + e2e
 ```
 
+## Type boundaries
+
+* `app/schemas/*`: HTTP request/response contracts (Pydantic transport layer).
+* `app/services/results.py`: app use-case outputs shared by API/CLI.
+* `core/services/types.py`: transport-agnostic core DTOs (chunking/eval/detection).
+* `core/domain/entities.py`: domain entities and business invariants.
+* `infrastructure/persistence/*/models.py`: ORM persistence models.
+
 ---
 
 ## Strict Request-Flow Architecture (`/api/ask`)
@@ -83,7 +91,7 @@ flowchart TD
     BRS --> COMP[composition.build_retriever_with_default_embedder_from_settings\napp/composition.py]
     COMP --> RP[core/ports::RetrieverPort]
     RP --> SBR[infrastructure/retrieval/sparse_bm25.py::SparseBM25Retriever]
-    RP --> DFR[infrastructure/retrieval/dense_faiss.py::DenseFaissRetriever]
+    RP --> DFR[infrastructure/retrieval/dense_vector.py::DenseVectorRetriever]
     RP --> HR[infrastructure/retrieval/hybrid.py::HybridRetriever]
     COMP --> RER[core/services/reranking.py::RerankingRetriever]
     RER --> RP
@@ -93,7 +101,7 @@ flowchart TD
     GP --> OLL[infrastructure/llms/ollama_chat.py::OllamaGenerator]
 
     BRS --> HP[core/ports::QAHistoryPort]
-    HP --> HSQL[infrastructure/persistence/sqlalchemy/sql_.py::HistorySqlStorage]
+    HP --> HSQL[infrastructure/persistence/sql/sql_.py::HistorySqlStorage]
 
     RR --> RB[app/blocking.py::run_blocking]
     RB --> RS
@@ -130,7 +138,7 @@ sequenceDiagram
 
     Router->>RagService: run_blocking(service.ask, question, k)
     RagService->>Retriever: retrieve(question, k)
-    Retriever->>InfraRet: SparseBM25Retriever OR DenseFaissRetriever OR HybridRetriever
+    Retriever->>InfraRet: SparseBM25Retriever OR DenseVectorRetriever OR HybridRetriever
     InfraRet-->>Retriever: (docs, scores)
     Retriever-->>RagService: (docs, scores)
 
@@ -146,9 +154,9 @@ sequenceDiagram
 * `RETRIEVAL_MODE=sparse`:
   `RetrieverPort := SparseBM25Retriever` (BM25 corpus + SQL doc repo)
 * `RETRIEVAL_MODE=dense`:
-  `RetrieverPort := DenseFaissRetriever` (embedder + FAISS + SQL doc repo)
+  `RetrieverPort := DenseVectorRetriever` (embedder + FAISS + SQL doc repo)
 * `RETRIEVAL_MODE=hybrid`:
-  `RetrieverPort := HybridRetriever(DenseFaissRetriever, SparseBM25Retriever, alpha)`
+  `RetrieverPort := HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`
 * If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
   `RetrieverPort := RerankingRetriever(base=<selected>)`
 
@@ -236,7 +244,7 @@ Key variables (non-exhaustive):
 | `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse unsafe public startup and reject non-local `/api/*` + `/metrics` requests when `API_KEY` is unset |
 | `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
-| `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, FAISS paths)       |
+| `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
 | `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
@@ -245,6 +253,7 @@ Key variables (non-exhaustive):
 | `INGEST_BATCH_SIZE`              | `64`                      | ingestion    | File-plans per ingestion batch (`1..512`)              |
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
+| `VECTOR_BACKEND`                 | `auto`                    | dense/hybrid | Vector backend selector: `auto` \| `faiss` \| `numpy` |
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
 | `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
 | (derived) `index_manifest.json`  | `data/index_manifest.json`| dense/hybrid | Index manifest (model/dim/chunker) for drift detection |
