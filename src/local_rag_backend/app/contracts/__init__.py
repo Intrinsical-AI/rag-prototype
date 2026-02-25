@@ -11,16 +11,11 @@ from local_rag_backend.app.contracts.ports import (
     UpsertResultPort,
 )
 from local_rag_backend.app.contracts.results import (
-    DeleteDocsByExternalIdSummary,
-    DeleteDocsSummary,
     MutationSummary,
     UpsertDocResult,
-    UpsertDocsSummary,
 )
 
 __all__ = [
-    "DeleteDocsByExternalIdSummary",
-    "DeleteDocsSummary",
     "DocsMutationPorts",
     "DocsRepositoryPort",
     "IndexMutationPorts",
@@ -30,6 +25,5 @@ __all__ = [
     "MutationSummary",
     "UpsertDocBuilderPort",
     "UpsertDocResult",
-    "UpsertDocsSummary",
     "UpsertResultPort",
 ]
