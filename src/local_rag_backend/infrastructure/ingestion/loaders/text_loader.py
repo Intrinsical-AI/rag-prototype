@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import LoadedItem
 from local_rag_backend.core.ports import LoaderPort
+from local_rag_backend.infrastructure.ingestion.loaders.lineage import loader_lineage
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -36,4 +37,13 @@ class TextFileLoader(LoaderPort):
         md.setdefault("source_path", str(self.path))
         md.setdefault("filename", self.path.name)
         md.setdefault("format", "text")
-        yield LoadedItem(text=text, metadata=md or None)
+        yield LoadedItem(
+            text=text,
+            lineage=loader_lineage(
+                source_uri=str(self.path.resolve()),
+                loader_name="TextFileLoader",
+                source_version=None,
+                record_locator="file",
+            ),
+            metadata=md or None,
+        )

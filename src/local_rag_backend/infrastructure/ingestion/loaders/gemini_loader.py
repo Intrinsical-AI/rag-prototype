@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from local_rag_backend.core.domain.entities import LoadedItem
+from local_rag_backend.infrastructure.ingestion.loaders.lineage import loader_lineage
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -50,7 +51,7 @@ class GeminiLoader:
         if not isinstance(messages, list):
             return
 
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             if not isinstance(msg, dict):
                 continue
 
@@ -63,6 +64,12 @@ class GeminiLoader:
 
             yield LoadedItem(
                 text=text,
+                lineage=loader_lineage(
+                    source_uri=f"gemini://conversation/{conv_id}",
+                    loader_name="GeminiLoader",
+                    source_version="gemini-export-v1",
+                    record_locator=f"message:{idx}",
+                ),
                 metadata={
                     "source": "gemini_export",
                     "conversation_id": conv_id,

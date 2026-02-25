@@ -5,14 +5,17 @@ Ingestion service for document processing.
 
 from __future__ import annotations
 
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from local_rag_backend.core.domain.types import ItemLineage
     from local_rag_backend.core.ports import LoaderPort
     from local_rag_backend.core.services.etl import ETLService
     from local_rag_backend.settings import Settings
+from local_rag_backend.core.domain.types import TransformStep, utc_now
 from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.text_processing import preprocess_text
 
@@ -37,7 +40,11 @@ def default_formatter(text: str, metadata: Mapping[str, Any] | None = None) -> s
     """Default formatter adding metadata as a header to the text."""
     if not metadata:
         return text
-    header = "\n".join(f"{k.title()}: {v}" for k, v in metadata.items() if v is not None)
+    header = "\n".join(
+        f"{k.title()}: {v}"
+        for k, v in metadata.items()
+        if v is not None and not str(k).startswith("_")
+    )
     return f"{header}\n\n{text}" if header else text
 
 
@@ -64,6 +71,13 @@ def build_chunk_fn_from_settings(
     return default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
 
 
+def _with_transform(
+    lineage: ItemLineage, *, name: str, version: str, params: dict[str, Any]
+) -> ItemLineage:
+    step = TransformStep(name=name, version=version, params=params, timestamp=utc_now())
+    return replace(lineage, transforms=(*lineage.transforms, step))
+
+
 class IngestionPipeline:
     """Pipeline for processing documents through loading, chunking, and storage."""
 
@@ -85,18 +99,34 @@ class IngestionPipeline:
         """Execute the ingestion pipeline."""
         all_chunks = []
         for loaded_item in self.loader.load():
-            # Preprocess
+            preprocess_lineage = _with_transform(
+                loaded_item.lineage,
+                name="preprocess",
+                version="v1",
+                params={},
+            )
             processed_text = self.preprocess_fn(loaded_item.text, loaded_item.metadata)
 
-            # Chunk
+            chunk_lineage = _with_transform(
+                preprocess_lineage,
+                name="chunk",
+                version="chars_v1",
+                params={},
+            )
             chunks = self.chunk_fn(processed_text, loaded_item.metadata)
 
-            # Format each chunk
             for chunk in chunks:
-                formatted_chunk = self.format_fn(chunk, loaded_item.metadata)
+                format_lineage = _with_transform(
+                    chunk_lineage,
+                    name="format",
+                    version="v1",
+                    params={},
+                )
+                metadata = dict(loaded_item.metadata) if loaded_item.metadata else {}
+                metadata["_lineage"] = asdict(format_lineage)
+                formatted_chunk = self.format_fn(chunk, metadata)
                 all_chunks.append(formatted_chunk)
 
-        # Ingest all chunks at once
         if all_chunks:
             self.etl_service.ingest(all_chunks)
 

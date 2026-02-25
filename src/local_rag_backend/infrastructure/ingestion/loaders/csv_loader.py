@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.core.domain.entities import LoadedItem
 from local_rag_backend.core.ports import LoaderPort
+from local_rag_backend.infrastructure.ingestion.loaders.lineage import loader_lineage
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -46,9 +47,17 @@ class CSVLoader(LoaderPort):
                 row_index += 1
                 if len(row) >= 2:
                     title, body = row[0].strip(), row[1].strip()
-                    yield LoadedItem(
-                        text=f"{title}\n\n{body}",
-                        metadata={"title": title, "row_index": row_index},
-                    )
+                    text = f"{title}\n\n{body}"
+                    metadata = {"title": title, "row_index": row_index}
                 else:
-                    yield LoadedItem(text=row[0].strip(), metadata={"row_index": row_index})
+                    text = row[0].strip()
+                    metadata = {"row_index": row_index}
+                yield LoadedItem(
+                    text=text,
+                    lineage=loader_lineage(
+                        source_uri=str(self.path.resolve()),
+                        loader_name="CSVLoader",
+                        record_locator=f"row:{row_index}",
+                    ),
+                    metadata=metadata,
+                )
