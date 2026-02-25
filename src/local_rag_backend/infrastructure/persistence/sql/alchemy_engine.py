@@ -191,7 +191,9 @@ class SqlDocumentStorage(DocumentRepoPort):
             return []
         with get_session(self._session_factory) as session:
             db_docs = session.query(DbDocument).filter(DbDocument.doc_id.in_(normalized)).all()
-            return [_to_domain_document(d) for d in db_docs]
+            docs_by_id = {str(d.doc_id): _to_domain_document(d) for d in db_docs}
+            # Preserve caller order deterministically across SQLite/Python versions.
+            return [docs_by_id[doc_id] for doc_id in normalized if doc_id in docs_by_id]
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
