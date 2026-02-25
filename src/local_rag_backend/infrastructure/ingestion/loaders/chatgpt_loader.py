@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from local_rag_backend.core.domain.entities import LoadedItem
+from local_rag_backend.infrastructure.ingestion.loaders.lineage import loader_lineage
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -73,7 +74,6 @@ class ChatGPTLoader:
             msg_id: str = str(msg.get("id") or "")
             create_time = msg.get("create_time")
 
-            # model_slug only if present
             model_slug: str | None = None
             msg_metadata = msg.get("metadata")
             if isinstance(msg_metadata, dict):
@@ -90,4 +90,13 @@ class ChatGPTLoader:
             if model_slug is not None:
                 md["model_slug"] = str(model_slug)
 
-            yield LoadedItem(text=text.strip(), metadata=md)
+            yield LoadedItem(
+                text=text.strip(),
+                lineage=loader_lineage(
+                    source_uri=f"chatgpt://conversation/{conv_id}",
+                    loader_name="ChatGPTLoader",
+                    source_version="chatgpt-export-v1",
+                    record_locator=f"message:{msg_id}" if msg_id else None,
+                ),
+                metadata=md,
+            )
