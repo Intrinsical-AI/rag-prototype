@@ -226,6 +226,11 @@ warn_required_dynamic_aliases = true
 module = ["faiss.*","rank_bm25.*","sentence_transformers.*","prometheus_client.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+check_untyped_defs = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
