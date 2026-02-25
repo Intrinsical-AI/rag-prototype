@@ -27,44 +27,44 @@ def render_prompt_template(template: str, *, context: str, question: str) -> str
     - `{question}` -> replaced with `question`
     - `{{` and `}}` -> literal braces
     """
-    out: list[str] = []
-    i = 0
-    n = len(template)
+    to_render: list[str] = []
+    left_idx = 0
+    len_ = len(template)
 
-    while i < n:
-        ch = template[i]
-        if ch == "{":
-            if i + 1 < n and template[i + 1] == "{":
-                out.append("{")
-                i += 2
+    while left_idx < len_:
+        current_ch = template[left_idx]
+        if current_ch == "{":
+            if left_idx + 1 < len_ and template[left_idx + 1] == "{":
+                to_render.append("{")
+                left_idx += 2
                 continue
-            j = template.find("}", i + 1)
-            if j == -1:
+            right_idx = template.find("}", left_idx + 1)
+            if right_idx == -1:
                 raise PromptTemplateError("Unmatched '{' in prompt_template.")
-            key = template[i + 1 : j]
+            key = template[left_idx + 1 : right_idx]
             if key == "context":
-                out.append(context)
+                to_render.append(context)
             elif key == "question":
-                out.append(question)
+                to_render.append(question)
             else:
                 raise PromptTemplateError(
                     "Unsupported placeholder in prompt_template. "
                     "Only {context} and {question} are allowed (use {{ and }} for literals)."
                 )
-            i = j + 1
+            left_idx = right_idx + 1
             continue
 
-        if ch == "}":
-            if i + 1 < n and template[i + 1] == "}":
-                out.append("}")
-                i += 2
+        if current_ch == "}":
+            if left_idx + 1 < len_ and template[left_idx + 1] == "}":
+                to_render.append("}")
+                left_idx += 2
                 continue
             raise PromptTemplateError("Unmatched '}' in prompt_template.")
 
-        out.append(ch)
-        i += 1
+        to_render.append(current_ch)
+        left_idx += 1
 
-    return "".join(out)
+    return "".join(to_render)
 
 
 def validate_prompt_template(template: str) -> None:
