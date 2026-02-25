@@ -14,9 +14,10 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
 
+    from local_rag_backend.app.application.storage_profiles import StorageProfileRegistry
     from local_rag_backend.core.domain.entities import Document
     from local_rag_backend.core.domain.types import DocId
-    from local_rag_backend.core.ports import EmbedderPort
+    from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
 
 class UpsertResultPort(Protocol):
@@ -34,6 +35,11 @@ class UpsertResultPort(Protocol):
 
 
 class UpsertDocBuilderPort(Protocol):
+    # Returns `object` (not a TypeVar) intentionally: the concrete builder produces an
+    # ORM-specific row object that only the persistence adapter understands.  Making the
+    # protocol generic would propagate a TypeVar through the entire mutation wiring for
+    # no benefit at the app layer; DocsRepositoryPort.upsert_documents_by_external_id
+    # accepts Sequence[object], which is the narrowest safe shared type.
     def __call__(
         self,
         *,
@@ -117,17 +123,17 @@ class DocsMutationPorts:
     build_embedder: Callable[[], EmbedderPort]
     doc_repo_factory: Callable[[], DocsRepositoryPort]
     build_upsert_doc: UpsertDocBuilderPort
-    vector_repo_factory: Callable[..., Any]
+    vector_repo_factory: Callable[..., VectorRepoPort]
     rebuild_fn: Callable[..., int]
     write_lock: WriteLockPort
     mutation_journal_factory: Callable[[], MutationJournalPort]
-    storage_profile_registry: Any
+    storage_profile_registry: StorageProfileRegistry
 
 
 @dataclass(frozen=True)
 class IndexMutationPorts:
     build_embedder: Callable[[], EmbedderPort]
-    doc_repo_factory: Callable[[], Any]
-    vector_repo_factory: Callable[..., Any]
+    doc_repo_factory: Callable[[], DocumentRepoPort]
+    vector_repo_factory: Callable[..., VectorRepoPort]
     purge_index_artifacts_fn: Callable[..., None]
     rebuild_fn: Callable[..., int]

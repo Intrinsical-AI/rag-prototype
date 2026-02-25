@@ -24,7 +24,7 @@ from local_rag_backend.settings import settings
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from local_rag_backend.core.ports import EmbedderPort
+    from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
 
 def build_docs_mutation_ports(
@@ -32,7 +32,7 @@ def build_docs_mutation_ports(
     build_embedder: Callable[[], EmbedderPort],
     doc_repo_factory: Callable[[], Any] | None = None,
     build_upsert_doc: Any | None = None,
-    vector_repo_factory: Callable[..., Any] | None = None,
+    vector_repo_factory: Callable[..., VectorRepoPort] | None = None,
     rebuild_fn: Callable[..., int] = rebuild_index_from_db,
     write_lock: Callable[..., Any] = multi_store_write_lock,
     mutation_journal_factory: Callable[..., Any] | None = None,
@@ -54,7 +54,7 @@ def build_docs_mutation_ports(
     if vector_repo_factory is None:
         from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
-        vec_factory: Callable[..., Any] = VectorStorage
+        vec_factory: Callable[..., VectorRepoPort] = VectorStorage
     else:
         vec_factory = vector_repo_factory
     journal_factory = mutation_journal_factory or (
@@ -76,8 +76,8 @@ def build_docs_mutation_ports(
 def build_index_mutation_ports(
     *,
     build_embedder: Callable[[], EmbedderPort],
-    doc_repo_factory: Callable[[], Any] | None = None,
-    vector_repo_factory: Callable[..., Any] | None = None,
+    doc_repo_factory: Callable[[], DocumentRepoPort] | None = None,
+    vector_repo_factory: Callable[..., VectorRepoPort] | None = None,
     purge_index_artifacts_fn: Callable[..., None] = purge_index_artifacts,
     rebuild_fn: Callable[..., int] = rebuild_index_from_db,
 ) -> IndexMutationPorts:
@@ -86,14 +86,16 @@ def build_index_mutation_ports(
             SqlDocumentStorage,
         )
 
-        repo_factory: Callable[[], Any] = cast("Callable[[], Any]", lambda: SqlDocumentStorage())
+        repo_factory: Callable[[], DocumentRepoPort] = cast(
+            "Callable[[], DocumentRepoPort]", lambda: SqlDocumentStorage()
+        )
     else:
         repo_factory = doc_repo_factory
 
     if vector_repo_factory is None:
         from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
-        vec_factory: Callable[..., Any] = VectorStorage
+        vec_factory: Callable[..., VectorRepoPort] = VectorStorage
     else:
         vec_factory = vector_repo_factory
     return IndexMutationPorts(

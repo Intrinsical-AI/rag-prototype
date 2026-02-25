@@ -30,6 +30,8 @@ def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
+    # Side-effect import: registers SQLAlchemy model metadata with db_base so that
+    # ensure_sqlite_schema_compatible can create all tables on the ephemeral engine.
     from local_rag_backend.infrastructure.persistence.sql import (  # noqa: F401
         models as _models,
     )
