@@ -1,5 +1,5 @@
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.rag_runtime import RagService
 
 
 class DummyRetriever:

@@ -10,10 +10,11 @@ import pytest
 
 from local_rag_backend.app import factory
 from local_rag_backend.app.routers import docs as docs_router
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
-async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
+async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consistent(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
     @dataclass(frozen=True)
@@ -31,13 +32,6 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
         action: str
         content_changed: bool
 
-    @dataclass(frozen=True)
-    class _ExistingDocState:
-        id: int
-        external_id: str
-        content: str
-        content_sha256: str | None
-
     class FakeRepo:
         UpsertDoc = _UpsertDoc
 
@@ -48,19 +42,6 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
 
         def get_tombstoned_external_ids(self, external_ids):
             return set()
-
-        def get_existing_doc_states_by_external_id(self, external_ids):
-            with self._lock:
-                out: dict[str, _ExistingDocState] = {}
-                for ext in external_ids:
-                    row = self._by_external_id.get(ext)
-                    if row is None:
-                        continue
-                    doc_id, content, sha = row
-                    out[ext] = _ExistingDocState(
-                        id=doc_id, external_id=ext, content=content, content_sha256=sha
-                    )
-                return out
 
         def upsert_documents_by_external_id(self, items):
             results = []
@@ -85,7 +66,6 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
 
                     doc_id, old_content, old_sha = row
                     if content == "B":
-                        # Forces the B request to update SQL while A still sleeps in vector upsert.
                         self._a_sql_done.wait(timeout=2)
                     content_changed = old_sha != sha or old_content != content
                     if content_changed:
@@ -109,18 +89,15 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
             self.by_id: dict[int, list[float]] = {}
             self._lock = threading.Lock()
 
-        def delete(self, ids):
-            with self._lock:
-                for i in ids:
-                    self.by_id.pop(int(i), None)
-
-        def upsert(self, ids, vectors):
-            # Force an interleaving window where request A sleeps after SQL commit.
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            vectors = [list(v) for _, v in upserts]
             if vectors and float(vectors[0][0]) == 1.0:
                 time.sleep(0.2)
             with self._lock:
-                for i, v in zip(ids, vectors, strict=False):
-                    self.by_id[int(i)] = list(v)
+                for i in delete_ids:
+                    self.by_id.pop(int(i), None)
+                for doc_id, vector in upserts:
+                    self.by_id[int(doc_id)] = list(vector)
 
     fake_vec = FakeVec()
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
@@ -132,22 +109,21 @@ async def test_concurrent_upserts_are_serialized_and_keep_sql_vector_consistent(
 
     task_a = asyncio.create_task(
         asgi_client.post(
-            "/api/docs/upsert",
-            json={"docs": [{"external_id": "doc-1", "content": "A"}]},
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-1", "content": "A"}]},
         )
     )
     await asyncio.sleep(0.02)
     task_b = asyncio.create_task(
         asgi_client.post(
-            "/api/docs/upsert",
-            json={"docs": [{"external_id": "doc-1", "content": "B"}]},
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-1", "content": "B"}]},
         )
     )
     ra, rb = await asyncio.gather(task_a, task_b)
 
     assert ra.status_code == 200
     assert rb.status_code == 200
-    # Final SQL state must match final vector state (latest content = B -> vector 2.0).
     assert FakeRepo._by_external_id["doc-1"][1] == "B"
     assert fake_vec.by_id[1] == [2.0]
 
@@ -171,54 +147,14 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["count"] >= 1
-
-    # Regression guard: /api/docs must run exactly one sync ingestion path under the lock wrapper.
     assert called_funcs.count("run_multi_store_write_locked") == 1
     assert called_task_types == ["mutation"]
     assert "_ingest_sync" not in called_funcs
 
 
-async def test_upsert_failure_still_invalidates_cached_rag_service(
+async def test_mutation_failure_still_invalidates_cached_rag_service(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
-    @dataclass(frozen=True)
-    class _UpsertDoc:
-        external_id: str
-        content: str
-        source_id: str | None = None
-        metadata: dict[str, object] | None = None
-        chunk_dedup_sha256: str | None = None
-
-    @dataclass(frozen=True)
-    class _UpsertResult:
-        external_id: str
-        id: int
-        action: str
-        content_changed: bool
-
-    class FakeRepo:
-        UpsertDoc = _UpsertDoc
-
-        def get_tombstoned_external_ids(self, external_ids):
-            return set()
-
-        def get_existing_doc_states_by_external_id(self, external_ids):
-            return {}
-
-        def upsert_documents_by_external_id(self, items):
-            return (
-                [
-                    _UpsertResult(
-                        external_id=items[0].external_id,
-                        id=1,
-                        action="inserted",
-                        content_changed=True,
-                    )
-                ],
-                [(1, items[0].content)],
-                [],
-            )
-
     class FakeEmbedder:
         dim = 1
 
@@ -226,10 +162,7 @@ async def test_upsert_failure_still_invalidates_cached_rag_service(
             return [[1.0] for _ in texts]
 
     class FailingVec:
-        def delete(self, ids):
-            return None
-
-        def upsert(self, ids, vectors):
+        def apply_delta_atomic(self, *, delete_ids, upserts):
             raise RuntimeError("vec upsert failed")
 
     reset_calls = 0
@@ -238,21 +171,17 @@ async def test_upsert_failure_still_invalidates_cached_rag_service(
         nonlocal reset_calls
         reset_calls += 1
 
-    def _rebuild_fail(**_kwargs):
-        raise RuntimeError("rebuild failed")
-
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "SqlDocumentStorage", FakeRepo, raising=True)
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
     monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
     monkeypatch.setattr(docs_router, "reset_rag_service", _count_reset, raising=True)
 
-    with pytest.raises(RuntimeError, match="rebuild failed"):
+    with pytest.raises(RuntimeError, match="vec upsert failed"):
         await asgi_client.post(
-            "/api/docs/upsert",
-            json={"docs": [{"external_id": "doc-1", "content": "hello"}]},
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
         )
 
     assert reset_calls == 1
+    assert SqlDocumentStorage().get_all_documents() == []

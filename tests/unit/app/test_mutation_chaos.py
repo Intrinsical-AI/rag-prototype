@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 from local_rag_backend.app import factory
-from local_rag_backend.app.routers import index as index_router
+from local_rag_backend.core.errors import WriteLockTimeoutError
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
-async def test_upsert_dense_vector_write_failure_triggers_rebuild_and_succeeds(
+async def test_mutate_dense_vector_failure_rolls_back_sql(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
     class DummyEmbedder:
@@ -20,55 +22,48 @@ async def test_upsert_dense_vector_write_failure_triggers_rebuild_and_succeeds(
             return [[1.0] for _ in texts]
 
     class FailingVec:
-        def delete(self, ids):
-            return None
-
-        def upsert(self, ids, vectors):
+        def apply_delta_atomic(self, *, delete_ids, upserts):
             raise RuntimeError("vec upsert fail")
-
-    rebuild_calls = 0
-
-    def _rebuild(*, doc_repo, vec_repo, embedder):
-        nonlocal rebuild_calls
-        rebuild_calls += 1
-        return len(doc_repo.get_all_documents())
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
     monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild, raising=True)
 
-    resp = await asgi_client.post(
-        "/api/docs/upsert", json={"docs": [{"external_id": "doc-1", "content": "hello"}]}
-    )
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["rebuilt_index"] is True
-    assert rebuild_calls == 1
-
-
-async def test_upsert_mutation_fails_when_write_lock_cannot_be_acquired(
-    asgi_client, in_memory_sqlite, monkeypatch
-):
-    @contextmanager
-    def _broken_lock():
-        raise RuntimeError("lock unavailable")
-        yield
-
-    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(factory, "multi_store_write_lock", _broken_lock, raising=True)
-
-    with pytest.raises(RuntimeError, match="lock unavailable"):
+    with pytest.raises(RuntimeError, match="vec upsert fail"):
         await asgi_client.post(
-            "/api/docs/upsert", json={"docs": [{"external_id": "doc-1", "content": "hello"}]}
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
         )
 
     assert SqlDocumentStorage().get_all_documents() == []
 
 
-async def test_upsert_crash_window_keeps_sql_when_vector_and_rebuild_fail(
+async def test_mutation_fails_when_write_lock_unavailable_returns_503(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    @contextmanager
+    def _broken_lock():
+        raise WriteLockTimeoutError("lock unavailable")
+        yield
+
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(factory, "multi_store_write_lock", _broken_lock, raising=True)
+    factory.reset_app_context()
+
+    try:
+        resp = await asgi_client.post(
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
+        )
+        assert resp.status_code == 503
+        assert "lock unavailable" in resp.json()["detail"]
+        assert SqlDocumentStorage().get_all_documents() == []
+    finally:
+        factory.reset_app_context()
+
+
+async def test_vector_failure_persists_rolled_back_journal_record(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
     class DummyEmbedder:
@@ -78,61 +73,24 @@ async def test_upsert_crash_window_keeps_sql_when_vector_and_rebuild_fail(
             return [[1.0] for _ in texts]
 
     class FailingVec:
-        def delete(self, ids):
-            return None
-
-        def upsert(self, ids, vectors):
+        def apply_delta_atomic(self, *, delete_ids, upserts):
             raise RuntimeError("vec upsert fail")
-
-    def _rebuild_fail(**_kwargs):
-        raise RuntimeError("rebuild failed")
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
     monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
-    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
 
-    with pytest.raises(RuntimeError, match="rebuild failed"):
+    journal_dir = Path(settings.get_coordination_dir()) / ".mutation_journal"
+    before = sorted(journal_dir.glob("*.json")) if journal_dir.is_dir() else []
+
+    with pytest.raises(RuntimeError, match="vec upsert fail"):
         await asgi_client.post(
-            "/api/docs/upsert", json={"docs": [{"external_id": "doc-1", "content": "hello"}]}
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-journal", "content": "x"}]},
         )
 
-    docs = SqlDocumentStorage().get_all_documents()
-    assert len(docs) == 1
-    assert docs[0].external_id == "doc-1"
-
-
-async def test_index_rebuild_failure_still_invalidates_cached_rag_service(
-    asgi_client, in_memory_sqlite, monkeypatch
-):
-    class DummyEmbedder:
-        dim = 1
-
-        def embed(self, texts):
-            return [[1.0] for _ in texts]
-
-    class DummyVec:
-        def __init__(self, *args, **kwargs):
-            return None
-
-    reset_calls = 0
-
-    def _count_reset() -> None:
-        nonlocal reset_calls
-        reset_calls += 1
-
-    def _rebuild_fail(**_kwargs):
-        raise RuntimeError("rebuild failed")
-
-    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
-    monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: DummyVec(), raising=True)
-    monkeypatch.setattr(factory, "rebuild_index_from_db", _rebuild_fail, raising=True)
-    monkeypatch.setattr(index_router, "reset_rag_service", _count_reset, raising=True)
-
-    with pytest.raises(RuntimeError, match="rebuild failed"):
-        await asgi_client.post("/api/index/rebuild")
-
-    assert reset_calls == 1
+    after = sorted(journal_dir.glob("*.json")) if journal_dir.is_dir() else []
+    assert len(after) >= len(before) + 1
+    last_record = json.loads(after[-1].read_text(encoding="utf-8"))
+    assert last_record.get("state") == "ROLLED_BACK"

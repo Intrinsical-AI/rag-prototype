@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from local_rag_backend.app.services.mutation_ports import (
+from local_rag_backend.app.wiring.mutation_ports import (
     build_build_index_ports,
     build_docs_mutation_ports,
     build_index_mutation_ports,

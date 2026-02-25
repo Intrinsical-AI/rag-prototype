@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from local_rag_backend.app.services import openrouter as service
+from local_rag_backend.app.application import openrouter as service
 from local_rag_backend.core.errors import LLMResponseError
 
 
