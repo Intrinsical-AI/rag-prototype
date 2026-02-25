@@ -78,6 +78,7 @@ def _build_file_ingest_plan(
     *,
     file_path: Path,
     preprocess_fn: Callable[..., str],
+    build_upsert_doc: Callable[..., Any],
     sniff_bytes: int,
     use_magic: bool,
     delimiter_opt: str | None,
@@ -89,7 +90,6 @@ def _build_file_ingest_plan(
         detect_file_format,
         get_loader_for_file,
     )
-    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
     det = detect_file_format(file_path, sniff_bytes=sniff_bytes, use_magic=use_magic)
     loader = get_loader_for_file(
@@ -140,7 +140,7 @@ def _build_file_ingest_plan(
             md_chunk["parent_doc_id"] = parent_doc_id
             content = default_formatter(chunk, md_chunk)
             items.append(
-                SqlDocumentStorage.UpsertDoc(
+                build_upsert_doc(
                     external_id=external_id,
                     content=content,
                     source_id=source_id,
@@ -162,6 +162,7 @@ def _build_ingest_plans(
     *,
     files: list[Path],
     preprocess_fn: Callable[..., str],
+    build_upsert_doc: Callable[..., Any],
     sniff_bytes: int,
     use_magic: bool,
     delimiter_opt: str | None,
@@ -177,6 +178,7 @@ def _build_ingest_plans(
         plan = _build_file_ingest_plan(
             file_path=file_path,
             preprocess_fn=preprocess_fn,
+            build_upsert_doc=build_upsert_doc,
             sniff_bytes=sniff_bytes,
             use_magic=use_magic,
             delimiter_opt=delimiter_opt,
@@ -372,9 +374,12 @@ def ingest_cmd(
             click.echo("[WARN] No files found under limits. Nothing to ingest.")
             return
 
+        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
+
         ingest_plans, total_files, dry_run_chunks, total_skipped = _build_ingest_plans(
             files=files,
             preprocess_fn=preprocess_fn,
+            build_upsert_doc=ports.build_upsert_doc,
             sniff_bytes=sniff_bytes,
             use_magic=use_magic,
             delimiter_opt=delimiter_opt,
@@ -389,7 +394,6 @@ def ingest_cmd(
             )
             return
 
-        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
         doc_repo = ports.doc_repo_factory()
         coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
 
