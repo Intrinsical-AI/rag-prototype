@@ -53,6 +53,15 @@ class VectorRepoPort(Protocol):
     """Interface for storing and searching vector embeddings."""
 
     def upsert(self, ids: Sequence[DocId], vectors: Sequence[Embedding]) -> None: ...
+    def apply_delta_atomic(
+        self,
+        *,
+        delete_ids: Sequence[DocId],
+        upserts: Sequence[tuple[DocId, Embedding]],
+    ) -> None:
+        """Apply delete+upsert delta atomically from the caller perspective."""
+        ...
+
     def delete(self, ids: Sequence[DocId]) -> int:
         """Delete vectors for given IDs (best-effort; may rebuild index)."""
         ...

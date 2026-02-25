@@ -12,6 +12,7 @@ from local_rag_backend.app.diagnostics import (
     get_document_ids,
     get_documents_count,
     get_history_count,
+    get_incomplete_mutation_records_count,
     get_retrieval_index_stats,
 )
 from local_rag_backend.infrastructure.persistence.sql import base as db_base
@@ -126,3 +127,18 @@ def check_retrieval_index(
     if docs_count <= 5000:
         return _check_retrieval_index_id_set_drift(checks=checks, settings_obj=settings_obj)
     return True
+
+
+def check_mutation_journal(*, checks: dict[str, Any], settings_obj: Settings) -> None:
+    try:
+        incomplete = get_incomplete_mutation_records_count(
+            coordination_dir=settings_obj.get_coordination_dir()
+        )
+    except Exception as e:
+        checks["mutation_journal"] = {"status": "failed", "error": str(e)}
+        return
+
+    if incomplete > 0:
+        checks["mutation_journal"] = {"status": "warning", "incomplete_records": int(incomplete)}
+        return
+    checks["mutation_journal"] = {"status": "ok", "incomplete_records": 0}

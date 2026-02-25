@@ -6,6 +6,7 @@ SQLAlchemy-based implementation of the document and history repositories.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from threading import Lock
@@ -223,6 +224,27 @@ class SqlDocumentStorage(DocumentRepoPort):
         content: str
         content_sha256: str | None
 
+    @dataclass(frozen=True)
+    class DocumentSnapshot:
+        id: DocId
+        external_id: str | None
+        content: str
+        source_id: str | None
+        metadata: Mapping[str, Any] | None
+        content_sha256: str | None
+        chunk_dedup_sha256: str | None
+
+        def to_dict(self) -> dict[str, Any]:
+            return {
+                "id": str(self.id),
+                "external_id": self.external_id,
+                "content": self.content,
+                "source_id": self.source_id,
+                "metadata": dict(self.metadata) if self.metadata is not None else None,
+                "content_sha256": self.content_sha256,
+                "chunk_dedup_sha256": self.chunk_dedup_sha256,
+            }
+
     def get_existing_doc_states_by_external_id(
         self, external_ids: Sequence[str]
     ) -> dict[str, ExistingDocState]:
@@ -382,6 +404,176 @@ class SqlDocumentStorage(DocumentRepoPort):
                     continue
                 out.append((DocId(str(doc_id)), str(ext_id)))
             return out
+
+    def snapshot_by_ids(self, ids: Sequence[DocId]) -> list[dict[str, Any]]:
+        normalized = [str(x).strip() for x in ids if str(x).strip()]
+        if not normalized:
+            return []
+        with get_session(self._session_factory) as session:
+            rows = (
+                session.query(
+                    DbDocument.doc_id,
+                    DbDocument.external_id,
+                    DbDocument.content,
+                    DbDocument.source_id,
+                    DbDocument.metadata_,
+                    DbDocument.content_sha256,
+                    DbDocument.chunk_dedup_sha256,
+                )
+                .filter(DbDocument.doc_id.in_(normalized))
+                .all()
+            )
+            snapshots = [
+                SqlDocumentStorage.DocumentSnapshot(
+                    id=DocId(str(doc_id)),
+                    external_id=(str(external_id) if external_id is not None else None),
+                    content=str(content),
+                    source_id=(str(source_id) if source_id is not None else None),
+                    metadata=(dict(metadata_) if isinstance(metadata_, dict) else None),
+                    content_sha256=(str(content_sha256) if content_sha256 is not None else None),
+                    chunk_dedup_sha256=(
+                        str(chunk_dedup_sha256) if chunk_dedup_sha256 is not None else None
+                    ),
+                )
+                for (
+                    doc_id,
+                    external_id,
+                    content,
+                    source_id,
+                    metadata_,
+                    content_sha256,
+                    chunk_dedup_sha256,
+                ) in rows
+            ]
+            return [snap.to_dict() for snap in snapshots]
+
+    def snapshot_by_external_ids(self, external_ids: Sequence[str]) -> list[dict[str, Any]]:
+        ext_ids = _normalize_external_ids(external_ids)
+        if not ext_ids:
+            return []
+        with get_session(self._session_factory) as session:
+            rows = (
+                session.query(
+                    DbDocument.doc_id,
+                    DbDocument.external_id,
+                    DbDocument.content,
+                    DbDocument.source_id,
+                    DbDocument.metadata_,
+                    DbDocument.content_sha256,
+                    DbDocument.chunk_dedup_sha256,
+                )
+                .filter(DbDocument.external_id.is_not(None))
+                .filter(DbDocument.external_id.in_(ext_ids))
+                .all()
+            )
+            snapshots = [
+                SqlDocumentStorage.DocumentSnapshot(
+                    id=DocId(str(doc_id)),
+                    external_id=(str(external_id) if external_id is not None else None),
+                    content=str(content),
+                    source_id=(str(source_id) if source_id is not None else None),
+                    metadata=(dict(metadata_) if isinstance(metadata_, dict) else None),
+                    content_sha256=(str(content_sha256) if content_sha256 is not None else None),
+                    chunk_dedup_sha256=(
+                        str(chunk_dedup_sha256) if chunk_dedup_sha256 is not None else None
+                    ),
+                )
+                for (
+                    doc_id,
+                    external_id,
+                    content,
+                    source_id,
+                    metadata_,
+                    content_sha256,
+                    chunk_dedup_sha256,
+                ) in rows
+            ]
+            return [snap.to_dict() for snap in snapshots]
+
+    def hard_delete_by_external_ids(self, external_ids: Sequence[str]) -> int:
+        ext_ids = _normalize_external_ids(external_ids)
+        if not ext_ids:
+            return 0
+        with get_session(self._session_factory) as session:
+            deleted = (
+                session.query(DbDocument)
+                .filter(DbDocument.external_id.is_not(None))
+                .filter(DbDocument.external_id.in_(ext_ids))
+                .delete(synchronize_session=False)
+            )
+            session.commit()
+            return int(deleted or 0)
+
+    def delete_tombstones(self, external_ids: Sequence[str]) -> int:
+        ext_ids = _normalize_external_ids(external_ids)
+        if not ext_ids:
+            return 0
+        with get_session(self._session_factory) as session:
+            deleted = (
+                session.query(DbDocumentTombstone)
+                .filter(DbDocumentTombstone.external_id.in_(ext_ids))
+                .delete(synchronize_session=False)
+            )
+            session.commit()
+            return int(deleted or 0)
+
+    def restore_from_snapshots(self, snapshots: Sequence[Mapping[str, Any]]) -> int:
+        snapshots_list = [dict(s) for s in snapshots if isinstance(s, Mapping)]
+        if not snapshots_list:
+            return 0
+        ids = [
+            str(s.get("id") or "").strip() for s in snapshots_list if str(s.get("id") or "").strip()
+        ]
+        if not ids:
+            return 0
+
+        with get_session(self._session_factory) as session:
+            existing_docs = session.query(DbDocument).filter(DbDocument.doc_id.in_(ids)).all()
+            by_id = {str(doc.doc_id): doc for doc in existing_docs}
+            restored = 0
+            for snap in snapshots_list:
+                doc_id = str(snap.get("id") or "").strip()
+                if not doc_id:
+                    continue
+                content = str(snap.get("content") or "").strip()
+                if not content:
+                    continue
+                content_sha = (
+                    str(snap.get("content_sha256") or "").strip()
+                    or hashlib.sha256(content.encode("utf-8")).hexdigest()
+                )
+                external_id_raw = snap.get("external_id")
+                external_id = str(external_id_raw) if external_id_raw is not None else None
+                source_id_raw = snap.get("source_id")
+                source_id = str(source_id_raw) if source_id_raw is not None else None
+                metadata_raw = snap.get("metadata")
+                metadata_ = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else None
+                chunk_dedup_raw = snap.get("chunk_dedup_sha256")
+                chunk_dedup = str(chunk_dedup_raw) if chunk_dedup_raw is not None else None
+
+                row = by_id.get(doc_id)
+                if row is None:
+                    session.add(
+                        DbDocument(
+                            doc_id=doc_id,
+                            content=content,
+                            external_id=external_id,
+                            source_id=source_id,
+                            metadata_=metadata_,
+                            content_sha256=content_sha,
+                            chunk_dedup_sha256=chunk_dedup,
+                        )
+                    )
+                else:
+                    row.content = content
+                    row.external_id = external_id
+                    row.source_id = source_id
+                    row.metadata_ = metadata_
+                    row.content_sha256 = content_sha
+                    row.chunk_dedup_sha256 = chunk_dedup
+                restored += 1
+            session.commit()
+            return restored
 
     def get_tombstoned_external_ids(self, external_ids: Sequence[str]) -> set[str]:
         ext_ids = _normalize_external_ids(external_ids)

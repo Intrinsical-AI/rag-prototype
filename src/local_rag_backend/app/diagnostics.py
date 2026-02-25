@@ -4,6 +4,8 @@ Operational diagnostics for the app layer (health/readiness/status).
 
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +13,8 @@ from sqlalchemy import text
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 
 def get_documents_count(engine: Engine) -> int:
@@ -215,3 +219,26 @@ def get_retrieval_index_stats(
             "error": f"{type(e).__name__}: {e}",
             "hint": "Rebuild the index (e.g. `rag-rebuild-index` or POST /api/index/rebuild).",
         }
+
+
+def get_incomplete_mutation_records_count(*, coordination_dir: Path) -> int:
+    journal_dir = Path(coordination_dir) / ".mutation_journal"
+    if not journal_dir.is_dir():
+        return 0
+
+    incomplete = 0
+    for path in sorted(journal_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning(
+                "Skipping unreadable mutation journal diagnostics record at %s", path, exc_info=True
+            )
+            continue
+        if not isinstance(payload, dict):
+            continue
+        state = str(payload.get("state") or "").strip()
+        if state in {"COMMITTED", "ROLLED_BACK"}:
+            continue
+        incomplete += 1
+    return incomplete

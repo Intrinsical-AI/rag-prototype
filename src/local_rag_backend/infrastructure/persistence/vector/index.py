@@ -107,26 +107,52 @@ class VectorIndex:
                     self._load_or_initialize_locked()
                 raise
 
-    def delete_ids(self, ids: Sequence[DocId]) -> int:
+    def _delete_ids_locked(self, ids: Sequence[DocId]) -> int:
         to_delete = {DocId(str(x)) for x in ids if str(x).strip()}
-        if not to_delete:
+        if not to_delete or not self.id_map:
             return 0
+
+        keep_positions = [i for i, doc_id in enumerate(self.id_map) if doc_id not in to_delete]
+        deleted = len(self.id_map) - len(keep_positions)
+        if deleted <= 0:
+            return 0
+
+        self.engine.delete_keep_positions(keep_positions)
+        self.id_map = [self.id_map[i] for i in keep_positions]
+        return deleted
+
+    def delete_ids(self, ids: Sequence[DocId]) -> int:
+        with self._locked_write():
+            self._load_or_initialize_locked()
+            deleted = self._delete_ids_locked(ids)
+            if deleted <= 0:
+                return 0
+            self._save_locked()
+            return deleted
+
+    def apply_delta_atomic(
+        self,
+        *,
+        delete_ids: Sequence[DocId],
+        upserts: Sequence[tuple[DocId, Sequence[float]]],
+    ) -> None:
+        upserts_list = [(DocId(str(doc_id)), list(vec)) for doc_id, vec in upserts]
+        vectors = np.asarray([vec for _, vec in upserts_list], dtype="float32")
+        if len(upserts_list) and vectors.ndim != 2:
+            raise ValueError("Upsert vectors must be a 2D array-like (n, dim)")
 
         with self._locked_write():
             self._load_or_initialize_locked()
-
-            if not self.id_map:
-                return 0
-
-            keep_positions = [i for i, doc_id in enumerate(self.id_map) if doc_id not in to_delete]
-            deleted = len(self.id_map) - len(keep_positions)
-            if deleted <= 0:
-                return 0
-
-            self.engine.delete_keep_positions(keep_positions)
-            self.id_map = [self.id_map[i] for i in keep_positions]
-            self._save_locked()
-            return deleted
+            try:
+                self._delete_ids_locked(delete_ids)
+                if upserts_list:
+                    self.engine.add(vectors)
+                    self.id_map.extend([doc_id for doc_id, _ in upserts_list])
+                self._save_locked()
+            except Exception:
+                with suppress(Exception):  # pragma: no cover
+                    self._load_or_initialize_locked()
+                raise
 
     def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
         if len(ids) != len(vectors):

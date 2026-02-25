@@ -4,10 +4,11 @@ FastAPI application entry point.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -20,7 +21,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from local_rag_backend.app.api_router import router
 from local_rag_backend.app.dependencies import get_rag_service
 from local_rag_backend.app.errors import NotFoundError
-from local_rag_backend.app.factory import reset_app_context
+from local_rag_backend.app.factory import get_app_context, reset_app_context
 from local_rag_backend.app.http.exception_handlers import register_exception_handlers
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
 from local_rag_backend.app.security import enforce_safe_bind_config, require_api_key
@@ -48,6 +49,41 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
     db_base.ensure_sqlite_schema_compatible(engine_to_use=db_base.engine)
+    if settings.mutation_recovery_enabled:
+        try:
+            repaired = get_app_context().container.recover_incomplete_doc_mutations(limit=200)
+            if repaired:
+                logger.warning("Recovered %s incomplete mutation journal records.", repaired)
+        except Exception as e:
+            logger.warning("Mutation journal recovery failed (continuing startup): %s", e)
+    recovery_task = None
+    if settings.mutation_recovery_enabled:
+
+        async def _mutation_recovery_loop() -> None:
+            base_interval = float(settings.mutation_recovery_interval_s)
+            delay_s = base_interval
+            while True:
+                try:
+                    await asyncio.sleep(delay_s)
+                    repaired = await asyncio.to_thread(
+                        get_app_context().container.recover_incomplete_doc_mutations,
+                        limit=200,
+                    )
+                    if repaired:
+                        logger.warning(
+                            "Recovered %s incomplete mutation journal records (background).",
+                            repaired,
+                        )
+                        delay_s = max(1.0, base_interval / 2.0)
+                    else:
+                        delay_s = base_interval
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("Background mutation recovery attempt failed: %s", e)
+                    delay_s = min(delay_s * 2.0, 300.0)
+
+        recovery_task = asyncio.create_task(_mutation_recovery_loop())
     # Best-effort preload: don't prevent the API from starting just because an LLM
     # provider isn't configured yet (readiness endpoint should report not_ready).
     try:
@@ -58,6 +94,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         reset_app_context()
     logger.info("Service initialized.")
     yield
+    if recovery_task is not None:
+        recovery_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await recovery_task
     logger.info("Shutting down.")
 
 

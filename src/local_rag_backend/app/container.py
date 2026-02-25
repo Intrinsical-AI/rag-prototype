@@ -6,6 +6,8 @@ import logging
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
+from local_rag_backend.app.application.docs_mutation import MutationCoordinator
+from local_rag_backend.app.application.storage_profiles import StorageProfileRegistry
 from local_rag_backend.app.composition import (
     DEFAULT_DENSE_BACKEND_MESSAGE,
     build_dense_embedder_from_settings,
@@ -14,7 +16,7 @@ from local_rag_backend.app.composition import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
     resolve_preferred_llm_provider,
 )
-from local_rag_backend.app.services.mutation_ports import (
+from local_rag_backend.app.wiring.mutation_ports import (
     build_docs_mutation_ports,
     build_index_mutation_ports,
 )
@@ -28,7 +30,7 @@ from local_rag_backend.core.services.maintenance import (
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
-from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -37,6 +39,7 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
+from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,
@@ -51,8 +54,8 @@ from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Ret
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from local_rag_backend.app.schemas.rag import AskEvalConfig
-    from local_rag_backend.app.services.ports import DocsMutationPorts, IndexMutationPorts
+    from local_rag_backend.app.contracts.ports import DocsMutationPorts, IndexMutationPorts
+    from local_rag_backend.app.schemas.rag_api_models import AskEvalConfig
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
@@ -99,6 +102,8 @@ class AppContainer:
         ] = delete_external_ids_multi_store,
         purge_index_artifacts_fn: Callable[..., None] = purge_index_artifacts,
         write_lock: Callable[..., Any] = multi_store_write_lock,
+        mutation_journal_factory: Callable[..., Any] | None = None,
+        storage_profile_registry: StorageProfileRegistry | None = None,
         rag_service_factory: Callable[..., RagService] = RagService,
         system_state_factory: Callable[[], SystemStateStorage] = SystemStateStorage,
     ) -> None:
@@ -126,6 +131,12 @@ class AppContainer:
         self.delete_external_ids_fn = delete_external_ids_fn
         self.purge_index_artifacts_fn = purge_index_artifacts_fn
         self.write_lock = write_lock
+        self.mutation_journal_factory = mutation_journal_factory or (
+            lambda: FileMutationJournal(
+                self.settings_obj.get_coordination_dir() / ".mutation_journal"
+            )
+        )
+        self.storage_profile_registry = storage_profile_registry or StorageProfileRegistry()
         self.rag_service_factory = rag_service_factory
         self._system_state = system_state_factory()
         self._rag_service_cache_lock = Lock()
@@ -183,6 +194,9 @@ class AppContainer:
             rebuild_fn=self.rebuild_fn,
             delete_docs_fn=self.delete_docs_fn,
             delete_external_ids_fn=self.delete_external_ids_fn,
+            write_lock=self.write_lock,
+            mutation_journal_factory=self.mutation_journal_factory,
+            storage_profile_registry=self.storage_profile_registry,
         )
 
     def index_mutation_ports(
@@ -199,6 +213,13 @@ class AppContainer:
             purge_index_artifacts_fn=self.purge_index_artifacts_fn,
             rebuild_fn=self.rebuild_fn,
         )
+
+    def recover_incomplete_doc_mutations(self, *, limit: int = 100) -> int:
+        coordinator = MutationCoordinator(
+            settings_obj=self.settings_obj,
+            ports=self.docs_mutation_ports(),
+        )
+        return coordinator.recover_incomplete(limit=limit)
 
     def build_retriever_from_config(
         self,

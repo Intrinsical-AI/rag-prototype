@@ -104,6 +104,15 @@ class VectorStorage(VectorRepoPort):
         self._ensure_manifest(overwrite=False)
         self.vector_index.add_to_index(list(ids), list(vectors))
 
+    def apply_delta_atomic(
+        self,
+        *,
+        delete_ids: Sequence[DocId],
+        upserts: Sequence[tuple[DocId, Sequence[float]]],
+    ) -> None:
+        self._ensure_manifest(overwrite=False)
+        self.vector_index.apply_delta_atomic(delete_ids=delete_ids, upserts=upserts)
+
     def delete(self, ids: Sequence[DocId]) -> int:
         self._ensure_manifest(overwrite=False)
         return self.vector_index.delete_ids(list(ids))
