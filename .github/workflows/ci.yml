@@ -235,11 +235,12 @@ jobs:
 
       - name: Run smoke tests (cross-platform persistence paths)
         run: >
-          uv run pytest -o addopts='' -q
-          tests/unit/infrastructure/persistence/faiss/test_faiss_index.py
-          tests/unit/infrastructure/persistence/faiss/test_faiss_index_race.py
-          tests/unit/infrastructure/persistence/faiss/test_vector_storage_manifest_guard.py
+          uv run pytest -o addopts='' -q \
+          tests/unit/infrastructure/persistence/vector/test_vector_index.py \
+          tests/unit/infrastructure/persistence/vector/test_vector_index_race.py \
+          tests/unit/infrastructure/persistence/vector/test_vector_storage_manifest_guard.py \
           tests/unit/core/services/test_maintenance.py
+
 
   security:
     name: Security Scan (bandit + safety)
