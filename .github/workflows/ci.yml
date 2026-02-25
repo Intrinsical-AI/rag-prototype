@@ -235,11 +235,8 @@ jobs:
 
       - name: Run smoke tests (cross-platform persistence paths)
         run: >
-          uv run pytest -o addopts='' -q \
-          tests/unit/infrastructure/persistence/vector/test_vector_index.py \
-          tests/unit/infrastructure/persistence/vector/test_vector_index_race.py \
-          tests/unit/infrastructure/persistence/vector/test_vector_storage_manifest_guard.py \
-          tests/unit/core/services/test_maintenance.py
+          uv run pytest -o addopts='' -q tests/unit/infrastructure/persistence/vector/test_vector_index.py tests/unit/infrastructure/persistence/vector/test_vector_index_race.py tests/unit/infrastructure/persistence/vector/test_vector_storage_manifest_guard.py tests/unit/core/services/test_maintenance.py
+
 
 
   security:
