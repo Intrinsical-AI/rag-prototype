@@ -102,7 +102,7 @@ class VectorIndex:
                 self.engine.add(vectors)
                 self.id_map.extend(ids)
                 self._save_locked()
-            except Exception:
+            except Exception:  # reload state to recover from partial writes — must be broad
                 with suppress(Exception):  # pragma: no cover
                     self._load_or_initialize_locked()
                 raise
@@ -149,7 +149,7 @@ class VectorIndex:
                     self.engine.add(vectors)
                     self.id_map.extend([doc_id for doc_id, _ in upserts_list])
                 self._save_locked()
-            except Exception:
+            except Exception:  # reload state to recover from partial writes — must be broad
                 with suppress(Exception):  # pragma: no cover
                     self._load_or_initialize_locked()
                 raise

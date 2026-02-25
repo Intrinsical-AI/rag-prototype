@@ -11,6 +11,7 @@ Goal:
 from __future__ import annotations
 
 import importlib
+import json
 import math
 from typing import TYPE_CHECKING, Any
 
@@ -124,18 +125,18 @@ def _magic_mime(raw: bytes) -> str | None:
             return None
         # `magic.from_buffer` exists in python-magic; ask for MIME to keep stable signals.
         return str(from_buffer(raw, mime=True))
-    except Exception:
+    except Exception:  # optional C extension — libmagic can raise arbitrary binding errors
         return None
 
 
 def _decode_text_sample(raw: bytes) -> str | None:
     try:
         return raw.decode("utf-8")
-    except Exception:
+    except UnicodeDecodeError:
         try:
             # Latin-1 never fails; we'll validate printability below.
             return raw.decode("latin-1")
-        except Exception:
+        except UnicodeDecodeError:
             return None
 
 
@@ -239,15 +240,13 @@ def detect_json_export_format(raw: bytes) -> Detection:
     This function is intentionally conservative: only returns a non-unknown format
     when the structural heuristic is unambiguous.
     """
-    import json as _json
-
     stripped = raw.lstrip()
     if not stripped:
         return Detection("unknown", "not-a-json-array")
 
     try:
-        data = _json.loads(raw.decode("utf-8", errors="replace"))
-    except Exception:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
         return Detection("unknown", "json-parse-error")
 
     if not isinstance(data, list):

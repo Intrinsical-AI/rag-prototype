@@ -27,7 +27,7 @@ def load_id_map_json(path: Path) -> list[DocId]:
 
     try:
         loaded = json.loads(raw.decode("utf-8"))
-    except Exception as e:
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise ValueError(f"Invalid id_map format at {path}: expected JSON list[str].") from e
 
     if not isinstance(loaded, list) or not all(isinstance(x, str) and x.strip() for x in loaded):
