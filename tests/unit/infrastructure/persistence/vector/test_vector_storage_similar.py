@@ -1,10 +1,10 @@
-# tests/unit/infrastructure/persistence/faiss/test_vector_storage_similar.py
+# tests/unit/infrastructure/persistence/vector/test_vector_storage_similar.py
 import numpy as np
 
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
 
-class DummyFaissIndex:
+class DummyVectorIndex:
     def __init__(self):
         self.id_map = [101, 102, 103]
         # tres dists: 0.0 (idéntico), 1.0, 9.0
@@ -16,12 +16,12 @@ class DummyFaissIndex:
 def test_similar_normalizes_and_maps_ids(monkeypatch):
     # inyectar dummy
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
         lambda *a, **k: None,
         raising=True,
     )
-    storage = FaissVectorStorage(index_path=":mem:", id_map_path=":mem:", dim=3)
-    storage.faiss_index = DummyFaissIndex()
+    storage = VectorStorage(index_path=":mem:", id_map_path=":mem:", dim=3)
+    storage.vector_index = DummyVectorIndex()
 
     pairs = storage.similar([0.0, 0.0, 0.0], k=3)
     ids, sims = zip(*pairs, strict=False)
@@ -39,12 +39,12 @@ def test_similar_is_fail_safe_on_id_map_mismatch(monkeypatch):
             return np.array([0]), np.array([0.0])
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
         lambda *a, **k: None,
         raising=True,
     )
-    storage = FaissVectorStorage(index_path=":mem:", id_map_path=":mem:", dim=3)
-    storage.faiss_index = DummyMismatchIndex()
+    storage = VectorStorage(index_path=":mem:", id_map_path=":mem:", dim=3)
+    storage.vector_index = DummyMismatchIndex()
 
     # Should not raise IndexError.
     assert storage.similar([0.0, 0.0, 0.0], k=1) == []

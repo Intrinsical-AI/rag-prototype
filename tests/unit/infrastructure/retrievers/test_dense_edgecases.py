@@ -1,5 +1,5 @@
 # tests/unit/infrastructure/retrievers/test_dense_edgecases.py
-from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 
 
 class E:
@@ -20,5 +20,5 @@ class R:
 
 
 def test_dense_k_le_zero_returns_empty():
-    retr = DenseFaissRetriever(embedder=E(), faiss_index=I(), doc_repo=R())
+    retr = DenseVectorRetriever(embedder=E(), vector_repo=I(), doc_repo=R())
     assert retr.retrieve("q", k=0) == ([], [])

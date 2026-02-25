@@ -6,7 +6,7 @@ import pytest
 from local_rag_backend.app import factory
 from local_rag_backend.app.application import openrouter as openrouter_service
 from local_rag_backend.app.routers import health as health_router
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -64,7 +64,7 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     dummy_vec = DummyVec()
-    monkeypatch.setattr(factory, "FaissVectorStorage", lambda **k: dummy_vec)
+    monkeypatch.setattr(factory, "VectorStorage", lambda **k: dummy_vec)
 
     payload = {"texts": ["X", "Y"]}
     r = await asgi_client.post("/api/docs", json=payload)
@@ -163,12 +163,12 @@ async def test_ask_eval_rejects_unsafe_prompt_template(asgi_client, in_memory_sq
 
 async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_path, monkeypatch):
     # Create a minimal valid on-disk index + id-map.
-    from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+    from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
     monkeypatch.setattr(settings, "openai_api_key", "x", raising=False)
-    FaissVectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
+    VectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)

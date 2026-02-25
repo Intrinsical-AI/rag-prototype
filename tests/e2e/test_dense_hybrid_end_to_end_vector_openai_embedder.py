@@ -7,13 +7,13 @@ from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,
 )
-from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.persistence.sql.base import Base
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
@@ -83,7 +83,7 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     history_repo = HistorySqlStorage(session_factory=SessionLocal)
 
     embedder = OpenAIEmbedder(model="dummy-4")
-    vec_repo = FaissVectorStorage(
+    vec_repo = VectorStorage(
         index_path=str(index_path), id_map_path=str(id_map_path), dim=embedder.dim
     )
 
@@ -91,7 +91,7 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     ids = etl.ingest(["alpha alpha alpha", "zzzz zzzz zzzz"])
     assert len(list(ids)) == 2
 
-    dense = DenseFaissRetriever(embedder=embedder, faiss_index=vec_repo, doc_repo=doc_repo)
+    dense = DenseVectorRetriever(embedder=embedder, vector_repo=vec_repo, doc_repo=doc_repo)
     docs, scores = dense.retrieve("alpha", k=1)
     assert len(docs) == 1
     assert docs[0].content.startswith("alpha")

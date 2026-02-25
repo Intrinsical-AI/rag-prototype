@@ -1,10 +1,10 @@
-# tests/unit/infrastructure/persistence/sqlalchemy/test_sql_upsert_documents_by_external_id.py
+# tests/unit/infrastructure/persistence/sql/test_sql_upsert_documents_by_external_id.py
 
 import hashlib
 
 import pytest
 
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
 
 def test_upsert_inserts_and_is_idempotent(in_memory_sqlite):

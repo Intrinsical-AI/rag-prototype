@@ -1,5 +1,5 @@
 # tests/unit/app/test_api_history.py
-from local_rag_backend.infrastructure.persistence.sqlalchemy import models
+from local_rag_backend.infrastructure.persistence.sql import models
 
 
 async def test_history_endpoint_returns_seeded_rows(asgi_client, in_memory_sqlite):

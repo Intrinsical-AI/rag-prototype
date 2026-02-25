@@ -1,8 +1,8 @@
-# tests/test_faiss_index.py
+# tests/test_vector_index.py
 import numpy as np
 from pytest import approx
 
-from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
 
 def test_faiss_add_and_search(tmp_path):
@@ -10,7 +10,7 @@ def test_faiss_add_and_search(tmp_path):
     index_file = tmp_path / "test.faiss"
     idmap_file = tmp_path / "id_map.json"
 
-    fi = FaissIndex(index_file, idmap_file, dim=dim)
+    fi = VectorIndex(index_file, idmap_file, dim=dim)
 
     # We create 5 vectors – the first one is clearly different (all zeros)
     vecs = [np.zeros(dim, dtype="float32")]

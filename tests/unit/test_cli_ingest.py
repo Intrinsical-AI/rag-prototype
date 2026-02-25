@@ -5,7 +5,7 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -88,7 +88,7 @@ def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
         lambda *a, **k: DummyVec(),
         raising=True,
     )

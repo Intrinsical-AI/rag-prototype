@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -109,7 +109,7 @@ def test_cli_delete_docs_dense_does_not_require_embedder_when_index_delete_succe
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
         lambda *_a, **_k: DummyVec(),
         raising=True,
     )
@@ -146,7 +146,7 @@ def test_cli_delete_external_ids_dense_does_not_require_embedder_when_index_dele
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
         lambda *_a, **_k: DummyVec(),
         raising=True,
     )
@@ -184,7 +184,7 @@ def test_cli_delete_external_ids_dense_preflight_failure_without_embedder_aborts
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissVectorStorage",
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
         lambda *_a, **_k: PreflightFailVec(),
         raising=True,
     )

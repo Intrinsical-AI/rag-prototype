@@ -1,10 +1,10 @@
-# tests/unit/infrastructure/persistence/faiss/test_manifest.py
+# tests/unit/infrastructure/persistence/vector/test_manifest.py
 
 from pathlib import Path
 
 import pytest
 
-from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+from local_rag_backend.infrastructure.persistence.vector.manifest import (
     build_expected_manifest_config,
     build_manifest,
     expected_manifest_config_from_settings,

@@ -1,12 +1,12 @@
-# tests/unit/infrastructure/persistence/sqlalchemy/test_chunk_dedup_unique_index.py
+# tests/unit/infrastructure/persistence/sql/test_chunk_dedup_unique_index.py
 
 from __future__ import annotations
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
+from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 
 
 def test_chunk_dedup_unique_index_enforced(in_memory_sqlite):

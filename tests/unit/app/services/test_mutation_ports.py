@@ -78,11 +78,11 @@ def test_build_docs_mutation_ports_defaults_are_loaded(monkeypatch: pytest.Monke
     class DummyVec:
         pass
 
-    from local_rag_backend.infrastructure.persistence.faiss import faiss_ as faiss_module
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import sql_ as sql_module
+    from local_rag_backend.infrastructure.persistence.sql import alchemy_engine as sql_module
+    from local_rag_backend.infrastructure.persistence.vector import storage as vector_module
 
     monkeypatch.setattr(sql_module, "SqlDocumentStorage", DummySqlRepo, raising=True)
-    monkeypatch.setattr(faiss_module, "FaissVectorStorage", DummyVec, raising=True)
+    monkeypatch.setattr(vector_module, "VectorStorage", DummyVec, raising=True)
 
     ports = build_docs_mutation_ports(build_embedder=lambda: DummyEmbedder())
 
@@ -106,11 +106,11 @@ def test_build_index_mutation_ports_defaults_and_overrides(
     def _rebuild(**kwargs: object) -> int:
         return 3
 
-    from local_rag_backend.infrastructure.persistence.faiss import faiss_ as faiss_module
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import sql_ as sql_module
+    from local_rag_backend.infrastructure.persistence.sql import alchemy_engine as sql_module
+    from local_rag_backend.infrastructure.persistence.vector import storage as vector_module
 
     monkeypatch.setattr(sql_module, "SqlDocumentStorage", DummySqlRepo, raising=True)
-    monkeypatch.setattr(faiss_module, "FaissVectorStorage", DummyVec, raising=True)
+    monkeypatch.setattr(vector_module, "VectorStorage", DummyVec, raising=True)
 
     default_ports = build_index_mutation_ports(build_embedder=lambda: DummyEmbedder())
     assert isinstance(default_ports.doc_repo_factory(), DummySqlRepo)

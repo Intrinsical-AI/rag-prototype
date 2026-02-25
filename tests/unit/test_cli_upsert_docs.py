@@ -5,7 +5,7 @@ import json
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 

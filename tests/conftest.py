@@ -1,4 +1,4 @@
-# ./conftest.py
+# tests/conftest.py
 from contextlib import suppress
 
 import pytest
@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 # Import models to ensure they are registered with Base.metadata
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base, sql_
+from local_rag_backend.infrastructure.persistence.sql import alchemy_engine, base as db_base
 
 
 @pytest.fixture()
@@ -32,7 +32,7 @@ def in_memory_sqlite(monkeypatch):
     monkeypatch.setattr(db_base, "engine", engine)
     monkeypatch.setattr(db_base, "SessionLocal", TestingSessionLocal)
     # Also patch in the sql_ module so SqlDocumentStorage uses the test session
-    monkeypatch.setattr(sql_, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(alchemy_engine, "SessionLocal", TestingSessionLocal)
 
     # Yield the session factory for tests that need it explicitly
     try:
@@ -57,7 +57,7 @@ def reset_app_context_between_tests():
         reset_app_context()
 
 
-class DummyFaissIndex:
+class DummyVectorIndex:
     def __init__(self, index_path, id_map_path, dim=None):  # <--- dim opcional
         self.index_path = index_path
         self.id_map_path = id_map_path
