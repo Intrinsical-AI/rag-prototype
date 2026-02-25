@@ -10,7 +10,7 @@ from local_rag_backend.app.factory import (
     get_rag_service,
     reset_rag_service,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import get_db
+from local_rag_backend.infrastructure.persistence.sql.base import get_db
 
 if TYPE_CHECKING:
     from local_rag_backend.app.app_context import AppContext

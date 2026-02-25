@@ -88,7 +88,7 @@ def _build_file_ingest_plan(
         detect_file_format,
         get_loader_for_file,
     )
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
     det = detect_file_format(file_path, sniff_bytes=sniff_bytes, use_magic=use_magic)
     loader = get_loader_for_file(
@@ -415,8 +415,10 @@ def ingest_cmd(
 
     try:
         from local_rag_backend.core.services.ingestion import build_preprocess_fn_from_settings
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+            SqlDocumentStorage,
+        )
+        from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
         doc_repo = SqlDocumentStorage()
         preprocess_fn = build_preprocess_fn_from_settings(settings)
@@ -429,7 +431,7 @@ def ingest_cmd(
         vec = None
         if settings.retrieval_mode in ("dense", "hybrid") and not dry_run:
             embedder = build_dense_embedder()
-            vec = FaissVectorStorage(
+            vec = VectorStorage(
                 index_path=settings.index_path,
                 id_map_path=settings.id_map_path,
                 dim=embedder.dim,

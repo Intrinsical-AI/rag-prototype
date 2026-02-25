@@ -14,8 +14,8 @@ from local_rag_backend.core.services.evaluation import (
     run_retrieval_eval as run_retrieval_eval_core,
 )
 from local_rag_backend.core.services.reranking import RerankingRetriever
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ def _build_ephemeral_doc_repo() -> SqlDocumentStorage:
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import (  # noqa: F401
+    from local_rag_backend.infrastructure.persistence.sql import (  # noqa: F401
         models as _models,
     )
 

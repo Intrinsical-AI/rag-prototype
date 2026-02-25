@@ -1,7 +1,4 @@
-# src/infrastructure/retrieval/dense_faiss.py
-"""
-Dense retriever using FAISS for vector search.
-"""
+"""Dense retriever using a vector repository."""
 
 from __future__ import annotations
 
@@ -20,30 +17,28 @@ if TYPE_CHECKING:
     from local_rag_backend.core.domain.entities import Document
 
 
-class DenseFaissRetriever(RetrieverPort):
-    """Dense retriever using FAISS for vector search."""
+class DenseVectorRetriever(RetrieverPort):
+    """Dense retriever using vector similarity search."""
 
     def __init__(
-        self, embedder: EmbedderPort, faiss_index: VectorRepoPort, doc_repo: DocumentRepoPort
+        self, embedder: EmbedderPort, vector_repo: VectorRepoPort, doc_repo: DocumentRepoPort
     ):
         self.embedder = embedder
-        self.faiss_index = faiss_index
+        self.vector_repo = vector_repo
         self.doc_repo = doc_repo
 
     def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
-        """Retrieve documents based on dense vector similarity."""
         if k <= 0:
             return [], []
 
         query_embedding = self.embedder.embed([query])[0]
-        id_score_pairs = self.faiss_index.similar(query_embedding, k)
+        id_score_pairs = self.vector_repo.similar(query_embedding, k)
         if not id_score_pairs:
             return [], []
 
         doc_ids, scores = zip(*id_score_pairs, strict=False)
         docs = self.doc_repo.get(list(doc_ids))
 
-        # Ensure correct order and pairing
         docs_by_id = {doc.id: doc for doc in docs}
         ordered_pairs = list(zip(doc_ids, scores, strict=False))
         ordered_docs = [docs_by_id[doc_id] for doc_id, _ in ordered_pairs if doc_id in docs_by_id]

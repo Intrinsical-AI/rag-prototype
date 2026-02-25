@@ -8,6 +8,7 @@ import click
 
 from local_rag_backend.app.services import docs as docs_service
 from local_rag_backend.app.services.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.app.services.results import UpsertDocsSummary
 from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.settings import settings
 
@@ -49,7 +50,7 @@ def _load_docs_payload(
 def _build_upsert_items(
     docs_payload: list[dict[str, object]],
 ) -> list[Any]:
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
     items: list[Any] = []
     for d in docs_payload:
@@ -110,7 +111,7 @@ def upsert_docs_cmd(
 
         ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
 
-        def _upsert_sync() -> docs_service.UpsertDocsSummary:
+        def _upsert_sync() -> UpsertDocsSummary:
             return docs_service.upsert_docs_sync(
                 docs=items,
                 settings_obj=settings,

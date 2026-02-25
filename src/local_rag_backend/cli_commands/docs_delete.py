@@ -4,6 +4,10 @@ import click
 
 from local_rag_backend.app.services import docs as docs_service
 from local_rag_backend.app.services.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.app.services.results import (
+    DeleteDocsByExternalIdSummary,
+    DeleteDocsSummary,
+)
 from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.settings import settings
 
@@ -19,7 +23,7 @@ def delete_docs_cmd(ids: tuple[int, ...]) -> None:
     try:
         ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
 
-        def _delete_sync() -> docs_service.DeleteDocsSummary:
+        def _delete_sync() -> DeleteDocsSummary:
             return docs_service.delete_docs_sync(
                 ids=list(ids),
                 settings_obj=settings,
@@ -54,7 +58,7 @@ def delete_external_ids_cmd(external_ids: tuple[str, ...]) -> None:
     try:
         ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
 
-        def _delete_sync() -> docs_service.DeleteDocsByExternalIdSummary:
+        def _delete_sync() -> DeleteDocsByExternalIdSummary:
             return docs_service.delete_docs_by_external_id_sync(
                 external_ids=list(external_ids),
                 settings_obj=settings,

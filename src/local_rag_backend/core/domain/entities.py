@@ -1,4 +1,4 @@
-# src/core/domain/entities.py
+# src/local_rag_backend/core/domain/entities.py
 """
 Domain entities for the application.
 """

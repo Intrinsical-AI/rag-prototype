@@ -75,6 +75,13 @@ class Settings(BaseSettings):
         "sparse",
         description="Retrieval strategy.",
     )
+    vector_backend: Literal["auto", "faiss", "numpy"] = Field(
+        "auto",
+        description=(
+            "Vector index engine selection for dense/hybrid modes. "
+            "'auto' prefers faiss when installed, else numpy."
+        ),
+    )
     hybrid_retrieval_alpha: float = Field(
         0.5, ge=0.0, le=1.0, description="Weight of sparse vs. dense in hybrid mode."
     )
@@ -117,8 +124,8 @@ class Settings(BaseSettings):
 
     # --- File Paths --- #
     data_dir: Path = Field(Path("data"), description="Base directory for data files.")
-    index_path: str = Field("data/index.faiss", description="Path to the FAISS index file.")
-    id_map_path: str = Field("data/id_map.json", description="Path to the FAISS ID map.")
+    index_path: str = Field("data/index.faiss", description="Path to the vector index file.")
+    id_map_path: str = Field("data/id_map.json", description="Path to the vector index ID map.")
     sqlite_url: str = Field("sqlite:///./data/app.db", description="SQLite database URL.")
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
 

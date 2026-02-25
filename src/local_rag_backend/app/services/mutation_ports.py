@@ -22,7 +22,7 @@ from local_rag_backend.core.services.maintenance import (
     delete_external_ids_multi_store,
     rebuild_index_from_db,
 )
-from local_rag_backend.infrastructure.persistence.faiss.manifest import purge_index_artifacts
+from local_rag_backend.infrastructure.persistence.vector.manifest import purge_index_artifacts
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -47,7 +47,9 @@ def build_docs_mutation_ports(
     ] = delete_external_ids_multi_store,
 ) -> DocsMutationPorts:
     if doc_repo_factory is None or build_upsert_doc is None:
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+            SqlDocumentStorage,
+        )
 
         repo_factory: Callable[[], Any] = doc_repo_factory or cast(
             "Callable[[], Any]", lambda: SqlDocumentStorage()
@@ -58,9 +60,9 @@ def build_docs_mutation_ports(
         upsert_doc_builder = build_upsert_doc
 
     if vector_repo_factory is None:
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
-        vec_factory: Callable[..., Any] = FaissVectorStorage
+        vec_factory: Callable[..., Any] = VectorStorage
     else:
         vec_factory = vector_repo_factory
     return DocsMutationPorts(
@@ -85,16 +87,18 @@ def build_index_mutation_ports(
     rebuild_fn: Callable[..., int] = rebuild_index_from_db,
 ) -> IndexMutationPorts:
     if doc_repo_factory is None:
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+            SqlDocumentStorage,
+        )
 
         repo_factory: Callable[[], Any] = cast("Callable[[], Any]", lambda: SqlDocumentStorage())
     else:
         repo_factory = doc_repo_factory
 
     if vector_repo_factory is None:
-        from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
+        from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
-        vec_factory: Callable[..., Any] = FaissVectorStorage
+        vec_factory: Callable[..., Any] = VectorStorage
     else:
         vec_factory = vector_repo_factory
     return IndexMutationPorts(

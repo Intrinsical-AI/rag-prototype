@@ -37,14 +37,14 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.faiss.manifest import purge_index_artifacts
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,
     SystemStateStorage,
 )
-from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.persistence.vector.manifest import purge_index_artifacts
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
@@ -84,9 +84,9 @@ class AppContainer:
         build_upsert_doc: Any | None = None,
         history_repo_factory: Callable[[], QAHistoryPort] | None = None,
         sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
-        dense_retriever_factory: Callable[..., RetrieverPort] = DenseFaissRetriever,
+        dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
         hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
-        vector_repo_factory: Callable[..., Any] = FaissVectorStorage,
+        vector_repo_factory: Callable[..., Any] = VectorStorage,
         reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
         precompute_vectors_fn: Callable[
             ..., dict[str, list[float]]

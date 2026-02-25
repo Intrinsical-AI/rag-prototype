@@ -14,10 +14,10 @@ from local_rag_backend.app.diagnostics import (
     get_history_count,
     get_retrieval_index_stats,
 )
-from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
+from local_rag_backend.infrastructure.persistence.vector.manifest import (
     expected_manifest_config_from_settings,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
 
 if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
@@ -92,6 +92,7 @@ def check_retrieval_index(
     stats = get_retrieval_index_stats(
         index_path=settings_obj.index_path,
         id_map_path=settings_obj.id_map_path,
+        vector_backend=settings_obj.vector_backend,
         dim=None,
         expected_manifest=expected_manifest,
     )
