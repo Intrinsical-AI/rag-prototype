@@ -88,16 +88,19 @@ class IngestionPipeline:
         preprocess_fn: Callable[[str, Mapping[str, Any] | None], str] | None = None,
         chunk_fn: Callable[[str, Mapping[str, Any] | None], list[str]] | None = None,
         format_fn: Callable[[str, Mapping[str, Any] | None], str] | None = None,
+        flush_batch_size: int = 256,
     ) -> None:
         self.loader = loader
         self.etl_service = etl_service
         self.preprocess_fn = preprocess_fn or default_preprocess
         self.chunk_fn = chunk_fn or default_chunker()
         self.format_fn = format_fn or default_formatter
+        self.flush_batch_size = max(1, int(flush_batch_size))
 
     def run(self) -> int:
         """Execute the ingestion pipeline."""
-        all_chunks = []
+        total_chunks = 0
+        batch: list[str] = []
         for loaded_item in self.loader.load():
             preprocess_lineage = _with_transform(
                 loaded_item.lineage,
@@ -125,9 +128,14 @@ class IngestionPipeline:
                 metadata = dict(loaded_item.metadata) if loaded_item.metadata else {}
                 metadata["_lineage"] = asdict(format_lineage)
                 formatted_chunk = self.format_fn(chunk, metadata)
-                all_chunks.append(formatted_chunk)
+                batch.append(formatted_chunk)
+                if len(batch) >= self.flush_batch_size:
+                    self.etl_service.ingest(batch)
+                    total_chunks += len(batch)
+                    batch.clear()
 
-        if all_chunks:
-            self.etl_service.ingest(all_chunks)
+        if batch:
+            self.etl_service.ingest(batch)
+            total_chunks += len(batch)
 
-        return len(all_chunks)
+        return total_chunks

@@ -5,25 +5,31 @@ Shared cross-process exclusive file locking (stdlib-only).
 from __future__ import annotations
 
 import os
+import time
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
+
+from local_rag_backend.core.errors import WriteLockTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
 
-def _try_posix_lock(file_obj: Any) -> bool:
+def _try_posix_lock(file_obj: Any, *, non_blocking: bool) -> bool | None:
     try:  # POSIX
         import fcntl
 
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
+        flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if non_blocking else 0)
+        fcntl.flock(file_obj.fileno(), flags)
         return True
-    except Exception:  # pragma: no cover
+    except BlockingIOError:
         return False
+    except Exception:  # pragma: no cover
+        return None
 
 
-def _try_windows_lock(file_obj: Any) -> bool:  # pragma: no cover
+def _try_windows_lock(file_obj: Any, *, non_blocking: bool) -> bool | None:  # pragma: no cover
     try:
         import msvcrt
 
@@ -33,10 +39,17 @@ def _try_windows_lock(file_obj: Any) -> bool:  # pragma: no cover
             file_obj.write(b"0")
             file_obj.flush()
         file_obj.seek(0)
-        msvcrt_any.locking(file_obj.fileno(), getattr(msvcrt_any, "LK_LOCK", 1), 1)
+        lock_mode = (
+            getattr(msvcrt_any, "LK_NBLCK", 1)
+            if non_blocking
+            else getattr(msvcrt_any, "LK_LOCK", 1)
+        )
+        msvcrt_any.locking(file_obj.fileno(), lock_mode, 1)
         return True
+    except OSError:
+        return None
     except Exception:
-        return False
+        return None
 
 
 def _best_effort_unlock(file_obj: Any) -> None:
@@ -55,7 +68,13 @@ def _best_effort_unlock(file_obj: Any) -> None:
 
 
 @contextmanager
-def exclusive_file_lock(lock_path: Path, *, error_message: str) -> Iterator[None]:
+def exclusive_file_lock(
+    lock_path: Path,
+    *,
+    error_message: str,
+    timeout_s: float = 30.0,
+    poll_s: float = 0.05,
+) -> Iterator[None]:
     """
     Cross-process exclusive lock using only stdlib.
 
@@ -67,12 +86,25 @@ def exclusive_file_lock(lock_path: Path, *, error_message: str) -> Iterator[None
     f = lock_path.open("a+b")
     locked = False
     try:
-        locked = _try_posix_lock(f)
-        if not locked:
-            locked = _try_windows_lock(f)
+        deadline = time.monotonic() + max(0.0, float(timeout_s))
+        while True:
+            posix = _try_posix_lock(f, non_blocking=True)
+            windows = _try_windows_lock(f, non_blocking=True) if posix is not True else None
 
-        if not locked:
-            raise RuntimeError(error_message)
+            if posix is True or windows is True:
+                locked = True
+                break
+
+            # Fail closed if the runtime cannot acquire a lock on this platform.
+            if posix is None and windows is None:
+                raise RuntimeError(error_message)
+
+            now = time.monotonic()
+            if now >= deadline:
+                raise WriteLockTimeoutError(
+                    f"{error_message} Timed out after {float(timeout_s):.2f}s."
+                )
+            time.sleep(max(0.001, float(poll_s)))
 
         yield
     finally:

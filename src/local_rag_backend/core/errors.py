@@ -15,6 +15,10 @@ class EmbeddingsBackendUnavailableError(RagBaseError, RuntimeError):
     """Dense/hybrid operation needs an embeddings backend that is not available."""
 
 
+class WriteLockTimeoutError(RagBaseError, RuntimeError):
+    """Multi-store write lock could not be acquired before timeout."""
+
+
 class LLMProviderError(RagBaseError):
     """Base error for LLM/provider integration failures."""
 

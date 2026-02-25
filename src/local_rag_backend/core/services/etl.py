@@ -5,7 +5,6 @@ ETL service for document ingestion, embedding, and storage.
 
 from __future__ import annotations
 
-from contextlib import suppress
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -50,11 +49,20 @@ class ETLService:
 
         try:
             self._vec_store.upsert(doc_ids, embeddings)
-        except Exception:
-            with suppress(Exception):
+        except Exception as upsert_err:
+            rollback_errors: list[str] = []
+            try:
                 self._vec_store.delete(doc_ids)
-            with suppress(Exception):
+            except Exception as rollback_vec_err:
+                rollback_errors.append(f"vector rollback failed: {rollback_vec_err}")
+            try:
                 self._doc_store.delete_documents(doc_ids)
+            except Exception as rollback_sql_err:
+                rollback_errors.append(f"sql rollback failed: {rollback_sql_err}")
+            if rollback_errors:
+                raise RuntimeError(
+                    "ETL ingest failed and rollback was incomplete: " + "; ".join(rollback_errors)
+                ) from upsert_err
             raise
 
         return doc_ids
