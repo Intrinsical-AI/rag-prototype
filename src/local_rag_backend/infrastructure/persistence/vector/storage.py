@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 from local_rag_backend.infrastructure.persistence.vector.manifest import (
@@ -99,15 +100,15 @@ class VectorStorage(VectorRepoPort):
                 "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
             )
 
-    def upsert(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
+    def upsert(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
         self._ensure_manifest(overwrite=False)
         self.vector_index.add_to_index(list(ids), list(vectors))
 
-    def delete(self, ids: Sequence[int]) -> int:
+    def delete(self, ids: Sequence[DocId]) -> int:
         self._ensure_manifest(overwrite=False)
         return self.vector_index.delete_ids(list(ids))
 
-    def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
+    def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
         self.vector_index.rebuild(ids, vectors)
         self._ensure_manifest(overwrite=True)
 
@@ -116,7 +117,7 @@ class VectorStorage(VectorRepoPort):
     ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
         return self.vector_index.search(query_vector, k)
 
-    def similar(self, vector: Sequence[float], k: int) -> list[tuple[int, float]]:
+    def similar(self, vector: Sequence[float], k: int) -> list[tuple[DocId, float]]:
         indices, distances = self.search(vector, k)
 
         id_map = self.vector_index.id_map

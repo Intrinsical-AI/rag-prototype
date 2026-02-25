@@ -2,7 +2,7 @@
 Vector index persistence for dense/hybrid retrieval.
 
 Security + data-consistency notes:
-- The ID map is persisted as JSON (list[int]) to avoid unsafe deserialization.
+- The ID map is persisted as JSON (list[str]) to avoid unsafe deserialization.
 - Index + id-map writes are atomic.
 - A cross-process lock protects concurrent writers and mitigates lost updates.
 """
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.services.file_lock import exclusive_file_lock
 from local_rag_backend.infrastructure.persistence.shared.id_map_json import (
     load_id_map_json,
@@ -86,7 +87,7 @@ class VectorIndex:
         self.engine.load_or_initialize(self.index_path, int(self.dim))
         self.id_map = load_id_map_json(self.id_map_path)
 
-    def add_to_index(self, ids: list[int], embeddings: list[Sequence[float]]) -> None:
+    def add_to_index(self, ids: list[DocId], embeddings: list[Sequence[float]]) -> None:
         if len(ids) != len(embeddings):
             raise ValueError(
                 f"ids/embeddings length mismatch: {len(ids)} ids != {len(embeddings)} embeddings"
@@ -106,8 +107,8 @@ class VectorIndex:
                     self._load_or_initialize_locked()
                 raise
 
-    def delete_ids(self, ids: Sequence[int]) -> int:
-        to_delete = {int(x) for x in ids}
+    def delete_ids(self, ids: Sequence[DocId]) -> int:
+        to_delete = {DocId(str(x)) for x in ids if str(x).strip()}
         if not to_delete:
             return 0
 
@@ -127,7 +128,7 @@ class VectorIndex:
             self._save_locked()
             return deleted
 
-    def rebuild(self, ids: Sequence[int], vectors: Sequence[Sequence[float]]) -> None:
+    def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
         if len(ids) != len(vectors):
             raise ValueError(f"ids/vectors length mismatch: {len(ids)} != {len(vectors)}")
         vecs = np.asarray(list(vectors), dtype="float32")
@@ -141,7 +142,7 @@ class VectorIndex:
         with self._locked_write():
             self.engine.load_or_initialize(self.index_path, int(self.dim))
             self.engine.rebuild(vecs)
-            self.id_map = [int(x) for x in ids]
+            self.id_map = [DocId(str(x)) for x in ids]
             self._save_locked()
 
     def search(
