@@ -86,8 +86,9 @@ class DummyVectorIndex:
 
 
 @pytest.fixture()
-async def asgi_client():
-    """Async HTTP client against the ASGI app (avoids Starlette TestClient thread portal)."""
+async def asgi_client(in_memory_sqlite):
+    """Async HTTP client against the ASGI app using isolated in-memory SQLite."""
+    _ = in_memory_sqlite
     import httpx
 
     from local_rag_backend.app.main import app
