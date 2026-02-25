@@ -1,5 +1,7 @@
 # tests/conftest.py
+import shutil
 from contextlib import suppress
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -92,6 +94,14 @@ async def asgi_client(in_memory_sqlite):
     import httpx
 
     from local_rag_backend.app.main import app
+    from local_rag_backend.settings import settings
+
+    # Remove any leftover journal entries before entering the lifespan so that
+    # parallel pytest-xdist workers cannot cross-contaminate each other through
+    # startup journal recovery (main.py lifespan, lines 52-58).
+    journal_dir = Path(settings.get_coordination_dir()) / ".mutation_journal"
+    if journal_dir.is_dir():
+        shutil.rmtree(journal_dir)
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
