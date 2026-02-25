@@ -9,7 +9,7 @@ def test_vector_index_add_and_search(tmp_path):
     dim = 4
     idx = VectorIndex(index_path, id_map_path, dim=dim)
     vectors = [np.random.rand(dim).astype(np.float32) for _ in range(3)]
-    ids = [101, 102, 103]
+    ids = ["doc:101", "doc:102", "doc:103"]
     idx.add_to_index(ids, vectors)
     # Save and reload (persists well)
     idx2 = VectorIndex(index_path, id_map_path, dim=dim)

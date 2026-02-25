@@ -3,6 +3,7 @@ import importlib
 from unittest.mock import patch
 
 from local_rag_backend.core.domain.entities import LoadedItem
+from local_rag_backend.core.domain.types import ItemLineage
 from local_rag_backend.settings import settings
 
 
@@ -167,6 +168,10 @@ def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, capsys):
             [
                 LoadedItem(
                     text="Packaged Question\n\nPackaged Answer",
+                    lineage=ItemLineage(
+                        source_uri="test://bootstrap",
+                        loader_name="mock",
+                    ),
                     metadata={"title": "Packaged Question"},
                 )
             ]

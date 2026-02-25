@@ -19,6 +19,6 @@ async def test_history_endpoint_returns_seeded_rows(asgi_client, in_memory_sqlit
 
     got = {item["question"]: item for item in data}
     assert got["Q1"]["answer"] == "A1"
-    assert got["Q1"]["source_ids"] == [1, 2]
+    assert got["Q1"]["source_ids"] == ["1", "2"]
     assert got["Q2"]["answer"] == "A2"
     assert got["Q2"]["source_ids"] == []

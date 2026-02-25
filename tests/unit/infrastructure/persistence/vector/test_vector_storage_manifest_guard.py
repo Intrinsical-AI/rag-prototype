@@ -28,7 +28,7 @@ def test_upsert_does_not_mutate_index_when_manifest_drifts(tmp_path, monkeypatch
     write_manifest(mpath, manifest)
 
     with pytest.raises(RuntimeError, match="drift"):
-        vec.upsert([1], [[0.0, 0.0, 0.0, 0.0]])
+        vec.upsert(["doc:1"], [[0.0, 0.0, 0.0, 0.0]])
 
     idx = VectorIndex(index_path, id_map_path, dim=4)
     assert idx.ntotal == 0
@@ -42,7 +42,7 @@ def test_delete_does_not_mutate_index_when_manifest_drifts(tmp_path, monkeypatch
     index_path = tmp_path / "index.faiss"
     id_map_path = tmp_path / "id_map.json"
     vec = VectorStorage(str(index_path), str(id_map_path), dim=4)
-    vec.rebuild([1], [[0.0, 0.0, 0.0, 0.0]])
+    vec.rebuild(["doc:1"], [[0.0, 0.0, 0.0, 0.0]])
 
     mpath = manifest_path_for(index_path)
     manifest = read_manifest(mpath)
@@ -51,11 +51,11 @@ def test_delete_does_not_mutate_index_when_manifest_drifts(tmp_path, monkeypatch
     write_manifest(mpath, manifest)
 
     with pytest.raises(RuntimeError, match="drift"):
-        vec.delete([1])
+        vec.delete(["doc:1"])
 
     idx = VectorIndex(index_path, id_map_path, dim=4)
     assert idx.ntotal == 1
-    assert idx.id_map == [1]
+    assert idx.id_map == ["doc:1"]
 
 
 def test_upsert_fails_closed_when_manifest_is_missing_for_non_empty_legacy_index(
@@ -69,14 +69,14 @@ def test_upsert_fails_closed_when_manifest_is_missing_for_non_empty_legacy_index
 
     # Simulate a legacy pre-manifest index with existing vectors.
     legacy = VectorIndex(index_path, id_map_path, dim=4)
-    legacy.rebuild([101], [[0.1, 0.2, 0.3, 0.4]])
+    legacy.rebuild(["doc:101"], [[0.1, 0.2, 0.3, 0.4]])
     assert manifest_path_for(index_path).exists() is False
 
     vec = VectorStorage(str(index_path), str(id_map_path), dim=4)
     with pytest.raises(RuntimeError, match="manifest missing for a non-empty index"):
-        vec.upsert([102], [[0.5, 0.6, 0.7, 0.8]])
+        vec.upsert(["doc:102"], [[0.5, 0.6, 0.7, 0.8]])
 
     # Guard: no mutation should happen when we fail closed.
     idx = VectorIndex(index_path, id_map_path, dim=4)
     assert idx.ntotal == 1
-    assert idx.id_map == [101]
+    assert idx.id_map == ["doc:101"]

@@ -1,5 +1,3 @@
-# tests/unit/infrastructure/persistence/sql/test_chunk_dedup_unique_index.py
-
 from __future__ import annotations
 
 import pytest
@@ -10,14 +8,12 @@ from local_rag_backend.infrastructure.persistence.sql.models import Document as 
 
 
 def test_chunk_dedup_unique_index_enforced(in_memory_sqlite):
-    # Ensure best-effort migration created the unique index.
-    db_base.ensure_sqlite_documents_identity_columns(engine_to_use=db_base.engine)
-
     SessionLocal = db_base.SessionLocal
     s = SessionLocal()
     try:
         s.add(
             DbDocument(
+                doc_id="doc:1",
                 content="a",
                 external_id="x1",
                 chunk_dedup_sha256="same",
@@ -29,6 +25,7 @@ def test_chunk_dedup_unique_index_enforced(in_memory_sqlite):
 
         s.add(
             DbDocument(
+                doc_id="doc:2",
                 content="b",
                 external_id="x2",
                 chunk_dedup_sha256="same",

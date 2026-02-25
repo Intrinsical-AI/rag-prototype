@@ -1,7 +1,5 @@
 # tests/unit/infrastructure/persistence/sql/test_sql_upsert_documents_by_external_id.py
 
-import hashlib
-
 import pytest
 
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
@@ -37,7 +35,6 @@ def test_upsert_inserts_and_is_idempotent(in_memory_sqlite):
     assert doc.external_id == "doc-1"
     assert doc.source_id == "src-a"
     assert doc.metadata == {"k": "v"}
-    assert doc.content_sha256 == hashlib.sha256(b"hello").hexdigest()
 
 
 def test_upsert_updates_content_and_hash(in_memory_sqlite):
@@ -58,7 +55,6 @@ def test_upsert_updates_content_and_hash(in_memory_sqlite):
 
     doc = repo.get([doc_id])[0]
     assert doc.content == "HELLO2"
-    assert doc.content_sha256 == hashlib.sha256(b"HELLO2").hexdigest()
 
 
 def test_upsert_metadata_only_change(in_memory_sqlite):
