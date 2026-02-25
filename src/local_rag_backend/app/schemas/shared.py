@@ -7,5 +7,5 @@ from pydantic import BaseModel, ConfigDict
 
 class DocumentInDB(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: str
     content: str

@@ -57,8 +57,12 @@ def check_sql_counts(checks: dict[str, Any]) -> tuple[bool, int | None]:
 
 def _check_retrieval_index_id_set_drift(*, checks: dict[str, Any], settings_obj: Settings) -> bool:
     try:
-        db_ids = set(get_document_ids(db_base.engine))
-        index_ids = set(json.loads(Path(settings_obj.id_map_path).read_text(encoding="utf-8")))
+        db_ids = {str(x) for x in get_document_ids(db_base.engine)}
+        index_ids = {
+            str(x)
+            for x in json.loads(Path(settings_obj.id_map_path).read_text(encoding="utf-8"))
+            if str(x).strip()
+        }
         stale = sorted(index_ids - db_ids)
         missing = sorted(db_ids - index_ids)
         if not stale and not missing:

@@ -102,7 +102,7 @@ def ingest_docs_sync(
     texts: Sequence[str],
     settings_obj: Settings,
     ports: DocsMutationPorts,
-) -> list[int]:
+) -> list[str]:
     if not texts:
         return []
 
@@ -171,7 +171,7 @@ def ingest_docs_sync(
     results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
         unique_items
     )
-    id_by_ext = {r.external_id: int(r.id) for r in results}
+    id_by_ext = {r.external_id: str(r.id) for r in results}
 
     if embedder is not None:
         vec = _build_vector_repo(settings_obj=settings_obj, ports=ports, dim=embedder.dim)
@@ -230,11 +230,11 @@ def delete_docs_by_external_id_sync(
 
 def delete_docs_sync(
     *,
-    ids: Sequence[int],
+    ids: Sequence[str],
     settings_obj: Settings,
     ports: DocsMutationPorts,
 ) -> DeleteDocsSummary:
-    ids_list = [int(i) for i in ids]
+    ids_list = [str(i).strip() for i in ids if str(i).strip()]
     if not ids_list:
         return DeleteDocsSummary(deleted_sql=0, deleted_index=0, rebuilt_index=False)
 
@@ -314,7 +314,7 @@ def upsert_docs_sync(
         results=[
             UpsertDocResult(
                 external_id=r.external_id,
-                id=int(r.id),
+                id=str(r.id),
                 action=r.action,
                 content_changed=bool(r.content_changed),
             )

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class UpsertDocResult:
     external_id: str
-    id: int
+    id: str
     action: str
     content_changed: bool
 

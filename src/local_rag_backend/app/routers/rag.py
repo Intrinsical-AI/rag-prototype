@@ -117,7 +117,7 @@ async def ask(
 
     sources = [
         QueryResult(
-            document=DocumentInDB(id=doc.id, content=doc.content),
+            document=DocumentInDB(id=str(doc.id), content=doc.content),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)
@@ -144,7 +144,7 @@ async def history(
                 if hasattr(entry.created_at, "isoformat")
                 else str(entry.created_at)
             ),
-            source_ids=entry.source_ids or [],
+            source_ids=[str(x) for x in (entry.source_ids or [])],
         )
         for entry in history_entries
     ]
@@ -189,7 +189,7 @@ async def ask_eval(
     scores = rag_result["scores"]
     sources = [
         QueryResult(
-            document=DocumentInDB(id=doc.id, content=doc.content),
+            document=DocumentInDB(id=str(doc.id), content=doc.content),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)

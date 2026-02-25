@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from local_rag_backend.core.domain.entities import Document as DomainDocument
+    from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
         EmbedderPort,
@@ -163,7 +164,7 @@ def build_retriever_from_settings(
     retriever: RetrieverPort
     docs_for_sparse: Sequence[DomainDocument] | None = None
     corpus: list[str] | None = None
-    doc_ids: list[int] | None = None
+    doc_ids: list[DocId] | None = None
 
     if mode in {"sparse", "hybrid"}:
         docs_for_sparse = (
