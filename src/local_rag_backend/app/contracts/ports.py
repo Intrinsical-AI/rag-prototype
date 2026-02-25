@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from contextlib import AbstractContextManager
+    from pathlib import Path
 
     from local_rag_backend.core.domain.entities import Document
     from local_rag_backend.core.domain.types import DocId
@@ -98,6 +100,18 @@ class MutationJournalPort(Protocol):
     def list_incomplete(self, *, limit: int = 100) -> list[MutationRecord]: ...
 
 
+class WriteLockPort(Protocol):
+    """Contract for the multi-store write lock callable."""
+
+    def __call__(
+        self,
+        *,
+        coordination_dir: Path | None = None,
+        timeout_s: float | None = None,
+        poll_s: float | None = None,
+    ) -> AbstractContextManager[None]: ...
+
+
 @dataclass(frozen=True)
 class DocsMutationPorts:
     build_embedder: Callable[[], EmbedderPort]
@@ -105,7 +119,7 @@ class DocsMutationPorts:
     build_upsert_doc: UpsertDocBuilderPort
     vector_repo_factory: Callable[..., Any]
     rebuild_fn: Callable[..., int]
-    write_lock: Callable[..., Any]
+    write_lock: WriteLockPort
     mutation_journal_factory: Callable[[], MutationJournalPort]
     storage_profile_registry: Any
 

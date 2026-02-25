@@ -66,13 +66,7 @@ def multi_store_write_lock(
     resolved_poll = (
         float(poll_s) if poll_s is not None else float(getattr(settings, "write_lock_poll_s", 0.05))
     )
-    try:
-        file_lock_cm = _exclusive_file_lock(
-            lock_path, timeout_s=resolved_timeout, poll_s=resolved_poll
-        )
-    except TypeError:
-        # Compatibility for tests/overrides patching `_exclusive_file_lock(path)`.
-        file_lock_cm = _exclusive_file_lock(lock_path)
+    file_lock_cm = _exclusive_file_lock(lock_path, timeout_s=resolved_timeout, poll_s=resolved_poll)
     with _LOCAL_WRITE_LOCK, file_lock_cm:
         _THREAD_STATE.depth = 1
         try:

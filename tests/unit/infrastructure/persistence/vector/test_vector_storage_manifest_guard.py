@@ -18,7 +18,7 @@ def test_upsert_does_not_mutate_index_when_manifest_drifts(tmp_path, monkeypatch
 
     index_path = tmp_path / "index.faiss"
     id_map_path = tmp_path / "id_map.json"
-    vec = VectorStorage(str(index_path), str(id_map_path), dim=4)
+    vec = VectorStorage(str(index_path), str(id_map_path), dim=4, settings_obj=settings)
     vec.rebuild([], [])
 
     mpath = manifest_path_for(index_path)
@@ -41,7 +41,7 @@ def test_delete_does_not_mutate_index_when_manifest_drifts(tmp_path, monkeypatch
 
     index_path = tmp_path / "index.faiss"
     id_map_path = tmp_path / "id_map.json"
-    vec = VectorStorage(str(index_path), str(id_map_path), dim=4)
+    vec = VectorStorage(str(index_path), str(id_map_path), dim=4, settings_obj=settings)
     vec.rebuild(["doc:1"], [[0.0, 0.0, 0.0, 0.0]])
 
     mpath = manifest_path_for(index_path)
@@ -72,7 +72,7 @@ def test_upsert_fails_closed_when_manifest_is_missing_for_non_empty_legacy_index
     legacy.rebuild(["doc:101"], [[0.1, 0.2, 0.3, 0.4]])
     assert manifest_path_for(index_path).exists() is False
 
-    vec = VectorStorage(str(index_path), str(id_map_path), dim=4)
+    vec = VectorStorage(str(index_path), str(id_map_path), dim=4, settings_obj=settings)
     with pytest.raises(RuntimeError, match="manifest missing for a non-empty index"):
         vec.upsert(["doc:102"], [[0.5, 0.6, 0.7, 0.8]])
 

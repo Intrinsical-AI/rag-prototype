@@ -255,10 +255,7 @@ class MutationCoordinator:
     def _write_lock(self, lock_root: Any) -> Any:
         timeout = float(getattr(self.settings_obj, "write_lock_timeout_s", 30.0))
         poll = float(getattr(self.settings_obj, "write_lock_poll_s", 0.05))
-        try:
-            return self.ports.write_lock(coordination_dir=lock_root, timeout_s=timeout, poll_s=poll)
-        except TypeError:
-            return self.ports.write_lock()
+        return self.ports.write_lock(coordination_dir=lock_root, timeout_s=timeout, poll_s=poll)
 
     def _recover_record(self, *, journal: MutationJournalPort, record: MutationRecord) -> None:
         if record.state in {"COMMITTED", "ROLLED_BACK"}:
