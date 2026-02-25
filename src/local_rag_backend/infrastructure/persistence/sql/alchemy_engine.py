@@ -85,8 +85,8 @@ def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, No
     session = session_factory()
     try:
         yield session
-    except Exception:
-        with suppress(Exception):
+    except Exception:  # rollback on any failure — must be broad to guard non-SQLAlchemy errors too
+        with suppress(Exception):  # suppress rollback errors so the original exception propagates
             session.rollback()
         raise
     finally:
