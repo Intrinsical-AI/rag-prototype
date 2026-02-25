@@ -102,14 +102,14 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
 
-    # DB has ids {1,2}
-    SqlDocumentStorage().store_documents(["d1", "d2"])
+    # DB has ids {doc_a, doc_b}
+    doc_ids = SqlDocumentStorage().store_documents(["d1", "d2"])
 
-    # Index has ids {1,3} (same count, different set)
+    # Index has ids {doc_a, doc:stale} (same count, different set)
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
     VectorStorage(str(idx), str(id_map), dim=4).rebuild(
-        [1, 3], [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]
+        [doc_ids[0], "doc:stale"], [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]
     )
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)

@@ -39,7 +39,7 @@ def test_add_and_get_documents(in_memory_db):
     texts = ["Doc uno", "Doc dos", "Doc tres"]
     ids = storage.store_documents(texts)
     assert len(ids) == 3
-    assert all(isinstance(i, int) for i in ids)
+    assert all(isinstance(i, str) and i.startswith("doc:") for i in ids)
 
     # 3) Recuperar por IDs
     docs = storage.get(ids)

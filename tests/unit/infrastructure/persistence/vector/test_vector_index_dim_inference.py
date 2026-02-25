@@ -13,8 +13,8 @@ def test_dim_inference_from_numpy_index(tmp_path):
     vectors = np.zeros((3, 7), dtype="float32")
     with index_path.open("wb") as f:
         np.save(f, vectors, allow_pickle=False)
-    id_map_path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    id_map_path.write_text(json.dumps(["doc:1", "doc:2", "doc:3"]), encoding="utf-8")
 
     idx = VectorIndex(index_path, id_map_path, dim=None)
     assert idx.dim == 7
-    assert idx.id_map == [1, 2, 3]
+    assert idx.id_map == ["doc:1", "doc:2", "doc:3"]
