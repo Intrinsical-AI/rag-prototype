@@ -1,7 +1,7 @@
 # Intrinsical RAG Prototype
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-green.svg)](https://fastapi.tiangolo.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/Intrinsical-AI/rag-prototype/actions)
@@ -51,10 +51,11 @@
 .
 ├── data/                      # CSV, SQLite DB, FAISS files
 ├── src/local_rag_backend/
-│   ├── app/                   # FastAPI (main, routers, DI, factory)
+│   ├── app/                   # FastAPI layer (routers, DI, use cases, factory)
 │   ├── core/                  # domain, ports and services (ETL, RAG)
 │   ├── infrastructure/        # adapters: llms, retrievers, storage, loaders
-│   ├── scripts/               # bootstrap and build_index
+│   ├── cli_commands/          # CLI transport adapters (ingest, mutate, eval, …)
+│   ├── scripts/               # internal scripts (sample data ingestion)
 │   └── frontend/              # packaged index.html to serve at /
 └── tests/                     # unit + integration + e2e
 ```
