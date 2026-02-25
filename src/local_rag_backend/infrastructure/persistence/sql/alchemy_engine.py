@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
+from local_rag_backend.core.domain.types import DocId, new_doc_id
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
 from local_rag_backend.infrastructure.persistence.sql.base import SessionLocal
 from local_rag_backend.infrastructure.persistence.sql.crud import (
@@ -69,14 +70,11 @@ class _DocumentChanges:
 def _to_domain_document(d: DbDocument) -> DomainDocument:
     """Map a single ORM row to its domain entity."""
     return DomainDocument(
-        id=d.id,
+        id=DocId(d.doc_id),
         content=d.content,
         external_id=d.external_id,
         source_id=d.source_id,
         metadata=d.metadata_,
-        content_sha256=d.content_sha256,
-        created_at=d.created_at,
-        updated_at=d.updated_at,
     )
 
 
@@ -87,8 +85,6 @@ def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, No
     try:
         yield session
     except Exception:
-        # Even though most CRUD helpers commit explicitly, ensure any partially-open
-        # transaction is rolled back so connections don't keep locks.
         with suppress(Exception):
             session.rollback()
         raise
@@ -178,26 +174,29 @@ class SqlDocumentStorage(DocumentRepoPort):
     def __init__(self, session_factory: sessionmaker[Session] | None = None):
         self._session_factory = session_factory or SessionLocal
 
-    def store_documents(self, texts: Sequence[str]) -> list[int]:
+    def store_documents(self, texts: Sequence[str]) -> list[DocId]:
         """Store documents in the database."""
         with get_session(self._session_factory) as session:
             return add_documents(session, list(texts))
 
-    def delete_documents(self, ids: Sequence[int]) -> None:
+    def delete_documents(self, ids: Sequence[DocId]) -> None:
         """Delete documents by IDs (best-effort rollback helper for ETL)."""
         with get_session(self._session_factory) as session:
             delete_documents(session, list(ids))
 
-    def get(self, ids: Sequence[int]) -> Sequence[DomainDocument]:
+    def get(self, ids: Sequence[DocId]) -> Sequence[DomainDocument]:
         """Retrieve documents by their IDs."""
+        normalized = [str(x) for x in ids if str(x).strip()]
+        if not normalized:
+            return []
         with get_session(self._session_factory) as session:
-            db_docs = session.query(DbDocument).filter(DbDocument.id.in_(ids)).all()
+            db_docs = session.query(DbDocument).filter(DbDocument.doc_id.in_(normalized)).all()
             return [_to_domain_document(d) for d in db_docs]
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
         with get_session(self._session_factory) as session:
-            db_docs = session.query(DbDocument).order_by(DbDocument.id).all()
+            db_docs = session.query(DbDocument).order_by(DbDocument.doc_id).all()
             return [_to_domain_document(d) for d in db_docs]
 
     @dataclass(frozen=True)
@@ -211,13 +210,13 @@ class SqlDocumentStorage(DocumentRepoPort):
     @dataclass(frozen=True)
     class UpsertResult:
         external_id: str
-        id: int
+        id: DocId
         action: Literal["inserted", "updated", "unchanged"]
         content_changed: bool
 
     @dataclass(frozen=True)
     class ExistingDocState:
-        id: int
+        id: DocId
         external_id: str
         content: str
         content_sha256: str | None
@@ -231,7 +230,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         with get_session(self._session_factory) as session:
             rows = (
                 session.query(
-                    DbDocument.id,
+                    DbDocument.doc_id,
                     DbDocument.external_id,
                     DbDocument.content,
                     DbDocument.content_sha256,
@@ -245,7 +244,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                 if ext_id is None:
                     continue
                 out[str(ext_id)] = SqlDocumentStorage.ExistingDocState(
-                    id=int(doc_id),
+                    id=DocId(str(doc_id)),
                     external_id=str(ext_id),
                     content=str(content or ""),
                     content_sha256=(str(content_sha) if content_sha is not None else None),
@@ -254,7 +253,7 @@ class SqlDocumentStorage(DocumentRepoPort):
 
     def upsert_documents_by_external_id(
         self, items: Sequence[UpsertDoc]
-    ) -> tuple[list[UpsertResult], list[tuple[int, str]], list[int]]:
+    ) -> tuple[list[UpsertResult], list[tuple[DocId, str]], list[DocId]]:
         """
         Upsert documents by `external_id` (idempotent).
 
@@ -277,8 +276,8 @@ class SqlDocumentStorage(DocumentRepoPort):
             raise ValueError("external_id values must be unique within the request")
 
         results: list[SqlDocumentStorage.UpsertResult] = []
-        changed_content: list[tuple[int, str]] = []
-        updated_content_ids: list[int] = []
+        changed_content: list[tuple[DocId, str]] = []
+        updated_content_ids: list[DocId] = []
 
         with get_session(self._session_factory) as session:
             existing = session.query(DbDocument).filter(DbDocument.external_id.in_(ext_ids)).all()
@@ -293,7 +292,9 @@ class SqlDocumentStorage(DocumentRepoPort):
 
                 db_doc = by_external_id.get(external_id)
                 if db_doc is None:
+                    new_id = str(new_doc_id())
                     new_doc = DbDocument(
+                        doc_id=new_id,
                         content=content,
                         external_id=external_id,
                         source_id=item.source_id,
@@ -302,20 +303,15 @@ class SqlDocumentStorage(DocumentRepoPort):
                         chunk_dedup_sha256=item.chunk_dedup_sha256,
                     )
                     session.add(new_doc)
-                    session.flush()  # allocate PK
-                    if new_doc.id is None:
-                        raise RuntimeError(
-                            f"Failed to allocate primary key for document '{external_id}' after flush"
-                        )
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
-                            id=int(new_doc.id),
+                            id=DocId(new_id),
                             action="inserted",
                             content_changed=True,
                         )
                     )
-                    changed_content.append((int(new_doc.id), content))
+                    changed_content.append((DocId(new_id), content))
                     continue
 
                 changes = _detect_document_changes(db_doc, item, content, sha)
@@ -324,7 +320,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                     results.append(
                         SqlDocumentStorage.UpsertResult(
                             external_id=external_id,
-                            id=int(db_doc.id),
+                            id=DocId(db_doc.doc_id),
                             action="unchanged",
                             content_changed=False,
                         )
@@ -334,8 +330,8 @@ class SqlDocumentStorage(DocumentRepoPort):
                 if changes.content:
                     db_doc.content = content
                     db_doc.content_sha256 = sha
-                    updated_content_ids.append(int(db_doc.id))
-                    changed_content.append((int(db_doc.id), content))
+                    updated_content_ids.append(DocId(db_doc.doc_id))
+                    changed_content.append((DocId(db_doc.doc_id), content))
 
                 if item.source_id is not None:
                     db_doc.source_id = item.source_id
@@ -347,7 +343,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                 results.append(
                     SqlDocumentStorage.UpsertResult(
                         external_id=external_id,
-                        id=int(db_doc.id),
+                        id=DocId(db_doc.doc_id),
                         action="updated",
                         content_changed=changes.content,
                     )
@@ -357,34 +353,32 @@ class SqlDocumentStorage(DocumentRepoPort):
 
         return results, changed_content, updated_content_ids
 
-    def list_ids_by_external_id_prefix(self, prefix: str) -> list[tuple[int, str]]:
+    def list_ids_by_external_id_prefix(self, prefix: str) -> list[tuple[DocId, str]]:
         """
         Return existing (id, external_id) for rows whose external_id starts with `prefix`.
 
         Used by file ingestion to delete stale chunks when a source shrinks or its chunking changes.
-        Callers should include a delimiter in the prefix to avoid accidental collisions
-        (e.g. `file:/tmp/foo:` should not match `file:/tmp/foo2:`).
+        Callers should include a delimiter in the prefix to avoid accidental collisions.
         """
         prefix_s = str(prefix)
         if not prefix_s:
             return []
 
-        # Escape LIKE wildcards so prefixes containing '%' or '_' behave as literals.
         escaped = prefix_s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = escaped + "%"
 
         with get_session(self._session_factory) as session:
             rows = (
-                session.query(DbDocument.id, DbDocument.external_id)
+                session.query(DbDocument.doc_id, DbDocument.external_id)
                 .filter(DbDocument.external_id.is_not(None))
                 .filter(DbDocument.external_id.like(pattern, escape="\\"))
                 .all()
             )
-            out: list[tuple[int, str]] = []
+            out: list[tuple[DocId, str]] = []
             for doc_id, ext_id in rows:
                 if ext_id is None:
                     continue
-                out.append((int(doc_id), str(ext_id)))
+                out.append((DocId(str(doc_id)), str(ext_id)))
             return out
 
     def get_tombstoned_external_ids(self, external_ids: Sequence[str]) -> set[str]:
@@ -405,8 +399,6 @@ class SqlDocumentStorage(DocumentRepoPort):
             return 0
 
         with get_session(self._session_factory) as session:
-            # SQLite doesn't support INSERT ... ON CONFLICT in ORM portably without Core.
-            # We'll ignore duplicates by checking existing first.
             existing = (
                 session.query(DbDocumentTombstone.external_id)
                 .filter(DbDocumentTombstone.external_id.in_(ext_ids))
@@ -422,7 +414,7 @@ class SqlDocumentStorage(DocumentRepoPort):
 
     def delete_by_external_ids(
         self, external_ids: Sequence[str]
-    ) -> tuple[int, list[int], list[str], int]:
+    ) -> tuple[int, list[DocId], list[str], int]:
         """
         Hard-delete documents by external_id and add tombstones.
 
@@ -434,15 +426,14 @@ class SqlDocumentStorage(DocumentRepoPort):
 
         with get_session(self._session_factory) as session:
             rows = (
-                session.query(DbDocument.id, DbDocument.external_id)
+                session.query(DbDocument.doc_id, DbDocument.external_id)
                 .filter(DbDocument.external_id.is_not(None))
                 .filter(DbDocument.external_id.in_(ext_ids))
                 .all()
             )
-            found_by_ext = {str(ext): int(doc_id) for doc_id, ext in rows if ext is not None}
+            found_by_ext = {str(ext): DocId(str(doc_id)) for doc_id, ext in rows if ext is not None}
             missing = [e for e in ext_ids if e not in found_by_ext]
 
-            # Tombstone all requested external_ids (including missing) to prevent reappearance.
             existing_ts = (
                 session.query(DbDocumentTombstone.external_id)
                 .filter(DbDocumentTombstone.external_id.in_(ext_ids))
@@ -458,7 +449,7 @@ class SqlDocumentStorage(DocumentRepoPort):
             if deleted_ids:
                 deleted_sql = (
                     session.query(DbDocument)
-                    .filter(DbDocument.id.in_(deleted_ids))
+                    .filter(DbDocument.doc_id.in_([str(x) for x in deleted_ids]))
                     .delete(synchronize_session=False)
                 )
             session.commit()
@@ -471,17 +462,7 @@ def _detect_document_changes(
     new_content: str,
     new_sha: str,
 ) -> _DocumentChanges:
-    """Compare an incoming UpsertDoc against the persisted row to find what changed.
-
-    Args:
-        db_doc: Existing ORM row.
-        item: Incoming upsert payload.
-        new_content: Stripped content string (pre-computed by caller).
-        new_sha: SHA-256 of new_content (pre-computed by caller).
-
-    Returns:
-        _DocumentChanges with per-field change flags.
-    """
+    """Compare an incoming UpsertDoc against the persisted row to find what changed."""
     content_changed = (db_doc.content_sha256 or "") != new_sha or db_doc.content != new_content
 
     metadata_changed = False
@@ -510,7 +491,7 @@ class HistorySqlStorage(QAHistoryPort):
     def __init__(self, session_factory: sessionmaker[Session] | None = None):
         self._session_factory = session_factory or SessionLocal
 
-    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None:
+    def save(self, q: str, a: str, source_ids: Sequence[DocId]) -> None:
         """Save a question-answer pair to the history table."""
         with get_session(self._session_factory) as session:
             add_history(session, q, a, source_ids=list(source_ids))
