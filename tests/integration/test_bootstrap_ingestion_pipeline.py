@@ -7,7 +7,7 @@ from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_inge
 from local_rag_backend.settings import settings
 
 
-def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, capsys):
+def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, caplog):
     """Test bootstrap using ingestion pipeline in sparse mode."""
     # Create test CSV
     csv_file = tmp_path / "faq.csv"
@@ -25,11 +25,13 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     monkeypatch.setattr(settings, "ingest_chunk_chars", 1200, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 200, raising=False)
 
-    run_sample_data_ingestion(settings_obj=settings)
+    import logging
 
-    captured = capsys.readouterr()
-    assert "Ingested" in captured.out
-    assert "sparse mode" in captured.out
+    with caplog.at_level(logging.INFO):
+        run_sample_data_ingestion(settings_obj=settings)
+
+    assert any("Ingested" in m for m in caplog.messages)
+    assert any("sparse mode" in m for m in caplog.messages)
 
     # Verify documents were stored
     from sqlalchemy import create_engine
@@ -50,7 +52,7 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     assert any("funciona" in doc.content for doc in docs)
 
 
-def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, capsys):
+def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, caplog):
     """Test bootstrap using ingestion pipeline in dense mode."""
 
     class DummyEmbedder:
@@ -103,11 +105,13 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
         DummyVectorIndex,
     )
 
-    run_sample_data_ingestion(settings_obj=settings)
+    import logging
 
-    captured = capsys.readouterr()
-    assert "Ingested" in captured.out
-    assert "SQL and FAISS" in captured.out
+    with caplog.at_level(logging.INFO):
+        run_sample_data_ingestion(settings_obj=settings)
+
+    assert any("Ingested" in m for m in caplog.messages)
+    assert any("SQL and FAISS" in m for m in caplog.messages)
 
 
 def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
@@ -150,7 +154,7 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     assert all("Long Question" in doc.content for doc in docs)
 
 
-def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, capsys):
+def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, caplog):
     """Test bootstrap falls back to the repo CSV when the configured file doesn't exist."""
 
     # Mock CSV loader to return test data (regardless of which fallback path is used)
@@ -175,14 +179,16 @@ def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
     # Mock CSVLoader to simulate fallback data
+    import logging
+
     with patch(
         "local_rag_backend.infrastructure.ingestion.loaders.csv_loader.CSVLoader.load",
         mock_csv_loader_load,
     ):
-        run_sample_data_ingestion()
+        with caplog.at_level(logging.INFO):
+            run_sample_data_ingestion()
 
-        captured = capsys.readouterr()
-        assert "Ingested" in captured.out
+        assert any("Ingested" in m for m in caplog.messages)
 
         # Verify fallback data was loaded
         from sqlalchemy import create_engine

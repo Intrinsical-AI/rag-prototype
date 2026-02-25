@@ -4,7 +4,7 @@ from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_inge
 from local_rag_backend.settings import settings
 
 
-def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
+def test_bootstrap_ingests_data(tmp_path, monkeypatch, caplog):
     class DummyEmbedder:
         dim = 4
 
@@ -62,10 +62,12 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     except ImportError:
         pass
 
-    run_sample_data_ingestion()
+    import logging
 
-    captured = capsys.readouterr()
-    assert "Ingested" in captured.out or "Ingerido" in captured.out
+    with caplog.at_level(logging.INFO):
+        run_sample_data_ingestion()
+
+    assert any("Ingested" in m or "Ingerido" in m for m in caplog.messages)
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
