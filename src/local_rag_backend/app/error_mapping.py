@@ -17,6 +17,7 @@ from local_rag_backend.core.errors import (
     LLMProviderError,
     LLMResponseError,
     LLMTimeoutError,
+    WriteLockTimeoutError,
 )
 
 
@@ -24,6 +25,8 @@ def map_runtime_error(exc: Exception) -> AppError | None:
     """Return mapped AppError for known runtime error types."""
     if isinstance(exc, EmbeddingsBackendUnavailableError):
         return BadRequestError(str(exc))
+    if isinstance(exc, WriteLockTimeoutError):
+        return ServiceUnavailableError(str(exc))
     if isinstance(exc, LLMTimeoutError):
         return GatewayTimeoutError(str(exc))
     if isinstance(exc, LLMConnectionError):

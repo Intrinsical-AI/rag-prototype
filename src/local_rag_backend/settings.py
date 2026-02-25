@@ -128,6 +128,39 @@ class Settings(BaseSettings):
     id_map_path: str = Field("data/id_map.json", description="Path to the vector index ID map.")
     sqlite_url: str = Field("sqlite:///./data/app.db", description="SQLite database URL.")
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
+    storage_profile: str = Field(
+        "",
+        description=(
+            "Storage profile identifier (optional). If empty, it is inferred from retrieval_mode "
+            "and vector backend."
+        ),
+    )
+    write_lock_timeout_s: float = Field(
+        30.0,
+        ge=0.1,
+        le=600.0,
+        description="Timeout in seconds when waiting for multi-store write lock acquisition.",
+    )
+    write_lock_poll_s: float = Field(
+        0.05,
+        ge=0.005,
+        le=5.0,
+        description="Polling interval in seconds for lock acquisition retries.",
+    )
+    mutation_journal_backend: Literal["file"] = Field(
+        "file",
+        description="Backend used for durable mutation journaling.",
+    )
+    mutation_recovery_enabled: bool = Field(
+        True,
+        description="Enable startup recovery of incomplete durable mutation records.",
+    )
+    mutation_recovery_interval_s: float = Field(
+        30.0,
+        ge=1.0,
+        le=3600.0,
+        description="Background interval (seconds) for retrying incomplete mutation recovery.",
+    )
 
     # --- Ingestion --- #
     ingest_chunk_strategy: Literal["chars_v1"] = Field(

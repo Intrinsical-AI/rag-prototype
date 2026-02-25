@@ -16,6 +16,7 @@ from local_rag_backend.core.errors import (
     LLMProviderError,
     LLMResponseError,
     LLMTimeoutError,
+    WriteLockTimeoutError,
 )
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ async def handle_runtime_error(request: Request, exc: Exception) -> JSONResponse
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, handle_app_error)
     app.add_exception_handler(EmbeddingsBackendUnavailableError, handle_runtime_error)
+    app.add_exception_handler(WriteLockTimeoutError, handle_runtime_error)
     app.add_exception_handler(LLMTimeoutError, handle_runtime_error)
     app.add_exception_handler(LLMConnectionError, handle_runtime_error)
     app.add_exception_handler(LLMResponseError, handle_runtime_error)
