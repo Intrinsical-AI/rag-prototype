@@ -68,8 +68,7 @@ jobs:
 
       - name: Install deps for hooks
         run: |
-          uv sync --frozen --extra lint --no-install-project --no-dev
-          uv pip install pre-commit
+          uv sync --frozen --group lint --no-install-project --no-default-groups
 
       - name: Run pre-commit hooks
         run: uv run pre-commit run --all-files --show-diff-on-failure
@@ -100,8 +99,8 @@ jobs:
       - name: Create virtualenv
         run: uv venv
 
-      - name: Install lint deps (extras)
-        run: uv sync --frozen --extra lint --no-install-project --no-dev
+      - name: Install lint deps (group)
+        run: uv sync --frozen --group lint --no-install-project --no-default-groups
 
       - name: Ruff
         run: uv run ruff check src tests
@@ -134,8 +133,8 @@ jobs:
       - name: Create virtualenv
         run: uv venv
 
-      - name: Install typing deps (extras lint)
-        run: uv sync --frozen --extra lint --no-install-project --no-dev
+      - name: Install typing deps (group lint)
+        run: uv sync --frozen --group lint --no-install-project --no-default-groups
 
       - name: mypy
         run: uv run mypy src
@@ -172,7 +171,7 @@ jobs:
         run: uv venv
 
       - name: Install deps
-        run: uv sync --frozen --extra dev --extra test
+        run: uv sync --frozen --group test --no-default-groups
 
       - name: Run tests
         run: >
@@ -231,7 +230,7 @@ jobs:
         run: uv venv
 
       - name: Install deps
-        run: uv sync --frozen --extra dev --extra test
+        run: uv sync --frozen --group test --no-default-groups
 
       - name: Run smoke tests (cross-platform persistence paths)
         run: >

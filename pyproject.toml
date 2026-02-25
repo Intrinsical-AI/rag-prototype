@@ -57,7 +57,6 @@ dependencies = [
   # CLI & Utilities
   "click>=8.0,<9.0",
   "rich>=13.0,<14.0",
-  "pre-commit>=4.5.1",
 ]
 
 [project.optional-dependencies]
@@ -67,33 +66,6 @@ dense = [
 dense-st = [
   # Heavy dependency chain (torch/transformers). Prefer OpenAI embeddings when possible.
   "sentence-transformers>=2.7,<3.0"
-]
-test = [
-  "pytest>=8.2,<9.0",
-  "pytest-cov>=6.1.1,<7.0",
-  "pytest-asyncio>=0.23,<1.0",
-  "pytest-xdist>=3.5,<4.0",
-  "httpx>=0.27,<0.28"
-]
-lint = [
-  "ruff>=0.4,<1.0",
-  "mypy>=1.10,<2.0"
-]
-dev = [
-  "pre-commit>=4.2.0,<5.0",
-  "ipython>=8.0,<9.0",
-  "jupyter>=1.0,<2.0"
-]
-sec = [
-  "bandit[toml]>=1.7,<2.0",
-  "safety>=3.2,<4.0"
-]
-docs = [
-  "mkdocs>=1.5,<2.0",
-  "mkdocs-material>=9.5,<10.0",
-  "mkdocstrings[python]>=0.24,<1.0",
-  "mkdocs-mermaid2-plugin>=1.1,<2.0",
-  "mkdocs-include-markdown-plugin>=6.0,<7.0"
 ]
 loaders = [
   "langchain-community>=0.2,<1.0",
@@ -128,6 +100,43 @@ all = [
   "prometheus-client>=0.19,<1.0",
   "structlog>=23.0,<24.0",
   "sentry-sdk[fastapi]>=1.40,<2.0"
+]
+
+[dependency-groups]
+test = [
+  "pytest>=8.2,<9.0",
+  "pytest-cov>=6.1.1,<7.0",
+  "pytest-asyncio>=0.23,<1.0",
+  "pytest-xdist>=3.5,<4.0",
+]
+lint = [
+  "ruff>=0.4,<1.0",
+  "mypy>=1.10,<2.0",
+  "pre-commit>=4.2.0,<5.0",
+]
+dev = [
+  { include-group = "test" },
+  { include-group = "lint" },
+  "ipython>=8.0,<9.0",
+  "jupyter>=1.0,<2.0",
+]
+sec = [
+  "bandit[toml]>=1.7,<2.0",
+  "safety>=3.2,<4.0",
+]
+docs = [
+  "mkdocs>=1.5,<2.0",
+  "mkdocs-material>=9.5,<10.0",
+  "mkdocstrings[python]>=0.24,<1.0",
+  "mkdocs-mermaid2-plugin>=1.1,<2.0",
+  "mkdocs-include-markdown-plugin>=6.0,<7.0",
+]
+
+[tool.uv]
+default-groups = []
+environments = [
+  "python_version == '3.11'",
+  "python_version == '3.12'",
 ]
 
 [project.urls]
