@@ -9,7 +9,7 @@ chunks and boundaries.
 
 from __future__ import annotations
 
-from local_rag_backend.core.services.schemas import TextChunk
+from local_rag_backend.core.services.types import TextChunk
 
 
 def chunk_chars_v1(text: str, *, max_chars: int, overlap: int) -> list[TextChunk]:

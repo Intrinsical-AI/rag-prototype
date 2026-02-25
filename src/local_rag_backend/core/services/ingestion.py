@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from local_rag_backend.core.ports import LoaderPort
     from local_rag_backend.core.services.etl import ETLService
     from local_rag_backend.settings import Settings
 from local_rag_backend.core.services.chunking import chunk_chars_v1
@@ -61,10 +62,6 @@ def build_chunk_fn_from_settings(
     if settings.ingest_chunk_strategy != "chars_v1":
         raise ValueError(f"Unsupported ingest_chunk_strategy: {settings.ingest_chunk_strategy!r}")
     return default_chunker(settings.ingest_chunk_chars, settings.ingest_chunk_overlap)
-
-
-if TYPE_CHECKING:
-    from local_rag_backend.core.ports import LoaderPort
 
 
 class IngestionPipeline:

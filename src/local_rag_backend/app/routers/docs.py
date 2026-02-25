@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from local_rag_backend.app.container import AppContainer
-    from local_rag_backend.app.services.docs import (
+    from local_rag_backend.app.services.results import (
         DeleteDocsByExternalIdSummary,
         DeleteDocsSummary,
         UpsertDocsSummary,

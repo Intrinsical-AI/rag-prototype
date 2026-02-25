@@ -14,7 +14,7 @@ import importlib
 import math
 from typing import TYPE_CHECKING, Any
 
-from local_rag_backend.core.services.schemas import DetectedFormat, Detection
+from local_rag_backend.core.services.types import DetectedFormat, Detection
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.ingestion.loaders.markdown_loader import MarkdownLoader
 from local_rag_backend.infrastructure.ingestion.loaders.text_loader import TextFileLoader

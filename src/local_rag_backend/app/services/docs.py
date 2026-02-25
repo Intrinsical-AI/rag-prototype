@@ -7,9 +7,14 @@ handlers remain thin and focused on HTTP concerns.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from local_rag_backend.app.services.results import (
+    DeleteDocsByExternalIdSummary,
+    DeleteDocsSummary,
+    UpsertDocResult,
+    UpsertDocsSummary,
+)
 from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.dedup import chunk_dedup_sha256
 from local_rag_backend.core.services.ingestion import (
@@ -46,39 +51,6 @@ class TombstonedExternalIdsError(ValueError):
         super().__init__(
             f"Some external_id values are tombstoned (deleted): {sorted(self.tombstoned)[:10]}"
         )
-
-
-@dataclass(frozen=True)
-class UpsertDocResult:
-    external_id: str
-    id: int
-    action: str
-    content_changed: bool
-
-
-@dataclass(frozen=True)
-class UpsertDocsSummary:
-    inserted: int
-    updated: int
-    unchanged: int
-    rebuilt_index: bool
-    results: list[UpsertDocResult]
-
-
-@dataclass(frozen=True)
-class DeleteDocsByExternalIdSummary:
-    deleted_sql: int
-    deleted_index: int | None
-    tombstoned: int
-    missing_external_ids: list[str]
-    rebuilt_index: bool
-
-
-@dataclass(frozen=True)
-class DeleteDocsSummary:
-    deleted_sql: int
-    deleted_index: int | None
-    rebuilt_index: bool
 
 
 def _embedding_model_name_for_dedup(settings_obj: Settings) -> str:

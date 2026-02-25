@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
-from local_rag_backend.core.services.schemas import EvalDataset, EvalDoc, EvalQuery, EvalResult
+from local_rag_backend.core.services.types import EvalDataset, EvalDoc, EvalQuery, EvalResult
 
 
 def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
