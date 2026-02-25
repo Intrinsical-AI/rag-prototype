@@ -101,7 +101,7 @@ def _apply_manifest_status(
     actual_dimension: int,
     actual_index_backend: str,
 ) -> None:
-    from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+    from local_rag_backend.infrastructure.persistence.vector.manifest import (
         read_manifest,
         validate_manifest,
     )
@@ -152,6 +152,7 @@ def get_retrieval_index_stats(
     *,
     index_path: str | Path,
     id_map_path: str | Path,
+    vector_backend: str = "auto",
     dim: int | None = None,
     expected_manifest: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -165,7 +166,7 @@ def get_retrieval_index_stats(
     """
     idx_path = Path(index_path)
     map_path = Path(id_map_path)
-    from local_rag_backend.infrastructure.persistence.faiss.manifest import manifest_path_for
+    from local_rag_backend.infrastructure.persistence.vector.manifest import manifest_path_for
 
     manifest_path = manifest_path_for(idx_path)
 
@@ -175,9 +176,9 @@ def get_retrieval_index_stats(
         return missing_payload
 
     try:
-        from local_rag_backend.infrastructure.persistence.faiss.index import FaissIndex
+        from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
 
-        idx = FaissIndex(idx_path, map_path, dim=dim)
+        idx = VectorIndex(idx_path, map_path, dim=dim, backend=vector_backend)
         id_map_len = len(idx.id_map)
         unique_ids = len(set(idx.id_map))
         duplicates = int(id_map_len - unique_ids)

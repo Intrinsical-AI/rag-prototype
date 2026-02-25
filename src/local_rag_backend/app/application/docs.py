@@ -11,7 +11,7 @@ from local_rag_backend.infrastructure.ingestion.loaders import (
     GeminiLoader,
     detect_json_export_format,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy.models import Document as DbDocument
+from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

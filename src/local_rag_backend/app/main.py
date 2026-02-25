@@ -24,7 +24,7 @@ from local_rag_backend.app.factory import reset_app_context
 from local_rag_backend.app.http.exception_handlers import register_exception_handlers
 from local_rag_backend.app.middleware import MetricsMiddleware, get_metrics
 from local_rag_backend.app.security import enforce_safe_bind_config, require_api_key
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:

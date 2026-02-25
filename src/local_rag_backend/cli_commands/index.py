@@ -14,7 +14,7 @@ from local_rag_backend.cli_commands.runtime import (
     ensure_sqlite_schema_for_cli,
     run_cli_mutation,
 )
-from local_rag_backend.infrastructure.persistence.faiss.manifest import (
+from local_rag_backend.infrastructure.persistence.vector.manifest import (
     expected_manifest_config_from_settings,
 )
 from local_rag_backend.settings import settings
@@ -73,7 +73,7 @@ def rebuild_index_cmd() -> None:
 @click.command("status")
 def status_cmd() -> None:
     """Display system status and configuration."""
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+    from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
     ensure_sqlite_schema_for_cli()
 

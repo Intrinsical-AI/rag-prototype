@@ -15,8 +15,8 @@ from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
@@ -100,9 +100,9 @@ def build_retriever_with_default_embedder_from_settings(
     reranker_candidate_k: int | None = None,
     reranker_strategy: str | None = None,
     sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
-    dense_retriever_factory: Callable[..., RetrieverPort] = DenseFaissRetriever,
+    dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
     hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
-    vector_repo_factory: Callable[..., Any] = FaissVectorStorage,
+    vector_repo_factory: Callable[..., Any] = VectorStorage,
     reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
 ) -> RetrieverPort:
     def _dense_embedder_factory() -> EmbedderPort:
@@ -151,9 +151,9 @@ def build_retriever_from_settings(
     reranker_candidate_k: int | None = None,
     reranker_strategy: str | None = None,
     sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
-    dense_retriever_factory: Callable[..., RetrieverPort] = DenseFaissRetriever,
+    dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
     hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
-    vector_repo_factory: Callable[..., Any] = FaissVectorStorage,
+    vector_repo_factory: Callable[..., Any] = VectorStorage,
     reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
 ) -> RetrieverPort:
     mode = str(retrieval_mode)
@@ -189,10 +189,11 @@ def build_retriever_from_settings(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=embedder.dim,
+            backend=getattr(settings_obj, "vector_backend", "auto"),
         )
         dense_retriever = dense_retriever_factory(
             embedder=embedder,
-            faiss_index=vector_repo,
+            vector_repo=vector_repo,
             doc_repo=doc_repo,
         )
         if mode == "dense":

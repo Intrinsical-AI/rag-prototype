@@ -17,12 +17,12 @@ from local_rag_backend.core.services.ingestion import (
     default_formatter,
 )
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.sqlalchemy import (
+from local_rag_backend.infrastructure.persistence.sql import (
     base as db_base,
     models as _models,
 )
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.settings import settings as default_settings
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ def run_sample_data_ingestion(
 
     if settings_obj.retrieval_mode in ("dense", "hybrid"):
         embedder: EmbedderPort = build_dense_embedder_from_settings(settings_obj=settings_obj)
-        vector_repo = FaissVectorStorage(
+        vector_repo = VectorStorage(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=embedder.dim,

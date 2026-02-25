@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from local_rag_backend.core.services.rag import RagService
-from local_rag_backend.infrastructure.persistence.sqlalchemy.crud import get_history
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,
 )
+from local_rag_backend.infrastructure.persistence.sql.crud import get_history
 
 if TYPE_CHECKING:
     from collections.abc import Callable

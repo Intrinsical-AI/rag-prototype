@@ -27,14 +27,14 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.infrastructure.persistence.faiss.faiss_ import FaissVectorStorage
-from local_rag_backend.infrastructure.persistence.faiss.manifest import purge_index_artifacts
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import (
+from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,
     SystemStateStorage,
 )
-from local_rag_backend.infrastructure.retrieval.dense_faiss import DenseFaissRetriever
+from local_rag_backend.infrastructure.persistence.vector.manifest import purge_index_artifacts
+from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
@@ -71,12 +71,12 @@ def _collect_container_overrides() -> dict[str, Any]:
         overrides["history_repo_factory"] = HistorySqlStorage
     if SparseBM25Retriever is not app_container_module.SparseBM25Retriever:
         overrides["sparse_retriever_factory"] = SparseBM25Retriever
-    if DenseFaissRetriever is not app_container_module.DenseFaissRetriever:
-        overrides["dense_retriever_factory"] = DenseFaissRetriever
+    if DenseVectorRetriever is not app_container_module.DenseVectorRetriever:
+        overrides["dense_retriever_factory"] = DenseVectorRetriever
     if HybridRetriever is not app_container_module.HybridRetriever:
         overrides["hybrid_retriever_factory"] = HybridRetriever
-    if FaissVectorStorage is not app_container_module.FaissVectorStorage:
-        overrides["vector_repo_factory"] = FaissVectorStorage
+    if VectorStorage is not app_container_module.VectorStorage:
+        overrides["vector_repo_factory"] = VectorStorage
     if RerankingRetriever is not app_container_module.RerankingRetriever:
         overrides["reranker_factory"] = RerankingRetriever
     if (

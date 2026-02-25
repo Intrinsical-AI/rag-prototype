@@ -22,7 +22,7 @@ def ensure_sqlite_schema_for_cli() -> None:
     CLI commands can be run without starting the FastAPI server, so they must
     apply the same best-effort SQLite migrations that the app does at startup.
     """
-    from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base
+    from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     db_base.ensure_sqlite_schema_compatible(
