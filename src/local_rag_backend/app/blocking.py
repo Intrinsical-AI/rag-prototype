@@ -212,7 +212,4 @@ async def run_blocking(
 
 
 def _pending_snapshot(state: _ExecutorState) -> int:
-    if hasattr(state, "pending_snapshot"):
-        return int(state.pending_snapshot())
-    pending = getattr(state, "pending", 0)
-    return int(pending) if isinstance(pending, int) else 0
+    return state.pending_snapshot()

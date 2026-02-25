@@ -137,7 +137,14 @@ def resolve_preferred_llm_provider(*, settings_obj: Settings) -> str:
         return "ollama"
     if settings_obj.openai_api_key:
         return "openai"
-    raise RuntimeError("No LLM configured. Set OPENAI_API_KEY or enable OLLAMA_ENABLED.")
+    if getattr(settings_obj, "openrouter_enabled", False) and getattr(
+        settings_obj, "openrouter_api_key", None
+    ):
+        return "openrouter"
+    raise RuntimeError(
+        "No LLM configured. Set OPENAI_API_KEY, enable OLLAMA_ENABLED, "
+        "or set OPENROUTER_ENABLED=true with OPENROUTER_API_KEY."
+    )
 
 
 def build_retriever_from_settings(

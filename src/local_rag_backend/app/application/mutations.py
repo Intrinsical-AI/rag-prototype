@@ -41,9 +41,7 @@ async def run_api_mutation(
     map_error: Callable[[Exception], AppError | None] | None = None,
 ) -> T:
     """Run one HTTP mutation with lock + offload + reset + mapped errors."""
-    mutation_attempted = False
     try:
-        mutation_attempted = True
         return await run_blocking_fn(run_locked, operation, task_type=task_type)
     except Exception as exc:
         mapped = _map_exception(exc, map_error=map_error)
@@ -51,8 +49,7 @@ async def run_api_mutation(
             raise mapped from exc
         raise
     finally:
-        if mutation_attempted:
-            reset_after()
+        reset_after()
 
 
 def run_cli_mutation(
@@ -65,9 +62,7 @@ def run_cli_mutation(
 ) -> T:
     """Run one CLI mutation with schema ensure + lock + reset + mapped errors."""
     ensure_schema()
-    mutation_attempted = False
     try:
-        mutation_attempted = True
         return run_locked(operation)
     except Exception as exc:
         mapped = _map_exception(exc, map_error=map_error)
@@ -75,5 +70,4 @@ def run_cli_mutation(
             raise mapped from exc
         raise
     finally:
-        if mutation_attempted:
-            reset_after()
+        reset_after()

@@ -24,5 +24,6 @@ def rebuild_index_sync(
         index_path=settings_obj.index_path,
         id_map_path=settings_obj.id_map_path,
         dim=embedder.dim,
+        backend=getattr(settings_obj, "vector_backend", "auto"),
     )
     return ports.rebuild_fn(doc_repo=doc_repo, vec_repo=vec, embedder=embedder)
