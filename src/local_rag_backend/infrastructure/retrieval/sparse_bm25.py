@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from local_rag_backend.core.domain.entities import Document
+    from local_rag_backend.core.domain.types import DocId
 
 
 class SparseBM25Retriever(RetrieverPort):
@@ -25,7 +26,7 @@ class SparseBM25Retriever(RetrieverPort):
     def __init__(
         self,
         documents: Sequence[str],
-        doc_ids: Sequence[int],
+        doc_ids: Sequence[DocId],
         doc_repo: DocumentRepoPort,
         *,
         preloaded_docs: Sequence[Document] | None = None,
@@ -34,8 +35,6 @@ class SparseBM25Retriever(RetrieverPort):
         self.doc_repo = doc_repo
         self.bm25 = None
         self._tokenized_corpus = [self._tokenize(doc) for doc in documents] if documents else []
-        # Avoid one SQL roundtrip per query in sparse mode; cache corpus docs in memory.
-        # This retriever instance is rebuilt when RAG service is invalidated after mutations.
         if preloaded_docs is None:
             self._docs_by_id = {doc.id: doc for doc in doc_repo.get(self.doc_ids)}
         else:
@@ -50,7 +49,7 @@ class SparseBM25Retriever(RetrieverPort):
 
             self.bm25 = BM25Okapi(self._tokenized_corpus)
 
-    def _ensure_docs_cache(self) -> dict[int, Document]:
+    def _ensure_docs_cache(self) -> dict[DocId, Document]:
         docs_by_id = getattr(self, "_docs_by_id", None)
         if docs_by_id is None:
             docs_by_id = {doc.id: doc for doc in self.doc_repo.get(self.doc_ids)}
@@ -110,7 +109,6 @@ class SparseBM25Retriever(RetrieverPort):
         k_eff = min(int(k), int(doc_scores.size))
         if k_eff <= 0:
             return [], []
-        # Stable order preserves existing deterministic tie behavior by corpus order.
         rank_scores = np.nan_to_num(doc_scores, nan=float("-inf"))
         ranked_indices = np.argsort(-rank_scores, kind="stable")
         if k_eff == 1:
@@ -124,7 +122,6 @@ class SparseBM25Retriever(RetrieverPort):
         retrieved_ids = [self.doc_ids[int(i)] for i in top_indices]
         scores = [float(rank_scores[int(i)]) for i in top_indices]
 
-        # Normalize scores to [0, 1]
         if not scores:
             return [], []
         min_score, max_score = min(scores), max(scores)
@@ -133,7 +130,6 @@ class SparseBM25Retriever(RetrieverPort):
         else:
             normalized_scores = [(s - min_score) / (max_score - min_score) for s in scores]
 
-        # Ensure correct order
         docs_by_id = self._ensure_docs_cache()
         ordered_docs = [docs_by_id[doc_id] for doc_id in retrieved_ids if doc_id in docs_by_id]
         score_by_id = {

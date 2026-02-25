@@ -10,12 +10,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from typing import Protocol
 
+    from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
     class ExternalIdDeleteRepoPort(DocumentRepoPort, Protocol):
         def delete_by_external_ids(
             self, external_ids: Sequence[str]
-        ) -> tuple[int, list[int], list[str], int]: ...
+        ) -> tuple[int, list[DocId], list[str], int]: ...
 
 
 def rebuild_index_from_db(
@@ -30,8 +31,8 @@ def rebuild_index_from_db(
         vec_repo.rebuild([], [])
         return 0
 
-    ids: list[int] = [d.id for d in docs]
-    texts: list[str] = [d.content for d in docs]
+    ids = [d.id for d in docs]
+    texts = [d.content for d in docs]
 
     vectors: list[list[float]] = []
     for i in range(0, len(texts), batch_size):
@@ -48,7 +49,7 @@ def rebuild_index_from_db(
 def delete_documents_multi_store(
     *,
     doc_repo: DocumentRepoPort,
-    ids: Sequence[int],
+    ids: Sequence[DocId],
     vec_repo: VectorRepoPort | None = None,
     embedder: EmbedderPort | None = None,
     embedder_factory: Callable[[], EmbedderPort] | None = None,
@@ -59,15 +60,12 @@ def delete_documents_multi_store(
 
     Returns: (deleted_sql, deleted_index, rebuilt_index)
     """
-    ids_list = [int(x) for x in ids]
+    ids_list = [x for x in ids if str(x).strip()]
     if not ids_list:
         return 0, 0 if vec_repo else None, False
 
     resolved_embedder = embedder
 
-    # Preflight vector mutability before SQL delete when rebuild fallback would require
-    # an embedder we don't have yet. This avoids deleting SQL first and then discovering
-    # we can't repair dense/hybrid drift.
     if vec_repo is not None and rebuild_on_index_failure and resolved_embedder is None:
         try:
             vec_repo.delete([])
@@ -83,7 +81,6 @@ def delete_documents_multi_store(
                     "rebuild fallback. Aborting SQL delete to avoid multi-store drift."
                 ) from preflight_err
 
-    # SQL delete first. If this succeeds but index delete fails, we can rebuild index from DB.
     before = len(list(doc_repo.get(ids_list)))
     doc_repo.delete_documents(ids_list)
     deleted_sql = before
@@ -142,9 +139,6 @@ def delete_external_ids_multi_store(
 
     resolved_embedder = embedder
 
-    # Preflight vector mutability before SQL delete when rebuild fallback would require
-    # an embedder we don't have yet. This avoids deleting SQL first and then discovering
-    # we can't repair dense/hybrid drift.
     if vec_repo is not None and rebuild_on_index_failure and resolved_embedder is None:
         try:
             vec_repo.delete([])
@@ -160,7 +154,6 @@ def delete_external_ids_multi_store(
                     "rebuild fallback. Aborting SQL delete to avoid multi-store drift."
                 ) from preflight_err
 
-    # SQL delete+tombstone first. If index delete fails afterward, rebuild from DB.
     deleted_sql, deleted_ids, missing_external_ids, tombstoned = doc_repo.delete_by_external_ids(
         ext_ids
     )
