@@ -52,6 +52,9 @@ class DocumentRepoPort(Protocol):
 class VectorRepoPort(Protocol):
     """Interface for storing and searching vector embeddings."""
 
+    @property
+    def ntotal(self) -> int: ...
+
     def upsert(self, ids: Sequence[DocId], vectors: Sequence[Embedding]) -> None: ...
     def apply_delta_atomic(
         self,
