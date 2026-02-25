@@ -10,7 +10,7 @@
 [![PyPI](https://img.shields.io/pypi/v/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
 [![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
 
-> General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, FAISS, hybrid), and swappable LLM connectors (OpenAI or Ollama). Designed as a solid base to iterate in real development environments.
+> General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, FAISS, hybrid), and swappable LLM connectors (OpenAI or Ollama). Designed as a solid base to iterate in experimental environments.
 
 ---
 
@@ -164,22 +164,6 @@ This boundary is enforced in `app/composition.py` and consumed by `AppContainer`
 
 ---
 
-## Docs
-
-* `docs/architecture.md`
-* `docs/architecture/app.md`
-* `docs/custom_usage_guide.md`
-* `docs/langchain_loaders.md`
-
----
-
-## Requirements
-
-* Python 3.11+
-* Operating system: Linux / macOS / Windows
-* For dense/hybrid mode: install the `dense` extra (FAISS). For SentenceTransformers embeddings, also install `dense-st`.
-
----
 
 ## Installation and startup (from source)
 
@@ -222,9 +206,8 @@ rag-server
 # Docs: http://localhost:8000/docs
 ```
 
-> If you prefer to invoke scripts directly:
-> `python scripts/bootstrap.py` (repo) or `rag-bootstrap` (installed), and
-> `uvicorn local_rag_backend.app.main:app --reload`.
+> Alternative startup (without CLI wrappers):
+> `rag-bootstrap` and `uvicorn local_rag_backend.app.main:app --reload`.
 
 ---
 
@@ -355,10 +338,6 @@ rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
 rag-ingest --no-follow-symlinks ./docs
 
 
-# Explicitly build the index from the CSV (populate SQL and FAISS if applicable)
-rag-build-index
-
-
 # Rebuild FAISS from the current SQLite documents (idempotent; dense/hybrid only)
 rag-rebuild-index
 
@@ -426,7 +405,7 @@ The ingestion process is orchestrated by `IngestionPipeline`:
 2. Preprocess (`preprocess_text`) and chunk (`default_chunker`) with overlap.
 3. Format chunks (metadata header) and batch-ingest via `ETLService.ingest()`.
 
-This pipeline is used by `scripts/bootstrap.py`.
+This pipeline is used by `rag-bootstrap`.
 
 ---
 
@@ -516,7 +495,6 @@ docker build --target production .
 * `GET /api/health/ollama`
 * `GET /api/config` and `GET /api/templates`
 * `POST /api/ask`
-
   * Body: `{ "question": "str", "k": int (1..10, default 3) }`
   * Response: `{ "answer": "str", "sources": [ { "document": {"id": "doc:...", "content": "str"}, "score": float(0..1) }, ... ] }`
 * `POST /api/ask_eval` (ephemeral per-request RAG config for retrieval/generator evaluation)

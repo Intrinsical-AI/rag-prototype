@@ -8,7 +8,6 @@ from local_rag_backend import cli as cli_module
 def test_cli_registers_all_expected_commands() -> None:
     expected = {
         "server",
-        "build-index",
         "rebuild-index",
         "mutate-docs",
         "bootstrap",
@@ -23,7 +22,6 @@ def test_cli_registers_all_expected_commands() -> None:
     ("wrapper_name", "expected_args"),
     [
         ("rag_server", ["server"]),
-        ("rag_build_index", ["build-index", "--flag"]),
         ("rag_bootstrap", ["bootstrap", "--flag"]),
         ("rag_status", ["status", "--flag"]),
         ("rag_eval", ["eval", "--flag"]),

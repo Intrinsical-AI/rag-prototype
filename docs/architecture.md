@@ -160,7 +160,6 @@ Kept:
 - `rag-ingest`
 - `rag-mutate-docs`
 - `rag-rebuild-index`
-- `rag-build-index`
 - `rag-bootstrap`
 - `rag-status`
 - `rag-eval`

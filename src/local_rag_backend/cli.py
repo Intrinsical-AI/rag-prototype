@@ -3,33 +3,19 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, TypeVar
 
 import click
 
 from local_rag_backend import __version__
 from local_rag_backend.cli_commands import (
     bootstrap_cmd,
-    build_index_cmd,
     eval_cmd,
     ingest_cmd,
     mutate_docs_cmd,
     rebuild_index_cmd,
-    runtime as cli_runtime,
     server_cmd,
     status_cmd,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from local_rag_backend.core.ports import EmbedderPort
-
-T = TypeVar("T")
-
-
-def _ensure_sqlite_schema_for_cli() -> None:
-    cli_runtime.ensure_sqlite_schema_for_cli()
 
 
 @click.group()
@@ -39,33 +25,7 @@ def cli() -> None:
     return None
 
 
-def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
-    return cli_runtime._run_with_multi_store_write_lock(operation)
-
-
-def _reset_rag_service_best_effort() -> None:
-    cli_runtime._reset_rag_service_best_effort()
-
-
-def _run_cli_mutation(
-    operation: Callable[[], T],
-    *,
-    use_lock: bool = True,
-    ensure_schema: bool = True,
-) -> T:
-    return cli_runtime.run_cli_mutation(
-        operation,
-        use_lock=use_lock,
-        ensure_schema=ensure_schema,
-    )
-
-
-def _build_dense_embedder() -> EmbedderPort:
-    return cli_runtime.build_dense_embedder()
-
-
 cli.add_command(server_cmd)
-cli.add_command(build_index_cmd)
 cli.add_command(rebuild_index_cmd)
 cli.add_command(mutate_docs_cmd)
 cli.add_command(bootstrap_cmd)
@@ -77,11 +37,6 @@ cli.add_command(ingest_cmd)
 def rag_server() -> None:
     """Entry point for rag-server command."""
     cli.main(args=["server"], standalone_mode=False)
-
-
-def rag_build_index() -> None:
-    """Entry point for rag-build-index command."""
-    cli.main(args=["build-index", *sys.argv[1:]], standalone_mode=False)
 
 
 def rag_bootstrap() -> None:
