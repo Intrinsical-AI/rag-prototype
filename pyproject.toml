@@ -39,7 +39,7 @@ classifiers = [
 
 dependencies = [
   # Web Framework & Server
-  "fastapi>=0.115,<0.116",
+  "fastapi>=0.124,<0.125",
   "uvicorn[standard]>=0.29,<1.0",
   "python-multipart>=0.0.9,<1.0",
   "anyio>=4.4,<5",
