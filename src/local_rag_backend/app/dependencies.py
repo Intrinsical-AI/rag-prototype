@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from local_rag_backend.app.factory import (
-    build_rag_service,
     get_app_context as _get_app_context,
     get_rag_service,
     reset_rag_service,
@@ -33,7 +32,6 @@ async def get_settings_dependency() -> Settings:
 
 
 __all__ = [
-    "build_rag_service",
     "get_app_container_dependency",
     "get_app_context",
     "get_db",
