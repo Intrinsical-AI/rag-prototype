@@ -36,7 +36,7 @@ def test_multi_store_write_lock_uses_coordination_dir(tmp_path, monkeypatch):
     captured: list[object] = []
 
     @contextmanager
-    def _fake_lock(path):
+    def _fake_lock(path, *, timeout_s: float = 30.0, poll_s: float = 0.05):
         captured.append(path)
         yield
 

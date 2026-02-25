@@ -198,6 +198,7 @@ def build_retriever_from_settings(
             id_map_path=settings_obj.id_map_path,
             dim=embedder.dim,
             backend=getattr(settings_obj, "vector_backend", "auto"),
+            settings_obj=settings_obj,
         )
         dense_retriever = dense_retriever_factory(
             embedder=embedder,

@@ -80,6 +80,7 @@ def test_build_retriever_with_default_embedder_uses_openai_factory_when_key_pres
         "id_map_path": "id_map.json",
         "dim": 7,
         "backend": "auto",
+        "settings_obj": cfg,
     }
     assert seen["dense_kwargs"] == {
         "embedder": ANY,
@@ -124,6 +125,7 @@ def test_build_retriever_passes_vector_backend_to_repo_factory():
         "id_map_path": "id_map.json",
         "dim": 4,
         "backend": "numpy",
+        "settings_obj": cfg,
     }
 
 

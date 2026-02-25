@@ -88,6 +88,7 @@ def run_sample_data_ingestion(
             index_path=settings_obj.index_path,
             id_map_path=settings_obj.id_map_path,
             dim=embedder.dim,
+            settings_obj=settings_obj,
         )
         etl = ETLService(doc_repo, vector_repo, embedder)
         loader = CSVLoader(

@@ -15,7 +15,7 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
     read_manifest,
     validate_manifest,
 )
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import Settings, settings as _global_settings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -34,8 +34,10 @@ class VectorStorage(VectorRepoPort):
         dim: int | None = 384,
         *,
         backend: str | None = None,
+        settings_obj: Settings | None = None,
     ):
-        resolved_backend = str(backend or settings.vector_backend)
+        self._settings = settings_obj if settings_obj is not None else _global_settings
+        resolved_backend = str(backend or self._settings.vector_backend)
         self.vector_index = VectorIndex(
             index_path,
             id_map_path,
@@ -44,7 +46,7 @@ class VectorStorage(VectorRepoPort):
         )
 
     def _expected_manifest_config(self) -> dict[str, str]:
-        return expected_manifest_config_from_settings(settings)
+        return expected_manifest_config_from_settings(self._settings)
 
     def _ensure_manifest(self, *, overwrite: bool) -> None:
         idx_path = getattr(self.vector_index, "index_path", None)

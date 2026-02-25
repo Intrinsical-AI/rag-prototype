@@ -43,7 +43,7 @@ async def test_mutation_fails_when_write_lock_unavailable_returns_503(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
     @contextmanager
-    def _broken_lock():
+    def _broken_lock(*, coordination_dir=None, timeout_s=None, poll_s=None):
         raise WriteLockTimeoutError("lock unavailable")
         yield
 
