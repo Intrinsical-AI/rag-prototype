@@ -50,6 +50,7 @@ Imagina que tus datos están en una lista de diccionarios. Así sería un `Loade
 from typing import Iterable, Any
 
 from local_rag_backend.core.domain.entities import LoadedItem
+from local_rag_backend.core.domain.types import ItemLineage
 from local_rag_backend.core.ports import LoaderPort
 
 class DictListLoader(LoaderPort):
@@ -64,7 +65,14 @@ class DictListLoader(LoaderPort):
             # Asume que cada diccionario tiene 'title' y 'content'
             text = f"{item.get('title', '')}\n\n{item.get('content', '')}"
             metadata = {"source": f"dict_item_{i}", **item.get('metadata', {})}
-            yield LoadedItem(text=text.strip(), metadata=metadata)
+            yield LoadedItem(
+                text=text.strip(),
+                lineage=ItemLineage(
+                    source_uri=f"dict://item/{i}",
+                    loader_name="DictListLoader",
+                ),
+                metadata=metadata,
+            )
 
 ```
 
