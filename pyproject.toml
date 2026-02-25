@@ -148,7 +148,6 @@ Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
 Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 
 [project.scripts]
-rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
 rag-ingest      = "local_rag_backend.cli:rag_ingest"
 rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
@@ -268,8 +267,7 @@ omit = [
   "*/conftest.py",
   "scripts/*",
   "*/local_rag_backend/cli.py",
-  "*/local_rag_backend/app/dependencies.py",
-  "*/local_rag_backend/scripts/build_index.py"
+  "*/local_rag_backend/app/dependencies.py"
 ]
 
 [tool.coverage.report]

@@ -6,43 +6,6 @@ from local_rag_backend.cli_commands import index as index_cmd_module
 from local_rag_backend.settings import settings
 
 
-def test_build_index_cli_delegates_to_app_service(monkeypatch) -> None:
-    calls: dict[str, object] = {}
-
-    def _fake_run_cli_mutation(operation, **kwargs):
-        calls["mutation_kwargs"] = kwargs
-        return operation()
-
-    def _fake_build_build_index_ports(**kwargs):
-        calls["ports_kwargs"] = kwargs
-        return "BUILD_PORTS"
-
-    def _fake_build_index_sync(*, settings_obj, ports):
-        calls["settings_obj"] = settings_obj
-        calls["ports"] = ports
-        return 1
-
-    monkeypatch.setattr(index_cmd_module, "run_cli_mutation", _fake_run_cli_mutation, raising=True)
-    monkeypatch.setattr(
-        "local_rag_backend.app.wiring.mutation_ports.build_build_index_ports",
-        _fake_build_build_index_ports,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        "local_rag_backend.app.application.index.build_index_sync",
-        _fake_build_index_sync,
-        raising=True,
-    )
-
-    result = CliRunner().invoke(index_cmd_module.build_index_cmd)
-    assert result.exit_code == 0, result.output
-    assert "Index built successfully!" in result.output
-    assert calls["ports"] == "BUILD_PORTS"
-    assert calls["settings_obj"] is settings
-    assert calls["ports_kwargs"] == {}
-    assert calls["mutation_kwargs"] == {"use_lock": False, "ensure_schema": False}
-
-
 def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     calls: dict[str, object] = {}

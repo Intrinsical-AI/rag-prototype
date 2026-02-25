@@ -20,31 +20,6 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
 from local_rag_backend.settings import settings
 
 
-@click.command("build-index")
-def build_index_cmd() -> None:
-    """Build FAISS index from existing documents."""
-    try:
-        from local_rag_backend.app.application import index as index_service
-        from local_rag_backend.app.wiring.mutation_ports import build_build_index_ports
-
-        ports = build_build_index_ports()
-
-        def _build_sync() -> int:
-            return index_service.build_index_sync(
-                settings_obj=settings,
-                ports=ports,
-            )
-
-        click.echo("[INFO] Building FAISS index...")
-        with click.progressbar(length=1, label="Building index") as bar:
-            run_cli_mutation(_build_sync, use_lock=False, ensure_schema=False)
-            bar.update(1)
-        click.echo("[OK] Index built successfully!")
-    except Exception as e:
-        click.echo(f"[ERROR] Error building index: {e}", err=True)
-        raise SystemExit(1)
-
-
 @click.command("rebuild-index")
 def rebuild_index_cmd() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
