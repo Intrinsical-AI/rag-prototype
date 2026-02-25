@@ -123,6 +123,9 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
         def upsert(self, ids, vectors):
             return None
 
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            return None
+
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     monkeypatch.setattr(factory, "VectorStorage", lambda **k: DummyVec())
 

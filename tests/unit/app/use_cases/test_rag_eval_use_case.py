@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from local_rag_backend.app.application.rag import (
+from local_rag_backend.app.application.rag_query_use_case import (
     execute_ask_eval_sync,
     list_history_entries_sync,
 )
@@ -55,7 +55,7 @@ def test_list_history_entries_sync_delegates_to_crud(monkeypatch) -> None:
         return fake_rows
 
     monkeypatch.setattr(
-        "local_rag_backend.app.application.rag.get_history",
+        "local_rag_backend.app.application.rag_query_use_case.get_history",
         _fake_get_history,
         raising=True,
     )

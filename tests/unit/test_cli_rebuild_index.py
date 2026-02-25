@@ -24,7 +24,7 @@ def test_build_index_cli_delegates_to_app_service(monkeypatch) -> None:
 
     monkeypatch.setattr(index_cmd_module, "run_cli_mutation", _fake_run_cli_mutation, raising=True)
     monkeypatch.setattr(
-        "local_rag_backend.app.services.mutation_ports.build_build_index_ports",
+        "local_rag_backend.app.wiring.mutation_ports.build_build_index_ports",
         _fake_build_build_index_ports,
         raising=True,
     )
@@ -75,7 +75,7 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     )
     monkeypatch.setattr(index_cmd_module, "run_cli_mutation", _fake_run_cli_mutation, raising=True)
     monkeypatch.setattr(
-        "local_rag_backend.app.services.mutation_ports.build_index_mutation_ports",
+        "local_rag_backend.app.wiring.mutation_ports.build_index_mutation_ports",
         _fake_build_index_mutation_ports,
         raising=True,
     )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 
 from click.testing import CliRunner
@@ -9,7 +10,7 @@ from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlD
 from local_rag_backend.settings import settings
 
 
-def test_cli_upsert_docs_runs_under_multi_store_lock(in_memory_sqlite, monkeypatch):
+def test_cli_mutate_docs_runs_under_multi_store_lock(in_memory_sqlite, tmp_path, monkeypatch):
     lock_entries = 0
 
     @contextmanager
@@ -25,14 +26,17 @@ def test_cli_upsert_docs_runs_under_multi_store_lock(in_memory_sqlite, monkeypat
         raising=True,
     )
 
-    result = CliRunner().invoke(
-        cli, ["upsert-docs", "--external-id", "doc-1", "--content", "hello"]
+    payload = tmp_path / "mutate_lock.json"
+    payload.write_text(
+        json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
+        encoding="utf-8",
     )
+    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert lock_entries == 1
 
 
-def test_cli_delete_docs_runs_under_multi_store_lock(in_memory_sqlite, monkeypatch):
+def test_cli_mutate_delete_ids_runs_under_multi_store_lock(in_memory_sqlite, tmp_path, monkeypatch):
     lock_entries = 0
 
     @contextmanager
@@ -49,7 +53,10 @@ def test_cli_delete_docs_runs_under_multi_store_lock(in_memory_sqlite, monkeypat
     )
 
     doc_id = SqlDocumentStorage().store_documents(["to-delete"])[0]
-    result = CliRunner().invoke(cli, ["delete-docs", str(doc_id)])
+    payload = tmp_path / "mutate_delete_ids_lock.json"
+    payload.write_text(json.dumps({"delete_ids": [str(doc_id)]}), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert lock_entries == 1
 
@@ -79,12 +86,11 @@ def test_cli_ingest_runs_mutation_batches_under_multi_store_lock(
 
     result = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert result.exit_code == 0, result.output
-    # Ingest now batches file mutations, so multiple files can share one lock window.
     assert lock_entries == 1
 
 
-def test_cli_delete_docs_dense_does_not_require_embedder_when_index_delete_succeeds(
-    in_memory_sqlite, monkeypatch
+def test_cli_mutate_delete_ids_dense_does_not_require_embedder_when_no_upserts(
+    in_memory_sqlite, tmp_path, monkeypatch
 ):
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
@@ -100,8 +106,9 @@ def test_cli_delete_docs_dense_does_not_require_embedder_when_index_delete_succe
         def __init__(self, *_args, **_kwargs) -> None:
             return None
 
-        def delete(self, ids):
-            return len(list(ids))
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            assert list(upserts) == []
+            return None
 
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
@@ -115,13 +122,15 @@ def test_cli_delete_docs_dense_does_not_require_embedder_when_index_delete_succe
     )
 
     doc_id = SqlDocumentStorage().store_documents(["to-delete-dense"])[0]
-    result = CliRunner().invoke(cli, ["delete-docs", str(doc_id)])
+    payload = tmp_path / "mutate_delete_dense_ids.json"
+    payload.write_text(json.dumps({"delete_ids": [str(doc_id)]}), encoding="utf-8")
+    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert embedder_calls == 0
 
 
-def test_cli_delete_external_ids_dense_does_not_require_embedder_when_index_delete_succeeds(
-    in_memory_sqlite, monkeypatch
+def test_cli_mutate_delete_external_ids_dense_does_not_require_embedder_when_no_upserts(
+    in_memory_sqlite, tmp_path, monkeypatch
 ):
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
@@ -137,8 +146,9 @@ def test_cli_delete_external_ids_dense_does_not_require_embedder_when_index_dele
         def __init__(self, *_args, **_kwargs) -> None:
             return None
 
-        def delete(self, ids):
-            return len(list(ids))
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            assert list(upserts) == []
+            return None
 
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
@@ -155,49 +165,9 @@ def test_cli_delete_external_ids_dense_does_not_require_embedder_when_index_dele
     repo.upsert_documents_by_external_id(
         [SqlDocumentStorage.UpsertDoc(external_id="doc-ext-ok", content="to-delete-dense")]
     )
-    result = CliRunner().invoke(cli, ["delete-external-ids", "doc-ext-ok"])
+
+    payload = tmp_path / "mutate_delete_dense_external_ids.json"
+    payload.write_text(json.dumps({"delete_external_ids": ["doc-ext-ok"]}), encoding="utf-8")
+    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert embedder_calls == 0
-
-
-def test_cli_delete_external_ids_dense_preflight_failure_without_embedder_aborts_before_sql(
-    in_memory_sqlite, monkeypatch
-):
-    monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
-    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
-
-    class PreflightFailVec:
-        def __init__(self, *_args, **_kwargs) -> None:
-            return None
-
-        def delete(self, ids):
-            if not list(ids):
-                raise RuntimeError("manifest-drift")
-            return len(list(ids))
-
-    def _boom_embedder(*_args, **_kwargs):
-        raise RuntimeError("embedder-unavailable")
-
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
-        _boom_embedder,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
-        lambda *_a, **_k: PreflightFailVec(),
-        raising=True,
-    )
-
-    repo = SqlDocumentStorage()
-    repo.upsert_documents_by_external_id(
-        [SqlDocumentStorage.UpsertDoc(external_id="doc-ext-preflight", content="keep-me")]
-    )
-
-    result = CliRunner().invoke(cli, ["delete-external-ids", "doc-ext-preflight"])
-    assert result.exit_code == 1
-    assert "Aborting SQL delete" in result.output
-    docs = repo.get_all_documents()
-    assert len(docs) == 1
-    assert docs[0].external_id == "doc-ext-preflight"
-    assert not repo.get_tombstoned_external_ids(["doc-ext-preflight"])

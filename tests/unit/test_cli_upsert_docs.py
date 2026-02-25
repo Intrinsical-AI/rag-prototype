@@ -1,5 +1,3 @@
-# tests/unit/test_cli_upsert_docs.py
-
 import json
 
 from click.testing import CliRunner
@@ -9,17 +7,22 @@ from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlD
 from local_rag_backend.settings import settings
 
 
-def test_cli_upsert_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch):
+def test_cli_mutate_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    p = tmp_path / "docs.json"
+    p = tmp_path / "mutate.json"
     p.write_text(
         json.dumps(
-            [{"external_id": "doc-1", "content": "hello"}, {"external_id": "doc-2", "content": "x"}]
+            {
+                "upserts": [
+                    {"external_id": "doc-1", "content": "hello"},
+                    {"external_id": "doc-2", "content": "x"},
+                ]
+            }
         ),
         encoding="utf-8",
     )
 
-    r = CliRunner().invoke(cli, ["upsert-docs", "--json", str(p)])
+    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
     assert r.exit_code == 0, r.output
     assert "inserted=2" in r.output
 
@@ -28,7 +31,9 @@ def test_cli_upsert_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch)
     assert {d.external_id for d in docs} == {"doc-1", "doc-2"}
 
 
-def test_cli_upsert_docs_dense_embed_failure_does_not_persist_sql(in_memory_sqlite, monkeypatch):
+def test_cli_mutate_docs_dense_embed_failure_does_not_persist_sql(
+    in_memory_sqlite, tmp_path, monkeypatch
+):
     class BadEmbedder:
         dim = 4
 
@@ -43,17 +48,19 @@ def test_cli_upsert_docs_dense_embed_failure_does_not_persist_sql(in_memory_sqli
         raising=True,
     )
 
-    r = CliRunner().invoke(
-        cli,
-        ["upsert-docs", "--external-id", "doc-1", "--content", "hello"],
+    p = tmp_path / "mutate_dense_fail.json"
+    p.write_text(
+        json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
+        encoding="utf-8",
     )
+    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert SqlDocumentStorage().get_all_documents() == []
 
 
-def test_cli_upsert_docs_failure_still_invalidates_cached_rag_service(
-    in_memory_sqlite, monkeypatch
+def test_cli_mutate_docs_failure_still_invalidates_cached_rag_service(
+    in_memory_sqlite, tmp_path, monkeypatch
 ):
     class BadEmbedder:
         dim = 4
@@ -80,16 +87,18 @@ def test_cli_upsert_docs_failure_still_invalidates_cached_rag_service(
         raising=True,
     )
 
-    r = CliRunner().invoke(
-        cli,
-        ["upsert-docs", "--external-id", "doc-1", "--content", "hello"],
+    p = tmp_path / "mutate_dense_reset.json"
+    p.write_text(
+        json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
+        encoding="utf-8",
     )
+    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert reset_calls == 1
 
 
-def test_cli_upsert_docs_rejects_duplicate_external_id_before_embedding(
+def test_cli_mutate_docs_rejects_duplicate_external_id_before_embedding(
     in_memory_sqlite, tmp_path, monkeypatch
 ):
     class CountingEmbedder:
@@ -114,16 +123,18 @@ def test_cli_upsert_docs_rejects_duplicate_external_id_before_embedding(
     p = tmp_path / "dup_docs.json"
     p.write_text(
         json.dumps(
-            [
-                {"external_id": "doc-1", "content": "hello"},
-                {"external_id": "doc-1", "content": "world"},
-            ]
+            {
+                "upserts": [
+                    {"external_id": "doc-1", "content": "hello"},
+                    {"external_id": "doc-1", "content": "world"},
+                ]
+            }
         ),
         encoding="utf-8",
     )
 
-    r = CliRunner().invoke(cli, ["upsert-docs", "--json", str(p)])
+    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
     assert r.exit_code == 1
-    assert "external_id values must be unique" in r.output
+    assert "external_id values in upserts must be unique" in r.output
     assert embedder.calls == 0
     assert SqlDocumentStorage().get_all_documents() == []

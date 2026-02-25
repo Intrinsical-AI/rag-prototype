@@ -38,6 +38,7 @@ async def test_upsert_dense_embed_failure_does_not_persist_sql(
 
     with pytest.raises(RuntimeError, match="embed fail"):
         await asgi_client.post(
-            "/api/docs/upsert", json={"docs": [{"external_id": "doc-1", "content": "hello"}]}
+            "/api/docs/mutate",
+            json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
         )
     assert SqlDocumentStorage().get_all_documents() == []

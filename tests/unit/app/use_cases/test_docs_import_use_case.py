@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from local_rag_backend.app.application import docs as docs_import
+from local_rag_backend.app.application import docs_import_use_case as docs_import
 
 
 def test_execute_import_docs_sync_rejects_empty_payload() -> None:
@@ -49,9 +49,11 @@ def test_execute_import_docs_sync_parses_and_ingests_chatgpt(monkeypatch) -> Non
     )
     monkeypatch.setattr(docs_import, "ChatGPTLoader", _Loader, raising=True)
     monkeypatch.setattr(
-        docs_import.docs_service,
+        docs_import,
         "ingest_docs_sync",
-        lambda *, texts, settings_obj, ports: [10, 11] if texts == ["a", "b"] else [],
+        lambda *, texts, settings_obj, ports, source="api:/docs/import": (
+            [10, 11] if texts == ["a", "b"] else []
+        ),
         raising=True,
     )
 

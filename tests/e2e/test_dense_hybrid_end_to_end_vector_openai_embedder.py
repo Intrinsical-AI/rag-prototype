@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.etl import ETLService
-from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (

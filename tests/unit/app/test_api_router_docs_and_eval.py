@@ -61,6 +61,12 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
         def upsert(self, ids, vectors):
             self.calls.append((list(ids), list(vectors)))
 
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            ids = [str(doc_id) for doc_id, _ in upserts]
+            vectors = [list(vec) for _, vec in upserts]
+            self.calls.append((ids, vectors))
+            assert list(delete_ids) == []
+
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     dummy_vec = DummyVec()
