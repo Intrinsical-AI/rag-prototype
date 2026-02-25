@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,

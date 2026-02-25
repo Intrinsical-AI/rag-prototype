@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query
 
-from local_rag_backend.app.application.rag import (
+from local_rag_backend.app.application.rag_query_use_case import (
     execute_ask_eval_sync,
     list_history_entries_sync,
 )
@@ -27,7 +27,7 @@ from local_rag_backend.app.observability import (
     log_event,
     observe_query,
 )
-from local_rag_backend.app.schemas.rag import (
+from local_rag_backend.app.schemas.rag_api_models import (
     AskEvalRequest,
     AskEvalResponse,
     AskRequest,
@@ -43,10 +43,10 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from local_rag_backend.app.container import AppContainer
-    from local_rag_backend.app.schemas.rag import AskEvalConfig
+    from local_rag_backend.app.schemas.rag_api_models import AskEvalConfig
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.ports import DocumentRepoPort, GeneratorPort, RetrieverPort
-    from local_rag_backend.core.services.rag import RagService
+    from local_rag_backend.core.services.rag_runtime import RagService
     from local_rag_backend.settings import Settings
 
 router = APIRouter()

@@ -1,22 +1,19 @@
-"""Application orchestration for docs listing/import flows."""
+"""Application use case for importing JSON exports and ingesting their text payloads."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from local_rag_backend.app.services import docs as docs_service
+from local_rag_backend.app.application.docs_ingest_use_case import ingest_docs_sync
 from local_rag_backend.infrastructure.ingestion.loaders import (
     ChatGPTLoader,
     GeminiLoader,
     detect_json_export_format,
 )
-from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
-    from local_rag_backend.app.services.ports import DocsMutationPorts
+    from local_rag_backend.app.contracts.ports import DocsMutationPorts
     from local_rag_backend.settings import Settings
 
 DEFAULT_IMPORT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
@@ -59,14 +56,6 @@ class ImportDocsOutcome:
     input_texts: int
 
 
-def list_docs_page_sync(*, db: Session, limit: int, offset: int) -> list[Any]:
-    """List persisted documents using stable ascending ID order."""
-    return cast(
-        "list[Any]",
-        db.query(DbDocument).order_by(DbDocument.doc_id.asc()).offset(offset).limit(limit).all(),
-    )
-
-
 def execute_import_docs_sync(
     *,
     raw: bytes,
@@ -74,7 +63,6 @@ def execute_import_docs_sync(
     ports: DocsMutationPorts,
     max_bytes: int = DEFAULT_IMPORT_MAX_BYTES,
 ) -> ImportDocsOutcome:
-    """Validate/export-parse/import documents from bytes payload."""
     if len(raw) > int(max_bytes):
         raise ImportFileTooLargeError(max_bytes=max_bytes)
 
@@ -98,10 +86,11 @@ def execute_import_docs_sync(
     if not texts:
         return ImportDocsOutcome(count=0, ids=[], format_detected=detection.fmt, input_texts=0)
 
-    ids = docs_service.ingest_docs_sync(
+    ids = ingest_docs_sync(
         texts=texts,
         settings_obj=settings_obj,
         ports=ports,
+        source="api:/docs/import",
     )
     return ImportDocsOutcome(
         count=len(ids),
@@ -109,3 +98,15 @@ def execute_import_docs_sync(
         format_detected=detection.fmt,
         input_texts=len(texts),
     )
+
+
+__all__ = [
+    "DEFAULT_IMPORT_MAX_BYTES",
+    "DocsImportError",
+    "ImportDocsOutcome",
+    "ImportFileTooLargeError",
+    "ImportPayloadEmptyError",
+    "InvalidImportPayloadError",
+    "UnsupportedImportFormatError",
+    "execute_import_docs_sync",
+]

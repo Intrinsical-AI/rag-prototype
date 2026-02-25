@@ -12,7 +12,7 @@ from local_rag_backend.app.routers.health import router as health_router
 from local_rag_backend.app.routers.index import router as index_router
 from local_rag_backend.app.routers.meta import router as meta_router
 from local_rag_backend.app.routers.openrouter import router as openrouter_router
-from local_rag_backend.app.routers.rag import router as rag_router
+from local_rag_backend.app.routers.rag_router import router as rag_router
 
 router = APIRouter()
 router.include_router(health_router)

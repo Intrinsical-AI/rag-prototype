@@ -7,18 +7,17 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
-from local_rag_backend.core.domain.types import DocId
-from local_rag_backend.core.services.dense_upsert import (
-    precompute_vectors_for_changed_items,
-    sync_dense_after_upsert,
+from local_rag_backend.app.application.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
 )
+from local_rag_backend.app.wiring.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from local_rag_backend.core.ports import EmbedderPort
 
 
 @dataclass(frozen=True)
@@ -237,108 +236,43 @@ def _deduplicate_items_by_external_id(items: list[Any]) -> list[Any]:
     return unique_items
 
 
-def _sync_and_cleanup_dense_batch(
-    *,
-    results: list[Any],
-    updated_content_ids: list[str],
-    vectors_by_external_id: dict[str, list[float]],
-    doc_repo: Any,
-    embedder: EmbedderPort,
-    vec: Any,
-    stale_ids_unique: list[str],
-) -> tuple[bool, int]:
-    from local_rag_backend.core.services.maintenance import delete_documents_multi_store
-
-    rebuilt = sync_dense_after_upsert(
-        results=results,
-        updated_content_ids=[DocId(x) for x in updated_content_ids],
-        vectors_by_external_id=vectors_by_external_id,
-        vec_repo=vec,
-        doc_repo=doc_repo,
-        embedder=embedder,
-    )
-    deleted_stale = 0
-    if stale_ids_unique:
-        deleted_sql, _, rebuilt_del = delete_documents_multi_store(
-            doc_repo=doc_repo,
-            ids=[DocId(x) for x in stale_ids_unique],
-            vec_repo=vec,
-            embedder=embedder,
-            rebuild_on_index_failure=True,
-        )
-        deleted_stale = int(deleted_sql)
-        rebuilt = rebuilt or rebuilt_del
-    return rebuilt, deleted_stale
-
-
 def _ingest_batch_sync(
     *,
     plans_bound: tuple[IngestPlan, ...],
     doc_repo: Any,
-    embedder: EmbedderPort | None,
-    vec: Any,
+    coordinator: MutationCoordinator,
 ) -> BatchSyncResult:
-    from local_rag_backend.core.services.maintenance import delete_documents_multi_store
-
     all_items, stale_ids_all, stale_by_file, ingested_chunks = _collect_batch_items_and_stale(
         plans_bound=plans_bound,
         doc_repo=doc_repo,
     )
     unique_items = _deduplicate_items_by_external_id(all_items)
-
-    vectors_by_external_id: dict[str, list[float]] = {}
-    if settings.retrieval_mode in ("dense", "hybrid") and unique_items:
-        if embedder is None:
-            raise RuntimeError(
-                "Dense embedder is required for dense/hybrid retrieval mode but was not initialized"
-            )
-        vectors_by_external_id = precompute_vectors_for_changed_items(
-            items=unique_items,
-            doc_repo=doc_repo,
-            embedder=embedder,
-        )
-
-    results: list[Any] = []
-    updated_content_ids: list[str] = []
-    if unique_items:
-        results, _changed_content, updated_content_ids = doc_repo.upsert_documents_by_external_id(
-            unique_items
-        )
-
-    inserted = sum(1 for r in results if r.action == "inserted")
-    updated = sum(1 for r in results if r.action == "updated")
-    unchanged = sum(1 for r in results if r.action == "unchanged")
-    rebuilt = False
-    deleted_stale = 0
     stale_ids_unique = sorted({str(x) for x in stale_ids_all})
 
-    if settings.retrieval_mode in ("dense", "hybrid"):
-        if embedder is None or vec is None:
-            raise RuntimeError(
-                "Dense embedder and vector repo are required for dense/hybrid retrieval mode"
-            )
-        rebuilt, deleted_stale = _sync_and_cleanup_dense_batch(
-            results=results,
-            updated_content_ids=updated_content_ids,
-            vectors_by_external_id=vectors_by_external_id,
-            doc_repo=doc_repo,
-            embedder=embedder,
-            vec=vec,
-            stale_ids_unique=stale_ids_unique,
+    upserts = tuple(
+        MutationUpsertInput(
+            external_id=str(item.external_id),
+            content=str(item.content),
+            source_id=(str(item.source_id) if item.source_id is not None else None),
+            metadata=(dict(item.metadata) if item.metadata is not None else None),
         )
-    elif stale_ids_unique:
-        deleted_sql, _, _ = delete_documents_multi_store(
-            doc_repo=doc_repo,
-            ids=[DocId(x) for x in stale_ids_unique],
+        for item in unique_items
+    )
+    summary = coordinator.execute(
+        MutationIntent(
+            op_id="",
+            upserts=upserts,
+            delete_ids=tuple(stale_ids_unique),
+            source="cli:ingest",
         )
-        deleted_stale = int(deleted_sql)
+    )
 
     return BatchSyncResult(
-        inserted=inserted,
-        updated=updated,
-        unchanged=unchanged,
-        rebuilt=rebuilt,
-        deleted_stale=deleted_stale,
+        inserted=summary.inserted,
+        updated=summary.updated,
+        unchanged=summary.unchanged,
+        rebuilt=bool(summary.index_rebuilt),
+        deleted_stale=int(summary.deleted_sql),
         ingested_chunks=ingested_chunks,
         stale_by_file=stale_by_file,
     )
@@ -348,8 +282,7 @@ def _execute_ingest_batches(
     *,
     ingest_plans: list[IngestPlan],
     doc_repo: Any,
-    embedder: EmbedderPort | None,
-    vec: Any,
+    coordinator: MutationCoordinator,
 ) -> tuple[int, int, int, int, bool]:
     total_inserted = 0
     total_updated = 0
@@ -363,8 +296,7 @@ def _execute_ingest_batches(
         batch = _ingest_batch_sync(
             plans_bound=tuple(plan_batch),
             doc_repo=doc_repo,
-            embedder=embedder,
-            vec=vec,
+            coordinator=coordinator,
         )
         total_chunks += batch.ingested_chunks
         total_inserted += batch.inserted
@@ -411,7 +343,7 @@ def ingest_cmd(
     dry_run: bool,
 ) -> None:
     """
-    Ingest documents from file(s) or directory(ies) into SQLite (+ FAISS for dense/hybrid).
+    Ingest documents from file(s) or directory(ies) into SQLite (+ vector index for dense/hybrid).
 
     Supported formats (best-effort): .txt, .md, .csv.
     """
@@ -421,27 +353,12 @@ def ingest_cmd(
 
     try:
         from local_rag_backend.core.services.ingestion import build_preprocess_fn_from_settings
-        from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
-            SqlDocumentStorage,
-        )
-        from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
-        doc_repo = SqlDocumentStorage()
         preprocess_fn = build_preprocess_fn_from_settings(settings)
         delimiter_opt, has_header = _resolve_loader_options(
             csv_delimiter=csv_delimiter,
             csv_has_header=csv_has_header,
         )
-
-        embedder: EmbedderPort | None = None
-        vec = None
-        if settings.retrieval_mode in ("dense", "hybrid") and not dry_run:
-            embedder = build_dense_embedder()
-            vec = VectorStorage(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                dim=embedder.dim,
-            )
 
         files = _discover_input_files(
             paths=paths,
@@ -472,12 +389,15 @@ def ingest_cmd(
             )
             return
 
+        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
+        doc_repo = ports.doc_repo_factory()
+        coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
+
         def _ingest_sync() -> tuple[int, int, int, int, bool]:
             return _execute_ingest_batches(
                 ingest_plans=ingest_plans,
                 doc_repo=doc_repo,
-                embedder=embedder,
-                vec=vec,
+                coordinator=coordinator,
             )
 
         total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any = (

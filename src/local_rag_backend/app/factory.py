@@ -18,7 +18,7 @@ from local_rag_backend.core.services.maintenance import (
     delete_external_ids_multi_store,
     rebuild_index_from_db,
 )
-from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder

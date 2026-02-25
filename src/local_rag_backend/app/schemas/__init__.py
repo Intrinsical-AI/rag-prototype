@@ -1,17 +1,13 @@
 """HTTP transport schemas grouped by bounded context."""
 
 from local_rag_backend.app.schemas.docs import (
-    DeleteDocsByExternalIdRequest,
-    DeleteDocsByExternalIdResponse,
-    DeleteDocsRequest,
-    DeleteDocsResponse,
+    DocsMutateRequest,
+    DocsMutateResponse,
     ImportResponse,
     IngestRequest,
     IngestResponse,
     UpsertDocItem,
     UpsertDocResult,
-    UpsertDocsRequest,
-    UpsertDocsResponse,
 )
 from local_rag_backend.app.schemas.index import RebuildIndexResponse
 from local_rag_backend.app.schemas.meta import ConfigResponse, TemplateResponse
@@ -20,7 +16,7 @@ from local_rag_backend.app.schemas.openrouter import (
     OpenRouterGenerateResponse,
     OpenRouterUsage,
 )
-from local_rag_backend.app.schemas.rag import (
+from local_rag_backend.app.schemas.rag_api_models import (
     AskEvalConfig,
     AskEvalRequest,
     AskEvalResponse,
@@ -38,10 +34,8 @@ __all__ = [
     "AskRequest",
     "AskResponse",
     "ConfigResponse",
-    "DeleteDocsByExternalIdRequest",
-    "DeleteDocsByExternalIdResponse",
-    "DeleteDocsRequest",
-    "DeleteDocsResponse",
+    "DocsMutateRequest",
+    "DocsMutateResponse",
     "DocumentInDB",
     "HistoryItem",
     "ImportResponse",
@@ -55,6 +49,4 @@ __all__ = [
     "TemplateResponse",
     "UpsertDocItem",
     "UpsertDocResult",
-    "UpsertDocsRequest",
-    "UpsertDocsResponse",
 ]
