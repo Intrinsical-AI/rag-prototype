@@ -39,9 +39,10 @@ classifiers = [
 
 dependencies = [
   # Web Framework & Server
-  "fastapi>=0.111,<0.112",
+  "fastapi>=0.115,<0.116",
   "uvicorn[standard]>=0.29,<1.0",
-  "anyio>=4.3,<4.4",
+  "python-multipart>=0.0.9,<1.0",
+  "anyio>=4.4,<5",
   # AI/ML Core (lightweight defaults; heavy deps are optional extras)
   "rank-bm25>=0.2,<1.0",
   "numpy>=2.0,<2.3",
