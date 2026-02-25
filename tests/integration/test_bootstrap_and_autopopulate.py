@@ -1,6 +1,6 @@
 import csv
-import importlib
 
+from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 from local_rag_backend.settings import settings
 
 
@@ -62,10 +62,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     except ImportError:
         pass
 
-    from local_rag_backend.scripts import bootstrap as bootstrap
-
-    importlib.reload(bootstrap)
-    bootstrap.main()
+    run_sample_data_ingestion()
 
     captured = capsys.readouterr()
     assert "Ingested" in captured.out or "Ingerido" in captured.out

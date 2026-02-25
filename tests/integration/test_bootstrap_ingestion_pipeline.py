@@ -1,9 +1,9 @@
 import csv
-import importlib
 from unittest.mock import patch
 
 from local_rag_backend.core.domain.entities import LoadedItem
 from local_rag_backend.core.domain.types import ItemLineage
+from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 from local_rag_backend.settings import settings
 
 
@@ -25,10 +25,7 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     monkeypatch.setattr(settings, "ingest_chunk_chars", 1200, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 200, raising=False)
 
-    from local_rag_backend.scripts import bootstrap
-
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    run_sample_data_ingestion(settings_obj=settings)
 
     captured = capsys.readouterr()
     assert "Ingested" in captured.out
@@ -106,10 +103,7 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
         DummyVectorIndex,
     )
 
-    from local_rag_backend.scripts import bootstrap
-
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    run_sample_data_ingestion(settings_obj=settings)
 
     captured = capsys.readouterr()
     assert "Ingested" in captured.out
@@ -134,10 +128,7 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "ingest_chunk_chars", 50, raising=False)  # Small chunks
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 10, raising=False)
 
-    from local_rag_backend.scripts import bootstrap
-
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    run_sample_data_ingestion(settings_obj=settings)
 
     # Verify multiple chunks were created
     from sqlalchemy import create_engine
@@ -188,10 +179,7 @@ def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, capsys):
         "local_rag_backend.infrastructure.ingestion.loaders.csv_loader.CSVLoader.load",
         mock_csv_loader_load,
     ):
-        from local_rag_backend.scripts import bootstrap
-
-        importlib.reload(bootstrap)
-        bootstrap.main()
+        run_sample_data_ingestion()
 
         captured = capsys.readouterr()
         assert "Ingested" in captured.out

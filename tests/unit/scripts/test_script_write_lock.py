@@ -1,10 +1,10 @@
 import csv
-import importlib
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
+from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 from local_rag_backend.settings import settings
 
 
@@ -38,10 +38,7 @@ def test_bootstrap_main_uses_multi_store_write_lock(tmp_path, monkeypatch):
         raising=True,
     )
 
-    from local_rag_backend.scripts import bootstrap
-
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    run_sample_data_ingestion(settings_obj=settings)
 
     assert entered
     assert entered == [settings.get_coordination_dir()]
@@ -70,10 +67,10 @@ def test_build_index_uses_multi_store_write_lock_for_sparse_storage(tmp_path, mo
         raising=True,
     )
 
-    from local_rag_backend.scripts import build_index
-
-    importlib.reload(build_index)
-    build_index.main()
+    run_sample_data_ingestion(
+        settings_obj=settings,
+        schema_error_message="Unable to ensure SQLite schema before sample-data ingestion.",
+    )
 
     assert entered
     assert entered == [settings.get_coordination_dir()]
@@ -108,11 +105,11 @@ def test_build_index_raises_when_storage_fails(tmp_path, monkeypatch):
         raising=True,
     )
 
-    from local_rag_backend.scripts import build_index
-
-    importlib.reload(build_index)
     with pytest.raises(RuntimeError, match="forced store failure"):
-        build_index.main()
+        run_sample_data_ingestion(
+            settings_obj=settings,
+            schema_error_message="Unable to ensure SQLite schema before sample-data ingestion.",
+        )
 
 
 def test_build_index_raises_when_schema_ensure_fails(tmp_path, monkeypatch):
@@ -134,8 +131,11 @@ def test_build_index_raises_when_schema_ensure_fails(tmp_path, monkeypatch):
         raising=True,
     )
 
-    from local_rag_backend.scripts import build_index
-
-    importlib.reload(build_index)
-    with pytest.raises(RuntimeError, match=r"Unable to ensure SQLite schema before build-index\."):
-        build_index.main()
+    with pytest.raises(
+        RuntimeError,
+        match=r"Unable to ensure SQLite schema before sample-data ingestion\.",
+    ):
+        run_sample_data_ingestion(
+            settings_obj=settings,
+            schema_error_message="Unable to ensure SQLite schema before sample-data ingestion.",
+        )

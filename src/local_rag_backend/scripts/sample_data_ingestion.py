@@ -1,4 +1,4 @@
-"""Internal sample-data ingestion implementation shared by bootstrap/build-index."""
+"""Internal sample-data ingestion implementation used by bootstrap flows."""
 
 from __future__ import annotations
 
