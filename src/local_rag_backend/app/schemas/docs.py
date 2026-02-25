@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IngestRequest(BaseModel):
@@ -19,47 +19,6 @@ class IngestRequest(BaseModel):
 class IngestResponse(BaseModel):
     count: int
     ids: list[str]
-
-
-class DeleteDocsRequest(BaseModel):
-    ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
-        ..., min_length=1, max_length=1000
-    )
-
-
-class DeleteDocsResponse(BaseModel):
-    deleted_sql: int
-    deleted_index: int | None = None
-    rebuilt_index: bool = False
-
-
-class DeleteDocsByExternalIdRequest(BaseModel):
-    external_ids: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        ..., min_length=1, max_length=512
-    )
-
-    @field_validator("external_ids")
-    @classmethod
-    def _normalize_external_ids(cls, v: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for ext in v:
-            ext_s = ext.strip()
-            if not ext_s or ext_s in seen:
-                continue
-            seen.add(ext_s)
-            normalized.append(ext_s)
-        if not normalized:
-            raise ValueError("external_ids must contain at least one non-blank value")
-        return normalized
-
-
-class DeleteDocsByExternalIdResponse(BaseModel):
-    deleted_sql: int
-    deleted_index: int | None = None
-    tombstoned: int = 0
-    missing_external_ids: list[str] = Field(default_factory=list)
-    rebuilt_index: bool = False
 
 
 class UpsertDocItem(BaseModel):
@@ -85,23 +44,11 @@ class UpsertDocItem(BaseModel):
         return v2
 
 
-class UpsertDocsRequest(BaseModel):
-    docs: list[UpsertDocItem] = Field(..., min_length=1, max_length=64)
-
-
 class UpsertDocResult(BaseModel):
     external_id: str
     id: str
     action: str
     content_changed: bool
-
-
-class UpsertDocsResponse(BaseModel):
-    inserted: int
-    updated: int
-    unchanged: int
-    rebuilt_index: bool = False
-    results: list[UpsertDocResult]
 
 
 class ImportResponse(BaseModel):
@@ -112,3 +59,75 @@ class ImportResponse(BaseModel):
     format_detected: str = Field(
         ..., description="Detected format: chatgpt_export or gemini_export"
     )
+
+
+class DocsMutateRequest(BaseModel):
+    op_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="Optional idempotency key for mutation replay safety.",
+    )
+    upserts: list[UpsertDocItem] = Field(default_factory=list, max_length=256)
+    delete_ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        default_factory=list,
+        max_length=2048,
+    )
+    delete_external_ids: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list,
+        max_length=2048,
+    )
+
+    @field_validator("delete_ids")
+    @classmethod
+    def _normalize_delete_ids(cls, v: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for doc_id in v:
+            doc_id_s = doc_id.strip()
+            if not doc_id_s or doc_id_s in seen:
+                continue
+            seen.add(doc_id_s)
+            normalized.append(doc_id_s)
+        return normalized
+
+    @field_validator("delete_external_ids")
+    @classmethod
+    def _normalize_delete_external_ids(cls, v: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for ext in v:
+            ext_s = ext.strip()
+            if not ext_s or ext_s in seen:
+                continue
+            seen.add(ext_s)
+            normalized.append(ext_s)
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_payload(self) -> DocsMutateRequest:
+        if not self.upserts and not self.delete_ids and not self.delete_external_ids:
+            raise ValueError(
+                "docs/mutate requires at least one operation: upserts, delete_ids, or delete_external_ids"
+            )
+        upsert_ext_ids = {str(doc.external_id).strip() for doc in self.upserts}
+        conflict = upsert_ext_ids & set(self.delete_external_ids)
+        if conflict:
+            raise ValueError(
+                "upserts and delete_external_ids cannot target the same external_id values"
+            )
+        return self
+
+
+class DocsMutateResponse(BaseModel):
+    op_id: str
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    deleted_sql: int = 0
+    deleted_index: int | None = None
+    tombstoned: int = 0
+    missing_external_ids: list[str] = Field(default_factory=list)
+    index_rebuilt: bool = False
+    index_doc_count: int | None = None
+    results: list[UpsertDocResult] = Field(default_factory=list)

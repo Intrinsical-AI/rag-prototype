@@ -25,7 +25,7 @@ def build_index_cmd() -> None:
     """Build FAISS index from existing documents."""
     try:
         from local_rag_backend.app.application import index as index_service
-        from local_rag_backend.app.services.mutation_ports import build_build_index_ports
+        from local_rag_backend.app.wiring.mutation_ports import build_build_index_ports
 
         ports = build_build_index_ports()
 
@@ -50,7 +50,7 @@ def rebuild_index_cmd() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
     try:
         from local_rag_backend.app.application import index as index_service
-        from local_rag_backend.app.services.mutation_ports import build_index_mutation_ports
+        from local_rag_backend.app.wiring.mutation_ports import build_index_mutation_ports
 
         if settings.retrieval_mode not in ("dense", "hybrid"):
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")

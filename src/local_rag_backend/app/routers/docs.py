@@ -8,15 +8,21 @@ from typing import TYPE_CHECKING, Annotated, cast
 
 from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 
-from local_rag_backend.app.application.docs import (
+from local_rag_backend.app.application.docs_import_use_case import (
     ImportDocsOutcome,
     ImportFileTooLargeError,
     ImportPayloadEmptyError,
     InvalidImportPayloadError,
     UnsupportedImportFormatError,
     execute_import_docs_sync,
-    list_docs_page_sync,
 )
+from local_rag_backend.app.application.docs_ingest_use_case import ingest_docs_sync
+from local_rag_backend.app.application.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
+)
+from local_rag_backend.app.application.docs_query_use_case import list_docs_page_sync
 from local_rag_backend.app.application.mutations import run_api_mutation
 from local_rag_backend.app.blocking import run_blocking
 from local_rag_backend.app.composition import DEFAULT_DENSE_BACKEND_MESSAGE
@@ -28,36 +34,26 @@ from local_rag_backend.app.dependencies import (
 )
 from local_rag_backend.app.errors import (
     BadRequestError,
-    ConflictError,
     PayloadTooLargeError,
     UnprocessableEntityError,
 )
 from local_rag_backend.app.observability import Timer, log_event, observe_ingest
 from local_rag_backend.app.schemas.docs import (
-    DeleteDocsByExternalIdRequest,
-    DeleteDocsByExternalIdResponse,
-    DeleteDocsRequest,
-    DeleteDocsResponse,
+    DocsMutateRequest,
+    DocsMutateResponse,
     ImportResponse,
     IngestRequest,
     IngestResponse,
     UpsertDocResult,
-    UpsertDocsRequest,
-    UpsertDocsResponse,
 )
 from local_rag_backend.app.schemas.shared import DocumentInDB
-from local_rag_backend.app.services import docs as docs_service
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from local_rag_backend.app.container import AppContainer
-    from local_rag_backend.app.services.results import (
-        DeleteDocsByExternalIdSummary,
-        DeleteDocsSummary,
-        UpsertDocsSummary,
-    )
+    from local_rag_backend.app.contracts.results import MutationSummary
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
@@ -79,11 +75,11 @@ def _map_ingest_error(exc: Exception) -> BadRequestError | None:
     return None
 
 
-def _map_upsert_error(exc: Exception) -> ConflictError | BadRequestError | None:
-    if isinstance(exc, docs_service.TombstonedExternalIdsError):
-        return ConflictError(str(exc))
+def _map_mutation_error(exc: Exception) -> BadRequestError | None:
     if isinstance(exc, ValueError):
         return BadRequestError(str(exc))
+    if isinstance(exc, EmbeddingsBackendUnavailableError):
+        return BadRequestError(DEFAULT_DENSE_BACKEND_MESSAGE)
     return None
 
 
@@ -101,6 +97,66 @@ def _map_import_error(
     return None
 
 
+@router.post("/docs/mutate", response_model=DocsMutateResponse)
+async def mutate_docs(
+    payload: Annotated[DocsMutateRequest, Body(...)],
+    container: AppContainer = Depends(get_app_container_dependency),
+    settings_obj: Settings = Depends(get_settings_dependency),
+) -> DocsMutateResponse:
+    def _mutate_operation() -> MutationSummary:
+        ports = container.docs_mutation_ports(missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE)
+        coordinator = MutationCoordinator(settings_obj=settings_obj, ports=ports)
+        return coordinator.execute(
+            MutationIntent(
+                op_id=str(payload.op_id or "").strip(),
+                upserts=tuple(
+                    MutationUpsertInput(
+                        external_id=item.external_id,
+                        content=item.content,
+                        source_id=item.source_id,
+                        metadata=item.metadata,
+                    )
+                    for item in payload.upserts
+                ),
+                delete_ids=tuple(payload.delete_ids),
+                delete_external_ids=tuple(payload.delete_external_ids),
+                source="api:/docs/mutate",
+            )
+        )
+
+    summary = cast(
+        "MutationSummary",
+        await run_api_mutation(
+            operation=_mutate_operation,
+            run_locked=container.run_multi_store_write_locked,
+            reset_after=reset_rag_service,
+            run_blocking_fn=run_blocking,
+            map_error=_map_mutation_error,
+        ),
+    )
+    return DocsMutateResponse(
+        op_id=summary.op_id,
+        inserted=summary.inserted,
+        updated=summary.updated,
+        unchanged=summary.unchanged,
+        deleted_sql=summary.deleted_sql,
+        deleted_index=summary.deleted_index,
+        tombstoned=summary.tombstoned,
+        missing_external_ids=list(summary.missing_external_ids or []),
+        index_rebuilt=summary.index_rebuilt,
+        index_doc_count=summary.index_doc_count,
+        results=[
+            UpsertDocResult(
+                external_id=r.external_id,
+                id=r.id,
+                action=r.action,
+                content_changed=r.content_changed,
+            )
+            for r in list(summary.results or [])
+        ],
+    )
+
+
 @router.post("/docs", response_model=IngestResponse)
 async def ingest_docs(
     payload: Annotated[IngestRequest, Body(...)],
@@ -113,12 +169,13 @@ async def ingest_docs(
     t = Timer()
 
     def _ingest_operation() -> list[str]:
-        return docs_service.ingest_docs_sync(
+        return ingest_docs_sync(
             texts=texts,
             settings_obj=settings_obj,
             ports=container.docs_mutation_ports(
                 missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
             ),
+            source="api:/docs",
         )
 
     ok = False
@@ -148,112 +205,6 @@ async def ingest_docs(
             reranker_enabled=bool(settings_obj.enable_reranker),
             duration_ms=int(1000 * t.seconds()),
         )
-
-
-@router.post("/docs/delete_by_external_id", response_model=DeleteDocsByExternalIdResponse)
-async def delete_docs_by_external_id(
-    payload: Annotated[DeleteDocsByExternalIdRequest, Body(...)],
-    container: AppContainer = Depends(get_app_container_dependency),
-    settings_obj: Settings = Depends(get_settings_dependency),
-) -> DeleteDocsByExternalIdResponse:
-    def _delete_operation() -> DeleteDocsByExternalIdSummary:
-        return docs_service.delete_docs_by_external_id_sync(
-            external_ids=payload.external_ids,
-            settings_obj=settings_obj,
-            ports=container.docs_mutation_ports(
-                missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
-            ),
-        )
-
-    summary = cast(
-        "DeleteDocsByExternalIdSummary",
-        await run_api_mutation(
-            operation=_delete_operation,
-            run_locked=container.run_multi_store_write_locked,
-            reset_after=reset_rag_service,
-            run_blocking_fn=run_blocking,
-        ),
-    )
-    return DeleteDocsByExternalIdResponse(
-        deleted_sql=summary.deleted_sql,
-        deleted_index=summary.deleted_index,
-        tombstoned=summary.tombstoned,
-        missing_external_ids=summary.missing_external_ids,
-        rebuilt_index=summary.rebuilt_index,
-    )
-
-
-@router.post("/docs/delete", response_model=DeleteDocsResponse)
-async def delete_docs(
-    payload: Annotated[DeleteDocsRequest, Body(...)],
-    container: AppContainer = Depends(get_app_container_dependency),
-    settings_obj: Settings = Depends(get_settings_dependency),
-) -> DeleteDocsResponse:
-    def _delete_operation() -> DeleteDocsSummary:
-        return docs_service.delete_docs_sync(
-            ids=payload.ids,
-            settings_obj=settings_obj,
-            ports=container.docs_mutation_ports(
-                missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
-            ),
-        )
-
-    summary = cast(
-        "DeleteDocsSummary",
-        await run_api_mutation(
-            operation=_delete_operation,
-            run_locked=container.run_multi_store_write_locked,
-            reset_after=reset_rag_service,
-            run_blocking_fn=run_blocking,
-        ),
-    )
-    return DeleteDocsResponse(
-        deleted_sql=summary.deleted_sql,
-        deleted_index=summary.deleted_index,
-        rebuilt_index=summary.rebuilt_index,
-    )
-
-
-@router.post("/docs/upsert", response_model=UpsertDocsResponse)
-async def upsert_docs(
-    payload: Annotated[UpsertDocsRequest, Body(...)],
-    container: AppContainer = Depends(get_app_container_dependency),
-    settings_obj: Settings = Depends(get_settings_dependency),
-) -> UpsertDocsResponse:
-    def _upsert_operation() -> UpsertDocsSummary:
-        return docs_service.upsert_docs_sync(
-            docs=payload.docs,
-            settings_obj=settings_obj,
-            ports=container.docs_mutation_ports(
-                missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
-            ),
-        )
-
-    summary = cast(
-        "UpsertDocsSummary",
-        await run_api_mutation(
-            operation=_upsert_operation,
-            run_locked=container.run_multi_store_write_locked,
-            reset_after=reset_rag_service,
-            run_blocking_fn=run_blocking,
-            map_error=_map_upsert_error,
-        ),
-    )
-    return UpsertDocsResponse(
-        inserted=summary.inserted,
-        updated=summary.updated,
-        unchanged=summary.unchanged,
-        rebuilt_index=summary.rebuilt_index,
-        results=[
-            UpsertDocResult(
-                external_id=r.external_id,
-                id=r.id,
-                action=r.action,
-                content_changed=r.content_changed,
-            )
-            for r in summary.results
-        ],
-    )
 
 
 @router.post("/docs/import", response_model=ImportResponse)
