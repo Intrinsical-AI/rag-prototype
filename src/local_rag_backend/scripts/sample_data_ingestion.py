@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from local_rag_backend.app.composition import build_dense_embedder_from_settings
+from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.ingestion import (
     IngestionPipeline,

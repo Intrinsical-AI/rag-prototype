@@ -3701,9 +3701,7 @@ name = "rag-prototype"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "anyio", marker = "python_full_version < '3.13'" },
     { name = "click", marker = "python_full_version < '3.13'" },
-    { name = "fastapi", marker = "python_full_version < '3.13'" },
     { name = "httpx", marker = "python_full_version < '3.13'" },
     { name = "numpy", marker = "python_full_version < '3.13'" },
     { name = "openai", marker = "python_full_version < '3.13'" },
@@ -3711,25 +3709,26 @@ dependencies = [
     { name = "pydantic", marker = "python_full_version < '3.13'" },
     { name = "pydantic-settings", marker = "python_full_version < '3.13'" },
     { name = "python-dotenv", marker = "python_full_version < '3.13'" },
-    { name = "python-multipart", marker = "python_full_version < '3.13'" },
     { name = "rank-bm25", marker = "python_full_version < '3.13'" },
     { name = "rich", marker = "python_full_version < '3.13'" },
     { name = "sqlalchemy", marker = "python_full_version < '3.13'" },
-    { name = "uvicorn", extra = ["standard"], marker = "python_full_version < '3.13'" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "faiss-cpu", marker = "python_full_version < '3.13'" },
+    { name = "fastapi", marker = "python_full_version < '3.13'" },
     { name = "langchain-community", marker = "python_full_version < '3.13'" },
     { name = "orjson", marker = "python_full_version < '3.13'" },
     { name = "prometheus-client", marker = "python_full_version < '3.13'" },
     { name = "python-magic", marker = "python_full_version < '3.13'" },
+    { name = "python-multipart", marker = "python_full_version < '3.13'" },
     { name = "sentence-transformers", marker = "python_full_version < '3.13'" },
     { name = "sentry-sdk", extra = ["fastapi"], marker = "python_full_version < '3.13'" },
     { name = "structlog", marker = "python_full_version < '3.13'" },
     { name = "torch", marker = "python_full_version < '3.13'" },
     { name = "trafilatura", marker = "python_full_version < '3.13'" },
+    { name = "uvicorn", extra = ["standard"], marker = "python_full_version < '3.13'" },
 ]
 dense = [
     { name = "faiss-cpu", marker = "python_full_version < '3.13'" },
@@ -3756,6 +3755,11 @@ performance = [
 performance-cpu = [
     { name = "orjson", marker = "python_full_version < '3.13'" },
     { name = "torch", marker = "python_full_version < '3.13'" },
+]
+server = [
+    { name = "fastapi", marker = "python_full_version < '3.13'" },
+    { name = "python-multipart", marker = "python_full_version < '3.13'" },
+    { name = "uvicorn", extra = ["standard"], marker = "python_full_version < '3.13'" },
 ]
 
 [package.dev-dependencies]
@@ -3795,45 +3799,35 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anyio", specifier = ">=4.4,<5" },
     { name = "click", specifier = ">=8.0,<9.0" },
-    { name = "faiss-cpu", marker = "extra == 'all'", specifier = ">=1.8.0,<2.0" },
     { name = "faiss-cpu", marker = "extra == 'dense'", specifier = ">=1.8.0,<2.0" },
-    { name = "fastapi", specifier = ">=0.124,<0.125" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.124,<0.125" },
     { name = "httpx", specifier = ">=0.27,<0.28" },
-    { name = "langchain-community", marker = "extra == 'all'", specifier = ">=0.2,<1.0" },
     { name = "langchain-community", marker = "extra == 'loaders'", specifier = ">=0.2,<1.0" },
     { name = "numpy", specifier = ">=2.0,<2.3" },
     { name = "openai", specifier = ">=1.24,<2.0" },
-    { name = "orjson", marker = "extra == 'all'", specifier = ">=3.10,<4.0" },
     { name = "orjson", marker = "extra == 'performance'", specifier = ">=3.10,<4.0" },
     { name = "orjson", marker = "extra == 'performance-cpu'", specifier = ">=3.10,<4.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
-    { name = "prometheus-client", marker = "extra == 'all'", specifier = ">=0.19,<1.0" },
     { name = "prometheus-client", marker = "extra == 'monitoring'", specifier = ">=0.19,<1.0" },
     { name = "pydantic", specifier = ">=2.0,<3.0" },
     { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
     { name = "python-dotenv", specifier = ">=1.0,<2.0" },
-    { name = "python-magic", marker = "extra == 'all'", specifier = ">=0.4,<1.0" },
     { name = "python-magic", marker = "extra == 'magic'", specifier = ">=0.4,<1.0" },
-    { name = "python-multipart", specifier = ">=0.0.9,<1.0" },
+    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9,<1.0" },
+    { name = "rag-prototype", extras = ["server", "dense", "dense-st", "loaders", "magic", "performance", "monitoring"], marker = "extra == 'all'" },
     { name = "rank-bm25", specifier = ">=0.2,<1.0" },
     { name = "rich", specifier = ">=13.0,<14.0" },
-    { name = "sentence-transformers", marker = "extra == 'all'", specifier = ">=2.7,<3.0" },
     { name = "sentence-transformers", marker = "extra == 'dense-st'", specifier = ">=2.7,<3.0" },
-    { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'all'", specifier = ">=1.40,<2.0" },
     { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'monitoring'", specifier = ">=1.40,<2.0" },
     { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
-    { name = "structlog", marker = "extra == 'all'", specifier = ">=23.0,<24.0" },
     { name = "structlog", marker = "extra == 'monitoring'", specifier = ">=23.0,<24.0" },
-    { name = "torch", marker = "extra == 'all'", specifier = ">=2.0,<3.0" },
     { name = "torch", marker = "extra == 'performance'", specifier = ">=2.0,<3.0" },
     { name = "torch", marker = "extra == 'performance-cpu'", specifier = ">=2.0,<3.0" },
-    { name = "trafilatura", marker = "extra == 'all'", specifier = ">=1.8,<2.0" },
     { name = "trafilatura", marker = "extra == 'loaders'", specifier = ">=1.8,<2.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.29,<1.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.29,<1.0" },
 ]
-provides-extras = ["dense", "dense-st", "loaders", "magic", "performance", "performance-cpu", "monitoring", "all"]
+provides-extras = ["server", "dense", "dense-st", "loaders", "magic", "performance", "performance-cpu", "monitoring", "all"]
 
 [package.metadata.requires-dev]
 dev = [

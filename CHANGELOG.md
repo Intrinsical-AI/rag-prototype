@@ -6,6 +6,44 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-26
+
+### BREAKING
+
+- **Screaming Architecture refactor**: `app/` package eliminated entirely.
+  - `app/application/` → `core/use_cases/` (transport-agnostic use cases).
+  - `app/contracts/ports.py` → `core/ports/contracts.py`.
+  - `app/contracts/results.py` → `core/use_cases/results.py`.
+  - `app/errors.py` → `core/use_cases/errors.py`.
+  - `app/{composition,container,factory,app_context}.py` → `composition/` (transport-neutral DI root).
+  - `app/wiring/` → `composition/wiring/`.
+  - `app/{diagnostics,metrics_backend,observability,telemetry}.py` → `infrastructure/observability/`.
+  - `app/blocking.py` → `infrastructure/concurrency/blocking.py`.
+  - `app/application/storage_profiles.py` → `core/domain/profiles.py`.
+  - All remaining HTTP-specific files → `http/` (routers, schemas, middleware, security, main).
+- **FastAPI is now an optional dependency**: moved `fastapi`, `uvicorn`, `python-multipart` to
+  `[project.optional-dependencies.server]`. Install with `pip install rag-prototype[server]`
+  or `uv sync --extra server`.
+- ASGI entry point changed: `local_rag_backend.app.main:app` → `local_rag_backend.http.main:app`.
+- `all` extra now uses PEP 621 self-referencing syntax to include `server` transitively.
+- `error_mapping.py` moved from `http/` into `core/use_cases/errors.py::map_runtime_error`.
+- `AppContainer` public method signatures use `AskEvalConfigLike` Protocol (from
+  `core/use_cases/rag_query`) instead of the concrete `AskEvalConfig` Pydantic schema.
+
+### Added
+
+- Architecture guard tests enforce layer dependency rules:
+  - `core/{domain,ports,services}` must not import `infrastructure/`, `http/`, or `composition/`.
+  - `core/use_cases/` must not import `http/` or `fastapi`/`starlette`.
+  - No `local_rag_backend.app.*` references remain in source.
+- `AskEvalConfigLike` Protocol with 9 properties for transport-neutral RAG evaluation config.
+- `Makefile` sync targets include `--extra server` for dev/test/lint environments.
+
+### Changed
+
+- Dockerfile: ASGI entry point updated to `local_rag_backend.http.main:app`; `--extra server`
+  added to dependency sync stages.
+
 ## [1.1.0] - 2026-02-25
 
 ### Security
@@ -16,7 +54,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Added
 - `VectorRepoPort.ntotal` read-only property for non-destructive preflight health checks
   (used in maintenance preflight before rebuild/delete operations).
-- `WriteLockPort` Protocol in `app/contracts/ports.py`; `DocsMutationPorts.write_lock`
+- `WriteLockPort` Protocol in `core/ports/contracts.py`; `DocsMutationPorts.write_lock`
   is now explicitly typed against it.
 - gitleaks v8.24.2 pre-commit hook for secret and credential detection.
 - `check-json` and `debug-statements` pre-commit hooks.

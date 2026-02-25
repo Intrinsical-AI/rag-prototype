@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar, cast
 
-from local_rag_backend.app.composition import build_dense_embedder_from_settings
+from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
@@ -38,7 +38,7 @@ def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
 
 
 def _reset_rag_service_best_effort() -> None:
-    from local_rag_backend.app.factory import reset_rag_service
+    from local_rag_backend.composition.factory import reset_rag_service
 
     try:
         reset_rag_service()
@@ -52,7 +52,7 @@ def run_cli_mutation(
     use_lock: bool = True,
     ensure_schema: bool = True,
 ) -> T:
-    from local_rag_backend.app.application.mutations import (
+    from local_rag_backend.core.use_cases.mutations import (
         run_cli_mutation as run_cli_mutation_core,
     )
 

@@ -1,44 +1,52 @@
-# App Layer (FastAPI) - Current Boundaries
+# Application Layers — Current Boundaries
 
-La capa `app` es la capa de entrega y orquestación: traduce HTTP/CLI a casos de uso, aplica políticas operativas (locking, recovery, errores, observabilidad) y delega al core/infra a través de contratos.
+La estructura del proyecto separa preocupaciones en capas concéntricas: `core/` (dominio y casos de uso), `infrastructure/` (adaptadores), `composition/` (DI), y dos transportes (`http/`, `cli_commands/`).
 
 ## Objetivo de diseño
 
-- Una sola capa de orquestación: `app/application`.
-- Sin capa intermedia ambigua (`app/services` fue eliminada).
+- Casos de uso transport-agnostic en `core/use_cases/`.
+- Composition root independiente del transporte: `composition/`.
 - Escrituras centralizadas en `MutationCoordinator`.
 - Routers/CLI finos, sin lógica de negocio distribuida.
+- FastAPI como dependencia opcional (`[server]` extra).
 
 ---
 
 ## Submódulos clave
 
-### `app/application`
+### `core/use_cases/`
 
 Casos de uso y coordinación transport-agnostic:
 
 - `docs_mutation.py`: `MutationCoordinator`, `MutationIntent`.
-- `docs_ingest_use_case.py`: ingesta de textos con salida a mutación canónica.
-- `docs_import_use_case.py`: import de JSON (ChatGPT/Gemini) + delegación a ingesta.
-- `docs_query_use_case.py`: consulta/listado de documentos.
-- `rag_query_use_case.py`: ask_eval + history read path.
+- `docs_ingest.py`: ingesta de textos con salida a mutación canónica.
+- `docs_import.py`: import de JSON (ChatGPT/Gemini) + delegación a ingesta.
+- `docs_query.py`: consulta/listado de documentos.
+- `rag_query.py`: ask_eval + history read path.
 - `mutations.py`: wrapper compartido de ejecución de mutaciones API/CLI.
-- `storage_profiles.py`: capabilities (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`).
-
-### `app/contracts`
-
-Contratos de app-layer:
-
-- `ports.py`: `DocsMutationPorts`, `IndexMutationPorts`, `MutationJournalPort`, etc.
+- `errors.py`: errores tipados de aplicación + `map_runtime_error`.
 - `results.py`: DTOs de salida de casos de uso.
 
-### `app/wiring`
+### `core/domain/`
 
-Builders por defecto de dependencias para mutación/index:
+- `profiles.py`: capabilities (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`), `StorageProfileRegistry`.
 
-- `mutation_ports.py`
+### `core/ports/`
 
-### `app/routers`
+Contratos de puertos:
+
+- `__init__.py`: `RetrieverPort`, `GeneratorPort`, `EmbedderPort`, etc.
+- `contracts.py`: `DocsMutationPorts`, `IndexMutationPorts`, `MutationJournalPort`, etc.
+
+### `composition/`
+
+Composition root y lifecycle runtime (transport-neutral):
+
+- `container.py` + `factory.py`: construcción de retriever/generator/rag runtime, cache/versionado de `RagService`, wiring de puertos para mutaciones, recovery de journal.
+- `adapters.py`: builders de adaptadores de infraestructura.
+- `wiring/mutation_ports.py`: builders por defecto de dependencias para mutación/index.
+
+### `http/routers/`
 
 Adaptadores HTTP por bounded context:
 
@@ -48,23 +56,15 @@ Adaptadores HTTP por bounded context:
 - `health.py`: `GET /health`, `GET /ready`, `GET /health/ollama`
 - `openrouter.py`, `meta.py`
 
-### `app/container.py` + `app/factory.py`
-
-Composition root y lifecycle runtime:
-
-- construcción de retriever/generator/rag runtime,
-- cache/versionado de `RagService`,
-- wiring de puertos para mutaciones,
-- recovery de journal incompleto al startup/background.
-
 ---
 
 ## Fronteras estrictas
 
-- `routers/*` no importan `infrastructure/*` directamente.
-- `application/*` no importa `fastapi`, `routers` ni `schemas`.
-- `core/*` no importa `app/*`.
-- No se permiten imports a `app.services`.
+- `core/{domain,ports,services}` no importan `infrastructure/`, `http/`, ni `composition/`.
+- `core/use_cases/` no importa `http/` ni `fastapi`/`starlette`.
+- `http/routers/*` no importan `infrastructure/*` directamente.
+- `composition/` solo importa `http/` bajo `TYPE_CHECKING`.
+- `cli_commands/` importa `core/` y `composition/`, nunca `http/`.
 
 Estas reglas están cubiertas por tests de arquitectura.
 
@@ -99,7 +99,7 @@ No se promete 2PC universal entre cualquier backend, pero sí garantía de opera
 
 `/ask` y `/ask_eval` usan `core/services/rag_runtime.py::RagService` con retriever/generator resueltos en `AppContainer`.
 
-El offload de trabajo bloqueante está centralizado en `app/blocking.py` con pools por tipo de tarea (`default|mutation|network|eval`).
+El offload de trabajo bloqueante está centralizado en `infrastructure/concurrency/blocking.py` con pools por tipo de tarea (`default|mutation|network|eval`).
 
 ---
 

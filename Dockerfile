@@ -41,7 +41,7 @@ RUN set -eux; \
         EXTRA_FLAGS="${EXTRA_FLAGS} --extra ${extra}"; \
       done; \
     fi; \
-    uv sync --frozen --no-dev ${EXTRA_FLAGS}
+    uv sync --frozen --no-dev --extra server ${EXTRA_FLAGS}
 
 # --- Stage 3: Development Environment ---
 FROM deps as development
@@ -55,11 +55,11 @@ RUN set -eux; \
         EXTRA_FLAGS="${EXTRA_FLAGS} --extra ${extra}"; \
       done; \
     fi; \
-    uv sync --frozen --extra dev --extra test --extra lint ${EXTRA_FLAGS}
+    uv sync --frozen --extra server --extra dev --extra test --extra lint ${EXTRA_FLAGS}
 
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 USER appuser
-CMD ["uvicorn", "local_rag_backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "local_rag_backend.http.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # --- Stage 4: Production runtime (minimal) ---
 FROM ${PYTHON_IMAGE} as production
@@ -87,7 +87,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 USER appuser
 EXPOSE 8000
-CMD ["uvicorn", "local_rag_backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--access-log", "--log-level", "info"]
+CMD ["uvicorn", "local_rag_backend.http.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--access-log", "--log-level", "info"]
 
 # --- Stage 5: Testing Environment ---
 FROM development as testing

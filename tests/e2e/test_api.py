@@ -2,8 +2,8 @@
 import tempfile
 from pathlib import Path
 
-from local_rag_backend.app.dependencies import get_rag_service
-from local_rag_backend.app.main import app
+from local_rag_backend.http.dependencies import get_rag_service
+from local_rag_backend.http.main import app
 
 
 class DummyRagSvc:
@@ -44,11 +44,11 @@ async def test_get_root_frontend_not_found(asgi_client, tmp_path, monkeypatch):
     # Simulate that index.html does not exist neither in package nor in repo
     # 1) Force failure when searching for packaged resources
     monkeypatch.setattr(
-        "local_rag_backend.app.main.resources.files",
+        "local_rag_backend.http.main.resources.files",
         lambda *a, **k: object(),  # object without .joinpath -> will raise exception and fallback
     )
     # 2) Fallback points to empty directory
-    monkeypatch.setattr("local_rag_backend.app.main.FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr("local_rag_backend.http.main.FRONTEND_DIR", tmp_path)
     resp = await asgi_client.get("/")
     assert resp.status_code == 404
 
@@ -62,7 +62,7 @@ async def test_get_root_frontend_packaged_ok(asgi_client, monkeypatch):
         def joinpath(self, name):
             return idx
 
-    monkeypatch.setattr("local_rag_backend.app.main.resources.files", lambda *_: _Pkg())
+    monkeypatch.setattr("local_rag_backend.http.main.resources.files", lambda *_: _Pkg())
     resp = await asgi_client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
@@ -83,7 +83,7 @@ async def test_get_frontend_assets_packaged_ok(asgi_client, monkeypatch):
         def joinpath(self, *parts):
             return base.joinpath(*parts)
 
-    monkeypatch.setattr("local_rag_backend.app.main.resources.files", lambda *_: _Pkg())
+    monkeypatch.setattr("local_rag_backend.http.main.resources.files", lambda *_: _Pkg())
 
     r_css = await asgi_client.get("/assets/styles.css")
     assert r_css.status_code == 200

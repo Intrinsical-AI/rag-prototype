@@ -38,12 +38,12 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     )
     monkeypatch.setattr(index_cmd_module, "run_cli_mutation", _fake_run_cli_mutation, raising=True)
     monkeypatch.setattr(
-        "local_rag_backend.app.wiring.mutation_ports.build_index_mutation_ports",
+        "local_rag_backend.composition.wiring.mutation_ports.build_index_mutation_ports",
         _fake_build_index_mutation_ports,
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.app.application.index.rebuild_index_sync",
+        "local_rag_backend.core.use_cases.index.rebuild_index_sync",
         _fake_rebuild_index_sync,
         raising=True,
     )

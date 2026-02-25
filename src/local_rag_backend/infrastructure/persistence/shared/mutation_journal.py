@@ -10,7 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
-from local_rag_backend.app.contracts.ports import (
+from local_rag_backend.core.ports.contracts import (
     MutationJournalPort,
     MutationRecord,
     MutationState,

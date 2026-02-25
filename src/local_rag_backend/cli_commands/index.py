@@ -4,15 +4,15 @@ from pathlib import Path
 
 import click
 
-from local_rag_backend.app.diagnostics import (
-    get_documents_count,
-    get_history_count,
-    get_retrieval_index_stats,
-)
 from local_rag_backend.cli_commands.runtime import (
     build_dense_embedder,
     ensure_sqlite_schema_for_cli,
     run_cli_mutation,
+)
+from local_rag_backend.infrastructure.observability.diagnostics import (
+    get_documents_count,
+    get_history_count,
+    get_retrieval_index_stats,
 )
 from local_rag_backend.infrastructure.persistence.vector.manifest import (
     expected_manifest_config_from_settings,
@@ -24,8 +24,8 @@ from local_rag_backend.settings import settings
 def rebuild_index_cmd() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
     try:
-        from local_rag_backend.app.application import index as index_service
-        from local_rag_backend.app.wiring.mutation_ports import build_index_mutation_ports
+        from local_rag_backend.composition.wiring.mutation_ports import build_index_mutation_ports
+        from local_rag_backend.core.use_cases import index as index_service
 
         if settings.retrieval_mode not in ("dense", "hybrid"):
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")

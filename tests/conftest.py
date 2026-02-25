@@ -48,7 +48,7 @@ def in_memory_sqlite(monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_app_context_between_tests():
     """Ensure each test starts with a fresh app container/context."""
-    from local_rag_backend.app.factory import reset_app_context
+    from local_rag_backend.composition.factory import reset_app_context
 
     reset_app_context()
     try:
@@ -91,7 +91,7 @@ async def asgi_client(in_memory_sqlite, monkeypatch, tmp_path):
     _ = in_memory_sqlite
     import httpx
 
-    from local_rag_backend.app.main import app
+    from local_rag_backend.http.main import app
     from local_rag_backend.settings import settings
 
     # Give each test its own isolated data directory so that parallel

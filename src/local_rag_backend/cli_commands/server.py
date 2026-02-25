@@ -15,7 +15,7 @@ def server_cmd() -> None:
     click.echo(f"   - Retrieval: {settings.retrieval_mode}")
 
     uvicorn.run(
-        "local_rag_backend.app.main:app",
+        "local_rag_backend.http.main:app",
         host=settings.app_host,
         port=settings.app_port,
         reload=settings.debug,

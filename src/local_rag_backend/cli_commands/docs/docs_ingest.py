@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from local_rag_backend.app.application.docs_mutation import (
+from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
+from local_rag_backend.composition.wiring.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.core.use_cases.docs_mutation import (
     MutationCoordinator,
     MutationIntent,
     MutationUpsertInput,
 )
-from local_rag_backend.app.wiring.mutation_ports import build_docs_mutation_ports
-from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:

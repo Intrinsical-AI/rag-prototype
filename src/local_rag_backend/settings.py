@@ -9,7 +9,7 @@ via environment variables or .env file.
 Example:
     export OPENAI_API_KEY=\"your-key-here\"
     export RETRIEVAL_MODE=\"hybrid\"
-    python -m local_rag_backend.app.main
+    python -m local_rag_backend.http.main
 """
 
 from __future__ import annotations

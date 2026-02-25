@@ -4,9 +4,9 @@ import json
 
 from click.testing import CliRunner
 
-from local_rag_backend.app.contracts.results import MutationSummary
 from local_rag_backend.cli import cli
 from local_rag_backend.cli_commands.docs import docs_ingest, docs_mutate
+from local_rag_backend.core.use_cases.results import MutationSummary
 from local_rag_backend.settings import settings
 
 

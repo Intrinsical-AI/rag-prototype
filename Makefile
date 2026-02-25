@@ -13,11 +13,11 @@ IMAGE_TAG ?= latest
 	@touch $@
 
 .venv/.uv-sync-stamp: .venv/.python-stamp pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --no-default-groups
+	$(UV) sync --frozen --group test --group lint --extra server --no-default-groups
 	@touch $@
 
 .venv/.uv-sec-stamp: .venv/.python-stamp pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --group sec --no-default-groups
+	$(UV) sync --frozen --group test --group lint --group sec --extra server --no-default-groups
 	@touch $@
 
 help: ## Show available targets

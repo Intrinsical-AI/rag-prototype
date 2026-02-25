@@ -1,15 +1,16 @@
 # Architecture Guide: Hexagonal + Durable Multi-Store Writes
 
-`rag-prototype` uses a hexagonal architecture (Ports & Adapters) with an explicit app layer for orchestration and transport boundaries.
+`rag-prototype` uses a hexagonal architecture (Ports & Adapters) with explicit layer boundaries and a transport-neutral composition root.
 
 ## Core principles
 
 - Core domain logic depends on ports, never on infrastructure implementations.
-- HTTP/CLI are transport adapters; business orchestration lives in `app/application`.
+- HTTP/CLI are transport adapters; business orchestration lives in `core/use_cases/`.
 - Persistence and model providers are swappable through ports and wiring factories.
 - Multi-store writes (SQL + vector index) are centralized in one coordinator (`DURABLE_SAGA`).
+- FastAPI is an optional dependency (`[server]` extra). The core, infrastructure, and composition layers work without it.
 
-> Golden Rule 1: Si borras la carpeta app/ (FastAPI), el sistema RAG (ingesta, mutación, query) debe seguir funcionando al 100% usando solo Python puro invocando core/services.
+> Golden Rule: Si borras la carpeta `http/` (FastAPI), el sistema RAG (ingesta, mutación, query) debe seguir funcionando al 100% usando solo Python puro invocando `core/services`.
 
 ---
 
@@ -17,51 +18,70 @@
 
 ```text
 src/local_rag_backend/
-├── app/
-│   ├── application/            # transport-agnostic use cases/orchestration
-│   │   ├── docs_mutation.py    # MutationCoordinator (canonical write path)
-│   │   ├── docs_*_use_case.py  # ingest/import/query docs use cases
-│   │   ├── rag_query_use_case.py
-│   │   ├── mutations.py        # shared API/CLI mutation execution wrapper
-│   │   └── storage_profiles.py # capability gates (ATOMIC/DURABLE_SAGA/READ_ONLY)
-│   ├── contracts/              # app-layer contracts (ports/results)
-│   ├── wiring/                 # default wiring builders for mutation ports
-│   ├── routers/                # FastAPI transport adapters
-│   ├── schemas/                # HTTP Pydantic models
-│   ├── container.py            # composition root for app runtime
-│   └── factory.py              # app context lifecycle and compatibility shims
 ├── core/
-│   ├── domain/                 # entities/value objects
-│   ├── ports/                  # Embedder/Generator/Retriever/Repo ports
-│   └── services/               # domain-oriented services (rag_runtime, ingestion, etc.)
+│   ├── domain/                 # entities, value objects, storage profiles
+│   ├── ports/                  # Embedder/Generator/Retriever/Repo ports + contracts
+│   ├── services/               # domain-oriented services (rag_runtime, ingestion, etc.)
+│   └── use_cases/              # transport-agnostic use cases/orchestration
+│       ├── docs_mutation.py    # MutationCoordinator (canonical write path)
+│       ├── docs_ingest.py      # ingest texts use case
+│       ├── docs_import.py      # import JSON (ChatGPT/Gemini) use case
+│       ├── docs_query.py       # query/list docs use case
+│       ├── rag_query.py        # ask_eval + history read path
+│       ├── mutations.py        # shared API/CLI mutation execution wrapper
+│       ├── errors.py           # typed app errors + map_runtime_error
+│       └── results.py          # use-case output DTOs
 ├── infrastructure/
 │   ├── persistence/            # sql + vector + shared
 │   ├── retrieval/              # sparse/dense/hybrid adapters
 │   ├── llms/                   # OpenAI/Ollama adapters
-│   └── embeddings/             # OpenAI/ST adapters
+│   ├── embeddings/             # OpenAI/ST adapters
+│   ├── concurrency/            # blocking task executor (stdlib-only)
+│   └── observability/          # telemetry, metrics, diagnostics
+├── composition/                # DI container, factory, wiring (transport-neutral)
+│   ├── container.py            # AppContainer composition root
+│   ├── factory.py              # app context lifecycle
+│   ├── adapters.py             # infrastructure adapter builders
+│   └── wiring/                 # default wiring builders for mutation ports
+├── http/                       # FastAPI transport adapter (optional [server] extra)
+│   ├── routers/                # HTTP route handlers
+│   ├── schemas/                # Pydantic HTTP models
+│   ├── main.py                 # ASGI entry point
+│   └── ...                     # middleware, security, dependencies
 └── cli_commands/               # CLI transport adapters
 ```
 
-`app/services` does not exist anymore by design. Its old responsibilities were split into:
+---
 
-- `app/contracts/*` for contracts/DTOs.
-- `app/wiring/*` for adapter wiring.
-- `app/application/*` for use-case orchestration.
+## Layer dependency rules
+
+```
+core/domain/    ← imported by all, imports nothing from local_rag_backend
+core/ports/     ← imports core/domain/ only
+core/services/  ← imports core/domain/, core/ports/
+core/use_cases/ ← imports core/domain/, core/ports/, core/services/
+infrastructure/ ← imports core/ only
+composition/    ← imports core/, infrastructure/ (http/ only under TYPE_CHECKING)
+http/           ← imports core/, infrastructure/, composition/
+cli_commands/   ← imports core/, composition/ (NOT http/)
+```
+
+These boundaries are enforced by architecture tests under `tests/unit/http/test_architecture_*`.
 
 ---
 
 ## Layer boundaries
 
-- `app/routers/*` must not import `infrastructure/*` directly.
-- `app/application/*` must not import HTTP transport (`fastapi`, routers, schemas).
-- `core/*` must not import `app/*` or concrete infrastructure.
-- Cross-layer runtime error mapping is centralized in `app/error_mapping.py` + `app/http/exception_handlers.py`.
-
-These boundaries are enforced by architecture tests under `tests/unit/app/test_architecture_*`.
+- `core/{domain,ports,services}` must not import `infrastructure/`, `http/`, or `composition/`.
+- `core/use_cases/` must not import `http/` or `fastapi`/`starlette`.
+- `http/routers/*` must not import `infrastructure/*` directly.
+- `composition/` only imports `http/` under `TYPE_CHECKING`.
+- `cli_commands/` imports `core/` and `composition/`, never `http/`.
+- Cross-layer runtime error mapping is centralized in `core/use_cases/errors.py::map_runtime_error` + `http/exception_handlers.py`.
 
 ### Transport isolation contract
 
-**Golden rule**: deleting the entire `app/` directory must not break the RAG system.
+**Golden rule**: deleting the entire `http/` directory must not break the RAG system.
 Ingestion, mutation, and query must remain fully functional by importing and calling
 `core/services` directly from plain Python — no FastAPI, no Starlette, no HTTP.
 
@@ -69,18 +89,14 @@ Practical test — the following must work in a vanilla Python script:
 
 ```python
 from local_rag_backend.core.services.rag_runtime import RagService
-from local_rag_backend.core.services.ingestion import IngestionPipeline
+from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
+from local_rag_backend.core.domain.profiles import StorageProfileRegistry
 ```
 
-**Implication for use-case authors**: functions in `app/application/` must accept
+**Implication for use-case authors**: functions in `core/use_cases/` must accept
 transport-neutral inputs — `LoaderPort`, `Sequence[str]`, `bytes`, or `io.BytesIO` —
 never `fastapi.UploadFile` or Pydantic HTTP schemas. The FastAPI router converts the
 HTTP request into those neutral types before calling the use case.
-
-Current implementation:
-
-- `ingest_docs_sync` receives `Sequence[str]` — no HTTP type.
-- `docs_import_use_case` receives `bytes` — no HTTP type.
 
 ---
 

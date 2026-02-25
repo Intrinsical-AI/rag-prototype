@@ -55,7 +55,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, caplog):
 
     # Reset singleton if needed
     try:
-        from local_rag_backend.app import factory
+        from local_rag_backend.composition import factory
 
         if hasattr(factory, "reset_rag_service"):
             factory.reset_rag_service()

@@ -51,9 +51,14 @@
 .
 ├── data/                      # CSV, SQLite DB, FAISS files
 ├── src/local_rag_backend/
-│   ├── app/                   # FastAPI layer (routers, DI, use cases, factory)
-│   ├── core/                  # domain, ports and services (ETL, RAG)
-│   ├── infrastructure/        # adapters: llms, retrievers, storage, loaders
+│   ├── core/                  # domain, ports, services, use cases
+│   │   ├── domain/            # entities, types, storage profiles
+│   │   ├── ports/             # abstract contracts (Protocol-based)
+│   │   ├── services/          # domain services (ETL, RAG runtime, reranking)
+│   │   └── use_cases/         # application use cases (ingest, query, mutation, …)
+│   ├── infrastructure/        # adapters: llms, retrievers, storage, loaders, observability
+│   ├── composition/           # DI container, factory, wiring (transport-neutral)
+│   ├── http/                  # FastAPI transport adapter (routers, schemas, middleware)
 │   ├── cli_commands/          # CLI transport adapters (ingest, mutate, eval, …)
 │   ├── scripts/               # internal scripts (sample data ingestion)
 │   └── frontend/              # packaged index.html to serve at /
@@ -62,8 +67,8 @@
 
 ## Type boundaries
 
-* `app/schemas/*`: HTTP request/response contracts (Pydantic transport layer).
-* `app/contracts/results.py`: app-layer use-case outputs shared by API/CLI.
+* `http/schemas/*`: HTTP request/response contracts (Pydantic transport layer).
+* `core/use_cases/results.py`: use-case outputs shared by API/CLI.
 * `core/services/types.py`: transport-agnostic core DTOs (chunking/eval/detection).
 * `core/domain/entities.py`: domain entities and business invariants.
 * `infrastructure/persistence/*/models.py`: ORM persistence models.
@@ -73,23 +78,23 @@
 ## Strict Request-Flow Architecture (`/api/ask`)
 
 The following diagram maps the real runtime path of a request from
-`src/local_rag_backend/app/routers/rag_router.py` to `core/ports` and into
+`src/local_rag_backend/http/routers/rag_router.py` to `core/ports` and into
 `infrastructure/retrieval`.
 
 ```mermaid
 flowchart TD
-    C[Client HTTP] --> M[FastAPI app\napp/main.py]
-    M --> AR[API Router\napp/api_router.py]
-    AR --> RR[RAG Router\napp/routers/rag_router.py::ask]
+    C[Client HTTP] --> M[FastAPI app\nhttp/main.py]
+    M --> AR[API Router\nhttp/api_router.py]
+    AR --> RR[RAG Router\nhttp/routers/rag_router.py::ask]
 
-    RR --> D1[Dependency\napp/dependencies.py::get_rag_service]
-    D1 --> F1[Factory\napp/factory.py::get_rag_service]
-    F1 --> AC[AppContainer\napp/container.py::get_rag_service]
-    AC --> BRS[build_rag_service\napp/container.py]
+    RR --> D1[Dependency\nhttp/dependencies.py::get_rag_service]
+    D1 --> F1[Factory\ncomposition/factory.py::get_rag_service]
+    F1 --> AC[AppContainer\ncomposition/container.py::get_rag_service]
+    AC --> BRS[build_rag_service\ncomposition/container.py]
 
     BRS --> RS[core/services/rag_runtime.py::RagService]
 
-    BRS --> COMP[composition.build_retriever_with_default_embedder_from_settings\napp/composition.py]
+    BRS --> COMP[build_retriever_with_default_embedder_from_settings\ncomposition/adapters.py]
     COMP --> RP[core/ports::RetrieverPort]
     RP --> SBR[infrastructure/retrieval/sparse_bm25.py::SparseBM25Retriever]
     RP --> DFR[infrastructure/retrieval/dense_vector.py::DenseVectorRetriever]
@@ -104,7 +109,7 @@ flowchart TD
     BRS --> HP[core/ports::QAHistoryPort]
     HP --> HSQL[infrastructure/persistence/sql/alchemy_engine.py::HistorySqlStorage]
 
-    RR --> RB[app/blocking.py::run_blocking]
+    RR --> RB[infrastructure/concurrency/blocking.py::run_blocking]
     RB --> RS
     RS --> RP
     RS --> GP
@@ -119,10 +124,10 @@ flowchart TD
 sequenceDiagram
     autonumber
     participant Client
-    participant Router as app/routers/rag_router.py::ask
-    participant Dep as app/dependencies.py::get_rag_service
-    participant Factory as app/factory.py::get_rag_service
-    participant Container as app/container.py::AppContainer
+    participant Router as http/routers/rag_router.py::ask
+    participant Dep as http/dependencies.py::get_rag_service
+    participant Factory as composition/factory.py::get_rag_service
+    participant Container as composition/container.py::AppContainer
     participant RagService as core/services/rag_runtime.py::RagService
     participant Retriever as core/ports::RetrieverPort
     participant InfraRet as infrastructure/retrieval/*
@@ -161,7 +166,7 @@ sequenceDiagram
 * If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
   `RetrieverPort := RerankingRetriever(base=<selected>)`
 
-This boundary is enforced in `app/composition.py` and consumed by `AppContainer`.
+This boundary is enforced in `composition/adapters.py` and consumed by `AppContainer`.
 
 ---
 
@@ -179,11 +184,11 @@ uv venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
 
-# Install runtime deps (uses uv.lock)
-uv sync --frozen
+# Install runtime deps (uses uv.lock); --extra server adds FastAPI/uvicorn
+uv sync --frozen --extra server
 
 # (Optional) Dense/Hybrid deps (FAISS)
-# uv sync --frozen --extra dense
+# uv sync --frozen --extra server --extra dense
 #
 # (Optional) SentenceTransformers embeddings (heavy: torch/transformers)
 # uv sync --frozen --extra dense-st
@@ -208,7 +213,7 @@ rag-server
 ```
 
 > Alternative startup (without CLI wrappers):
-> `rag-bootstrap` and `uvicorn local_rag_backend.app.main:app --reload`.
+> `rag-bootstrap` and `uvicorn local_rag_backend.http.main:app --reload`.
 
 ---
 
@@ -533,7 +538,7 @@ curl -X POST "http://localhost:8000/api/ask" \
 ## Tests
 
 ```bash
-UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --no-default-groups
+UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --extra server --no-default-groups
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
 uv run pre-commit run --all-files
@@ -578,7 +583,7 @@ mkdocs serve
 
 ## Extension and integration points
 
-* **LLM**: implement `GeneratorPort` (see `infrastructure/llms/*`) and wire it in `app/factory.py`.
+* **LLM**: implement `GeneratorPort` (see `infrastructure/llms/*`) and wire it in `composition/factory.py`.
 * **Retriever**: implement `RetrieverPort` and wire it in `factory.get_retriever()`.
 * **Vector store**: implement `VectorRepoPort` (e.g., an alternative to FAISS).
 * **Document store**: implement `DocumentRepoPort` to use a DB other than SQLite.
@@ -588,7 +593,7 @@ mkdocs serve
 
 ## Runtime considerations
 
-* **Singleton per process**: `RagService` is initialized as a singleton in `factory`. With `uvicorn --workers N`, each process loads its own instance (and its FAISS). Align deployment and warm-up as needed.
+* **Singleton per process**: `RagService` is initialized as a singleton in `composition/factory`. With `uvicorn --workers N`, each process loads its own instance (and its FAISS). Align deployment and warm-up as needed.
 * **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit `DATA_DIR`; when `DATA_DIR` is default and `SQLITE_URL` is absolute, it uses the DB parent directory to keep workers/CLI aligned.
 * **Metrics**: if `ENABLE_MONITORING=true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
 * **Dense/Hybrid**: must use the same embedding model for indexing and querying (`ST_EMBEDDING_MODEL`).
