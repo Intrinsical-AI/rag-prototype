@@ -3737,7 +3737,7 @@ wheels = [
 
 [[package]]
 name = "rag-prototype"
-version = "1.1.0"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
