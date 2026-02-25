@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from local_rag_backend.core.domain.entities import Document
+    from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import EmbedderPort
 
 
@@ -38,15 +40,31 @@ class UpsertDocBuilderPort(Protocol):
         source_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
         chunk_dedup_sha256: str | None = None,
-    ) -> Any: ...
+    ) -> object: ...
 
 
 class DocsRepositoryPort(Protocol):
+    """Contract for the docs repository used by mutation use cases.
+
+    Required methods are called unconditionally by MutationCoordinator.
+    Optional rollback/snapshot methods are guarded by hasattr in the coordinator
+    and do not need to be implemented by every adapter.
+    """
+
+    # --- always required ---
     def get_tombstoned_external_ids(self, external_ids: Sequence[str]) -> set[str]: ...
 
     def upsert_documents_by_external_id(
-        self, items: Sequence[Any]
+        self, items: Sequence[object]
     ) -> tuple[list[UpsertResultPort], list[tuple[str, str]], list[str]]: ...
+
+    def get(self, ids: Sequence[DocId]) -> Sequence[Document]: ...
+
+    def delete_documents(self, ids: Sequence[DocId]) -> None: ...
+
+    def delete_by_external_ids(
+        self, external_ids: Sequence[str]
+    ) -> tuple[int, list[DocId], list[str], int]: ...
 
 
 MutationState = Literal[
@@ -86,11 +104,7 @@ class DocsMutationPorts:
     doc_repo_factory: Callable[[], DocsRepositoryPort]
     build_upsert_doc: UpsertDocBuilderPort
     vector_repo_factory: Callable[..., Any]
-    precompute_vectors_fn: Callable[..., dict[str, list[float]]]
-    sync_dense_fn: Callable[..., bool]
     rebuild_fn: Callable[..., int]
-    delete_docs_fn: Callable[..., tuple[int, int | None, bool]]
-    delete_external_ids_fn: Callable[..., tuple[int, int | None, list[str], int, bool]]
     write_lock: Callable[..., Any]
     mutation_journal_factory: Callable[[], MutationJournalPort]
     storage_profile_registry: Any
