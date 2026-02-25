@@ -71,6 +71,10 @@ class DummyVecRepo:
         self.fail_delete = fail_delete
         self.fail_rebuild = fail_rebuild
 
+    @property
+    def ntotal(self) -> int:
+        return 0
+
     def rebuild(self, ids, vectors):
         if self.fail_rebuild:
             raise RuntimeError("fail-rebuild")
@@ -95,12 +99,10 @@ def test_rebuild_index_from_db_empty_rebuilds_to_empty():
 
 def test_delete_documents_sql_only_counts_existing():
     doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "b")])
-    deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
-        doc_repo=doc_repo, ids=[2, 999]
-    )
-    assert deleted_sql == 1
-    assert deleted_index is None
-    assert rebuilt is False
+    result = delete_documents_multi_store(doc_repo=doc_repo, ids=[2, 999])
+    assert result.deleted_sql == 1
+    assert result.deleted_index is None
+    assert result.rebuilt is False
     assert [d.id for d in doc_repo.get_all_documents()] == [1]
 
 
@@ -109,16 +111,16 @@ def test_delete_documents_index_failure_triggers_rebuild():
     vec_repo = DummyVecRepo(fail_delete=True)
     embedder = DummyEmbedder()
 
-    deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+    result = delete_documents_multi_store(
         doc_repo=doc_repo,
         vec_repo=vec_repo,
         embedder=embedder,
         ids=[1],
         rebuild_on_index_failure=True,
     )
-    assert deleted_sql == 1
-    assert deleted_index is None
-    assert rebuilt is True
+    assert result.deleted_sql == 1
+    assert result.deleted_index is None
+    assert result.rebuilt is True
     assert vec_repo.rebuild_calls  # rebuilt from DB state (doc 2 remains)
 
 
@@ -132,16 +134,16 @@ def test_delete_documents_does_not_build_embedder_when_index_delete_succeeds():
         factory_calls += 1
         return DummyEmbedder()
 
-    deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+    result = delete_documents_multi_store(
         doc_repo=doc_repo,
         vec_repo=vec_repo,
         embedder_factory=_embedder_factory,
         ids=[1],
         rebuild_on_index_failure=True,
     )
-    assert deleted_sql == 1
-    assert deleted_index == 1
-    assert rebuilt is False
+    assert result.deleted_sql == 1
+    assert result.deleted_index == 1
+    assert result.rebuilt is False
     assert factory_calls == 0
 
 
@@ -154,16 +156,16 @@ def test_delete_documents_uses_real_deleted_index_count():
             return 1
 
     vec_repo = PartialDeleteVec()
-    deleted_sql, deleted_index, rebuilt = delete_documents_multi_store(
+    result = delete_documents_multi_store(
         doc_repo=doc_repo,
         vec_repo=vec_repo,
         embedder=DummyEmbedder(),
         ids=[1, 2],
         rebuild_on_index_failure=True,
     )
-    assert deleted_sql == 2
-    assert deleted_index == 1
-    assert rebuilt is False
+    assert result.deleted_sql == 2
+    assert result.deleted_index == 1
+    assert result.rebuilt is False
 
 
 def test_delete_documents_index_failure_no_rebuild_raises():
@@ -199,10 +201,12 @@ def test_delete_documents_aborts_before_sql_when_vector_preflight_fails_without_
     doc_repo = DummyDocRepo([_Doc(1, "a"), _Doc(2, "b")])
 
     class PreflightFailVec(DummyVecRepo):
+        @property
+        def ntotal(self) -> int:
+            raise RuntimeError("manifest-drift")
+
         def delete(self, ids):
             self.delete_calls.append(list(ids))
-            if not ids:
-                raise RuntimeError("manifest-drift")
             return len(list(ids))
 
     vec_repo = PreflightFailVec()
@@ -230,9 +234,7 @@ def test_delete_documents_raises_explicit_consistency_error_when_fallback_embedd
     class DeleteOnlyFailVec(DummyVecRepo):
         def delete(self, ids):
             self.delete_calls.append(list(ids))
-            if ids:
-                raise RuntimeError("fail-delete")
-            return 0
+            raise RuntimeError("fail-delete")
 
     vec_repo = DeleteOnlyFailVec()
 
@@ -251,15 +253,15 @@ def test_delete_documents_raises_explicit_consistency_error_when_fallback_embedd
 
 def test_delete_external_ids_sql_only_counts_missing_and_tombstones():
     doc_repo = DummyDocRepo([_Doc(1, "a", "ext-1"), _Doc(2, "b", "ext-2")])
-    deleted_sql, deleted_index, missing, tombstoned, rebuilt = delete_external_ids_multi_store(
+    result = delete_external_ids_multi_store(
         doc_repo=doc_repo,
         external_ids=["ext-1", "missing-ext"],
     )
-    assert deleted_sql == 1
-    assert deleted_index is None
-    assert missing == ["missing-ext"]
-    assert tombstoned == 2
-    assert rebuilt is False
+    assert result.deleted_sql == 1
+    assert result.deleted_index is None
+    assert result.missing_external_ids == ["missing-ext"]
+    assert result.tombstoned == 2
+    assert result.rebuilt is False
     assert [d.id for d in doc_repo.get_all_documents()] == [2]
     assert doc_repo.tombstones == {"ext-1", "missing-ext"}
 
@@ -269,18 +271,18 @@ def test_delete_external_ids_index_failure_triggers_rebuild():
     vec_repo = DummyVecRepo(fail_delete=True)
     embedder = DummyEmbedder()
 
-    deleted_sql, deleted_index, missing, tombstoned, rebuilt = delete_external_ids_multi_store(
+    result = delete_external_ids_multi_store(
         doc_repo=doc_repo,
         vec_repo=vec_repo,
         embedder=embedder,
         external_ids=["ext-1"],
         rebuild_on_index_failure=True,
     )
-    assert deleted_sql == 1
-    assert deleted_index is None
-    assert missing == []
-    assert tombstoned == 1
-    assert rebuilt is True
+    assert result.deleted_sql == 1
+    assert result.deleted_index is None
+    assert result.missing_external_ids == []
+    assert result.tombstoned == 1
+    assert result.rebuilt is True
     assert vec_repo.rebuild_calls
 
 
@@ -288,10 +290,12 @@ def test_delete_external_ids_aborts_before_sql_when_vector_preflight_fails_witho
     doc_repo = DummyDocRepo([_Doc(1, "a", "ext-1"), _Doc(2, "b", "ext-2")])
 
     class PreflightFailVec(DummyVecRepo):
+        @property
+        def ntotal(self) -> int:
+            raise RuntimeError("manifest-drift")
+
         def delete(self, ids):
             self.delete_calls.append(list(ids))
-            if not ids:
-                raise RuntimeError("manifest-drift")
             return len(list(ids))
 
     vec_repo = PreflightFailVec()
@@ -319,9 +323,7 @@ def test_delete_external_ids_raises_consistency_error_when_fallback_embedder_una
     class DeleteOnlyFailVec(DummyVecRepo):
         def delete(self, ids):
             self.delete_calls.append(list(ids))
-            if ids:
-                raise RuntimeError("fail-delete")
-            return 0
+            raise RuntimeError("fail-delete")
 
     vec_repo = DeleteOnlyFailVec()
 
