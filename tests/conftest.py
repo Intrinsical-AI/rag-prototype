@@ -1,7 +1,5 @@
 # tests/conftest.py
-import shutil
 from contextlib import suppress
-from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -88,7 +86,7 @@ class DummyVectorIndex:
 
 
 @pytest.fixture()
-async def asgi_client(in_memory_sqlite):
+async def asgi_client(in_memory_sqlite, monkeypatch, tmp_path):
     """Async HTTP client against the ASGI app using isolated in-memory SQLite."""
     _ = in_memory_sqlite
     import httpx
@@ -96,12 +94,16 @@ async def asgi_client(in_memory_sqlite):
     from local_rag_backend.app.main import app
     from local_rag_backend.settings import settings
 
-    # Remove any leftover journal entries before entering the lifespan so that
-    # parallel pytest-xdist workers cannot cross-contaminate each other through
-    # startup journal recovery (main.py lifespan, lines 52-58).
-    journal_dir = Path(settings.get_coordination_dir()) / ".mutation_journal"
-    if journal_dir.is_dir():
-        shutil.rmtree(journal_dir)
+    # Give each test its own isolated data directory so that parallel
+    # pytest-xdist workers don't share the mutation journal.  Without this,
+    # the ASGI startup recovery (main.py:54) picks up PREPARED entries written
+    # by other workers and injects phantom documents into this test's fresh
+    # in-memory SQLite DB, causing spurious assertion failures.
+    # settings.get_coordination_dir() returns data_dir.resolve() when data_dir
+    # is absolute, so an absolute tmp_path fully isolates the journal.
+    isolated_data_dir = tmp_path / "data"
+    isolated_data_dir.mkdir()
+    monkeypatch.setattr(settings, "data_dir", isolated_data_dir)
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
