@@ -1,6 +1,7 @@
+"""Core service-layer data types (transport-agnostic DTOs)."""
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -47,35 +48,7 @@ class EvalResult:
     mrr: float
 
 
-# ---Re-Ranking ---
-
-
-def _tokens(text: str) -> set[str]:
-    from local_rag_backend.core.services.text_processing import preprocess_text
-
-    # Keep tokenization aligned with the sparse retriever (preprocess_text + \\w+).
-    return set(re.findall(r"\w+", preprocess_text(text)))
-
-
-@dataclass(frozen=True)
-class OverlapV1Reranker:
-    """
-    Token overlap reranker (cheap heuristic).
-
-    Score: |tokens(query) ∩ tokens(doc)| / max(1, |tokens(query)|)
-    """
-
-    def score(self, *, query: str, doc_text: str) -> float:
-        qt = _tokens(query)
-        if not qt:
-            return 0.0
-        dt = _tokens(doc_text)
-        if not dt:
-            return 0.0
-        return float(len(qt & dt) / max(1, len(qt)))
-
-
-# -- INFRA, Loader Factory --
+# --- INFRASTRUCTURE INGESTION DETECTION ---
 DetectedFormat = Literal[
     "csv", "markdown", "text", "binary", "unknown", "chatgpt_export", "gemini_export"
 ]
