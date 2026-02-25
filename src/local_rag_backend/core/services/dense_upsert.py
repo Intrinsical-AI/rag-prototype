@@ -16,6 +16,7 @@ from local_rag_backend.core.services.maintenance import rebuild_index_from_db
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
 
@@ -32,7 +33,7 @@ class UpsertResultLike(Protocol):
     def external_id(self) -> str: ...
 
     @property
-    def id(self) -> int: ...
+    def id(self) -> DocId: ...
 
     @property
     def content_changed(self) -> bool: ...
@@ -100,7 +101,7 @@ def precompute_vectors_for_changed_items(
 def sync_dense_after_upsert(
     *,
     results: Sequence[UpsertResultLike],
-    updated_content_ids: Sequence[int],
+    updated_content_ids: Sequence[DocId],
     vectors_by_external_id: Mapping[str, Sequence[float]],
     vec_repo: VectorRepoPort,
     doc_repo: DocumentRepoPort,
@@ -126,7 +127,7 @@ def sync_dense_after_upsert(
             "Missing precomputed vectors for changed documents: " + ", ".join(missing_vectors[:10])
         )
 
-    ids = [int(r.id) for r in changed_results]
+    ids = [r.id for r in changed_results]
     vectors = [list(vectors_by_external_id[r.external_id]) for r in changed_results]
     try:
         if updated_content_ids:
