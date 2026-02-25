@@ -102,6 +102,10 @@ class VectorStorage(VectorRepoPort):
                 "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
             )
 
+    @property
+    def ntotal(self) -> int:
+        return self.vector_index.ntotal
+
     def upsert(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
         self._ensure_manifest(overwrite=False)
         self.vector_index.add_to_index(list(ids), list(vectors))
