@@ -1,7 +1,7 @@
 [project]
 name = "rag-prototype"
 version = "1.0.0"
-description = "Enterprise-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
+description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -11,7 +11,7 @@ keywords = [
   "rag","retrieval-augmented-generation","fastapi","faiss",
   "nlp","ai","machine-learning","semantic-search","llm",
   "hexagonal-architecture","vector-search","openai","ollama",
-  "enterprise","production-ready","microservices","docker"
+  "Experimental","production-ready","microservices","docker"
 ]
 classifiers = [
   "Development Status :: 4 - Beta",

@@ -6,14 +6,66 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-25
+
+### Security
+- Bumped starlette 0.37.2 → 0.50.0 (via fastapi ≥ 0.124): resolves three DoS CVEs
+  (CVE-2024-47874, CVE-2025-54121, CVE-2025-62727).
+- Bumped anyio 4.3 → 4.12: closes PVE-2024-71199.
+
+### Added
+- `VectorRepoPort.ntotal` read-only property for non-destructive preflight health checks
+  (used in maintenance preflight before rebuild/delete operations).
+- `WriteLockPort` Protocol in `app/contracts/ports.py`; `DocsMutationPorts.write_lock`
+  is now explicitly typed against it.
+- gitleaks v8.24.2 pre-commit hook for secret and credential detection.
+- `check-json` and `debug-statements` pre-commit hooks.
+
+### Changed
+- fastapi pin raised to `>=0.124,<0.125` (minimum required to unlock starlette ≥ 0.50).
+- python-multipart declared as an explicit dependency (was transitive in fastapi ≤ 0.111).
+- `DocsMutationPorts`: four dead fields removed (`precompute_vectors_fn`, `sync_dense_fn`,
+  `delete_docs_fn`, `delete_external_ids_fn`).
+- `DocsRepositoryPort`: extended with `get()`, `delete_documents()`, `delete_by_external_ids()`.
+- `UpsertDocBuilderPort`: return type narrowed from `Any` to `object`.
+- `MultiStoreDeleteResult` and `MultiStoreExternalIdDeleteResult` are now frozen dataclasses;
+  `maintenance.py` functions no longer return bare tuples.
+- `core/services/types.py` replaces `core/services/schemas.py` for data-only DTOs.
+- `VectorStorage.__init__` accepts an explicit `settings_obj` parameter instead of
+  relying on the global settings singleton.
+
+### Fixed
+- `except Exception` narrowed to specific types (`UnicodeDecodeError`, `json.JSONDecodeError`)
+  in `factory.py` and `id_map_json.py`; broad catches in `alchemy_engine.py` and
+  `vector/index.py` are documented as intentionally wide (rollback/recovery guards).
+- `docs_ingest.py` no longer imports `SqlDocumentStorage` directly; uses the
+  `ports.build_upsert_doc` factory instead.
+- `sample_data_ingestion.py`: `print()` replaced by `logger.info()`; magic constant
+  `128` replaced by `settings_obj.ingest_batch_size`.
+- All production `assert x is not None` replaced by explicit `RuntimeError`.
+- Orphaned result DTOs removed: `UpsertDocsSummary`, `DeleteDocsByExternalIdSummary`,
+  `DeleteDocsSummary`.
+- `runtime.__all__` no longer exposes private `_reset_rag_service_best_effort`.
+- `mutation_journal._record_from_dict`: invalid-state entries now log a warning before
+  resetting to `PREPARED` instead of silently resetting.
+- `except TypeError` removed from `write_lock.py` and `docs_mutation.py`.
+
 ### Refactor
-- Internal type/module taxonomy normalized by layer:
-  - `core/services/schemas.py` replaced by `core/services/types.py` for data-only DTOs.
-  - `OverlapV1Reranker` moved to `core/services/reranking.py` (behavioral strategy).
-  - `app/services/results.py` added for docs mutation use-case outcomes.
-  - `app/services/ports.py` kept focused on dependency contracts and bundles.
-- Removed residual `core/services/models.py` (unused/empty).
-- Internal imports updated across app/core/infra/CLI to align with new boundaries.
+- `_resolve_embedder_or_raise()` helper extracted in `maintenance.py`, removing four
+  duplicated preflight patterns across two functions.
+- `FaissIndex._locked_write()` context manager replaces five repeated lock patterns.
+- `Settings.ingest_batch_size` field added; magic number `64` removed from callers.
+- `IngestPlan` and `BatchSyncResult` converted from tuple aliases to frozen dataclasses.
+- `_to_domain_document()` and `_detect_document_changes()` extracted in `sql_.py`
+  (eliminates `getattr` usage; adds explicit change detection).
+- `DocsMutationPorts` / `IndexMutationPorts`: `Any` replaced by concrete types
+  throughout mutation port contracts.
+- `factory.py:get_app_context` dead local variable for mypy narrowing removed.
+
+### Docs
+- README: FastAPI badge corrected (0.111+ → 0.124+); `cli_commands/` added to project
+  structure tree; `scripts/` directory description corrected.
+- USAGE.md: `sessionmaker(bind=engine)` → `sessionmaker(engine)` (SQLAlchemy 2.x API).
 
 ## [1.0.0] - 2026-02-24
 

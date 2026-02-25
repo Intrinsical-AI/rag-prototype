@@ -40,9 +40,8 @@ LOG_LEVEL="INFO"
 
 ## Paso 2: Implementación de un `Loader` Personalizado
 
-La librería define una interfaz (`port`) para los cargadores de datos. Para crear el tuyo, solo necesitas implementar la clase `LoaderPort`.
+La librería define una interfaz (`port`) para los cargadores de datos. Para crear uno custom, solo es necesario implementar la clase `LoaderPort`.
 
-Imagina que tus datos están en una lista de diccionarios. Así sería un `Loader` para ese formato:
 
 ```python
 # my_custom_loader.py
@@ -78,7 +77,7 @@ class DictListLoader(LoaderPort):
 
 ## Paso 3: Script de Ingesta de Datos
 
-Ahora, crea un script para orquestar el proceso de ingesta. Este script inicializará los componentes necesarios, usará tu `Loader` personalizado y ejecutará el pipeline.
+Necesitamos un script para orquestar el proceso de ingesta. Este script inicializará los componentes necesarios, usará el nuevo `Loader` personalizado y ejecutará el pipeline.
 
 ```python
 # run_ingestion.py
@@ -91,7 +90,7 @@ from local_rag_backend.settings import settings
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.infrastructure.persistence.sql.base import Base
 
-# 2. Importar tu Loader personalizado
+# 2. Importar Loader (custom)
 from my_custom_loader import DictListLoader
 
 # 3. Datos de ejemplo
@@ -116,7 +115,7 @@ def main():
 
     # El ETLService es necesario solo para modos 'dense' o 'hybrid'.
     # Para 'sparse', podemos interactuar directamente con el repositorio.
-    # Aquí mostramos cómo hacerlo de forma simple para 'sparse'.
+    # Ejemplo de cómo hacerlo de forma simple para 'sparse'.
     from local_rag_backend.core.services.ingestion import default_preprocess, default_chunker, default_formatter
 
     print(f"Cargando {len(my_data)} documentos...")
@@ -145,7 +144,7 @@ python run_ingestion.py
 
 ## Paso 4: Script de Consulta con Ollama
 
-Finalmente, crea un script para hacer preguntas a tus datos utilizando el `RagService` y Ollama.
+Script para hacer preguntas a los datos utilizando el `RagService` y Ollama.
 
 ```python
 # run_query.py
@@ -182,7 +181,7 @@ Ejecuta este script para obtener una respuesta:
 python run_query.py
 ```
 
-¡Y eso es todo! Siguiendo estos pasos, puedes usar este proyecto como una potente librería para construir sistemas RAG a medida, integrando tus propias fuentes de datos y aprovechando modelos locales con Ollama.
+> Siguiendo estos pasos, puedes adaptar este proyecto para entender como construir un sistema RAG, con support a modelos locales con Ollama.
 
 ---
 
