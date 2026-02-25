@@ -305,25 +305,16 @@ It records stable identifiers for the index build (embedding backend/model, dime
 If you change any of these settings, `/api/ready` and `rag-status` will report drift and instruct you to rebuild:
 `rag-rebuild-index` (or `POST /api/index/rebuild`).
 
-### Upgrade notes (SQLite ID integrity)
+### Upgrade notes (Fresh install only)
 
-Dense/hybrid modes rely on document IDs being stable across stores (SQLite + FAISS). SQLite can reuse
-integer primary keys after deletes unless `AUTOINCREMENT` is used. On startup, the app will
-best-effort migrate legacy `documents` tables to `AUTOINCREMENT` when the schema matches the expected
-columns (`id`, `content`). If you have a customized schema, the app will refuse to auto-migrate.
+This release uses a **fresh-install only** storage contract:
 
-### Upgrade notes (Document identity and metadata)
+* canonical document IDs are opaque strings (`doc:<uuid7>`)
+* SQL documents use `doc_id` as the primary key
+* vector `id_map.json` stores `list[str]`
+* no runtime migration/fallback for legacy schemas or legacy id maps
 
-To support idempotent ingestion and future upserts, the app also ensures the `documents` table contains
-stable identity fields and metadata. On startup (SQLite only), it will best-effort add/backfill the
-following columns if missing:
-
-* `external_id` (nullable, unique when set): stable document identity for upserts
-* `source_id` (nullable): traceability (e.g., filename/url)
-* `metadata` (JSON text): structured metadata (best-effort default `{}`)
-* `content_sha256`: content hash used by dedup/update policies
-* `chunk_dedup_sha256`: optional chunk-level dedup hash (unique when set)
-* `created_at`, `updated_at`: timestamps (best-effort backfilled for legacy rows)
+If you are upgrading from an older layout, recreate DB/index artifacts before running this version.
 
 ---
 
@@ -417,7 +408,7 @@ export RERANKER_CANDIDATE_K=20
 
 The ingestion process is orchestrated by `IngestionPipeline`:
 
-1. Load items from a `LoaderPort` (e.g., `CSVLoader`) returning `LoadedItem(text, metadata)`.
+1. Load items from a `LoaderPort` (e.g., `CSVLoader`) returning `LoadedItem(text, lineage, metadata)`.
 2. Preprocess (`preprocess_text`) and chunk (`default_chunker`) with overlap.
 3. Format chunks (metadata header) and batch-ingest via `ETLService.ingest()`.
 
@@ -513,11 +504,11 @@ docker build --target production .
 * `POST /api/ask`
 
   * Body: `{ "question": "str", "k": int (1..10, default 3) }`
-  * Response: `{ "answer": "str", "sources": [ { "document": {"id": int, "content": "str"}, "score": float(0..1) }, ... ] }`
+  * Response: `{ "answer": "str", "sources": [ { "document": {"id": "doc:...", "content": "str"}, "score": float(0..1) }, ... ] }`
 * `POST /api/ask_eval` (ephemeral per-request RAG config for retrieval/generator evaluation)
 * `GET /api/history?limit=1..100&offset>=0`
 
-  * Response: list of `{ id, question, answer, created_at, source_ids[] }`
+  * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
 * `POST /api/docs/upsert` (idempotent upsert by `external_id`)
