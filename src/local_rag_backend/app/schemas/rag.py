@@ -37,7 +37,7 @@ class HistoryItem(BaseModel):
     question: str
     answer: str
     created_at: str
-    source_ids: list[int] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
 
 
 class AskEvalConfig(BaseModel):

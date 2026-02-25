@@ -54,7 +54,7 @@ class InvalidImportPayloadError(DocsImportError):
 @dataclass(frozen=True)
 class ImportDocsOutcome:
     count: int
-    ids: list[int]
+    ids: list[str]
     format_detected: str
     input_texts: int
 
@@ -63,7 +63,7 @@ def list_docs_page_sync(*, db: Session, limit: int, offset: int) -> list[Any]:
     """List persisted documents using stable ascending ID order."""
     return cast(
         "list[Any]",
-        db.query(DbDocument).order_by(DbDocument.id.asc()).offset(offset).limit(limit).all(),
+        db.query(DbDocument).order_by(DbDocument.doc_id.asc()).offset(offset).limit(limit).all(),
     )
 
 

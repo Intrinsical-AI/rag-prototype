@@ -70,7 +70,7 @@ async def list_docs(
     db: Session = Depends(get_db),
 ) -> list[DocumentInDB]:
     docs = list_docs_page_sync(db=db, limit=limit, offset=offset)
-    return [DocumentInDB.model_validate(item) for item in docs]
+    return [DocumentInDB(id=str(item.doc_id), content=str(item.content)) for item in docs]
 
 
 def _map_ingest_error(exc: Exception) -> BadRequestError | None:
@@ -112,7 +112,7 @@ async def ingest_docs(
         return IngestResponse(count=0, ids=[])
     t = Timer()
 
-    def _ingest_operation() -> list[int]:
+    def _ingest_operation() -> list[str]:
         return docs_service.ingest_docs_sync(
             texts=texts,
             settings_obj=settings_obj,
@@ -122,10 +122,10 @@ async def ingest_docs(
         )
 
     ok = False
-    ids: list[int] = []
+    ids: list[str] = []
     try:
         ids = cast(
-            "list[int]",
+            "list[str]",
             await run_api_mutation(
                 operation=_ingest_operation,
                 run_locked=container.run_multi_store_write_locked,

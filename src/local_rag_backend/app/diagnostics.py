@@ -23,13 +23,13 @@ def get_history_count(engine: Engine) -> int:
         return int(conn.execute(text("SELECT COUNT(*) FROM qa_history")).scalar() or 0)
 
 
-def get_document_ids(engine: Engine, *, limit: int | None = None) -> list[int]:
-    sql = "SELECT id FROM documents ORDER BY id"
+def get_document_ids(engine: Engine, *, limit: int | None = None) -> list[str]:
+    sql = "SELECT doc_id FROM documents ORDER BY doc_id"
     if limit is not None:
         sql += " LIMIT :limit"
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"limit": limit} if limit is not None else {}).fetchall()
-    return [int(r[0]) for r in rows]
+    return [str(r[0]) for r in rows]
 
 
 def _build_missing_index_stats(

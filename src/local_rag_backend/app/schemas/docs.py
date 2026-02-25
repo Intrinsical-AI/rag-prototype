@@ -18,11 +18,13 @@ class IngestRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     count: int
-    ids: list[int]
+    ids: list[str]
 
 
 class DeleteDocsRequest(BaseModel):
-    ids: list[int] = Field(..., min_length=1, max_length=1000)
+    ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        ..., min_length=1, max_length=1000
+    )
 
 
 class DeleteDocsResponse(BaseModel):
@@ -89,7 +91,7 @@ class UpsertDocsRequest(BaseModel):
 
 class UpsertDocResult(BaseModel):
     external_id: str
-    id: int
+    id: str
     action: str
     content_changed: bool
 
@@ -106,7 +108,7 @@ class ImportResponse(BaseModel):
     """Response for POST /api/docs/import."""
 
     count: int = Field(..., description="Number of documents imported")
-    ids: list[int] = Field(default_factory=list, description="IDs of imported documents")
+    ids: list[str] = Field(default_factory=list, description="IDs of imported documents")
     format_detected: str = Field(
         ..., description="Detected format: chatgpt_export or gemini_export"
     )
