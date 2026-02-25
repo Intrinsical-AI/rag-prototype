@@ -13,13 +13,7 @@ from local_rag_backend.app.contracts.ports import (
     DocsMutationPorts,
     IndexMutationPorts,
 )
-from local_rag_backend.core.services.dense_upsert import (
-    precompute_vectors_for_changed_items,
-    sync_dense_after_upsert,
-)
 from local_rag_backend.core.services.maintenance import (
-    delete_documents_multi_store,
-    delete_external_ids_multi_store,
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.write_lock import multi_store_write_lock
@@ -39,15 +33,7 @@ def build_docs_mutation_ports(
     doc_repo_factory: Callable[[], Any] | None = None,
     build_upsert_doc: Any | None = None,
     vector_repo_factory: Callable[..., Any] | None = None,
-    precompute_vectors_fn: Callable[
-        ..., dict[str, list[float]]
-    ] = precompute_vectors_for_changed_items,
-    sync_dense_fn: Callable[..., bool] = sync_dense_after_upsert,
     rebuild_fn: Callable[..., int] = rebuild_index_from_db,
-    delete_docs_fn: Callable[..., tuple[int, int | None, bool]] = delete_documents_multi_store,
-    delete_external_ids_fn: Callable[
-        ..., tuple[int, int | None, list[str], int, bool]
-    ] = delete_external_ids_multi_store,
     write_lock: Callable[..., Any] = multi_store_write_lock,
     mutation_journal_factory: Callable[..., Any] | None = None,
     storage_profile_registry: StorageProfileRegistry | None = None,
@@ -80,11 +66,7 @@ def build_docs_mutation_ports(
         doc_repo_factory=repo_factory,
         build_upsert_doc=upsert_doc_builder,
         vector_repo_factory=vec_factory,
-        precompute_vectors_fn=precompute_vectors_fn,
-        sync_dense_fn=sync_dense_fn,
         rebuild_fn=rebuild_fn,
-        delete_docs_fn=delete_docs_fn,
-        delete_external_ids_fn=delete_external_ids_fn,
         write_lock=write_lock,
         mutation_journal_factory=journal_factory,
         storage_profile_registry=profile_registry,

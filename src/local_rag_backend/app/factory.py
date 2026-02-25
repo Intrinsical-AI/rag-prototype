@@ -8,13 +8,7 @@ from typing import TYPE_CHECKING
 
 from local_rag_backend.app.app_context import AppContext
 from local_rag_backend.app.container import AppContainer
-from local_rag_backend.core.services.dense_upsert import (
-    precompute_vectors_for_changed_items,
-    sync_dense_after_upsert,
-)
 from local_rag_backend.core.services.maintenance import (
-    delete_documents_multi_store,
-    delete_external_ids_multi_store,
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.rag_runtime import RagService
@@ -68,11 +62,7 @@ def _build_container(
         hybrid_retriever_factory=HybridRetriever,
         vector_repo_factory=VectorStorage,
         reranker_factory=RerankingRetriever,
-        precompute_vectors_fn=precompute_vectors_for_changed_items,
-        sync_dense_fn=sync_dense_after_upsert,
         rebuild_fn=rebuild_index_from_db,
-        delete_docs_fn=delete_documents_multi_store,
-        delete_external_ids_fn=delete_external_ids_multi_store,
         purge_index_artifacts_fn=purge_index_artifacts,
         write_lock=multi_store_write_lock,
         rag_service_factory=RagService,
@@ -95,9 +85,10 @@ def get_app_context() -> AppContext:
     with _APP_CONTEXT_LOCK:
         if _APP_CONTEXT is None:
             _APP_CONTEXT = _build_app_context()
-        if _APP_CONTEXT is None:
-            raise RuntimeError("AppContext failed to initialize")
-        return _APP_CONTEXT
+        ctx = _APP_CONTEXT
+    if ctx is None:
+        raise RuntimeError("AppContext failed to initialize")
+    return ctx
 
 
 def reset_app_context() -> None:

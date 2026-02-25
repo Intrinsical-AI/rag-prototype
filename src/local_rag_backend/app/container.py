@@ -20,13 +20,7 @@ from local_rag_backend.app.wiring.mutation_ports import (
     build_docs_mutation_ports,
     build_index_mutation_ports,
 )
-from local_rag_backend.core.services.dense_upsert import (
-    precompute_vectors_for_changed_items,
-    sync_dense_after_upsert,
-)
 from local_rag_backend.core.services.maintenance import (
-    delete_documents_multi_store,
-    delete_external_ids_multi_store,
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
@@ -91,15 +85,7 @@ class AppContainer:
         hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
         vector_repo_factory: Callable[..., Any] = VectorStorage,
         reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
-        precompute_vectors_fn: Callable[
-            ..., dict[str, list[float]]
-        ] = precompute_vectors_for_changed_items,
-        sync_dense_fn: Callable[..., bool] = sync_dense_after_upsert,
         rebuild_fn: Callable[..., int] = rebuild_index_from_db,
-        delete_docs_fn: Callable[..., tuple[int, int | None, bool]] = delete_documents_multi_store,
-        delete_external_ids_fn: Callable[
-            ..., tuple[int, int | None, list[str], int, bool]
-        ] = delete_external_ids_multi_store,
         purge_index_artifacts_fn: Callable[..., None] = purge_index_artifacts,
         write_lock: Callable[..., Any] = multi_store_write_lock,
         mutation_journal_factory: Callable[..., Any] | None = None,
@@ -124,11 +110,7 @@ class AppContainer:
         self.hybrid_retriever_factory = hybrid_retriever_factory
         self.vector_repo_factory = vector_repo_factory
         self.reranker_factory = reranker_factory
-        self.precompute_vectors_fn = precompute_vectors_fn
-        self.sync_dense_fn = sync_dense_fn
         self.rebuild_fn = rebuild_fn
-        self.delete_docs_fn = delete_docs_fn
-        self.delete_external_ids_fn = delete_external_ids_fn
         self.purge_index_artifacts_fn = purge_index_artifacts_fn
         self.write_lock = write_lock
         self.mutation_journal_factory = mutation_journal_factory or (
@@ -189,11 +171,7 @@ class AppContainer:
             doc_repo_factory=cast("Any", self.doc_repo_factory),
             build_upsert_doc=self.build_upsert_doc,
             vector_repo_factory=self.vector_repo_factory,
-            precompute_vectors_fn=self.precompute_vectors_fn,
-            sync_dense_fn=self.sync_dense_fn,
             rebuild_fn=self.rebuild_fn,
-            delete_docs_fn=self.delete_docs_fn,
-            delete_external_ids_fn=self.delete_external_ids_fn,
             write_lock=self.write_lock,
             mutation_journal_factory=self.mutation_journal_factory,
             storage_profile_registry=self.storage_profile_registry,
