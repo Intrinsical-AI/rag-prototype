@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
+    from local_rag_backend.core.domain.types import DocId
 
 
 # -------- Ports --------
@@ -41,9 +42,9 @@ class RetrieverPort(Protocol):
 class DocumentRepoPort(Protocol):
     """Interface for storing and retrieving documents by ID."""
 
-    def store_documents(self, contents: Sequence[str]) -> Sequence[int]: ...
-    def delete_documents(self, ids: Sequence[int]) -> None: ...
-    def get(self, ids: Sequence[int]) -> Sequence[Document]: ...
+    def store_documents(self, contents: Sequence[str]) -> Sequence[DocId]: ...
+    def delete_documents(self, ids: Sequence[DocId]) -> None: ...
+    def get(self, ids: Sequence[DocId]) -> Sequence[Document]: ...
     def get_all_documents(self) -> Sequence[Document]: ...
 
 
@@ -51,16 +52,16 @@ class DocumentRepoPort(Protocol):
 class VectorRepoPort(Protocol):
     """Interface for storing and searching vector embeddings."""
 
-    def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
-    def delete(self, ids: Sequence[int]) -> int:
+    def upsert(self, ids: Sequence[DocId], vectors: Sequence[Embedding]) -> None: ...
+    def delete(self, ids: Sequence[DocId]) -> int:
         """Delete vectors for given IDs (best-effort; may rebuild index)."""
         ...
 
-    def rebuild(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None:
+    def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Embedding]) -> None:
         """Rebuild the full index from scratch (idempotent)."""
         ...
 
-    def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]:
+    def similar(self, vector: Embedding, k: int) -> Sequence[tuple[DocId, float]]:
         """Find similar vectors, returning (ID, normalized_similarity_score)."""
         ...
 
@@ -69,7 +70,7 @@ class VectorRepoPort(Protocol):
 class QAHistoryPort(Protocol):
     """Interface for persisting question-answer interactions."""
 
-    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None: ...
+    def save(self, q: str, a: str, source_ids: Sequence[DocId]) -> None: ...
 
 
 @runtime_checkable
