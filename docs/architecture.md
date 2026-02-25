@@ -9,6 +9,8 @@
 - Persistence and model providers are swappable through ports and wiring factories.
 - Multi-store writes (SQL + vector index) are centralized in one coordinator (`DURABLE_SAGA`).
 
+> Golden Rule 1: Si borras la carpeta app/ (FastAPI), el sistema RAG (ingesta, mutación, query) debe seguir funcionando al 100% usando solo Python puro invocando core/services.
+
 ---
 
 ## Current structure
@@ -56,6 +58,29 @@ src/local_rag_backend/
 - Cross-layer runtime error mapping is centralized in `app/error_mapping.py` + `app/http/exception_handlers.py`.
 
 These boundaries are enforced by architecture tests under `tests/unit/app/test_architecture_*`.
+
+### Transport isolation contract
+
+**Golden rule**: deleting the entire `app/` directory must not break the RAG system.
+Ingestion, mutation, and query must remain fully functional by importing and calling
+`core/services` directly from plain Python — no FastAPI, no Starlette, no HTTP.
+
+Practical test — the following must work in a vanilla Python script:
+
+```python
+from local_rag_backend.core.services.rag_runtime import RagService
+from local_rag_backend.core.services.ingestion import IngestionPipeline
+```
+
+**Implication for use-case authors**: functions in `app/application/` must accept
+transport-neutral inputs — `LoaderPort`, `Sequence[str]`, `bytes`, or `io.BytesIO` —
+never `fastapi.UploadFile` or Pydantic HTTP schemas. The FastAPI router converts the
+HTTP request into those neutral types before calling the use case.
+
+Current implementation:
+
+- `ingest_docs_sync` receives `Sequence[str]` — no HTTP type.
+- `docs_import_use_case` receives `bytes` — no HTTP type.
 
 ---
 
