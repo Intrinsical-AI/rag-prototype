@@ -1,7 +1,4 @@
-# src/local_rag_backend/app/api_router.py
-"""
-Root API router composition.
-"""
+"""Root API router composition."""
 
 from __future__ import annotations
 

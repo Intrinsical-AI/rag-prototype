@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_http_routers_do_not_import_global_settings_singleton() -> None:
-    routers_dir = Path("src/local_rag_backend/app/routers")
+    routers_dir = Path("src/local_rag_backend/http/routers")
     violations: list[str] = []
     settings_module = "local_rag_backend.settings"
 
