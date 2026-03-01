@@ -139,6 +139,37 @@ jobs:
       - name: mypy
         run: uv run mypy src
 
+  architecture:
+    name: Architecture Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: architecture
+
+      - name: Create virtualenv
+        run: uv venv
+
+      - name: Install test deps (group test)
+        run: uv sync --frozen --group test --no-install-project --no-default-groups
+
+      - name: Run architecture guardrails
+        run: DEBUG=false uv run pytest -q -o addopts='' tests/unit/http/test_architecture_*.py
+
   test:
     name: Tests (Ubuntu, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -289,7 +320,7 @@ jobs:
 
   docker:
     name: Docker Build
-    needs: [pre-commit, lint, typing, test, security]
+    needs: [pre-commit, lint, typing, architecture, test, security]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     timeout-minutes: 15
