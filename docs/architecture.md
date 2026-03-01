@@ -7,19 +7,21 @@
 
 ## 0) TL;DR (90 seconds)
 
-- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. The system supports sparse/dense/hybrid retrieval, SQL persistence, and vector index backends (FAISS/numpy) with consistency controls.
+- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it runs mainly with split persistence (SQL + vector index), and target architecture evolves to backend-agnostic persistence adapters (split-store or unified-store engines).
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
-  - Canonical write path via `MutationCoordinator` (`DURABLE_SAGA`) for SQL + vector consistency.
+  - Canonical write path via `MutationCoordinator`, with consistency strategy selected by storage profile/capabilities (`DURABLE_SAGA` for split-store; single-store atomic when supported).
+  - SQL writes inside canonical mutation run under explicit `mutation_uow_factory` and shared SQL session context (`session_uow`).
   - App/runtime wiring centralized in `AppContainer` + `composition/*`.
   - Architecture guard tests enforce import boundaries in CI.
   - Runtime safety with write lock, mutation journal, startup/background recovery.
 - **Non-negotiables:**
   - All write-enabled document mutations go through `core/use_cases/docs_mutation.py::MutationCoordinator`.
-  - No direct writes to SQL/vector stores outside canonical mutation/index use cases.
+  - No direct writes to persistence backends outside canonical mutation/index use cases.
   - `core/{domain,ports,services}` must not depend on `infrastructure/`, `http/`, `composition/`.
-  - Target state: `core/use_cases` depends on ports/contracts only (no concrete infra imports). [TODO: pending full implementation; current violations exist in `docs_query`, `rag_query`, `health`, `evaluation`, `openrouter`, `mutations`]
+  - `core/use_cases` depends on ports/contracts only (no concrete infra/composition imports).
+  - Application/core layers must not assume split persistence (`SQL + FAISS`) as mandatory architecture.
   - Breaking changes are allowed during this deliverable; no migration compatibility layer is required.
   - CI gates (`pre-commit`, `ruff`, `mypy`, `pytest`, architecture tests) are mandatory.
 
@@ -29,9 +31,10 @@
 
 ### 1.1 Goals (prioritized)
 1. Close Deliverable D1: architecture stabilization + maximum practical decoupling.
-2. Enforce architectural guardrails in code (not only docs).
-3. Reduce blast radius in high-complexity modules (`docs_mutation`, `alchemy_engine`, composition wiring).
-4. Freeze a clear, maintainable baseline for subsequent product work.
+2. Make persistence layer technology-agnostic at application boundary (no hard dependency on split SQL+vector model).
+3. Enforce architectural guardrails in code (not only docs).
+4. Reduce blast radius in high-complexity modules (`docs_mutation`, `alchemy_engine`, composition wiring).
+5. Freeze a clear, maintainable baseline for subsequent product work.
 
 ### 1.2 Non-goals
 - Adding new user-facing features.
@@ -43,7 +46,7 @@
 - Legal / regulatory: no special regulated-domain requirement declared for D1.
 - Budget / latency / throughput: local-first single-node operation, optional Docker; avoid infra-heavy dependencies by default.
 - Team: small maintainer set; changes must be reviewable in small increments.
-- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`), SQLite + vector index on disk.
+- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current baseline uses SQLite + local vector index, but architecture must support unified engines (ElasticSearch, pgvector, Qdrant) through ports.
 - Product constraint: breaking changes explicitly allowed for this deliverable.
 
 ### 1.4 Quality attributes
@@ -52,18 +55,19 @@
 | ------------ | -----: | ----------- |
 | Latency p95 (`POST /api/ask`, sparse, local sample dataset) | <= 2000ms | `rag_query_duration_seconds` metric + e2e smoke |
 | Availability (single instance) | >= 99.0% in controlled environment | `/api/health` + `/api/ready` checks |
-| Consistency | SQL atomic + SQL/vector `DURABLE_SAGA` | mutation journal recovery tests + integration tests |
+| Consistency | capability-driven (`ATOMIC` for single-store, `DURABLE_SAGA` for split-store) | mutation journal recovery tests + integration tests |
 | Cost | single-node local runtime (no mandatory external SaaS except optional LLM provider) | Docker/local runtime footprint |
 
 ### 1.5 Definition of Done (Deliverable D1)
 - Guardrails:
-  - Architecture tests enforce target dependencies including `core/use_cases` decoupling objective. [TODO: extend current architecture tests to enforce this explicitly]
-  - No forbidden imports remain in target modules. [TODO: pending cleanup in listed `core/use_cases` modules]
+  - Architecture tests enforce strict `core/use_cases` boundaries (`infrastructure|composition` forbidden).
+  - No forbidden imports remain in target modules.
 - Decoupling:
-  - Critical use cases (`docs_query`, `rag_query`, `health`, `evaluation`, `openrouter`) consume ports/adapters abstractions, not concrete infra modules. [TODO: pending refactor]
+  - `docs_query`, `mutations`, `openrouter`, `health`, `docs_import`, `rag_query`, and `evaluation` consume ports/adapters abstractions.
 - Stability:
-  - CI baseline green (`pre-commit`, `ruff`, `mypy`, `pytest`). [TODO: keep as release gate after decoupling changes]
-  - Mutation consistency and recovery smoke tests pass. [TODO: keep as mandatory smoke suite during refactor]
+  - CI baseline green (`pre-commit`, `ruff`, `mypy`, `pytest`).
+  - Mutation consistency and recovery smoke tests pass.
+  - SQL unit-of-work tests prove commit/rollback semantics under shared-session UoW.
 - Documentation:
   - This spec reflects actual code boundaries and entrypoints.
   - Known tradeoffs and accepted debt are explicit.
@@ -89,7 +93,7 @@
 | Retrieval Query | Retrieve docs + generate answer | No | LLM adapters, retrievers | `/api/ask`, `/api/ask_eval`, `RagService.ask` |
 | Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs`, `/api/docs/import`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
 | Index Maintenance | Rebuild/repair vector index | Yes | embedder + vector adapter | `/api/index/rebuild`, `rag-rebuild-index` |
-| Health/Diagnostics | Readiness/consistency diagnostics | No | SQL engine, manifest/index files | `/api/health`, `/api/ready`, `rag-status` |
+| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files | `/api/health`, `/api/ready`, `rag-status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
 | Composition Runtime | Dependency wiring + runtime cache invalidation | No | settings + adapters | DI factory/container |
 
@@ -133,20 +137,29 @@
 ## 3) Data model
 
 ### 3.1 Storage overview
-- Primary DB: SQLite via SQLAlchemy.
+- Current baseline:
+  - relational persistence via SQLite + SQLAlchemy;
+  - vector index via FAISS/numpy adapters on local disk.
+- Target abstraction:
+  - application uses persistence ports and capability profile, not concrete store topology;
+  - supported topologies:
+    - split-store (`DocumentStorePort` + `VectorStorePort`);
+    - unified-store (single adapter handles document + vector + metadata operations).
 - Cache: in-process runtime cache (`RagService` cache versioned via `system_state`).
-- Search / vector index: FAISS or numpy index backend on disk.
 - Files / blobs: local filesystem (`data/`, index artifacts, mutation journal).
 
 ### 3.2 Schemas
 - SQL models: `src/local_rag_backend/infrastructure/persistence/sql/models.py`
 - SQL compatibility/bootstrap: `src/local_rag_backend/infrastructure/persistence/sql/base.py`
 - Vector manifest contract: `src/local_rag_backend/infrastructure/persistence/vector/manifest.py`
+- SQL UoW/session binding: `session_uow()` + `get_bound_session()` in `sql/base.py`
+- [TODO: persistence-agnostic] Add backend contract tests validating unified adapters against the same application persistence behaviors.
 
 ### 3.3 DTOs / Contracts
 - HTTP DTOs: `src/local_rag_backend/http/schemas/`
 - Use-case outputs: `src/local_rag_backend/core/use_cases/results.py`
 - Mutation/index app contracts: `src/local_rag_backend/core/ports/contracts.py`
+- Use-case decoupling target ports: `src/local_rag_backend/core/ports/use_cases.py`
 - Versioning: semver at package level; D1 allows breaking internal contracts to reach clean boundaries.
 
 #### DTO: `AskRequest` / `AskResponse`
@@ -167,10 +180,13 @@
 ### 3.4 Mapping rules (DTO <-> Domain <-> Persistence)
 - DTO -> Domain: in `http/routers/*`, with request validation by Pydantic schemas.
 - Domain -> Persistence: via ports and adapters (`DocumentRepoPort`, `VectorRepoPort`, `QAHistoryPort`).
+- Application -> SQL transaction boundary: `DocsMutationPorts.mutation_uow_factory` wraps SQL mutation + SQL rollback paths.
+- Repository session resolution: SQL adapters reuse bound session when present, otherwise open/own a session.
 - Forbidden shortcuts:
   - HTTP routers importing concrete infra adapters directly.
   - Domain/services embedding framework-specific request/response models.
   - Non-canonical SQL/vector writes that bypass mutation coordinator.
+  - Branching in use cases by concrete storage technology (`if backend == "sql"`, `if faiss_enabled`) outside composition/adapters.
 
 ---
 
@@ -179,24 +195,27 @@
 ### 4.1 Global invariants
 - Multi-store write operations are serialized under shared write lock.
 - Canonical write flow is journaled and recoverable (`DURABLE_SAGA`).
+- Canonical SQL mutation and SQL compensation run inside explicit unit-of-work boundaries.
+- When UoW is active, SQL repositories must reuse the bound session and must not force early commit.
 - Dense/hybrid mutation cannot silently proceed when embeddings backend is unavailable.
 - Retrieval mode must be one of `sparse|dense|hybrid`.
 - Transport isolation rule: removing `http/` must not break core mutation/query capabilities.
+- Persistence topology isolation rule: application behavior must be invariant under split-store vs unified-store backends (except declared capability differences).
 
 ### 4.2 Per-aggregate invariants
 
 | Aggregate | Invariant | Enforced where | Test coverage |
 | --------- | --------- | -------------- | ------------- |
-| Document | `external_id` uniqueness, tombstone semantics for deleted external IDs | SQL model + mutation use case + repo methods | unit + integration |
+| Document | `external_id` uniqueness, tombstone semantics for deleted external IDs | persistence adapter + mutation use case + repo methods | unit + integration |
 | MutationRecord | valid state machine transitions + idempotent `op_id` behavior | `MutationCoordinator` + journal adapter | unit + integration |
-| Vector index mapping | no drift between SQL docs and id map/manifest in steady state | diagnostics + readiness checks + maintenance flows | unit + integration + e2e |
+| Vector index mapping | no drift between canonical document state and vector/id-map state in steady state | diagnostics + readiness checks + maintenance flows | unit + integration + e2e |
 
 ### 4.3 Failure semantics
 - Validation errors: mapped to `AppError` hierarchy (`400/401/404/409/413/422/5xx`).
 - Idempotency: `op_id` in mutation intent guarantees replay-safe behavior.
 - Retry safety: incomplete mutation records are recoverable at startup/background intervals.
 - Consistency model per operation:
-  - SQL-only operations: atomic per DB transaction.
+  - SQL-only operations: atomic per DB transaction (owned session) or per explicit unit-of-work (shared session).
   - SQL + vector mutations: `DURABLE_SAGA` with compensation/recovery.
 
 ---
@@ -218,7 +237,7 @@
 | ----- | ---------------- | ---------------- |
 | Domain (`core/domain`) | entities, value objects, storage profile semantics | HTTP/DB/LLM framework code |
 | Application (`core/use_cases`, `core/services`) | use cases, orchestration, business flow | transport framework dependencies |
-| Adapters (`infrastructure`) | DB, vector index, embeddings, LLM clients, observability adapters | domain policy decisions |
+| Adapters (`infrastructure`) | persistence adapters (split or unified), embeddings, LLM clients, observability adapters | domain policy decisions |
 | Composition (`composition`) | dependency assembly, runtime lifecycle/wiring | business rules |
 | Transport (`http`, `cli_commands`) | request parsing, auth, response mapping, command UX | domain invariants |
 
@@ -233,19 +252,44 @@ UI/API/CLI   -> Application + Composition
 ```
 
 Rule: no upward imports. Enforced with architecture tests and CI.
-[TODO: add explicit guardrail for `core/use_cases` -> `infrastructure` imports, not only `core/{domain,ports,services}`.]
+Rule: `core/use_cases` direct imports to `infrastructure|composition` are forbidden (no exceptions/snapshot).
 
 ### 5.4 Target ports to decouple `core/use_cases`
-[TODO: define and implement these ports in `core/ports/contracts.py` (or dedicated application contracts module), then migrate use-cases incrementally.]
+Ports defined in `core/ports/use_cases.py` are active and used by all migrated use cases.
 
 | Use case module | Current coupling | Target port/abstraction |
 | --------------- | ---------------- | ----------------------- |
-| `docs_query.py` | direct SQL model import | `DocsReadPort` (`list_docs_page`) |
-| `rag_query.py` | direct SQL storage/crud imports | `HistoryReadPort` + `RagRuntimeFactoryPort` |
-| `health.py` | direct diagnostics/sql/vector imports | `HealthDiagnosticsPort` |
-| `evaluation.py` | direct SQL/retriever construction | `EvalStoragePort` + `EvalRetrieverFactoryPort` |
-| `openrouter.py` | direct OpenAI client factory import | `ChatCompletionPort` (OpenAI-compatible adapter) |
-| `mutations.py` | direct blocking import | `BlockingExecutorPort` |
+| `docs_query.py` | migrated to port-based read path | `DocsReadPort` (`list_docs_page`) |
+| `docs_import.py` | migrated to loader/detector port | `DocsImportLoaderPort` |
+| `rag_query.py` | migrated to runtime/history ports | `HistoryReadPort` + `RagRuntimeFactoryPort` |
+| `health.py` | migrated to diagnostics port | `HealthDiagnosticsPort` |
+| `evaluation.py` | migrated to eval storage/retriever ports | `EvalStoragePort` + `EvalRetrieverFactoryPort` |
+| `openrouter.py` | migrated to port-based OpenAI-compatible client | `OpenRouterClientPort` (OpenAI-compatible adapter) |
+| `mutations.py` | migrated to blocking execution port | `BlockingExecutorPort` |
+| `docs_mutation.py` | orchestrator kept thin; contracts/handlers extracted | `docs_mutation_contracts.py` + `docs_mutation_handlers.py` |
+
+### 5.5 Fase B hardening backlog
+- [x] `core/use_cases/docs_mutation.py` coordinator complexity reduced: intent normalization + journal payload shaping externalized (`docs_mutation_contracts.py` / `docs_mutation_runtime.py`), SQL/vector/recovery handlers extracted, coordinator now focused on orchestration.
+- [TODO: Fase C] Unit-of-work boundary (`mutation_uow_factory`) is active and bound to shared SQL sessions (`session_uow`) for mutation SQL + rollback paths; extending the same transactional seam to other write-heavy workflows is intentionally deferred.
+- [x] Composition fan-out reduced with context bundles in `AppContainer` (`build_mutation_execution_bundle`, `build_docs_*_bundle`, `build_health_readiness_bundle`, `build_rag_*_bundle`) and router consumption.
+- [x] Evaluation/CLI paths now consume `AppContainer` bundles/builders instead of direct adapter/wiring assembly (eval command, docs mutate/ingest CLI, index rebuild/status CLI).
+- [x] Focused characterization tests added for mutation failure semantics (journal recovery, rollback failure, vector delta failure) in `tests/unit/core/use_cases/test_docs_mutation_refactor.py`.
+- [x] External HTTP/CLI contracts remained stable across B1-B2.5 refactors (validated by e2e/unit smoke coverage and full regression suite).
+
+### 5.6 Persistence backend agnostic target (next cycle)
+- [TODO: architecture] Introduce explicit persistence topology abstraction in ports:
+  - `SplitStorePersistencePort` (document + vector + history seams);
+  - `UnifiedKnowledgeStorePort` (single backend abstraction with equivalent use-case operations).
+- [TODO: architecture] Promote capability-driven orchestration (`StorageProfile`-based) so mutation/query flows choose strategy by capabilities, not by backend names.
+- [TODO: architecture] Move SQL/FAISS-specific assumptions fully to adapters/composition.
+- [TODO: architecture] Add contract test suite to validate adapter parity across:
+  - split baseline (`SQLite + FAISS/numpy`);
+  - unified candidates (`ElasticSearch`, `pgvector`, `Qdrant`).
+- [TODO: architecture] Keep external HTTP/CLI contracts stable while allowing internal breaking changes.
+
+Fase B closure (2026-03-01):
+- Completed.
+- Residual debt intentionally accepted for Fase C: broaden explicit transactional seams beyond canonical mutation paths.
 
 ---
 
@@ -257,6 +301,7 @@ Rule: no upward imports. Enforced with architecture tests and CI.
   - `RagService` (query orchestration)
   - `MutationCoordinator` (write orchestration)
   - `AppContainer` (composition root)
+  - Context bundles from composition root to routers (reduced fan-out wiring seams)
   - SQL repository adapters
   - Vector repository adapters
   - LLM/Embedding adapters
@@ -271,13 +316,19 @@ Rule: no upward imports. Enforced with architecture tests and CI.
 
 #### Flow: `Canonical mutation`
 - Trigger: `/api/docs/mutate`, `/api/docs`, `/api/docs/import`, `rag-mutate-docs`, `rag-ingest`
-- Steps: normalize intent -> acquire lock -> journal -> SQL mutation -> vector delta -> commit -> cleanup
-- Side effects: SQL writes, vector index updates, mutation journal entries
-- Failure modes: vector failure after SQL commit, rollback failure, lock timeout
+- Steps:
+  - normalize intent -> acquire lock -> journal;
+  - resolve storage capabilities/profile;
+  - execute mutation in selected strategy:
+    - split-store: SQL mutation + vector delta + compensation/recovery (`DURABLE_SAGA`);
+    - unified-store: single backend mutation with backend-native atomicity when available;
+  - commit journal/cleanup.
+- Side effects: backend writes and mutation journal entries.
+- Failure modes: capability mismatch, partial failure requiring compensation, rollback failure, lock timeout.
 
 #### Flow: `Index rebuild/repair`
 - Trigger: `/api/index/rebuild` or `rag-rebuild-index`
-- Steps: purge artifacts -> embed all SQL docs -> rebuild vector index -> emit diagnostics
+- Steps: purge artifacts -> embed all canonical docs from persistence port -> rebuild vector index (or trigger backend-native rebuild) -> emit diagnostics
 - Side effects: full index rewrite
 - Failure modes: embedder unavailable, manifest/drift mismatch, index persistence failure
 
@@ -321,7 +372,8 @@ Rule: no upward imports. Enforced with architecture tests and CI.
 
 - Workload assumptions:
   - single-node service
-  - local SQLite and local disk index
+  - local split-store baseline today (`SQLite + local index`)
+  - optional unified engine deployment in future cycles
   - moderate concurrent requests
 - Bottlenecks:
   - embedding/generation network latency
@@ -364,6 +416,11 @@ Rule: no upward imports. Enforced with architecture tests and CI.
 | Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | pass |
 
 Mandatory CI gate: total coverage >= 85% (`pytest` config in `pyproject.toml`).
+
+Key mutation/UoW characterization tests:
+- `tests/unit/core/use_cases/test_docs_mutation_refactor.py`
+- `tests/unit/infrastructure/persistence/sql/test_sql_storage.py`
+- `tests/integration/test_mutation_journal_recovery_e2e.py`
 
 ---
 
@@ -409,12 +466,14 @@ docs/
 
 ADRs must include alternatives, tradeoffs, consequences.
 
-Planned ADR set for D1 (to create under `docs/adr/`):
+Active ADR set for D1:
 1. ADR-001: Canonical mutation path and `DURABLE_SAGA` as mandatory write model.
 2. ADR-002: `core/use_cases` decoupling policy and required ports.
 3. ADR-003: Single composition root strategy and wiring ownership.
 4. ADR-004: Settings/config access policy (avoid hidden global coupling in app/core paths).
 5. ADR-005: Architecture test suite as release gate.
+6. ADR-006: Mutation UoW + shared SQL session boundary in `SqlDocumentStorage`/`HistorySqlStorage`.
+7. ADR-007 (proposed): persistence topology abstraction (split-store and unified-store), capability matrix, and cross-backend contract test policy.
 
 ---
 
