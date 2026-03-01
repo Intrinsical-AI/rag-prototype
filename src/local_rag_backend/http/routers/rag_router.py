@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query
 
-from local_rag_backend.composition.adapters import DEFAULT_DENSE_BACKEND_MESSAGE
 from local_rag_backend.core.use_cases.errors import BadRequestError, InternalServerError
 from local_rag_backend.core.use_cases.rag_query import (
     execute_ask_eval_sync,
@@ -38,49 +37,13 @@ from local_rag_backend.infrastructure.observability.observability import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from sqlalchemy.orm import Session
 
     from local_rag_backend.composition.container import AppContainer
-    from local_rag_backend.core.domain.entities import Document as DomainDocument
-    from local_rag_backend.core.ports import DocumentRepoPort, GeneratorPort, RetrieverPort
     from local_rag_backend.core.services.rag_runtime import RagService
-    from local_rag_backend.http.schemas.rag_api_models import AskEvalConfig
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
-
-
-def _build_retriever_from_config(
-    *,
-    container: AppContainer,
-    cfg: AskEvalConfig,
-    doc_repo: DocumentRepoPort,
-    preloaded_docs: Sequence[DomainDocument] | None = None,
-) -> RetrieverPort:
-    try:
-        return container.build_retriever_from_config(
-            cfg,
-            doc_repo,
-            preloaded_docs=preloaded_docs,
-            missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE,
-        )
-    except ValueError as e:
-        raise BadRequestError(str(e)) from e
-
-
-def _build_generator_from_config(
-    *,
-    container: AppContainer,
-    cfg: AskEvalConfig,
-) -> GeneratorPort:
-    try:
-        return container.build_generator_from_config(cfg)
-    except RuntimeError as e:
-        raise InternalServerError(str(e)) from e
-    except ValueError as e:
-        raise BadRequestError(str(e)) from e
 
 
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
@@ -130,9 +93,15 @@ async def history(
     limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
     offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
     db: Session = Depends(get_db),
+    container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[HistoryItem]:
     """Retrieve historical Q&A pairs from the database."""
-    history_entries = list_history_entries_sync(db=db, limit=limit, offset=offset)
+    history_bundle = container.build_rag_history_bundle(db=db)
+    history_entries = list_history_entries_sync(
+        history_reader=history_bundle.history_reader,
+        limit=limit,
+        offset=offset,
+    )
 
     return [
         HistoryItem(
@@ -165,24 +134,19 @@ async def ask_eval(
     if validation_errors := container.validate_rag_config(cfg):
         raise BadRequestError(f"Invalid config: {'; '.join(validation_errors)}")
 
-    outcome = await run_blocking(
-        execute_ask_eval_sync,
-        question=payload.question,
-        cfg=cfg,
-        build_retriever_from_config=lambda cfg, doc_repo, *, preloaded_docs=None: (
-            _build_retriever_from_config(
-                container=container,
-                cfg=cfg,
-                doc_repo=doc_repo,
-                preloaded_docs=preloaded_docs,
-            )
-        ),
-        build_generator_from_config=lambda cfg: _build_generator_from_config(
-            container=container,
+    try:
+        eval_bundle = container.build_rag_eval_bundle()
+        outcome = await run_blocking(
+            execute_ask_eval_sync,
+            question=payload.question,
             cfg=cfg,
-        ),
-        task_type="eval",
-    )
+            rag_runtime_factory=eval_bundle.rag_runtime_factory,
+            task_type="eval",
+        )
+    except ValueError as e:
+        raise BadRequestError(str(e)) from e
+    except RuntimeError as e:
+        raise InternalServerError(str(e)) from e
 
     rag_result = outcome.rag_result
     docs = rag_result["docs"]

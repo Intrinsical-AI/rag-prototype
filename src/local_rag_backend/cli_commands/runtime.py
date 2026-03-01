@@ -10,6 +10,7 @@ from local_rag_backend.settings import settings
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.core.ports import EmbedderPort
 
 T = TypeVar("T")
@@ -44,6 +45,13 @@ def _reset_rag_service_best_effort() -> None:
         reset_rag_service()
     except Exception:
         return None
+
+
+def get_cli_container() -> AppContainer:
+    """Resolve the app container for CLI wiring."""
+    from local_rag_backend.composition.factory import get_app_context
+
+    return get_app_context().container
 
 
 def run_cli_mutation(
@@ -84,5 +92,6 @@ def build_dense_embedder() -> EmbedderPort:
 __all__ = [
     "build_dense_embedder",
     "ensure_sqlite_schema_for_cli",
+    "get_cli_container",
     "run_cli_mutation",
 ]

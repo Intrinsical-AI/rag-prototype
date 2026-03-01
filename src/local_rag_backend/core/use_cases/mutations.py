@@ -5,13 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypeVar
 
 from local_rag_backend.core.use_cases.errors import map_runtime_error
-from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
 
+    from local_rag_backend.core.ports import BlockingExecutorPort, BlockingTaskType
     from local_rag_backend.core.use_cases.errors import AppError
-    from local_rag_backend.infrastructure.concurrency.blocking import BlockingTaskType
 
 T = TypeVar("T")
 
@@ -36,13 +35,13 @@ async def run_api_mutation(
     operation: Callable[[], T],
     run_locked: Callable[[Callable[[], T]], T],
     reset_after: Callable[[], None],
-    run_blocking_fn: Callable[..., Awaitable[T]] = run_blocking,
+    blocking_executor: BlockingExecutorPort,
     task_type: BlockingTaskType = "mutation",
     map_error: Callable[[Exception], AppError | None] | None = None,
 ) -> T:
     """Run one HTTP mutation with lock + offload + reset + mapped errors."""
     try:
-        return await run_blocking_fn(run_locked, operation, task_type=task_type)
+        return await blocking_executor.run_blocking(run_locked, operation, task_type=task_type)
     except Exception as exc:
         mapped = _map_exception(exc, map_error=map_error)
         if mapped is not exc:

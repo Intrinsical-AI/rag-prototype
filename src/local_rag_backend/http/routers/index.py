@@ -17,7 +17,6 @@ from local_rag_backend.http.dependencies import (
     reset_rag_service,
 )
 from local_rag_backend.http.schemas.index import RebuildIndexResponse
-from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 
 if TYPE_CHECKING:
     from local_rag_backend.composition.container import AppContainer
@@ -40,13 +39,14 @@ async def rebuild_index(
             ports=container.index_mutation_ports(),
         )
 
+    execution_bundle = container.build_mutation_execution_bundle()
     indexed = cast(
         "int",
         await run_api_mutation(
             operation=_rebuild_operation,
-            run_locked=container.run_multi_store_write_locked,
+            run_locked=execution_bundle.run_locked,
             reset_after=reset_rag_service,
-            run_blocking_fn=run_blocking,
+            blocking_executor=execution_bundle.blocking_executor,
         ),
     )
     return RebuildIndexResponse(indexed=indexed)

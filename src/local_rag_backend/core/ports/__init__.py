@@ -90,3 +90,57 @@ class LoaderPort(Protocol):
     """Interface for loading data from a source into a standard format."""
 
     def load(self) -> Iterable[LoadedItem]: ...
+
+
+from local_rag_backend.core.ports.use_cases import (  # noqa: E402
+    BlockingExecutorPort,
+    BlockingTaskType,
+    DocsImportLoaderPort,
+    DocsReadPort,
+    EvalDatasetDocInput,
+    EvalRetrieverFactoryPort,
+    EvalRetrieverPort,
+    EvalStoragePort,
+    HealthDiagnosticsPort,
+    HistoryEntry,
+    HistoryReadPort,
+    ImportDocsLoadResult,
+    ListedDocument,
+    OpenRouterClientPort,
+    OpenRouterGenerateRequest,
+    OpenRouterGenerateResult,
+    OpenRouterUsage,
+    RagRuntimeFactoryPort,
+    ReadinessDiagnostics,
+    ReadinessStatus,
+)
+
+__all__ = [
+    "BlockingExecutorPort",
+    "BlockingTaskType",
+    "DocsImportLoaderPort",
+    "DocsReadPort",
+    "DocumentRepoPort",
+    "EmbedderPort",
+    "EvalDatasetDocInput",
+    "EvalRetrieverFactoryPort",
+    "EvalRetrieverPort",
+    "EvalStoragePort",
+    "GeneratorPort",
+    "HealthDiagnosticsPort",
+    "HistoryEntry",
+    "HistoryReadPort",
+    "ImportDocsLoadResult",
+    "ListedDocument",
+    "LoaderPort",
+    "OpenRouterClientPort",
+    "OpenRouterGenerateRequest",
+    "OpenRouterGenerateResult",
+    "OpenRouterUsage",
+    "QAHistoryPort",
+    "RagRuntimeFactoryPort",
+    "ReadinessDiagnostics",
+    "ReadinessStatus",
+    "RetrieverPort",
+    "VectorRepoPort",
+]

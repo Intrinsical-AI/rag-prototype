@@ -6,13 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from local_rag_backend.core.use_cases.docs_ingest import ingest_docs_sync
-from local_rag_backend.infrastructure.ingestion.loaders import (
-    ChatGPTLoader,
-    GeminiLoader,
-    detect_json_export_format,
-)
 
 if TYPE_CHECKING:
+    from local_rag_backend.core.ports import DocsImportLoaderPort
     from local_rag_backend.core.ports.contracts import DocsMutationPorts
     from local_rag_backend.settings import Settings
 
@@ -61,6 +57,7 @@ def execute_import_docs_sync(
     raw: bytes,
     settings_obj: Settings,
     ports: DocsMutationPorts,
+    import_loader: DocsImportLoaderPort,
     max_bytes: int = DEFAULT_IMPORT_MAX_BYTES,
 ) -> ImportDocsOutcome:
     if len(raw) > int(max_bytes):
@@ -69,22 +66,21 @@ def execute_import_docs_sync(
     if not raw:
         raise ImportPayloadEmptyError()
 
-    detection = detect_json_export_format(raw)
-    if detection.fmt == "chatgpt_export":
-        loader: ChatGPTLoader | GeminiLoader = ChatGPTLoader(raw)
-    elif detection.fmt == "gemini_export":
-        loader = GeminiLoader(raw)
-    else:
-        raise UnsupportedImportFormatError()
-
     try:
-        items = list(loader.load())
+        load_result = import_loader.load_texts(raw=raw)
+    except UnsupportedImportFormatError:
+        raise
     except ValueError as exc:
         raise InvalidImportPayloadError(str(exc)) from exc
 
-    texts = [item.text for item in items if item.text and item.text.strip()]
+    texts = [text for text in load_result.texts if text and text.strip()]
     if not texts:
-        return ImportDocsOutcome(count=0, ids=[], format_detected=detection.fmt, input_texts=0)
+        return ImportDocsOutcome(
+            count=0,
+            ids=[],
+            format_detected=load_result.format_detected,
+            input_texts=0,
+        )
 
     ids = ingest_docs_sync(
         texts=texts,
@@ -95,7 +91,7 @@ def execute_import_docs_sync(
     return ImportDocsOutcome(
         count=len(ids),
         ids=ids,
-        format_detected=detection.fmt,
+        format_detected=load_result.format_detected,
         input_texts=len(texts),
     )
 

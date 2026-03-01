@@ -68,9 +68,15 @@ async def list_docs(
     limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     db: Session = Depends(get_db),
+    container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
-    docs = list_docs_page_sync(db=db, limit=limit, offset=offset)
-    return [DocumentInDB(id=str(item.doc_id), content=str(item.content)) for item in docs]
+    query_bundle = container.build_docs_query_bundle(db=db)
+    docs = list_docs_page_sync(
+        docs_reader=query_bundle.docs_reader,
+        limit=limit,
+        offset=offset,
+    )
+    return [DocumentInDB(id=item.id, content=item.content) for item in docs]
 
 
 def _map_ingest_error(exc: Exception) -> BadRequestError | None:
@@ -107,9 +113,13 @@ async def mutate_docs(
     container: AppContainer = Depends(get_app_container_dependency),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> DocsMutateResponse:
+    mutation_bundle = container.build_docs_mutation_bundle(
+        missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
+    )
+    execution_bundle = container.build_mutation_execution_bundle(run_blocking_fn=run_blocking)
+
     def _mutate_operation() -> MutationSummary:
-        ports = container.docs_mutation_ports(missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE)
-        coordinator = MutationCoordinator(settings_obj=settings_obj, ports=ports)
+        coordinator = MutationCoordinator(settings_obj=settings_obj, ports=mutation_bundle.ports)
         return coordinator.execute(
             MutationIntent(
                 op_id=str(payload.op_id or "").strip(),
@@ -132,9 +142,9 @@ async def mutate_docs(
         "MutationSummary",
         await run_api_mutation(
             operation=_mutate_operation,
-            run_locked=container.run_multi_store_write_locked,
+            run_locked=execution_bundle.run_locked,
             reset_after=reset_rag_service,
-            run_blocking_fn=run_blocking,
+            blocking_executor=execution_bundle.blocking_executor,
             map_error=_map_mutation_error,
         ),
     )
@@ -167,6 +177,10 @@ async def ingest_docs(
     container: AppContainer = Depends(get_app_container_dependency),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> IngestResponse:
+    mutation_bundle = container.build_docs_mutation_bundle(
+        missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
+    )
+    execution_bundle = container.build_mutation_execution_bundle(run_blocking_fn=run_blocking)
     texts = [t.strip() for t in payload.texts if t and t.strip()]
     if not texts:
         return IngestResponse(count=0, ids=[])
@@ -176,9 +190,7 @@ async def ingest_docs(
         return ingest_docs_sync(
             texts=texts,
             settings_obj=settings_obj,
-            ports=container.docs_mutation_ports(
-                missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
-            ),
+            ports=mutation_bundle.ports,
             source="api:/docs",
         )
 
@@ -189,9 +201,9 @@ async def ingest_docs(
             "list[str]",
             await run_api_mutation(
                 operation=_ingest_operation,
-                run_locked=container.run_multi_store_write_locked,
+                run_locked=execution_bundle.run_locked,
                 reset_after=reset_rag_service,
-                run_blocking_fn=run_blocking,
+                blocking_executor=execution_bundle.blocking_executor,
                 map_error=_map_ingest_error,
             ),
         )
@@ -224,6 +236,10 @@ async def import_docs(
     Detects the export format automatically and ingests each message as a separate document.
     """
     raw = await file.read()
+    mutation_bundle = container.build_docs_mutation_bundle(
+        missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
+    )
+    execution_bundle = container.build_mutation_execution_bundle(run_blocking_fn=run_blocking)
     t = Timer()
     ok = False
     outcome: ImportDocsOutcome | None = None
@@ -233,18 +249,17 @@ async def import_docs(
             return execute_import_docs_sync(
                 raw=raw,
                 settings_obj=settings_obj,
-                ports=container.docs_mutation_ports(
-                    missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
-                ),
+                ports=mutation_bundle.ports,
+                import_loader=mutation_bundle.import_loader,
             )
 
         outcome = cast(
             "ImportDocsOutcome",
             await run_api_mutation(
                 operation=_import_operation,
-                run_locked=container.run_multi_store_write_locked,
+                run_locked=execution_bundle.run_locked,
                 reset_after=reset_rag_service,
-                run_blocking_fn=run_blocking,
+                blocking_executor=execution_bundle.blocking_executor,
                 map_error=_map_import_error,
             ),
         )

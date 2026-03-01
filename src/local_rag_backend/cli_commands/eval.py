@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from local_rag_backend.settings import settings
+from local_rag_backend.cli_commands.runtime import get_cli_container
 
 
 @click.command("eval")
@@ -50,14 +50,18 @@ def eval_cmd(
     )
     from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 
+    container = get_cli_container()
+    eval_bundle = container.build_eval_execution_bundle()
     ds = load_eval_dataset(dataset)
     res = run_retrieval_eval(
         dataset=ds,
+        eval_storage_port=eval_bundle.eval_storage_port,
+        eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
         retrieval_mode=retrieval_mode,
         k=k,
         reranker_enabled=bool(reranker),
-        reranker_candidate_k=settings.reranker_candidate_k,
-        reranker_strategy=settings.reranker_strategy,
+        reranker_candidate_k=eval_bundle.reranker_candidate_k,
+        reranker_strategy=eval_bundle.reranker_strategy,
         max_queries=max_queries,
     )
     click.echo(format_eval_result(res))

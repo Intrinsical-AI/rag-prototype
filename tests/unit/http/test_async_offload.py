@@ -2,6 +2,7 @@ import threading
 
 import pytest
 
+from local_rag_backend.composition import adapters as composition_adapters
 from local_rag_backend.http.dependencies import get_rag_service
 from local_rag_backend.http.main import app
 from local_rag_backend.settings import settings
@@ -37,8 +38,6 @@ async def test_openrouter_generate_runs_in_worker_thread(asgi_client, monkeypatc
     monkeypatch.setattr(settings, "openrouter_enabled", True, raising=False)
     monkeypatch.setattr(settings, "openrouter_api_key", "k", raising=False)
 
-    from local_rag_backend.core.use_cases import openrouter as openrouter_service
-
     class DummyUsage:
         prompt_tokens = 1
         completion_tokens = 2
@@ -55,16 +54,22 @@ async def test_openrouter_generate_runs_in_worker_thread(asgi_client, monkeypatc
         usage = DummyUsage()
 
     class DummyClient:
-        def __init__(self, *args, **kwargs):
-            seen["tid"] = threading.get_ident()
-
         class chat:
             class completions:
                 @staticmethod
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
+    def _fake_create_openai_client(**kwargs):
+        seen["tid"] = threading.get_ident()
+        return DummyClient()
+
+    monkeypatch.setattr(
+        composition_adapters,
+        "create_openai_client",
+        _fake_create_openai_client,
+        raising=True,
+    )
 
     r = await asgi_client.post(
         "/api/openrouter/generate",

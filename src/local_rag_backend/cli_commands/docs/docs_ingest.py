@@ -7,8 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
-from local_rag_backend.composition.wiring.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.cli_commands.runtime import (
+    build_dense_embedder,
+    get_cli_container,
+    run_cli_mutation,
+)
 from local_rag_backend.core.use_cases.docs_mutation import (
     MutationCoordinator,
     MutationIntent,
@@ -374,7 +377,12 @@ def ingest_cmd(
             click.echo("[WARN] No files found under limits. Nothing to ingest.")
             return
 
-        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
+        container = get_cli_container()
+        mutation_bundle = container.build_docs_mutation_bundle(
+            build_embedder=build_dense_embedder,
+            use_wiring_defaults=True,
+        )
+        ports = mutation_bundle.ports
 
         ingest_plans, total_files, dry_run_chunks, total_skipped = _build_ingest_plans(
             files=files,

@@ -2,36 +2,20 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import text
-
-from local_rag_backend.infrastructure.observability.diagnostics import (
-    get_document_ids,
-    get_documents_count,
-    get_history_count,
-    get_incomplete_mutation_records_count,
-    get_retrieval_index_stats,
-)
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
-from local_rag_backend.infrastructure.persistence.vector.manifest import (
-    expected_manifest_config_from_settings,
-)
-
 if TYPE_CHECKING:
+    from local_rag_backend.core.ports import HealthDiagnosticsPort
     from local_rag_backend.settings import Settings
 
 
-def ping_database() -> None:
-    with db_base.engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
+def ping_database(*, diagnostics: HealthDiagnosticsPort) -> None:
+    diagnostics.ping_database()
 
 
-def check_database(checks: dict[str, Any]) -> bool:
+def check_database(*, checks: dict[str, Any], diagnostics: HealthDiagnosticsPort) -> bool:
     try:
-        ping_database()
+        ping_database(diagnostics=diagnostics)
         checks["database"] = "ok"
         return True
     except Exception as e:
@@ -39,31 +23,36 @@ def check_database(checks: dict[str, Any]) -> bool:
         return False
 
 
-def check_sql_counts(checks: dict[str, Any]) -> tuple[bool, int | None]:
+def check_sql_counts(
+    *,
+    checks: dict[str, Any],
+    diagnostics: HealthDiagnosticsPort,
+) -> tuple[bool, int | None]:
     docs_count: int | None = None
     is_ready = True
     try:
-        docs_count = get_documents_count(db_base.engine)
+        docs_count = diagnostics.get_documents_count()
         checks["documents"] = {"count": docs_count}
     except Exception as e:
         checks["documents"] = f"failed: {e!s}"
         is_ready = False
 
     try:
-        checks["history"] = {"count": get_history_count(db_base.engine)}
+        checks["history"] = {"count": diagnostics.get_history_count()}
     except Exception as e:
         checks["history"] = f"failed: {e!s}"
     return is_ready, docs_count
 
 
-def _check_retrieval_index_id_set_drift(*, checks: dict[str, Any], settings_obj: Settings) -> bool:
+def _check_retrieval_index_id_set_drift(
+    *,
+    checks: dict[str, Any],
+    settings_obj: Settings,
+    diagnostics: HealthDiagnosticsPort,
+) -> bool:
     try:
-        db_ids = {str(x) for x in get_document_ids(db_base.engine)}
-        index_ids = {
-            str(x)
-            for x in json.loads(Path(settings_obj.id_map_path).read_text(encoding="utf-8"))
-            if str(x).strip()
-        }
+        db_ids = set(diagnostics.get_document_ids())
+        index_ids = set(diagnostics.get_index_ids(id_map_path=settings_obj.id_map_path))
         stale = sorted(index_ids - db_ids)
         missing = sorted(db_ids - index_ids)
         if not stale and not missing:
@@ -89,12 +78,13 @@ def check_retrieval_index(
     checks: dict[str, Any],
     docs_count: int | None,
     settings_obj: Settings,
+    diagnostics: HealthDiagnosticsPort,
+    expected_manifest: dict[str, Any] | None = None,
 ) -> bool:
     if settings_obj.retrieval_mode not in ("dense", "hybrid"):
         return True
 
-    expected_manifest = expected_manifest_config_from_settings(settings_obj)
-    stats = get_retrieval_index_stats(
+    stats = diagnostics.get_retrieval_index_stats(
         index_path=settings_obj.index_path,
         id_map_path=settings_obj.id_map_path,
         vector_backend=settings_obj.vector_backend,
@@ -125,13 +115,22 @@ def check_retrieval_index(
         return False
 
     if docs_count <= 5000:
-        return _check_retrieval_index_id_set_drift(checks=checks, settings_obj=settings_obj)
+        return _check_retrieval_index_id_set_drift(
+            checks=checks,
+            settings_obj=settings_obj,
+            diagnostics=diagnostics,
+        )
     return True
 
 
-def check_mutation_journal(*, checks: dict[str, Any], settings_obj: Settings) -> None:
+def check_mutation_journal(
+    *,
+    checks: dict[str, Any],
+    settings_obj: Settings,
+    diagnostics: HealthDiagnosticsPort,
+) -> None:
     try:
-        incomplete = get_incomplete_mutation_records_count(
+        incomplete = diagnostics.get_incomplete_mutation_records_count(
             coordination_dir=settings_obj.get_coordination_dir()
         )
     except Exception as e:

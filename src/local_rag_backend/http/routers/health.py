@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends
 
 from local_rag_backend.composition.adapters import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
+    get_sql_base_ref,
 )
-from local_rag_backend.core.use_cases import health as health_application
 from local_rag_backend.core.use_cases.errors import ServiceUnavailableError
 from local_rag_backend.core.use_cases.health import (
     check_database,
@@ -21,15 +21,20 @@ from local_rag_backend.core.use_cases.health import (
     check_sql_counts,
     ping_database,
 )
-from local_rag_backend.http.dependencies import get_rag_service, get_settings_dependency
+from local_rag_backend.http.dependencies import (
+    get_app_container_dependency,
+    get_rag_service,
+    get_settings_dependency,
+)
 from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 
 if TYPE_CHECKING:
+    from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
 # Backward-compat test seam: some tests monkeypatch `health_router.db_base.engine`.
-db_base = health_application.db_base
+db_base = get_sql_base_ref()
 
 
 async def _check_rag_service(checks: dict[str, Any]) -> bool:
@@ -52,10 +57,13 @@ def _check_llm_providers(*, checks: dict[str, Any], settings_obj: Settings) -> b
 
 
 @router.get("/health", tags=["Health"], summary="Health check endpoint")
-async def health_check() -> dict[str, str]:
+async def health_check(
+    container: AppContainer = Depends(get_app_container_dependency),
+) -> dict[str, str]:
     """Basic health check for service availability (e.g., Docker/K8s)."""
     try:
-        ping_database()
+        readiness_bundle = container.build_health_readiness_bundle(engine=db_base.engine)
+        ping_database(diagnostics=readiness_bundle.diagnostics)
         return {"status": "healthy"}
     except Exception as e:
         raise ServiceUnavailableError(f"Database connection failed: {e!s}") from e
@@ -64,17 +72,21 @@ async def health_check() -> dict[str, str]:
 @router.get("/ready", tags=["Health"], summary="Readiness check endpoint")
 async def readiness_check(
     settings_obj: Settings = Depends(get_settings_dependency),
+    container: AppContainer = Depends(get_app_container_dependency),
 ) -> dict[str, Any]:
     """Check if all dependencies are ready to handle requests."""
     checks: dict[str, Any] = {}
     is_ready = True
     docs_count: int | None = None
+    readiness_bundle = container.build_health_readiness_bundle(engine=db_base.engine)
+    diagnostics = readiness_bundle.diagnostics
+    expected_manifest = readiness_bundle.expected_manifest
 
-    db_ok = check_database(checks)
+    db_ok = check_database(checks=checks, diagnostics=diagnostics)
     if not db_ok:
         is_ready = False
     if db_ok:
-        db_ready, docs_count = check_sql_counts(checks)
+        db_ready, docs_count = check_sql_counts(checks=checks, diagnostics=diagnostics)
         if not db_ready:
             is_ready = False
 
@@ -82,9 +94,15 @@ async def readiness_check(
         is_ready = False
     if not _check_llm_providers(checks=checks, settings_obj=settings_obj):
         is_ready = False
-    if not check_retrieval_index(checks=checks, docs_count=docs_count, settings_obj=settings_obj):
+    if not check_retrieval_index(
+        checks=checks,
+        docs_count=docs_count,
+        settings_obj=settings_obj,
+        diagnostics=diagnostics,
+        expected_manifest=expected_manifest,
+    ):
         is_ready = False
-    check_mutation_journal(checks=checks, settings_obj=settings_obj)
+    check_mutation_journal(checks=checks, settings_obj=settings_obj, diagnostics=diagnostics)
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:

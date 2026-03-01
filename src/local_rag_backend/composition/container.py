@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
 from local_rag_backend.composition.adapters import (
     DEFAULT_DENSE_BACKEND_MESSAGE,
+    build_blocking_executor,
     build_dense_embedder_from_settings,
+    build_docs_import_loader_port,
+    build_docs_read_port,
+    build_eval_retriever_factory_port,
+    build_eval_storage_port,
+    build_expected_manifest_config,
     build_generator_from_settings,
+    build_health_diagnostics_port,
+    build_history_read_port,
+    build_openrouter_client_from_settings,
+    build_rag_runtime_factory,
     build_retriever_with_default_embedder_from_settings,
     get_available_llm_providers as get_available_llm_providers_from_settings,
     resolve_preferred_llm_provider,
@@ -34,6 +45,7 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
     HistorySqlStorage,
     SqlDocumentStorage,
@@ -46,14 +58,23 @@ from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.ports import (
+        BlockingExecutorPort,
+        DocsImportLoaderPort,
+        DocsReadPort,
         DocumentRepoPort,
         EmbedderPort,
+        EvalRetrieverFactoryPort,
+        EvalStoragePort,
         GeneratorPort,
+        HealthDiagnosticsPort,
+        HistoryReadPort,
+        OpenRouterClientPort,
         QAHistoryPort,
+        RagRuntimeFactoryPort,
         RetrieverPort,
         VectorRepoPort,
     )
@@ -63,6 +84,52 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MutationExecutionBundle:
+    run_locked: Callable[[Callable[[], Any]], Any]
+    blocking_executor: BlockingExecutorPort
+
+
+@dataclass(frozen=True)
+class DocsQueryBundle:
+    docs_reader: DocsReadPort
+
+
+@dataclass(frozen=True)
+class DocsMutationBundle:
+    ports: DocsMutationPorts
+    import_loader: DocsImportLoaderPort
+
+
+@dataclass(frozen=True)
+class IndexRebuildBundle:
+    ports: IndexMutationPorts
+
+
+@dataclass(frozen=True)
+class HealthReadinessBundle:
+    diagnostics: HealthDiagnosticsPort
+    expected_manifest: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class RagHistoryBundle:
+    history_reader: HistoryReadPort
+
+
+@dataclass(frozen=True)
+class RagEvalBundle:
+    rag_runtime_factory: RagRuntimeFactoryPort
+
+
+@dataclass(frozen=True)
+class EvalExecutionBundle:
+    eval_storage_port: EvalStoragePort
+    eval_retriever_factory_port: EvalRetrieverFactoryPort
+    reranker_candidate_k: int
+    reranker_strategy: str
 
 
 class AppContainer:
@@ -90,6 +157,7 @@ class AppContainer:
         purge_index_artifacts_fn: Callable[..., None] = purge_index_artifacts,
         write_lock: Callable[..., Any] = multi_store_write_lock,
         mutation_journal_factory: Callable[..., Any] | None = None,
+        mutation_uow_factory: Callable[..., Any] | None = None,
         storage_profile_registry: StorageProfileRegistry | None = None,
         rag_service_factory: Callable[..., RagService] = RagService,
         system_state_factory: Callable[[], SystemStateStorage] = SystemStateStorage,
@@ -119,6 +187,7 @@ class AppContainer:
                 self.settings_obj.get_coordination_dir() / ".mutation_journal"
             )
         )
+        self.mutation_uow_factory = mutation_uow_factory
         self.storage_profile_registry = storage_profile_registry or StorageProfileRegistry()
         self.rag_service_factory = rag_service_factory
         self._system_state = system_state_factory()
@@ -160,15 +229,128 @@ class AppContainer:
         with self.write_lock():
             return fn()
 
+    def build_docs_read_port(self, *, db: Any) -> DocsReadPort:
+        return build_docs_read_port(db=db)
+
+    def build_docs_query_bundle(self, *, db: Any) -> DocsQueryBundle:
+        return DocsQueryBundle(docs_reader=self.build_docs_read_port(db=db))
+
+    def build_history_read_port(self, *, db: Any) -> HistoryReadPort:
+        return build_history_read_port(db=db)
+
+    def build_rag_history_bundle(self, *, db: Any) -> RagHistoryBundle:
+        return RagHistoryBundle(history_reader=self.build_history_read_port(db=db))
+
+    def build_rag_eval_bundle(self) -> RagEvalBundle:
+        return RagEvalBundle(rag_runtime_factory=self.build_rag_runtime_factory())
+
+    def build_health_diagnostics_port(self, *, engine: Any | None = None) -> HealthDiagnosticsPort:
+        return build_health_diagnostics_port(
+            engine=(engine if engine is not None else db_base.engine)
+        )
+
+    def build_health_readiness_bundle(self, *, engine: Any | None = None) -> HealthReadinessBundle:
+        return HealthReadinessBundle(
+            diagnostics=self.build_health_diagnostics_port(engine=engine),
+            expected_manifest=self.build_expected_manifest_config(),
+        )
+
+    def build_expected_manifest_config(self) -> dict[str, Any]:
+        return build_expected_manifest_config(settings_obj=self.settings_obj)
+
+    def build_docs_import_loader_port(self) -> DocsImportLoaderPort:
+        return build_docs_import_loader_port()
+
+    def build_docs_mutation_bundle(
+        self,
+        *,
+        missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
+        build_embedder: Callable[[], EmbedderPort] | None = None,
+        use_wiring_defaults: bool = False,
+    ) -> DocsMutationBundle:
+        return DocsMutationBundle(
+            ports=self.docs_mutation_ports(
+                missing_backend_message=missing_backend_message,
+                build_embedder=build_embedder,
+                use_wiring_defaults=use_wiring_defaults,
+            ),
+            import_loader=self.build_docs_import_loader_port(),
+        )
+
+    def build_index_rebuild_bundle(
+        self,
+        *,
+        missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
+        build_embedder: Callable[[], EmbedderPort] | None = None,
+        use_wiring_defaults: bool = False,
+    ) -> IndexRebuildBundle:
+        return IndexRebuildBundle(
+            ports=self.index_mutation_ports(
+                missing_backend_message=missing_backend_message,
+                build_embedder=build_embedder,
+                use_wiring_defaults=use_wiring_defaults,
+            ),
+        )
+
+    def blocking_executor(
+        self,
+        *,
+        run_blocking_fn: Callable[..., Awaitable[Any]] | None = None,
+    ) -> BlockingExecutorPort:
+        if run_blocking_fn is None:
+            return build_blocking_executor()
+        return build_blocking_executor(run_blocking_fn=run_blocking_fn)
+
+    def build_mutation_execution_bundle(
+        self,
+        *,
+        run_blocking_fn: Callable[..., Awaitable[Any]] | None = None,
+    ) -> MutationExecutionBundle:
+        return MutationExecutionBundle(
+            run_locked=self.run_multi_store_write_locked,
+            blocking_executor=self.blocking_executor(run_blocking_fn=run_blocking_fn),
+        )
+
+    def build_openrouter_client(self) -> OpenRouterClientPort:
+        return build_openrouter_client_from_settings(settings_obj=self.settings_obj)
+
+    def build_rag_runtime_factory(self) -> RagRuntimeFactoryPort:
+        return build_rag_runtime_factory(
+            doc_repo_factory=self.doc_repo_factory,
+            history_repo_factory=self.history_repo_factory,
+            build_retriever_from_config=self.build_retriever_from_config,
+            build_generator_from_config=self.build_generator_from_config,
+            rag_service_factory=self.rag_service_factory,
+        )
+
+    def build_eval_storage_port(self) -> EvalStoragePort:
+        return build_eval_storage_port()
+
+    def build_eval_retriever_factory_port(self) -> EvalRetrieverFactoryPort:
+        return build_eval_retriever_factory_port()
+
+    def build_eval_execution_bundle(self) -> EvalExecutionBundle:
+        return EvalExecutionBundle(
+            eval_storage_port=self.build_eval_storage_port(),
+            eval_retriever_factory_port=self.build_eval_retriever_factory_port(),
+            reranker_candidate_k=int(self.settings_obj.reranker_candidate_k),
+            reranker_strategy=str(self.settings_obj.reranker_strategy),
+        )
+
     def docs_mutation_ports(
         self,
         *,
         missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
+        build_embedder: Callable[[], EmbedderPort] | None = None,
+        use_wiring_defaults: bool = False,
     ) -> DocsMutationPorts:
+        resolved_embedder_builder = build_embedder or (
+            lambda: self.build_dense_embedder(missing_backend_message=missing_backend_message)
+        )
+        if use_wiring_defaults:
+            return build_docs_mutation_ports(build_embedder=resolved_embedder_builder)
         return build_docs_mutation_ports(
-            build_embedder=lambda: self.build_dense_embedder(
-                missing_backend_message=missing_backend_message
-            ),
+            build_embedder=resolved_embedder_builder,
             doc_repo_factory=cast("Any", self.doc_repo_factory),
             build_upsert_doc=self.build_upsert_doc,
             vector_repo_factory=self.vector_repo_factory,
@@ -176,17 +358,23 @@ class AppContainer:
             write_lock=self.write_lock,
             mutation_journal_factory=self.mutation_journal_factory,
             storage_profile_registry=self.storage_profile_registry,
+            mutation_uow_factory=self.mutation_uow_factory,
         )
 
     def index_mutation_ports(
         self,
         *,
         missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
+        build_embedder: Callable[[], EmbedderPort] | None = None,
+        use_wiring_defaults: bool = False,
     ) -> IndexMutationPorts:
+        resolved_embedder_builder = build_embedder or (
+            lambda: self.build_dense_embedder(missing_backend_message=missing_backend_message)
+        )
+        if use_wiring_defaults:
+            return build_index_mutation_ports(build_embedder=resolved_embedder_builder)
         return build_index_mutation_ports(
-            build_embedder=lambda: self.build_dense_embedder(
-                missing_backend_message=missing_backend_message
-            ),
+            build_embedder=resolved_embedder_builder,
             doc_repo_factory=self.doc_repo_factory,
             vector_repo_factory=self.vector_repo_factory,
             purge_index_artifacts_fn=self.purge_index_artifacts_fn,

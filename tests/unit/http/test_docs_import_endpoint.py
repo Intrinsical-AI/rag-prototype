@@ -206,10 +206,26 @@ async def test_import_missing_file_field_returns_422(asgi_client, in_memory_sqli
 
 async def test_import_file_too_large_returns_413(asgi_client, in_memory_sqlite, monkeypatch):
     """Test that file exceeding size limit returns 413."""
+    from local_rag_backend.core.use_cases import docs_import as docs_import_use_case
+    from local_rag_backend.http.routers import docs as docs_router
+
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
-    # Create a file larger than 50MB limit
-    large_content = b"[" + b"x" * (51 * 1024 * 1024) + b"]"
+    def _execute_import_docs_sync_with_small_limit(**kwargs):
+        return docs_import_use_case.execute_import_docs_sync(
+            max_bytes=512,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        docs_router,
+        "execute_import_docs_sync",
+        _execute_import_docs_sync_with_small_limit,
+        raising=True,
+    )
+
+    # Keep payload intentionally small to avoid heavy test runtime; limit is monkeypatched above.
+    large_content = b"[" + b"x" * 2048 + b"]"
 
     files = {
         "file": (

@@ -6,8 +6,11 @@ from typing import Any, cast
 
 import click
 
-from local_rag_backend.cli_commands.runtime import build_dense_embedder, run_cli_mutation
-from local_rag_backend.composition.wiring.mutation_ports import build_docs_mutation_ports
+from local_rag_backend.cli_commands.runtime import (
+    build_dense_embedder,
+    get_cli_container,
+    run_cli_mutation,
+)
 from local_rag_backend.core.use_cases.docs_mutation import (
     MutationCoordinator,
     MutationIntent,
@@ -74,8 +77,12 @@ def mutate_docs_cmd(payload_json: Path) -> None:
     try:
         payload = _read_payload(payload_json)
         intent = _build_intent(payload)
-        ports = build_docs_mutation_ports(build_embedder=build_dense_embedder)
-        coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
+        container = get_cli_container()
+        mutation_bundle = container.build_docs_mutation_bundle(
+            build_embedder=build_dense_embedder,
+            use_wiring_defaults=True,
+        )
+        coordinator = MutationCoordinator(settings_obj=settings, ports=mutation_bundle.ports)
 
         def _run_sync() -> MutationSummary:
             return coordinator.execute(intent)

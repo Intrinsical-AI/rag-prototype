@@ -7,15 +7,8 @@ import click
 from local_rag_backend.cli_commands.runtime import (
     build_dense_embedder,
     ensure_sqlite_schema_for_cli,
+    get_cli_container,
     run_cli_mutation,
-)
-from local_rag_backend.infrastructure.observability.diagnostics import (
-    get_documents_count,
-    get_history_count,
-    get_retrieval_index_stats,
-)
-from local_rag_backend.infrastructure.persistence.vector.manifest import (
-    expected_manifest_config_from_settings,
 )
 from local_rag_backend.settings import settings
 
@@ -24,18 +17,20 @@ from local_rag_backend.settings import settings
 def rebuild_index_cmd() -> None:
     """Rebuild FAISS index from the current SQLite documents (idempotent)."""
     try:
-        from local_rag_backend.composition.wiring.mutation_ports import build_index_mutation_ports
         from local_rag_backend.core.use_cases import index as index_service
 
-        if settings.retrieval_mode not in ("dense", "hybrid"):
+        container = get_cli_container()
+        if container.settings_obj.retrieval_mode not in ("dense", "hybrid"):
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
-
-        ports = build_index_mutation_ports(build_embedder=build_dense_embedder)
+        index_bundle = container.build_index_rebuild_bundle(
+            build_embedder=build_dense_embedder,
+            use_wiring_defaults=True,
+        )
 
         def _rebuild_sync() -> int:
             return index_service.rebuild_index_sync(
-                settings_obj=settings,
-                ports=ports,
+                settings_obj=container.settings_obj,
+                ports=index_bundle.ports,
             )
 
         n = run_cli_mutation(_rebuild_sync)
@@ -51,6 +46,9 @@ def status_cmd() -> None:
     from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
     ensure_sqlite_schema_for_cli()
+    container = get_cli_container()
+    readiness_bundle = container.build_health_readiness_bundle(engine=db_base.engine)
+    diagnostics = readiness_bundle.diagnostics
 
     title_fg = "cyan"
     key_fg = "blue"
@@ -100,24 +98,24 @@ def status_cmd() -> None:
 
     docs_count: int | None = None
     try:
-        docs_count = get_documents_count(db_base.engine)
+        docs_count = diagnostics.get_documents_count()
         click.echo(f"  {click.style('Documents:', fg=key_fg, bold=True)} {docs_count}")
     except Exception as e:
         click.echo(f"  {click.style('Documents:', fg=key_fg, bold=True)} [ERROR] {e!s}")
 
     try:
-        hist = get_history_count(db_base.engine)
+        hist = diagnostics.get_history_count()
         click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} {hist}")
     except Exception as e:
         click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
 
     if settings.retrieval_mode in ("dense", "hybrid"):
-        expected_manifest = expected_manifest_config_from_settings(settings)
-        stats = get_retrieval_index_stats(
+        stats = diagnostics.get_retrieval_index_stats(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
+            vector_backend=settings.vector_backend,
             dim=None,
-            expected_manifest=expected_manifest,
+            expected_manifest=readiness_bundle.expected_manifest,
         )
         status_txt = str(stats.get("status"))
         if status_txt == "ok":

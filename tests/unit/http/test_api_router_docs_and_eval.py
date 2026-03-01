@@ -3,8 +3,7 @@
 import numpy as np
 import pytest
 
-from local_rag_backend.composition import factory
-from local_rag_backend.core.use_cases import openrouter as openrouter_service
+from local_rag_backend.composition import adapters as composition_adapters, factory
 from local_rag_backend.http.routers import health as health_router
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.settings import settings
@@ -216,16 +215,22 @@ async def test_openrouter_generate_success(asgi_client, monkeypatch):
         usage = DummyUsage()
 
     class DummyClient:
-        def __init__(self, *args, **kwargs):
-            captured.update(kwargs)
-
         class chat:
             class completions:
                 @staticmethod
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
+    def _fake_create_openai_client(**kwargs):
+        captured.update(kwargs)
+        return DummyClient()
+
+    monkeypatch.setattr(
+        composition_adapters,
+        "create_openai_client",
+        _fake_create_openai_client,
+        raising=True,
+    )
 
     r = await asgi_client.post(
         "/api/openrouter/generate",
@@ -254,16 +259,18 @@ async def test_openrouter_generate_malformed_response_is_502(asgi_client, monkey
         usage = None
 
     class DummyClient:
-        def __init__(self, *args, **kwargs):
-            return None
-
         class chat:
             class completions:
                 @staticmethod
                 def create(**kwargs):
                     return DummyResp()
 
-    monkeypatch.setattr(openrouter_service, "OpenAI", DummyClient)
+    monkeypatch.setattr(
+        composition_adapters,
+        "create_openai_client",
+        lambda **kwargs: DummyClient(),
+        raising=True,
+    )
 
     r = await asgi_client.post(
         "/api/openrouter/generate",
