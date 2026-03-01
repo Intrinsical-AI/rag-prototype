@@ -101,38 +101,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Shutting down.")
 
 
-app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
-register_exception_handlers(app)
-
-# CORS: keep permissive defaults ONLY in debug mode.
-cors_allow_origins = ["*"] if settings.debug else list(settings.cors_allow_origins)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_allow_origins,
-    # `*` + credentials is invalid per the CORS spec; browsers will ignore it.
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-if settings.enable_monitoring:
-    app.add_middleware(MetricsMiddleware)
-
-app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
-
-
-@app.get(
-    "/metrics",
-    response_class=PlainTextResponse,
-    include_in_schema=False,
-    dependencies=[Depends(require_api_key)],
-)
-async def metrics_endpoint() -> PlainTextResponse:
-    """Prometheus metrics endpoint."""
-    content, content_type = get_metrics()
-    return PlainTextResponse(content=content, media_type=content_type)
-
-
 def get_frontend_path() -> Traversable | Path | None:
     """Try to find the index.html file, first in package resources, then in repo structure."""
     try:
@@ -177,6 +145,38 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
         return data, mt
 
     raise NotFoundError("Asset not found.")
+
+
+app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
+register_exception_handlers(app)
+
+# CORS: keep permissive defaults ONLY in debug mode.
+cors_allow_origins = ["*"] if settings.debug else list(settings.cors_allow_origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_allow_origins,
+    # `*` + credentials is invalid per the CORS spec; browsers will ignore it.
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+if settings.enable_monitoring:
+    app.add_middleware(MetricsMiddleware)
+
+app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
+
+
+@app.get(
+    "/metrics",
+    response_class=PlainTextResponse,
+    include_in_schema=False,
+    dependencies=[Depends(require_api_key)],
+)
+async def metrics_endpoint() -> PlainTextResponse:
+    """Prometheus metrics endpoint."""
+    content, content_type = get_metrics()
+    return PlainTextResponse(content=content, media_type=content_type)
 
 
 @app.get("/assets/{asset_path:path}", include_in_schema=False)
