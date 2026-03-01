@@ -17,7 +17,7 @@ from sqlalchemy import text
 from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.domain.types import DocId, new_doc_id
 from local_rag_backend.core.ports import DocumentRepoPort, QAHistoryPort
-from local_rag_backend.infrastructure.persistence.sql.base import SessionLocal
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.sql.crud import (
     add_documents,
     add_history,
@@ -27,6 +27,9 @@ from local_rag_backend.infrastructure.persistence.sql.models import (
     Document as DbDocument,
     DocumentTombstone as DbDocumentTombstone,
 )
+
+# Backward-compatible alias used by tests and legacy wiring.
+SessionLocal = db_base.SessionLocal
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping, Sequence
@@ -91,6 +94,19 @@ def get_session(session_factory: sessionmaker[Session]) -> Generator[Session, No
         raise
     finally:
         session.close()
+
+
+@contextmanager
+def get_managed_session(
+    session_factory: sessionmaker[Session],
+) -> Generator[tuple[Session, bool], None, None]:
+    """Yield (session, owns_session) honoring an active SQL unit-of-work if present."""
+    bound = db_base.get_bound_session()
+    if bound is not None:
+        yield bound, False
+        return
+    with get_session(session_factory) as session:
+        yield session, True
 
 
 class SystemStateStorage:
@@ -177,20 +193,20 @@ class SqlDocumentStorage(DocumentRepoPort):
 
     def store_documents(self, texts: Sequence[str]) -> list[DocId]:
         """Store documents in the database."""
-        with get_session(self._session_factory) as session:
-            return add_documents(session, list(texts))
+        with get_managed_session(self._session_factory) as (session, owns_session):
+            return add_documents(session, list(texts), autocommit=owns_session)
 
     def delete_documents(self, ids: Sequence[DocId]) -> None:
         """Delete documents by IDs (best-effort rollback helper for ETL)."""
-        with get_session(self._session_factory) as session:
-            delete_documents(session, list(ids))
+        with get_managed_session(self._session_factory) as (session, owns_session):
+            delete_documents(session, list(ids), autocommit=owns_session)
 
     def get(self, ids: Sequence[DocId]) -> Sequence[DomainDocument]:
         """Retrieve documents by their IDs."""
         normalized = [str(x) for x in ids if str(x).strip()]
         if not normalized:
             return []
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             db_docs = session.query(DbDocument).filter(DbDocument.doc_id.in_(normalized)).all()
             docs_by_id = {str(d.doc_id): _to_domain_document(d) for d in db_docs}
             # Preserve caller order deterministically across SQLite/Python versions.
@@ -198,7 +214,7 @@ class SqlDocumentStorage(DocumentRepoPort):
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         """Retrieve all documents from the database."""
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             db_docs = session.query(DbDocument).order_by(DbDocument.doc_id).all()
             return [_to_domain_document(d) for d in db_docs]
 
@@ -251,7 +267,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
         if not ext_ids:
             return {}
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             rows = (
                 session.query(
                     DbDocument.doc_id,
@@ -303,7 +319,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         changed_content: list[tuple[DocId, str]] = []
         updated_content_ids: list[DocId] = []
 
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, owns_session):
             existing = session.query(DbDocument).filter(DbDocument.external_id.in_(ext_ids)).all()
             by_external_id = {d.external_id: d for d in existing if d.external_id is not None}
 
@@ -373,7 +389,10 @@ class SqlDocumentStorage(DocumentRepoPort):
                     )
                 )
 
-            session.commit()
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
 
         return results, changed_content, updated_content_ids
 
@@ -391,7 +410,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         escaped = prefix_s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = escaped + "%"
 
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             rows = (
                 session.query(DbDocument.doc_id, DbDocument.external_id)
                 .filter(DbDocument.external_id.is_not(None))
@@ -409,7 +428,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         normalized = [str(x).strip() for x in ids if str(x).strip()]
         if not normalized:
             return []
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             rows = (
                 session.query(
                     DbDocument.doc_id,
@@ -451,7 +470,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return []
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             rows = (
                 session.query(
                     DbDocument.doc_id,
@@ -494,27 +513,33 @@ class SqlDocumentStorage(DocumentRepoPort):
         ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return 0
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, owns_session):
             deleted = (
                 session.query(DbDocument)
                 .filter(DbDocument.external_id.is_not(None))
                 .filter(DbDocument.external_id.in_(ext_ids))
                 .delete(synchronize_session=False)
             )
-            session.commit()
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
             return int(deleted or 0)
 
     def delete_tombstones(self, external_ids: Sequence[str]) -> int:
         ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return 0
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, owns_session):
             deleted = (
                 session.query(DbDocumentTombstone)
                 .filter(DbDocumentTombstone.external_id.in_(ext_ids))
                 .delete(synchronize_session=False)
             )
-            session.commit()
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
             return int(deleted or 0)
 
     def restore_from_snapshots(self, snapshots: Sequence[Mapping[str, Any]]) -> int:
@@ -527,7 +552,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         if not ids:
             return 0
 
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, owns_session):
             existing_docs = session.query(DbDocument).filter(DbDocument.doc_id.in_(ids)).all()
             by_id = {str(doc.doc_id): doc for doc in existing_docs}
             restored = 0
@@ -572,14 +597,17 @@ class SqlDocumentStorage(DocumentRepoPort):
                     row.content_sha256 = content_sha
                     row.chunk_dedup_sha256 = chunk_dedup
                 restored += 1
-            session.commit()
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
             return restored
 
     def get_tombstoned_external_ids(self, external_ids: Sequence[str]) -> set[str]:
         ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return set()
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, _owns_session):
             rows = (
                 session.query(DbDocumentTombstone.external_id)
                 .filter(DbDocumentTombstone.external_id.in_(ext_ids))
@@ -592,7 +620,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         if not ext_ids:
             return 0
 
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, owns_session):
             existing = (
                 session.query(DbDocumentTombstone.external_id)
                 .filter(DbDocumentTombstone.external_id.in_(ext_ids))
@@ -603,7 +631,10 @@ class SqlDocumentStorage(DocumentRepoPort):
             if not to_add:
                 return 0
             session.add_all([DbDocumentTombstone(external_id=e) for e in to_add])
-            session.commit()
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
             return len(to_add)
 
     def delete_by_external_ids(
@@ -618,7 +649,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         if not ext_ids:
             return 0, [], [], 0
 
-        with get_session(self._session_factory) as session:
+        with get_managed_session(self._session_factory) as (session, owns_session):
             rows = (
                 session.query(DbDocument.doc_id, DbDocument.external_id)
                 .filter(DbDocument.external_id.is_not(None))
@@ -646,7 +677,10 @@ class SqlDocumentStorage(DocumentRepoPort):
                     .filter(DbDocument.doc_id.in_([str(x) for x in deleted_ids]))
                     .delete(synchronize_session=False)
                 )
-            session.commit()
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
             return int(deleted_sql or 0), deleted_ids, missing, len(to_tombstone)
 
 
@@ -687,5 +721,5 @@ class HistorySqlStorage(QAHistoryPort):
 
     def save(self, q: str, a: str, source_ids: Sequence[DocId]) -> None:
         """Save a question-answer pair to the history table."""
-        with get_session(self._session_factory) as session:
-            add_history(session, q, a, source_ids=list(source_ids))
+        with get_managed_session(self._session_factory) as (session, owns_session):
+            add_history(session, q, a, source_ids=list(source_ids), autocommit=owns_session)

@@ -128,6 +128,7 @@ class DocsMutationPorts:
     write_lock: WriteLockPort
     mutation_journal_factory: Callable[[], MutationJournalPort]
     storage_profile_registry: StorageProfileRegistry
+    mutation_uow_factory: Callable[[], AbstractContextManager[None]] | None = None
 
 
 @dataclass(frozen=True)

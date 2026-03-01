@@ -21,16 +21,17 @@ async def test_run_api_mutation_executes_locked_and_resets() -> None:
         nonlocal reset_calls
         reset_calls += 1
 
-    async def _fake_run_blocking(func, /, *args, **kwargs):
-        task_type = str(kwargs.get("task_type", "default"))
-        blocking_calls.append((func, task_type))
-        return func(*args)
+    class _BlockingExecutor:
+        async def run_blocking(self, func, /, *args, **kwargs):
+            task_type = str(kwargs.get("task_type", "default"))
+            blocking_calls.append((func, task_type))
+            return func(*args)
 
     out = await run_api_mutation(
         operation=_operation,
         run_locked=_run_locked,
         reset_after=_reset,
-        run_blocking_fn=_fake_run_blocking,
+        blocking_executor=_BlockingExecutor(),
     )
     assert out == 7
     assert len(blocking_calls) == 1
@@ -51,8 +52,9 @@ async def test_run_api_mutation_maps_custom_error_and_resets() -> None:
         nonlocal reset_calls
         reset_calls += 1
 
-    async def _fake_run_blocking(func, /, *args, **kwargs):
-        return func(*args)
+    class _BlockingExecutor:
+        async def run_blocking(self, func, /, *args, **kwargs):
+            return func(*args)
 
     def _map_error(exc: Exception):
         if isinstance(exc, ValueError):
@@ -64,7 +66,7 @@ async def test_run_api_mutation_maps_custom_error_and_resets() -> None:
             operation=_operation,
             run_locked=_run_locked,
             reset_after=_reset,
-            run_blocking_fn=_fake_run_blocking,
+            blocking_executor=_BlockingExecutor(),
             map_error=_map_error,
         )
     assert reset_calls == 1

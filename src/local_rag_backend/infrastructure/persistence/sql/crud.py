@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def add_documents(db: Session, texts: list[str]) -> list[DocId]:
+def add_documents(db: Session, texts: list[str], *, autocommit: bool = True) -> list[DocId]:
     """Store new documents and return their IDs."""
     docs = [
         Document(
@@ -28,21 +28,32 @@ def add_documents(db: Session, texts: list[str]) -> list[DocId]:
         for text in texts
     ]
     db.add_all(docs)
-    db.commit()
+    if autocommit:
+        db.commit()
+    else:
+        db.flush()
     return [DocId(doc.doc_id) for doc in docs]
 
 
-def delete_documents(db: Session, ids: Sequence[DocId]) -> None:
+def delete_documents(db: Session, ids: Sequence[DocId], *, autocommit: bool = True) -> None:
     """Delete documents by IDs (best-effort rollback helper for multi-store ETL)."""
     ids_list = [str(x) for x in ids if str(x).strip()]
     if not ids_list:
         return
     db.query(Document).filter(Document.doc_id.in_(ids_list)).delete(synchronize_session=False)
-    db.commit()
+    if autocommit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def add_history(
-    db: Session, question: str, answer: str, source_ids: list[DocId] | None = None
+    db: Session,
+    question: str,
+    answer: str,
+    source_ids: list[DocId] | None = None,
+    *,
+    autocommit: bool = True,
 ) -> None:
     """Save a question-answer interaction to the history."""
     history_entry = QaHistory(
@@ -51,7 +62,10 @@ def add_history(
         source_ids=([str(x) for x in source_ids] if source_ids is not None else None),
     )
     db.add(history_entry)
-    db.commit()
+    if autocommit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def get_history(db: Session, limit: int = 10, offset: int = 0) -> Sequence[QaHistory]:

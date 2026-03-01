@@ -18,11 +18,13 @@ from local_rag_backend.core.services.maintenance import (
 )
 from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.vector.manifest import purge_index_artifacts
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
     from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
@@ -36,6 +38,7 @@ def build_docs_mutation_ports(
     rebuild_fn: Callable[..., int] = rebuild_index_from_db,
     write_lock: Callable[..., Any] = multi_store_write_lock,
     mutation_journal_factory: Callable[..., Any] | None = None,
+    mutation_uow_factory: Callable[[], AbstractContextManager[None]] | None = None,
     storage_profile_registry: StorageProfileRegistry | None = None,
 ) -> DocsMutationPorts:
     if doc_repo_factory is None or build_upsert_doc is None:
@@ -61,6 +64,9 @@ def build_docs_mutation_ports(
         lambda: FileMutationJournal(settings.get_coordination_dir() / ".mutation_journal")
     )
     profile_registry = storage_profile_registry or StorageProfileRegistry()
+    uow_factory = mutation_uow_factory or cast(
+        "Callable[[], AbstractContextManager[None]]", db_base.session_uow
+    )
     return DocsMutationPorts(
         build_embedder=build_embedder,
         doc_repo_factory=repo_factory,
@@ -70,6 +76,7 @@ def build_docs_mutation_ports(
         write_lock=write_lock,
         mutation_journal_factory=journal_factory,
         storage_profile_registry=profile_registry,
+        mutation_uow_factory=uow_factory,
     )
 
 

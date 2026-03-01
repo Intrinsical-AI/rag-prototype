@@ -1,4 +1,7 @@
 # tests/test_sql_storage.py
+import pytest
+
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 
 
@@ -43,3 +46,30 @@ def test_delete_by_external_ids_accepts_duplicates_without_integrity_error(in_me
     assert len(deleted_ids) == 1
     assert missing == []
     assert tombstoned == 1
+
+
+def test_sql_document_storage_obeys_shared_uow_commit(in_memory_sqlite):
+    storage = SqlDocumentStorage(session_factory=in_memory_sqlite)
+
+    with db_base.session_uow(session_factory=in_memory_sqlite):
+        ids = storage.store_documents(["inside-uow"])
+        docs = storage.get(ids)
+        assert len(docs) == 1
+        assert docs[0].content == "inside-uow"
+
+    all_docs = storage.get_all_documents()
+    assert [d.content for d in all_docs] == ["inside-uow"]
+
+
+def test_sql_document_storage_obeys_shared_uow_rollback(in_memory_sqlite):
+    storage = SqlDocumentStorage(session_factory=in_memory_sqlite)
+
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        db_base.session_uow(session_factory=in_memory_sqlite),
+    ):
+        storage.store_documents(["must-rollback"])
+        raise RuntimeError("boom")
+
+    all_docs = storage.get_all_documents()
+    assert all_docs == []
