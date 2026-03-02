@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends
 
 from local_rag_backend.composition.adapters import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
-    get_sql_base_ref,
 )
 from local_rag_backend.core.use_cases.errors import ServiceUnavailableError
 from local_rag_backend.core.use_cases.health import (
@@ -33,8 +32,6 @@ if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
-# Backward-compat test seam: some tests monkeypatch `health_router.db_base.engine`.
-db_base = get_sql_base_ref()
 
 
 async def _check_rag_service(checks: dict[str, Any]) -> bool:
@@ -62,7 +59,7 @@ async def health_check(
 ) -> dict[str, str]:
     """Basic health check for service availability (e.g., Docker/K8s)."""
     try:
-        readiness_bundle = container.build_health_readiness_bundle(engine=db_base.engine)
+        readiness_bundle = container.build_health_readiness_bundle()
         ping_database(diagnostics=readiness_bundle.diagnostics)
         return {"status": "healthy"}
     except Exception as e:
@@ -78,7 +75,7 @@ async def readiness_check(
     checks: dict[str, Any] = {}
     is_ready = True
     docs_count: int | None = None
-    readiness_bundle = container.build_health_readiness_bundle(engine=db_base.engine)
+    readiness_bundle = container.build_health_readiness_bundle()
     diagnostics = readiness_bundle.diagnostics
     expected_manifest = readiness_bundle.expected_manifest
 

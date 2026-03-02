@@ -34,39 +34,46 @@ cli.add_command(eval_cmd)
 cli.add_command(ingest_cmd)
 
 
+def _dispatch_entrypoint(*, command: str, include_argv: bool) -> None:
+    args = [command]
+    if include_argv:
+        args.extend(sys.argv[1:])
+    cli.main(args=args, standalone_mode=False)
+
+
 def rag_server() -> None:
     """Entry point for rag-server command."""
-    cli.main(args=["server"], standalone_mode=False)
+    _dispatch_entrypoint(command="server", include_argv=False)
 
 
 def rag_bootstrap() -> None:
     """Entry point for rag-bootstrap command."""
-    cli.main(args=["bootstrap", *sys.argv[1:]], standalone_mode=False)
+    _dispatch_entrypoint(command="bootstrap", include_argv=True)
 
 
 def rag_status() -> None:
     """Entry point for rag-status command."""
-    cli.main(args=["status", *sys.argv[1:]], standalone_mode=False)
+    _dispatch_entrypoint(command="status", include_argv=True)
 
 
 def rag_eval() -> None:
     """Entry point for rag-eval command."""
-    cli.main(args=["eval", *sys.argv[1:]], standalone_mode=False)
+    _dispatch_entrypoint(command="eval", include_argv=True)
 
 
 def rag_rebuild_index() -> None:
     """Entry point for rag-rebuild-index command."""
-    cli.main(args=["rebuild-index", *sys.argv[1:]], standalone_mode=False)
+    _dispatch_entrypoint(command="rebuild-index", include_argv=True)
 
 
 def rag_ingest() -> None:
     """Entry point for rag-ingest command."""
-    cli.main(args=["ingest", *sys.argv[1:]], standalone_mode=False)
+    _dispatch_entrypoint(command="ingest", include_argv=True)
 
 
 def rag_mutate_docs() -> None:
     """Entry point for rag-mutate-docs command."""
-    cli.main(args=["mutate-docs", *sys.argv[1:]], standalone_mode=False)
+    _dispatch_entrypoint(command="mutate-docs", include_argv=True)
 
 
 if __name__ == "__main__":

@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends
 
-from local_rag_backend.core.ports import OpenRouterGenerateRequest as OpenRouterServiceRequest
+from local_rag_backend.core.ports import (
+    OpenRouterGenerateRequest as OpenRouterServiceRequest,
+    OpenRouterGenerateResult as OpenRouterServiceResult,
+)
 from local_rag_backend.core.use_cases.errors import BadRequestError
 from local_rag_backend.core.use_cases.openrouter import (
-    OpenRouterGenerateOutput,
-    OpenRouterUsageOut,
     generate_openrouter_sync,
 )
 from local_rag_backend.http.dependencies import (
@@ -61,16 +62,13 @@ async def openrouter_generate(
         top_p=payload.top_p,
     )
 
-    def _generate_operation() -> OpenRouterGenerateOutput:
+    def _generate_operation() -> OpenRouterServiceResult:
         return generate_openrouter_sync(
             payload=service_payload,
             openrouter_client=container.build_openrouter_client(),
         )
 
     out = await run_blocking(_generate_operation, task_type="network")
-
-    if not isinstance(out, OpenRouterGenerateOutput):
-        raise RuntimeError(f"OpenRouter generation returned unexpected type: {type(out).__name__}")
     usage = out.usage
     usage_obj = (
         OpenRouterUsage(
@@ -78,7 +76,7 @@ async def openrouter_generate(
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
         )
-        if isinstance(usage, OpenRouterUsageOut)
+        if usage is not None
         else None
     )
     return OpenRouterGenerateResponse(text=out.text, usage=usage_obj)

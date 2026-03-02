@@ -49,5 +49,5 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     assert calls["settings_obj"] is settings
     assert calls["bundle_called"] is True
     assert "build_embedder" in calls["bundle_kwargs"]
-    assert calls["bundle_kwargs"]["use_wiring_defaults"] is True
+    assert "use_wiring_defaults" not in calls["bundle_kwargs"]
     assert calls["mutation_kwargs"] == {}

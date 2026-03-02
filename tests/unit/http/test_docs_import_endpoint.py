@@ -3,6 +3,10 @@
 import io
 import json
 
+import pytest
+
+from local_rag_backend.core.use_cases.docs_import import ImportFileTooLargeError
+from local_rag_backend.http.routers import docs as docs_router
 from local_rag_backend.settings import settings
 
 
@@ -334,3 +338,22 @@ async def test_import_response_includes_all_fields(asgi_client, in_memory_sqlite
     assert isinstance(data["count"], int)
     assert isinstance(data["ids"], list)
     assert isinstance(data["format_detected"], str)
+
+
+@pytest.mark.unit
+async def test_read_upload_with_limit_stops_early_on_oversize_chunk():
+    class FakeUpload:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def read(self, _n: int = -1) -> bytes:
+            self.calls += 1
+            if self.calls == 1:
+                # Simulate an uploader that returns more bytes than requested.
+                return b"x" * 1025
+            raise AssertionError("read() must not be called again after oversize detection")
+
+    fake = FakeUpload()
+    with pytest.raises(ImportFileTooLargeError):
+        await docs_router._read_upload_with_limit(file=fake, max_bytes=1024, chunk_bytes=128)
+    assert fake.calls == 1

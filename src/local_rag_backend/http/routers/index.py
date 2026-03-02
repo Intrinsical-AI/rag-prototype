@@ -39,14 +39,14 @@ async def rebuild_index(
             ports=container.index_mutation_ports(),
         )
 
-    execution_bundle = container.build_mutation_execution_bundle()
+    blocking_executor = container.blocking_executor()
     indexed = cast(
         "int",
         await run_api_mutation(
             operation=_rebuild_operation,
-            run_locked=execution_bundle.run_locked,
+            run_locked=container.run_multi_store_write_locked,
             reset_after=reset_rag_service,
-            blocking_executor=execution_bundle.blocking_executor,
+            blocking_executor=blocking_executor,
         ),
     )
     return RebuildIndexResponse(indexed=indexed)

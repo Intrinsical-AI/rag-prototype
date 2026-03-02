@@ -24,7 +24,6 @@ def rebuild_index_cmd() -> None:
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
         index_bundle = container.build_index_rebuild_bundle(
             build_embedder=build_dense_embedder,
-            use_wiring_defaults=True,
         )
 
         def _rebuild_sync() -> int:

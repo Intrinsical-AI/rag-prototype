@@ -4,13 +4,15 @@ Bounded router for documents mutation/query endpoints.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 
 from local_rag_backend.composition.adapters import DEFAULT_DENSE_BACKEND_MESSAGE
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.core.use_cases.docs_import import (
+    DEFAULT_IMPORT_MAX_BYTES,
     ImportDocsOutcome,
     ImportFileTooLargeError,
     ImportPayloadEmptyError,
@@ -24,7 +26,6 @@ from local_rag_backend.core.use_cases.docs_mutation import (
     MutationIntent,
     MutationUpsertInput,
 )
-from local_rag_backend.core.use_cases.docs_query import list_docs_page_sync
 from local_rag_backend.core.use_cases.errors import (
     BadRequestError,
     PayloadTooLargeError,
@@ -63,6 +64,46 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
+def _run_unlocked(fn):  # type: ignore[no-untyped-def]
+    return fn()
+
+
+def _map_docs_error(
+    exc: Exception,
+    *,
+    operation: str,
+) -> PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None:
+    if isinstance(exc, EmbeddingsBackendUnavailableError):
+        return BadRequestError(DEFAULT_DENSE_BACKEND_MESSAGE)
+    if operation == "mutate" and isinstance(exc, ValueError):
+        return BadRequestError(str(exc))
+    if operation == "import":
+        if isinstance(exc, ImportFileTooLargeError):
+            return PayloadTooLargeError(str(exc))
+        if isinstance(
+            exc, ImportPayloadEmptyError | UnsupportedImportFormatError | InvalidImportPayloadError
+        ):
+            return UnprocessableEntityError(str(exc))
+    return None
+
+
+async def _run_docs_mutation_operation(
+    *,
+    operation: Callable[[], Any],
+    container: AppContainer,
+    map_error: Callable[
+        [Exception], PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None
+    ],
+) -> Any:
+    return await run_api_mutation(
+        operation=operation,
+        run_locked=_run_unlocked,
+        reset_after=reset_rag_service,
+        blocking_executor=container.blocking_executor(run_blocking_fn=run_blocking),
+        map_error=map_error,
+    )
+
+
 @router.get("/docs", response_model=list[DocumentInDB])
 async def list_docs(
     limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
@@ -71,40 +112,30 @@ async def list_docs(
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
     query_bundle = container.build_docs_query_bundle(db=db)
-    docs = list_docs_page_sync(
-        docs_reader=query_bundle.docs_reader,
-        limit=limit,
-        offset=offset,
-    )
+    docs = query_bundle.docs_reader.list_docs_page(limit=limit, offset=offset)
     return [DocumentInDB(id=item.id, content=item.content) for item in docs]
 
 
-def _map_ingest_error(exc: Exception) -> BadRequestError | None:
-    if isinstance(exc, EmbeddingsBackendUnavailableError):
-        return BadRequestError(DEFAULT_DENSE_BACKEND_MESSAGE)
-    return None
+async def _read_upload_with_limit(
+    *,
+    file: UploadFile,
+    max_bytes: int = DEFAULT_IMPORT_MAX_BYTES,
+    chunk_bytes: int = 1024 * 1024,
+) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    max_allowed = int(max_bytes)
+    read_size = max(1, int(chunk_bytes))
 
-
-def _map_mutation_error(exc: Exception) -> BadRequestError | None:
-    if isinstance(exc, ValueError):
-        return BadRequestError(str(exc))
-    if isinstance(exc, EmbeddingsBackendUnavailableError):
-        return BadRequestError(DEFAULT_DENSE_BACKEND_MESSAGE)
-    return None
-
-
-def _map_import_error(
-    exc: Exception,
-) -> PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None:
-    if isinstance(exc, ImportFileTooLargeError):
-        return PayloadTooLargeError(str(exc))
-    if isinstance(
-        exc, ImportPayloadEmptyError | UnsupportedImportFormatError | InvalidImportPayloadError
-    ):
-        return UnprocessableEntityError(str(exc))
-    if isinstance(exc, EmbeddingsBackendUnavailableError):
-        return BadRequestError(DEFAULT_DENSE_BACKEND_MESSAGE)
-    return None
+    while True:
+        chunk = await file.read(read_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_allowed:
+            raise ImportFileTooLargeError(max_bytes=max_allowed)
+        chunks.append(bytes(chunk))
+    return b"".join(chunks)
 
 
 @router.post("/docs/mutate", response_model=DocsMutateResponse)
@@ -116,7 +147,6 @@ async def mutate_docs(
     mutation_bundle = container.build_docs_mutation_bundle(
         missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
     )
-    execution_bundle = container.build_mutation_execution_bundle(run_blocking_fn=run_blocking)
 
     def _mutate_operation() -> MutationSummary:
         coordinator = MutationCoordinator(settings_obj=settings_obj, ports=mutation_bundle.ports)
@@ -140,12 +170,10 @@ async def mutate_docs(
 
     summary = cast(
         "MutationSummary",
-        await run_api_mutation(
+        await _run_docs_mutation_operation(
             operation=_mutate_operation,
-            run_locked=execution_bundle.run_locked,
-            reset_after=reset_rag_service,
-            blocking_executor=execution_bundle.blocking_executor,
-            map_error=_map_mutation_error,
+            container=container,
+            map_error=lambda exc: _map_docs_error(exc, operation="mutate"),
         ),
     )
     return DocsMutateResponse(
@@ -180,7 +208,6 @@ async def ingest_docs(
     mutation_bundle = container.build_docs_mutation_bundle(
         missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
     )
-    execution_bundle = container.build_mutation_execution_bundle(run_blocking_fn=run_blocking)
     texts = [t.strip() for t in payload.texts if t and t.strip()]
     if not texts:
         return IngestResponse(count=0, ids=[])
@@ -199,12 +226,10 @@ async def ingest_docs(
     try:
         ids = cast(
             "list[str]",
-            await run_api_mutation(
+            await _run_docs_mutation_operation(
                 operation=_ingest_operation,
-                run_locked=execution_bundle.run_locked,
-                reset_after=reset_rag_service,
-                blocking_executor=execution_bundle.blocking_executor,
-                map_error=_map_ingest_error,
+                container=container,
+                map_error=lambda exc: _map_docs_error(exc, operation="ingest"),
             ),
         )
         ok = True
@@ -235,11 +260,10 @@ async def import_docs(
     Accepts multipart/form-data with a single file field named 'file'.
     Detects the export format automatically and ingests each message as a separate document.
     """
-    raw = await file.read()
+    raw = await _read_upload_with_limit(file=file)
     mutation_bundle = container.build_docs_mutation_bundle(
         missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
     )
-    execution_bundle = container.build_mutation_execution_bundle(run_blocking_fn=run_blocking)
     t = Timer()
     ok = False
     outcome: ImportDocsOutcome | None = None
@@ -255,12 +279,10 @@ async def import_docs(
 
         outcome = cast(
             "ImportDocsOutcome",
-            await run_api_mutation(
+            await _run_docs_mutation_operation(
                 operation=_import_operation,
-                run_locked=execution_bundle.run_locked,
-                reset_after=reset_rag_service,
-                blocking_executor=execution_bundle.blocking_executor,
-                map_error=_map_import_error,
+                container=container,
+                map_error=lambda exc: _map_docs_error(exc, operation="import"),
             ),
         )
         ok = True

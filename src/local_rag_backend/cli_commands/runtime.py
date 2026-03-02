@@ -16,6 +16,14 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+def _noop_ensure() -> None:
+    return None
+
+
+def _run_without_lock(fn: Callable[[], T]) -> T:
+    return fn()
+
+
 def ensure_sqlite_schema_for_cli() -> None:
     """
     Ensure SQLite schema is compatible with the current ORM mappings.
@@ -32,7 +40,9 @@ def ensure_sqlite_schema_for_cli() -> None:
 
 
 def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
-    from local_rag_backend.core.services.write_lock import multi_store_write_lock
+    from local_rag_backend.infrastructure.concurrency.locks.write_lock import (
+        multi_store_write_lock,
+    )
 
     with multi_store_write_lock():
         return operation()
@@ -64,16 +74,10 @@ def run_cli_mutation(
         run_cli_mutation as run_cli_mutation_core,
     )
 
-    def _noop_ensure() -> None:
-        return None
-
-    def _no_lock(fn: Callable[[], T]) -> T:
-        return fn()
-
     ensure_fn: Callable[[], None] = ensure_sqlite_schema_for_cli if ensure_schema else _noop_ensure
     run_locked_fn = cast(
         "Callable[[Callable[[], T]], T]",
-        _run_with_multi_store_write_lock if use_lock else _no_lock,
+        _run_with_multi_store_write_lock if use_lock else _run_without_lock,
     )
 
     return run_cli_mutation_core(

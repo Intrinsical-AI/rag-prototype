@@ -1,6 +1,3 @@
-# tests/unit/app/test_api_router_endpoints_extra.py
-from types import SimpleNamespace
-
 from local_rag_backend.http.routers import health as health_router
 from local_rag_backend.settings import settings
 
@@ -9,16 +6,10 @@ async def test_health_db_failure(asgi_client, monkeypatch):
     class Boom(Exception):
         pass
 
-    class DummyConn:
-        def __enter__(self):
-            raise Boom("db down")
+    def _boom(*, diagnostics):
+        raise Boom("db down")
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    monkeypatch.setattr(
-        health_router.db_base, "engine", SimpleNamespace(connect=lambda: DummyConn())
-    )
+    monkeypatch.setattr(health_router, "ping_database", _boom)
     r = await asgi_client.get("/api/health")
     assert r.status_code == 503
     assert "Database connection failed" in r.json()["detail"]
@@ -26,16 +17,11 @@ async def test_health_db_failure(asgi_client, monkeypatch):
 
 async def test_ready_not_ready_db_and_no_llm(asgi_client, monkeypatch):
     # Force DB failure and no providers
-    class DummyConn:
-        def __enter__(self):
-            raise RuntimeError("no db")
+    def _db_failed(*, checks, diagnostics):
+        checks["database"] = "failed: no db"
+        return False
 
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(
-        health_router.db_base, "engine", SimpleNamespace(connect=lambda: DummyConn())
-    )
+    monkeypatch.setattr(health_router, "check_database", _db_failed)
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
 

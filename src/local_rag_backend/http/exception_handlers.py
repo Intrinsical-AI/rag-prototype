@@ -17,6 +17,7 @@ from local_rag_backend.core.errors import (
     WriteLockTimeoutError,
 )
 from local_rag_backend.core.use_cases.errors import AppError, InternalServerError, map_runtime_error
+from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -24,9 +25,10 @@ if TYPE_CHECKING:
 
 async def handle_app_error(_request: Request, exc: Exception) -> JSONResponse:
     app_error = exc if isinstance(exc, AppError) else InternalServerError(str(exc))
-    return JSONResponse(
-        status_code=int(app_error.status_code), content={"detail": app_error.detail}
-    )
+    detail = app_error.detail
+    if int(app_error.status_code) == 500 and not bool(settings.debug):
+        detail = app_error.default_detail
+    return JSONResponse(status_code=int(app_error.status_code), content={"detail": detail})
 
 
 async def handle_runtime_error(request: Request, exc: Exception) -> JSONResponse:

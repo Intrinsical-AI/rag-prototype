@@ -5,26 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from local_rag_backend.core.errors import LLMResponseError
-from local_rag_backend.core.use_cases import docs_query, evaluation, health, mutations, openrouter
+from local_rag_backend.core.ports import OpenRouterGenerateRequest
+from local_rag_backend.core.use_cases import evaluation, health, mutations, openrouter
 from local_rag_backend.core.use_cases.rag_query import list_history_entries_sync
-
-
-def test_docs_query_list_docs_page_sync_delegates_to_port() -> None:
-    captured: dict[str, int] = {}
-    expected = (
-        SimpleNamespace(id="doc:1", content="hello"),
-        SimpleNamespace(id="doc:2", content="world"),
-    )
-
-    class DummyDocsReadPort:
-        def list_docs_page(self, *, limit: int, offset: int):
-            captured["limit"] = limit
-            captured["offset"] = offset
-            return expected
-
-    out = docs_query.list_docs_page_sync(docs_reader=DummyDocsReadPort(), limit=10, offset=3)
-    assert out == expected
-    assert captured == {"limit": 10, "offset": 3}
 
 
 def test_health_check_database_sets_failed_status_on_ping_error(monkeypatch) -> None:
@@ -44,7 +27,7 @@ def test_openrouter_generate_openrouter_sync_wraps_port_errors() -> None:
         def generate(self, *, request):
             raise RuntimeError("boom")
 
-    payload = openrouter.OpenRouterGenerateInput(
+    payload = OpenRouterGenerateRequest(
         model=None,
         system_instruction="sys",
         user_content="hi",

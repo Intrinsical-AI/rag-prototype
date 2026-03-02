@@ -13,7 +13,10 @@ from local_rag_backend.cli_commands.runtime import get_cli_container
     "--dataset",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Path to a JSONL eval dataset. If omitted, uses the packaged rag_eval_v1 dataset.",
+    help=(
+        "Path to a JSONL eval dataset. If omitted, uses datasets/rag_eval_v1.jsonl "
+        "(or RAG_EVAL_DATASET_PATH)."
+    ),
 )
 @click.option(
     "--retrieval-mode",

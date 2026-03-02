@@ -80,14 +80,13 @@ def mutate_docs_cmd(payload_json: Path) -> None:
         container = get_cli_container()
         mutation_bundle = container.build_docs_mutation_bundle(
             build_embedder=build_dense_embedder,
-            use_wiring_defaults=True,
         )
         coordinator = MutationCoordinator(settings_obj=settings, ports=mutation_bundle.ports)
 
         def _run_sync() -> MutationSummary:
             return coordinator.execute(intent)
 
-        summary = run_cli_mutation(_run_sync)
+        summary = run_cli_mutation(_run_sync, use_lock=False)
         click.echo(
             "[OK] Mutation committed. "
             f"op_id={summary.op_id} inserted={summary.inserted} updated={summary.updated} "
