@@ -55,21 +55,6 @@ def ensure_sqlite_schema_compatible(
     _ = id_map_path
     eng = engine_to_use or engine
     Base.metadata.create_all(bind=eng)
-    ensure_sqlite_documents_autoincrement(engine_to_use=eng, id_map_path=id_map_path)
-    ensure_sqlite_documents_identity_columns(engine_to_use=eng)
-
-
-def ensure_sqlite_documents_autoincrement(
-    *, engine_to_use: Engine | None = None, id_map_path: str | None = None
-) -> None:
-    """Fresh-install contract: AUTOINCREMENT migration is intentionally unsupported."""
-    _ = engine_to_use
-    _ = id_map_path
-
-
-def ensure_sqlite_documents_identity_columns(*, engine_to_use: Engine | None = None) -> None:
-    """Fresh-install contract: legacy identity-column migration is intentionally unsupported."""
-    _ = engine_to_use
 
 
 async def get_db() -> AsyncGenerator[Session, None]:

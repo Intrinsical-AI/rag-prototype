@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SystemStateStorage
+from local_rag_backend.infrastructure.persistence.sql import SystemStateStorage
 
 
 def test_system_state_get_version_defaults_to_zero(in_memory_sqlite) -> None:

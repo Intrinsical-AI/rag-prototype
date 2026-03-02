@@ -1,8 +1,7 @@
 # tests/test_sql_storage.py
 import pytest
 
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage, base as db_base
 
 
 def test_store_and_get_documents(in_memory_sqlite):

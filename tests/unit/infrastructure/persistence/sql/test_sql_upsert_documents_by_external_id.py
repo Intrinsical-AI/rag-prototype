@@ -2,7 +2,7 @@
 
 import pytest
 
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 
 
 def test_upsert_inserts_and_is_idempotent(in_memory_sqlite):

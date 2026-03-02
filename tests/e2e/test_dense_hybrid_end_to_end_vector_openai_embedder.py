@@ -6,7 +6,7 @@ from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
     SqlDocumentStorage,
 )
