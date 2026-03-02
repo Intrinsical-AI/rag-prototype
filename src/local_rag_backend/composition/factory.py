@@ -8,28 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.composition.context import AppContext
-from local_rag_backend.core.services.maintenance import (
-    rebuild_index_from_db,
-)
 from local_rag_backend.core.services.rag_runtime import RagService
-from local_rag_backend.core.services.reranking import RerankingRetriever
-from local_rag_backend.infrastructure.concurrency.locks.write_lock import multi_store_write_lock
-from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
-    SentenceTransformerEmbedder,
-)
-from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
-from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.sql import (
-    HistorySqlStorage,
-    SqlDocumentStorage,
     SystemStateStorage,
 )
-from local_rag_backend.infrastructure.persistence.vector.manifest import purge_index_artifacts
-from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
-from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
-from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
-from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
@@ -39,29 +21,59 @@ logger = logging.getLogger(__name__)
 
 _APP_CONTEXT: AppContext | None = None
 _APP_CONTEXT_LOCK = Lock()
+_RUNTIME_WIRING_DEFAULTS = AppContainer.runtime_wiring_defaults()
+
+# Public wiring symbols intentionally exposed for tests that monkeypatch factory-level
+# adapter constructors.
+OpenAIEmbedder = _RUNTIME_WIRING_DEFAULTS["openai_embedder_factory"]
+SentenceTransformerEmbedder = _RUNTIME_WIRING_DEFAULTS["st_embedder_factory"]
+OpenAIGenerator = _RUNTIME_WIRING_DEFAULTS["openai_generator_factory"]
+OllamaGenerator = _RUNTIME_WIRING_DEFAULTS["ollama_generator_factory"]
+SqlDocumentStorage = _RUNTIME_WIRING_DEFAULTS["doc_repo_factory"]
+HistorySqlStorage = _RUNTIME_WIRING_DEFAULTS["history_repo_factory"]
+SparseBM25Retriever = _RUNTIME_WIRING_DEFAULTS["sparse_retriever_factory"]
+DenseVectorRetriever = _RUNTIME_WIRING_DEFAULTS["dense_retriever_factory"]
+HybridRetriever = _RUNTIME_WIRING_DEFAULTS["hybrid_retriever_factory"]
+VectorStorage = _RUNTIME_WIRING_DEFAULTS["vector_repo_factory"]
+RerankingRetriever = _RUNTIME_WIRING_DEFAULTS["reranker_factory"]
+rebuild_index_from_db = _RUNTIME_WIRING_DEFAULTS["rebuild_fn"]
+purge_index_artifacts = _RUNTIME_WIRING_DEFAULTS["purge_index_artifacts_fn"]
+multi_store_write_lock = _RUNTIME_WIRING_DEFAULTS["write_lock"]
+
+
+_FACTORY_WIRING_SYMBOLS: dict[str, str] = {
+    "openai_embedder_factory": "OpenAIEmbedder",
+    "st_embedder_factory": "SentenceTransformerEmbedder",
+    "openai_generator_factory": "OpenAIGenerator",
+    "ollama_generator_factory": "OllamaGenerator",
+    "doc_repo_factory": "SqlDocumentStorage",
+    "history_repo_factory": "HistorySqlStorage",
+    "sparse_retriever_factory": "SparseBM25Retriever",
+    "dense_retriever_factory": "DenseVectorRetriever",
+    "hybrid_retriever_factory": "HybridRetriever",
+    "vector_repo_factory": "VectorStorage",
+    "reranker_factory": "RerankingRetriever",
+    "rebuild_fn": "rebuild_index_from_db",
+    "purge_index_artifacts_fn": "purge_index_artifacts",
+    "write_lock": "multi_store_write_lock",
+    "rag_service_factory": "RagService",
+}
 
 
 def _container_overrides() -> dict[str, Any]:
-    return {
-        "openai_embedder_factory": OpenAIEmbedder,
-        "st_embedder_factory": lambda model_name: SentenceTransformerEmbedder(
-            model_name=model_name
-        ),
-        "openai_generator_factory": OpenAIGenerator,
-        "ollama_generator_factory": OllamaGenerator,
-        "doc_repo_factory": SqlDocumentStorage,
-        "build_upsert_doc": getattr(SqlDocumentStorage, "UpsertDoc", None),
-        "history_repo_factory": HistorySqlStorage,
-        "sparse_retriever_factory": SparseBM25Retriever,
-        "dense_retriever_factory": DenseVectorRetriever,
-        "hybrid_retriever_factory": HybridRetriever,
-        "vector_repo_factory": VectorStorage,
-        "reranker_factory": RerankingRetriever,
-        "rebuild_fn": rebuild_index_from_db,
-        "purge_index_artifacts_fn": purge_index_artifacts,
-        "write_lock": multi_store_write_lock,
-        "rag_service_factory": RagService,
-    }
+    overrides: dict[str, Any] = {}
+    for key, symbol_name in _FACTORY_WIRING_SYMBOLS.items():
+        value = globals().get(symbol_name, _RUNTIME_WIRING_DEFAULTS[key])
+        if key == "st_embedder_factory":
+            overrides[key] = lambda model_name, _factory=value: _factory(model_name=model_name)
+            continue
+        overrides[key] = value
+
+    doc_repo_factory = overrides.get(
+        "doc_repo_factory", _RUNTIME_WIRING_DEFAULTS["doc_repo_factory"]
+    )
+    overrides["build_upsert_doc"] = getattr(doc_repo_factory, "UpsertDoc", None)
+    return overrides
 
 
 def _build_container(
@@ -127,9 +139,23 @@ def reset_rag_service() -> None:
 
 
 __all__ = [
+    "DenseVectorRetriever",
+    "HistorySqlStorage",
+    "HybridRetriever",
+    "OllamaGenerator",
+    "OpenAIEmbedder",
+    "OpenAIGenerator",
+    "RerankingRetriever",
+    "SentenceTransformerEmbedder",
+    "SparseBM25Retriever",
+    "SqlDocumentStorage",
+    "VectorStorage",
     "build_rag_service",
     "get_app_context",
     "get_rag_service",
+    "multi_store_write_lock",
+    "purge_index_artifacts",
+    "rebuild_index_from_db",
     "reset_app_context",
     "reset_rag_service",
 ]

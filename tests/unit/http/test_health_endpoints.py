@@ -63,7 +63,7 @@ async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path
 async def test_ready_endpoint_503_when_dense_index_drifts_from_sql(
     asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
-    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
     from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
@@ -96,7 +96,7 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
     Counts can match while the actual ID set differs (stale vectors + missing docs).
     /api/ready should catch this for small corpora and return actionable drift details.
     """
-    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
     from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)

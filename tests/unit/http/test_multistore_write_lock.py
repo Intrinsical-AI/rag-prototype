@@ -10,7 +10,7 @@ import pytest
 
 from local_rag_backend.composition import factory
 from local_rag_backend.http.routers import docs as docs_router
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -181,7 +181,8 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
     payload = resp.json()
     assert payload["count"] >= 1
     assert called_funcs.count("run_multi_store_write_locked") == 0
-    assert called_funcs.count("_run_unlocked") == 1
+    assert len(called_funcs) == 1
+    assert called_funcs[0] != "run_multi_store_write_locked"
     assert called_task_types == ["mutation"]
     assert "_ingest_sync" not in called_funcs
 

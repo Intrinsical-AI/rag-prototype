@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from click.testing import CliRunner
 
 from local_rag_backend.cli_commands import index as index_cmd_module
@@ -15,10 +13,10 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     class _FakeContainer:
         settings_obj = settings
 
-        def build_index_rebuild_bundle(self, **kwargs):
-            calls["bundle_called"] = True
-            calls["bundle_kwargs"] = kwargs
-            return SimpleNamespace(ports="PORTS")
+        def index_mutation_ports(self, **kwargs):
+            calls["ports_called"] = True
+            calls["ports_kwargs"] = kwargs
+            return "PORTS"
 
     def _fake_run_cli_mutation(operation, **kwargs):
         calls["mutation_kwargs"] = kwargs
@@ -47,7 +45,7 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     assert "Rebuilt index with 42 vectors." in result.output
     assert calls["ports"] == "PORTS"
     assert calls["settings_obj"] is settings
-    assert calls["bundle_called"] is True
-    assert "build_embedder" in calls["bundle_kwargs"]
-    assert "use_wiring_defaults" not in calls["bundle_kwargs"]
+    assert calls["ports_called"] is True
+    assert "build_embedder" in calls["ports_kwargs"]
+    assert "use_wiring_defaults" not in calls["ports_kwargs"]
     assert calls["mutation_kwargs"] == {}

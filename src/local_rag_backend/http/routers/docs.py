@@ -64,10 +64,6 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
-def _run_unlocked(fn):  # type: ignore[no-untyped-def]
-    return fn()
-
-
 def _map_docs_error(
     exc: Exception,
     *,
@@ -97,7 +93,7 @@ async def _run_docs_mutation_operation(
 ) -> Any:
     return await run_api_mutation(
         operation=operation,
-        run_locked=_run_unlocked,
+        run_locked=lambda fn: fn(),
         reset_after=reset_rag_service,
         blocking_executor=container.blocking_executor(run_blocking_fn=run_blocking),
         map_error=map_error,
@@ -111,8 +107,8 @@ async def list_docs(
     db: Session = Depends(get_db),
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
-    query_bundle = container.build_docs_query_bundle(db=db)
-    docs = query_bundle.docs_reader.list_docs_page(limit=limit, offset=offset)
+    docs_reader = container.build_docs_read_port(db=db)
+    docs = docs_reader.list_docs_page(limit=limit, offset=offset)
     return [DocumentInDB(id=item.id, content=item.content) for item in docs]
 
 

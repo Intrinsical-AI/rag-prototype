@@ -96,9 +96,9 @@ async def history(
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[HistoryItem]:
     """Retrieve historical Q&A pairs from the database."""
-    history_bundle = container.build_rag_history_bundle(db=db)
+    history_reader = container.build_history_read_port(db=db)
     history_entries = list_history_entries_sync(
-        history_reader=history_bundle.history_reader,
+        history_reader=history_reader,
         limit=limit,
         offset=offset,
     )
@@ -135,12 +135,11 @@ async def ask_eval(
         raise BadRequestError(f"Invalid config: {'; '.join(validation_errors)}")
 
     try:
-        eval_bundle = container.build_rag_eval_bundle()
         outcome = await run_blocking(
             execute_ask_eval_sync,
             question=payload.question,
             cfg=cfg,
-            rag_runtime_factory=eval_bundle.rag_runtime_factory,
+            rag_runtime_factory=container.build_rag_runtime_factory(),
             task_type="eval",
         )
     except ValueError as e:

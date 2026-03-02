@@ -84,35 +84,15 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class DocsQueryBundle:
-    docs_reader: DocsReadPort
-
-
-@dataclass(frozen=True)
 class DocsMutationBundle:
     ports: DocsMutationPorts
     import_loader: DocsImportLoaderPort
 
 
 @dataclass(frozen=True)
-class IndexRebuildBundle:
-    ports: IndexMutationPorts
-
-
-@dataclass(frozen=True)
 class HealthReadinessBundle:
     diagnostics: HealthDiagnosticsPort
     expected_manifest: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class RagHistoryBundle:
-    history_reader: HistoryReadPort
-
-
-@dataclass(frozen=True)
-class RagEvalBundle:
-    rag_runtime_factory: RagRuntimeFactoryPort
 
 
 @dataclass(frozen=True)
@@ -128,51 +108,95 @@ class AppContainer:
 
     RAG_SERVICE_STATE_KEY = "rag_service"
 
+    @classmethod
+    def runtime_wiring_defaults(cls) -> dict[str, Any]:
+        """Single source of truth for runtime adapter wiring defaults."""
+        return {
+            "openai_embedder_factory": OpenAIEmbedder,
+            "st_embedder_factory": cls._default_st_embedder_factory,
+            "openai_generator_factory": OpenAIGenerator,
+            "ollama_generator_factory": OllamaGenerator,
+            "doc_repo_factory": SqlDocumentStorage,
+            "build_upsert_doc": SqlDocumentStorage.UpsertDoc,
+            "history_repo_factory": HistorySqlStorage,
+            "sparse_retriever_factory": SparseBM25Retriever,
+            "dense_retriever_factory": DenseVectorRetriever,
+            "hybrid_retriever_factory": HybridRetriever,
+            "vector_repo_factory": VectorStorage,
+            "reranker_factory": RerankingRetriever,
+            "rebuild_fn": rebuild_index_from_db,
+            "purge_index_artifacts_fn": purge_index_artifacts,
+            "write_lock": multi_store_write_lock,
+            "rag_service_factory": RagService,
+            "system_state_factory": SystemStateStorage,
+        }
+
     def __init__(
         self,
         *,
         settings_obj: Settings,
-        openai_embedder_factory: Callable[[], EmbedderPort] = OpenAIEmbedder,
+        openai_embedder_factory: Callable[[], EmbedderPort] | None = None,
         st_embedder_factory: Callable[[str], EmbedderPort] | None = None,
-        openai_generator_factory: Callable[..., GeneratorPort] = OpenAIGenerator,
-        ollama_generator_factory: Callable[..., GeneratorPort] = OllamaGenerator,
+        openai_generator_factory: Callable[..., GeneratorPort] | None = None,
+        ollama_generator_factory: Callable[..., GeneratorPort] | None = None,
         doc_repo_factory: Callable[[], DocumentRepoPort] | None = None,
         build_upsert_doc: Any | None = None,
         history_repo_factory: Callable[[], QAHistoryPort] | None = None,
-        sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
-        dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
-        hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
-        vector_repo_factory: Callable[..., VectorRepoPort] = VectorStorage,
-        reranker_factory: Callable[..., RetrieverPort] = RerankingRetriever,
-        rebuild_fn: Callable[..., int] = rebuild_index_from_db,
-        purge_index_artifacts_fn: Callable[..., None] = purge_index_artifacts,
-        write_lock: Callable[..., Any] = multi_store_write_lock,
+        sparse_retriever_factory: Callable[..., RetrieverPort] | None = None,
+        dense_retriever_factory: Callable[..., RetrieverPort] | None = None,
+        hybrid_retriever_factory: Callable[..., RetrieverPort] | None = None,
+        vector_repo_factory: Callable[..., VectorRepoPort] | None = None,
+        reranker_factory: Callable[..., RetrieverPort] | None = None,
+        rebuild_fn: Callable[..., int] | None = None,
+        purge_index_artifacts_fn: Callable[..., None] | None = None,
+        write_lock: Callable[..., Any] | None = None,
         mutation_journal_factory: Callable[..., Any] | None = None,
         mutation_uow_factory: Callable[..., Any] | None = None,
         storage_profile_registry: StorageProfileRegistry | None = None,
-        rag_service_factory: Callable[..., RagService] = RagService,
-        system_state_factory: Callable[[], SystemStateStorage] = SystemStateStorage,
+        rag_service_factory: Callable[..., RagService] | None = None,
+        system_state_factory: Callable[[], SystemStateStorage] | None = None,
     ) -> None:
+        defaults = self.runtime_wiring_defaults()
         self.settings_obj = settings_obj
-        self.openai_embedder_factory = openai_embedder_factory
-        self.st_embedder_factory = st_embedder_factory or self._default_st_embedder_factory
-        self.openai_generator_factory = openai_generator_factory
-        self.ollama_generator_factory = ollama_generator_factory
+        self.openai_embedder_factory = openai_embedder_factory or cast(
+            "Callable[[], EmbedderPort]", defaults["openai_embedder_factory"]
+        )
+        self.st_embedder_factory = st_embedder_factory or cast(
+            "Callable[[str], EmbedderPort]", defaults["st_embedder_factory"]
+        )
+        self.openai_generator_factory = openai_generator_factory or cast(
+            "Callable[..., GeneratorPort]", defaults["openai_generator_factory"]
+        )
+        self.ollama_generator_factory = ollama_generator_factory or cast(
+            "Callable[..., GeneratorPort]", defaults["ollama_generator_factory"]
+        )
         self.doc_repo_factory = doc_repo_factory or cast(
-            "Callable[[], DocumentRepoPort]", SqlDocumentStorage
+            "Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"]
         )
-        self.build_upsert_doc = build_upsert_doc or SqlDocumentStorage.UpsertDoc
+        self.build_upsert_doc = build_upsert_doc or defaults["build_upsert_doc"]
         self.history_repo_factory = history_repo_factory or cast(
-            "Callable[[], QAHistoryPort]", HistorySqlStorage
+            "Callable[[], QAHistoryPort]", defaults["history_repo_factory"]
         )
-        self.sparse_retriever_factory = sparse_retriever_factory
-        self.dense_retriever_factory = dense_retriever_factory
-        self.hybrid_retriever_factory = hybrid_retriever_factory
-        self.vector_repo_factory = vector_repo_factory
-        self.reranker_factory = reranker_factory
-        self.rebuild_fn = rebuild_fn
-        self.purge_index_artifacts_fn = purge_index_artifacts_fn
-        self.write_lock = write_lock
+        self.sparse_retriever_factory = sparse_retriever_factory or cast(
+            "Callable[..., RetrieverPort]", defaults["sparse_retriever_factory"]
+        )
+        self.dense_retriever_factory = dense_retriever_factory or cast(
+            "Callable[..., RetrieverPort]", defaults["dense_retriever_factory"]
+        )
+        self.hybrid_retriever_factory = hybrid_retriever_factory or cast(
+            "Callable[..., RetrieverPort]", defaults["hybrid_retriever_factory"]
+        )
+        self.vector_repo_factory = vector_repo_factory or cast(
+            "Callable[..., VectorRepoPort]", defaults["vector_repo_factory"]
+        )
+        self.reranker_factory = reranker_factory or cast(
+            "Callable[..., RetrieverPort]", defaults["reranker_factory"]
+        )
+        self.rebuild_fn = rebuild_fn or cast("Callable[..., int]", defaults["rebuild_fn"])
+        self.purge_index_artifacts_fn = purge_index_artifacts_fn or cast(
+            "Callable[..., None]", defaults["purge_index_artifacts_fn"]
+        )
+        self.write_lock = write_lock or cast("Callable[..., Any]", defaults["write_lock"])
         self.mutation_journal_factory = mutation_journal_factory or (
             lambda: FileMutationJournal(
                 self.settings_obj.get_coordination_dir() / ".mutation_journal"
@@ -180,8 +204,13 @@ class AppContainer:
         )
         self.mutation_uow_factory = mutation_uow_factory
         self.storage_profile_registry = storage_profile_registry or StorageProfileRegistry()
-        self.rag_service_factory = rag_service_factory
-        self._system_state = system_state_factory()
+        self.rag_service_factory = rag_service_factory or cast(
+            "Callable[..., RagService]", defaults["rag_service_factory"]
+        )
+        self._system_state = (
+            system_state_factory
+            or cast("Callable[[], SystemStateStorage]", defaults["system_state_factory"])
+        )()
         self._rag_service_cache_lock = Lock()
         self._rag_service_cache: RagService | None = None
         self._rag_service_cache_version: int | None = None
@@ -189,7 +218,9 @@ class AppContainer:
     @classmethod
     def from_settings(cls, settings_obj: Settings, **overrides: Any) -> AppContainer:
         """Preferred constructor for runtime wiring while preserving injectable __init__."""
-        return cls(settings_obj=settings_obj, **overrides)
+        resolved = cls.runtime_wiring_defaults()
+        resolved.update(overrides)
+        return cls(settings_obj=settings_obj, **resolved)
 
     @staticmethod
     def _default_st_embedder_factory(model_name: str) -> EmbedderPort:
@@ -228,17 +259,8 @@ class AppContainer:
     def build_docs_read_port(self, *, db: Any) -> DocsReadPort:
         return build_docs_read_port(db=db)
 
-    def build_docs_query_bundle(self, *, db: Any) -> DocsQueryBundle:
-        return DocsQueryBundle(docs_reader=self.build_docs_read_port(db=db))
-
     def build_history_read_port(self, *, db: Any) -> HistoryReadPort:
         return build_history_read_port(db=db)
-
-    def build_rag_history_bundle(self, *, db: Any) -> RagHistoryBundle:
-        return RagHistoryBundle(history_reader=self.build_history_read_port(db=db))
-
-    def build_rag_eval_bundle(self) -> RagEvalBundle:
-        return RagEvalBundle(rag_runtime_factory=self.build_rag_runtime_factory())
 
     def build_health_diagnostics_port(self, *, engine: Any | None = None) -> HealthDiagnosticsPort:
         return build_health_diagnostics_port(
@@ -269,19 +291,6 @@ class AppContainer:
                 build_embedder=build_embedder,
             ),
             import_loader=self.build_docs_import_loader_port(),
-        )
-
-    def build_index_rebuild_bundle(
-        self,
-        *,
-        missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
-        build_embedder: Callable[[], EmbedderPort] | None = None,
-    ) -> IndexRebuildBundle:
-        return IndexRebuildBundle(
-            ports=self.index_mutation_ports(
-                missing_backend_message=missing_backend_message,
-                build_embedder=build_embedder,
-            ),
         )
 
     def blocking_executor(

@@ -5,7 +5,7 @@ import pytest
 
 from local_rag_backend.composition import adapters as composition_adapters, factory
 from local_rag_backend.http.routers import health as health_router
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 

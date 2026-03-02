@@ -22,14 +22,14 @@ def rebuild_index_cmd() -> None:
         container = get_cli_container()
         if container.settings_obj.retrieval_mode not in ("dense", "hybrid"):
             raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
-        index_bundle = container.build_index_rebuild_bundle(
+        ports = container.index_mutation_ports(
             build_embedder=build_dense_embedder,
         )
 
         def _rebuild_sync() -> int:
             return index_service.rebuild_index_sync(
                 settings_obj=container.settings_obj,
-                ports=index_bundle.ports,
+                ports=ports,
             )
 
         n = run_cli_mutation(_rebuild_sync)
