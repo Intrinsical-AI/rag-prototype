@@ -8,11 +8,14 @@ Why:
 
 from __future__ import annotations
 
+import json
+import os
 import threading
+import time
 from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING
 
-from local_rag_backend.core.services.file_lock import exclusive_file_lock
+from local_rag_backend.infrastructure.concurrency.locks.file_lock import exclusive_file_lock
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
 
 _LOCAL_WRITE_LOCK = threading.RLock()
 _THREAD_STATE = threading.local()
+_LOCK_METRICS_PATH_ENV = "RAG_LOCK_METRICS_PATH"
 
 
 def _exclusive_file_lock(
@@ -35,6 +39,34 @@ def _exclusive_file_lock(
         timeout_s=timeout_s,
         poll_s=poll_s,
     )
+
+
+def _record_lock_event(
+    *,
+    lock_path: Path,
+    status: str,
+    wait_s: float | None = None,
+    hold_s: float | None = None,
+) -> None:
+    metrics_path = str(os.getenv(_LOCK_METRICS_PATH_ENV, "")).strip()
+    if not metrics_path:
+        return
+    payload: dict[str, float | int | str] = {
+        "ts": time.time(),
+        "pid": os.getpid(),
+        "lock_path": str(lock_path),
+        "status": str(status),
+    }
+    if wait_s is not None:
+        payload["wait_ms"] = max(0.0, float(wait_s)) * 1000.0
+    if hold_s is not None:
+        payload["hold_ms"] = max(0.0, float(hold_s)) * 1000.0
+    try:
+        with open(metrics_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=True, separators=(",", ":")) + "\n")
+    except Exception:
+        # Best-effort metrics hook for load/stress testing. Never break writes.
+        return
 
 
 @contextmanager
@@ -67,9 +99,33 @@ def multi_store_write_lock(
         float(poll_s) if poll_s is not None else float(getattr(settings, "write_lock_poll_s", 0.05))
     )
     file_lock_cm = _exclusive_file_lock(lock_path, timeout_s=resolved_timeout, poll_s=resolved_poll)
-    with _LOCAL_WRITE_LOCK, file_lock_cm:
-        _THREAD_STATE.depth = 1
-        try:
-            yield
-        finally:
-            _THREAD_STATE.depth = 0
+    acquire_started = time.monotonic()
+    try:
+        with _LOCAL_WRITE_LOCK, file_lock_cm:
+            acquired_wait_s = time.monotonic() - acquire_started
+            _record_lock_event(
+                lock_path=lock_path,
+                status="acquired",
+                wait_s=acquired_wait_s,
+            )
+            hold_started = time.monotonic()
+            _THREAD_STATE.depth = 1
+            try:
+                yield
+            finally:
+                _THREAD_STATE.depth = 0
+                _record_lock_event(
+                    lock_path=lock_path,
+                    status="released",
+                    hold_s=(time.monotonic() - hold_started),
+                )
+    except Exception:
+        _record_lock_event(
+            lock_path=lock_path,
+            wait_s=(time.monotonic() - acquire_started),
+            status="failed",
+        )
+        raise
+
+
+__all__ = ["_exclusive_file_lock", "multi_store_write_lock"]

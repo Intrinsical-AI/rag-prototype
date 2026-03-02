@@ -111,3 +111,6 @@ def exclusive_file_lock(
         if locked:
             _best_effort_unlock(f)
         f.close()
+
+
+__all__ = ["exclusive_file_lock"]

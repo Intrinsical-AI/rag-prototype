@@ -9,6 +9,8 @@ from sqlalchemy.pool import StaticPool
 # Import models to ensure they are registered with Base.metadata
 from local_rag_backend.infrastructure.persistence.sql import alchemy_engine, base as db_base
 
+_ = alchemy_engine
+
 
 @pytest.fixture()
 def in_memory_sqlite(monkeypatch):
@@ -31,9 +33,6 @@ def in_memory_sqlite(monkeypatch):
     # Patch objects used in the code
     monkeypatch.setattr(db_base, "engine", engine)
     monkeypatch.setattr(db_base, "SessionLocal", TestingSessionLocal)
-    # Also patch in the sql_ module so SqlDocumentStorage uses the test session
-    monkeypatch.setattr(alchemy_engine, "SessionLocal", TestingSessionLocal)
-
     # Yield the session factory for tests that need it explicitly
     try:
         yield TestingSessionLocal

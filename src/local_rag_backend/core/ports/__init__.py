@@ -111,8 +111,6 @@ from local_rag_backend.core.ports.use_cases import (  # noqa: E402
     OpenRouterGenerateResult,
     OpenRouterUsage,
     RagRuntimeFactoryPort,
-    ReadinessDiagnostics,
-    ReadinessStatus,
 )
 
 __all__ = [
@@ -139,8 +137,6 @@ __all__ = [
     "OpenRouterUsage",
     "QAHistoryPort",
     "RagRuntimeFactoryPort",
-    "ReadinessDiagnostics",
-    "ReadinessStatus",
     "RetrieverPort",
     "VectorRepoPort",
 ]

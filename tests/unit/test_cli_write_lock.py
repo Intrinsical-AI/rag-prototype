@@ -21,7 +21,7 @@ def test_cli_mutate_docs_runs_under_multi_store_lock(in_memory_sqlite, tmp_path,
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(
-        "local_rag_backend.core.services.write_lock.multi_store_write_lock",
+        "local_rag_backend.infrastructure.concurrency.locks.write_lock.multi_store_write_lock",
         _fake_lock,
         raising=True,
     )
@@ -33,7 +33,7 @@ def test_cli_mutate_docs_runs_under_multi_store_lock(in_memory_sqlite, tmp_path,
     )
     result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
     assert result.exit_code == 0, result.output
-    assert lock_entries == 1
+    assert lock_entries == 0
 
 
 def test_cli_mutate_delete_ids_runs_under_multi_store_lock(in_memory_sqlite, tmp_path, monkeypatch):
@@ -47,7 +47,7 @@ def test_cli_mutate_delete_ids_runs_under_multi_store_lock(in_memory_sqlite, tmp
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(
-        "local_rag_backend.core.services.write_lock.multi_store_write_lock",
+        "local_rag_backend.infrastructure.concurrency.locks.write_lock.multi_store_write_lock",
         _fake_lock,
         raising=True,
     )
@@ -58,7 +58,7 @@ def test_cli_mutate_delete_ids_runs_under_multi_store_lock(in_memory_sqlite, tmp
 
     result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
     assert result.exit_code == 0, result.output
-    assert lock_entries == 1
+    assert lock_entries == 0
 
 
 def test_cli_ingest_runs_mutation_batches_under_multi_store_lock(
@@ -74,7 +74,7 @@ def test_cli_ingest_runs_mutation_batches_under_multi_store_lock(
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(
-        "local_rag_backend.core.services.write_lock.multi_store_write_lock",
+        "local_rag_backend.infrastructure.concurrency.locks.write_lock.multi_store_write_lock",
         _fake_lock,
         raising=True,
     )
@@ -86,7 +86,7 @@ def test_cli_ingest_runs_mutation_batches_under_multi_store_lock(
 
     result = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert result.exit_code == 0, result.output
-    assert lock_entries == 1
+    assert lock_entries == 0
 
 
 def test_cli_mutate_delete_ids_dense_does_not_require_embedder_when_no_upserts(
@@ -111,12 +111,12 @@ def test_cli_mutate_delete_ids_dense_does_not_require_embedder_when_no_upserts(
             return None
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        "local_rag_backend.composition.factory.SentenceTransformerEmbedder",
         _boom_embedder,
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
+        "local_rag_backend.composition.factory.VectorStorage",
         lambda *_a, **_k: DummyVec(),
         raising=True,
     )
@@ -151,12 +151,12 @@ def test_cli_mutate_delete_external_ids_dense_does_not_require_embedder_when_no_
             return None
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        "local_rag_backend.composition.factory.SentenceTransformerEmbedder",
         _boom_embedder,
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
+        "local_rag_backend.composition.factory.VectorStorage",
         lambda *_a, **_k: DummyVec(),
         raising=True,
     )

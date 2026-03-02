@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     All fields have default values, so the class can be instantiated without arguments.
     """
 
-    # This block is only for telling mypy that all fields have default values
+    # Block for telling mypy that all fields have default values
     if False:
 
         def __init__(self, **kwargs: Any) -> None: ...
@@ -147,9 +147,23 @@ class Settings(BaseSettings):
         le=5.0,
         description="Polling interval in seconds for lock acquisition retries.",
     )
-    mutation_journal_backend: Literal["file"] = Field(
-        "file",
-        description="Backend used for durable mutation journaling.",
+    mutation_batch_max_size: int = Field(
+        32,
+        ge=1,
+        le=512,
+        description=(
+            "Maximum number of queued mutation requests drained by one lock holder in a single "
+            "batch cycle."
+        ),
+    )
+    mutation_batch_max_wait_ms: int = Field(
+        50,
+        ge=0,
+        le=5000,
+        description=(
+            "Maximum wait (milliseconds) to coalesce additional mutation requests before "
+            "draining a batch."
+        ),
     )
     mutation_recovery_enabled: bool = Field(
         True,

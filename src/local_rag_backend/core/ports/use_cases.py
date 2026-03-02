@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, TypeVar
 
 BlockingTaskType = Literal["default", "mutation", "network", "eval"]
-ReadinessStatus = Literal["ready", "not_ready"]
 T = TypeVar("T")
 
 
@@ -28,12 +27,6 @@ class HistoryEntry:
     answer: str
     created_at: str
     source_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ReadinessDiagnostics:
-    status: ReadinessStatus
-    checks: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -175,6 +168,4 @@ __all__ = [
     "OpenRouterGenerateResult",
     "OpenRouterUsage",
     "RagRuntimeFactoryPort",
-    "ReadinessDiagnostics",
-    "ReadinessStatus",
 ]

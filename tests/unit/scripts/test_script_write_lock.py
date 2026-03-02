@@ -33,7 +33,7 @@ def test_bootstrap_main_uses_multi_store_write_lock(tmp_path, monkeypatch):
         yield
 
     monkeypatch.setattr(
-        "local_rag_backend.core.services.write_lock.multi_store_write_lock",
+        "local_rag_backend.infrastructure.concurrency.locks.write_lock.multi_store_write_lock",
         _fake_lock,
         raising=True,
     )
@@ -62,7 +62,7 @@ def test_build_index_uses_multi_store_write_lock_for_sparse_storage(tmp_path, mo
         yield
 
     monkeypatch.setattr(
-        "local_rag_backend.core.services.write_lock.multi_store_write_lock",
+        "local_rag_backend.infrastructure.concurrency.locks.write_lock.multi_store_write_lock",
         _fake_lock,
         raising=True,
     )
@@ -91,7 +91,7 @@ def test_build_index_raises_when_storage_fails(tmp_path, monkeypatch):
         yield
 
     monkeypatch.setattr(
-        "local_rag_backend.core.services.write_lock.multi_store_write_lock",
+        "local_rag_backend.infrastructure.concurrency.locks.write_lock.multi_store_write_lock",
         _no_op_lock,
         raising=True,
     )
