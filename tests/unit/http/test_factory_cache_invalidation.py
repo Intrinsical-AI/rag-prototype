@@ -34,7 +34,7 @@ async def test_get_rag_service_cache_is_invalidated_by_system_state_version(
     assert built == [svc1]
 
     # Simulate external invalidation (another process bumps shared version in DB).
-    state.bump_version(factory._RAG_SERVICE_STATE_KEY)
+    state.bump_version(factory.AppContainer.RAG_SERVICE_STATE_KEY)
 
     svc3 = await factory.get_rag_service()
     assert svc3 is not svc1
@@ -50,9 +50,9 @@ def test_reset_rag_service_bumps_system_state_version(in_memory_sqlite, monkeypa
     monkeypatch.setattr(factory, "SystemStateStorage", lambda: state, raising=True)
     _ = factory.get_app_context()
 
-    assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 0
+    assert state.get_version(factory.AppContainer.RAG_SERVICE_STATE_KEY) == 0
     factory.reset_rag_service()
-    assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 1
+    assert state.get_version(factory.AppContainer.RAG_SERVICE_STATE_KEY) == 1
 
     factory.reset_rag_service()
-    assert state.get_version(factory._RAG_SERVICE_STATE_KEY) == 2
+    assert state.get_version(factory.AppContainer.RAG_SERVICE_STATE_KEY) == 2

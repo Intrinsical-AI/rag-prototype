@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.composition.context import AppContext
@@ -13,14 +13,14 @@ from local_rag_backend.core.services.maintenance import (
 )
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
-from local_rag_backend.core.services.write_lock import multi_store_write_lock
+from local_rag_backend.infrastructure.concurrency.locks.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
     SqlDocumentStorage,
     SystemStateStorage,
@@ -37,9 +37,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_RAG_SERVICE_STATE_KEY = AppContainer.RAG_SERVICE_STATE_KEY
 _APP_CONTEXT: AppContext | None = None
 _APP_CONTEXT_LOCK = Lock()
+
+
+def _container_overrides() -> dict[str, Any]:
+    return {
+        "openai_embedder_factory": OpenAIEmbedder,
+        "st_embedder_factory": lambda model_name: SentenceTransformerEmbedder(
+            model_name=model_name
+        ),
+        "openai_generator_factory": OpenAIGenerator,
+        "ollama_generator_factory": OllamaGenerator,
+        "doc_repo_factory": SqlDocumentStorage,
+        "build_upsert_doc": getattr(SqlDocumentStorage, "UpsertDoc", None),
+        "history_repo_factory": HistorySqlStorage,
+        "sparse_retriever_factory": SparseBM25Retriever,
+        "dense_retriever_factory": DenseVectorRetriever,
+        "hybrid_retriever_factory": HybridRetriever,
+        "vector_repo_factory": VectorStorage,
+        "reranker_factory": RerankingRetriever,
+        "rebuild_fn": rebuild_index_from_db,
+        "purge_index_artifacts_fn": purge_index_artifacts,
+        "write_lock": multi_store_write_lock,
+        "rag_service_factory": RagService,
+    }
 
 
 def _build_container(
@@ -47,26 +69,12 @@ def _build_container(
     system_state_factory: Callable[[], SystemStateStorage] | None = None,
 ) -> AppContainer:
     resolved_system_state_factory = system_state_factory or SystemStateStorage
+    overrides = _container_overrides()
 
-    return AppContainer(
-        settings_obj=settings,
-        openai_embedder_factory=OpenAIEmbedder,
-        st_embedder_factory=lambda model_name: SentenceTransformerEmbedder(model_name=model_name),
-        openai_generator_factory=OpenAIGenerator,
-        ollama_generator_factory=OllamaGenerator,
-        doc_repo_factory=SqlDocumentStorage,
-        build_upsert_doc=getattr(SqlDocumentStorage, "UpsertDoc", None),
-        history_repo_factory=HistorySqlStorage,
-        sparse_retriever_factory=SparseBM25Retriever,
-        dense_retriever_factory=DenseVectorRetriever,
-        hybrid_retriever_factory=HybridRetriever,
-        vector_repo_factory=VectorStorage,
-        reranker_factory=RerankingRetriever,
-        rebuild_fn=rebuild_index_from_db,
-        purge_index_artifacts_fn=purge_index_artifacts,
-        write_lock=multi_store_write_lock,
-        rag_service_factory=RagService,
+    return AppContainer.from_settings(
+        settings,
         system_state_factory=resolved_system_state_factory,
+        **overrides,
     )
 
 

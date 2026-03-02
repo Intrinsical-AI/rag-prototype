@@ -25,19 +25,16 @@ from local_rag_backend.composition.adapters import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
     resolve_preferred_llm_provider,
 )
-from local_rag_backend.composition.wiring.mutation_ports import (
-    build_docs_mutation_ports,
-    build_index_mutation_ports,
-)
 from local_rag_backend.core.domain.profiles import StorageProfileRegistry
+from local_rag_backend.core.ports.contracts import DocsMutationPorts, IndexMutationPorts
 from local_rag_backend.core.services.maintenance import (
     rebuild_index_from_db,
 )
 from local_rag_backend.core.services.prompting import PromptTemplateError, validate_prompt_template
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
-from local_rag_backend.core.services.write_lock import multi_store_write_lock
 from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
+from local_rag_backend.infrastructure.concurrency.locks.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
@@ -45,11 +42,11 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
     SqlDocumentStorage,
     SystemStateStorage,
+    base as db_base,
 )
 from local_rag_backend.infrastructure.persistence.vector.manifest import purge_index_artifacts
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
@@ -84,12 +81,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class MutationExecutionBundle:
-    run_locked: Callable[[Callable[[], Any]], Any]
-    blocking_executor: BlockingExecutorPort
 
 
 @dataclass(frozen=True)
@@ -195,6 +186,11 @@ class AppContainer:
         self._rag_service_cache: RagService | None = None
         self._rag_service_cache_version: int | None = None
 
+    @classmethod
+    def from_settings(cls, settings_obj: Settings, **overrides: Any) -> AppContainer:
+        """Preferred constructor for runtime wiring while preserving injectable __init__."""
+        return cls(settings_obj=settings_obj, **overrides)
+
     @staticmethod
     def _default_st_embedder_factory(model_name: str) -> EmbedderPort:
         return SentenceTransformerEmbedder(model_name=model_name)
@@ -266,13 +262,11 @@ class AppContainer:
         *,
         missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
         build_embedder: Callable[[], EmbedderPort] | None = None,
-        use_wiring_defaults: bool = False,
     ) -> DocsMutationBundle:
         return DocsMutationBundle(
             ports=self.docs_mutation_ports(
                 missing_backend_message=missing_backend_message,
                 build_embedder=build_embedder,
-                use_wiring_defaults=use_wiring_defaults,
             ),
             import_loader=self.build_docs_import_loader_port(),
         )
@@ -282,13 +276,11 @@ class AppContainer:
         *,
         missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
         build_embedder: Callable[[], EmbedderPort] | None = None,
-        use_wiring_defaults: bool = False,
     ) -> IndexRebuildBundle:
         return IndexRebuildBundle(
             ports=self.index_mutation_ports(
                 missing_backend_message=missing_backend_message,
                 build_embedder=build_embedder,
-                use_wiring_defaults=use_wiring_defaults,
             ),
         )
 
@@ -300,16 +292,6 @@ class AppContainer:
         if run_blocking_fn is None:
             return build_blocking_executor()
         return build_blocking_executor(run_blocking_fn=run_blocking_fn)
-
-    def build_mutation_execution_bundle(
-        self,
-        *,
-        run_blocking_fn: Callable[..., Awaitable[Any]] | None = None,
-    ) -> MutationExecutionBundle:
-        return MutationExecutionBundle(
-            run_locked=self.run_multi_store_write_locked,
-            blocking_executor=self.blocking_executor(run_blocking_fn=run_blocking_fn),
-        )
 
     def build_openrouter_client(self) -> OpenRouterClientPort:
         return build_openrouter_client_from_settings(settings_obj=self.settings_obj)
@@ -342,14 +324,11 @@ class AppContainer:
         *,
         missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
         build_embedder: Callable[[], EmbedderPort] | None = None,
-        use_wiring_defaults: bool = False,
     ) -> DocsMutationPorts:
         resolved_embedder_builder = build_embedder or (
             lambda: self.build_dense_embedder(missing_backend_message=missing_backend_message)
         )
-        if use_wiring_defaults:
-            return build_docs_mutation_ports(build_embedder=resolved_embedder_builder)
-        return build_docs_mutation_ports(
+        return DocsMutationPorts(
             build_embedder=resolved_embedder_builder,
             doc_repo_factory=cast("Any", self.doc_repo_factory),
             build_upsert_doc=self.build_upsert_doc,
@@ -358,7 +337,7 @@ class AppContainer:
             write_lock=self.write_lock,
             mutation_journal_factory=self.mutation_journal_factory,
             storage_profile_registry=self.storage_profile_registry,
-            mutation_uow_factory=self.mutation_uow_factory,
+            mutation_uow_factory=self.mutation_uow_factory or db_base.session_uow,
         )
 
     def index_mutation_ports(
@@ -366,14 +345,11 @@ class AppContainer:
         *,
         missing_backend_message: str = DEFAULT_DENSE_BACKEND_MESSAGE,
         build_embedder: Callable[[], EmbedderPort] | None = None,
-        use_wiring_defaults: bool = False,
     ) -> IndexMutationPorts:
         resolved_embedder_builder = build_embedder or (
             lambda: self.build_dense_embedder(missing_backend_message=missing_backend_message)
         )
-        if use_wiring_defaults:
-            return build_index_mutation_ports(build_embedder=resolved_embedder_builder)
-        return build_index_mutation_ports(
+        return IndexMutationPorts(
             build_embedder=resolved_embedder_builder,
             doc_repo_factory=self.doc_repo_factory,
             vector_repo_factory=self.vector_repo_factory,
