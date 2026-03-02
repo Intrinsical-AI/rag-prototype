@@ -88,8 +88,8 @@ def test_precompute_vectors_for_changed_and_new_items_only() -> None:
 
     out = precompute_vectors_for_changed_items(items=items, doc_repo=repo, embedder=embedder)
 
-    assert list(out.keys()) == ["rehash-needed", "changed", "new"]
-    assert embedder.calls == [["rehash", "new", "brand new"]]
+    assert list(out.keys()) == ["same", "rehash-needed", "changed", "new"]
+    assert embedder.calls == [["stable", "rehash", "new", "brand new"]]
 
 
 def test_precompute_vectors_raises_when_embedder_returns_wrong_count() -> None:

@@ -3,7 +3,7 @@ Vector index persistence for dense/hybrid retrieval.
 
 Security + data-consistency notes:
 - The ID map is persisted as JSON (list[str]) to avoid unsafe deserialization.
-- Index + id-map writes are atomic.
+- Index/id-map individual file writes are atomic; load fails closed on length drift.
 - A cross-process lock protects concurrent writers and mitigates lost updates.
 """
 
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from local_rag_backend.core.domain.types import DocId
-from local_rag_backend.core.services.file_lock import exclusive_file_lock
+from local_rag_backend.infrastructure.concurrency.locks.file_lock import exclusive_file_lock
 from local_rag_backend.infrastructure.persistence.shared.id_map_json import (
     load_id_map_json,
     save_id_map_json,
@@ -86,6 +86,13 @@ class VectorIndex:
     def _load_or_initialize_locked(self) -> None:
         self.engine.load_or_initialize(self.index_path, int(self.dim))
         self.id_map = load_id_map_json(self.id_map_path)
+        vectors_count = int(self.engine.ntotal)
+        id_map_len = len(self.id_map)
+        if vectors_count != id_map_len:
+            raise RuntimeError(
+                "Corrupt vector index: index/id_map length mismatch "
+                f"({vectors_count} vectors vs {id_map_len} ids). Rebuild is required."
+            )
 
     def add_to_index(self, ids: list[DocId], embeddings: list[Sequence[float]]) -> None:
         if len(ids) != len(embeddings):
@@ -181,6 +188,18 @@ class VectorIndex:
 
         with self._state_lock:
             return self.engine.search(query_np, k)
+
+    def search_with_snapshot(
+        self, query_vector: Sequence[float], k: int
+    ) -> tuple[NDArray[np.int64], NDArray[np.float32], list[DocId]]:
+        if k <= 0:
+            return np.asarray([], dtype=np.int64), np.asarray([], dtype=np.float32), []
+
+        query_np = np.asarray(query_vector, dtype="float32").reshape(1, -1)
+        with self._state_lock:
+            indices, distances = self.engine.search(query_np, k)
+            # Copy id_map under the same lock to keep index-position mapping stable.
+            return indices, distances, list(self.id_map)
 
     def save(self) -> None:
         with self._locked_write():

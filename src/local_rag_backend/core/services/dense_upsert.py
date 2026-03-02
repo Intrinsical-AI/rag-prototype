@@ -81,14 +81,12 @@ def precompute_vectors_for_changed_items(
     """
     if not items:
         return {}
+    _ = doc_repo
 
-    existing_states = doc_repo.get_existing_doc_states_by_external_id(
-        [it.external_id for it in items]
-    )
-    to_embed = [it for it in items if _needs_embedding(it, existing_states)]
-
-    if not to_embed:
-        return {}
+    # Safety-first strategy: precompute every upsert vector. This avoids stale
+    # snapshot races when another mutation updates the same external_id between
+    # precompute and locked SQL/vector application.
+    to_embed = list(items)
 
     embedded = embedder.embed([it.content.strip() for it in to_embed])
     if len(embedded) != len(to_embed):

@@ -7,7 +7,7 @@ Focus: reproducible retrieval metrics without requiring an LLM provider.
 from __future__ import annotations
 
 import json
-from importlib import resources
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,12 +17,25 @@ if TYPE_CHECKING:
 
 from local_rag_backend.core.services.types import EvalDataset, EvalDoc, EvalQuery, EvalResult
 
+_EVAL_DATASET_ENV = "RAG_EVAL_DATASET_PATH"
+
+
+def _default_eval_dataset_path() -> Path:
+    env = str(os.getenv(_EVAL_DATASET_ENV, "")).strip()
+    if env:
+        return Path(env)
+    # src/local_rag_backend/core/services/evaluation.py -> repo root
+    return Path(__file__).resolve().parents[4] / "datasets" / "rag_eval_v1.jsonl"
+
 
 def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
     content: str
     if path is None:
-        p = resources.files("local_rag_backend.datasets").joinpath("rag_eval_v1.jsonl")
-        # Traversable (works for editable installs and packaged resources).
+        p = _default_eval_dataset_path()
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"Default eval dataset not found: {p}. Set RAG_EVAL_DATASET_PATH or pass --dataset."
+            )
         content = p.read_text(encoding="utf-8")
     else:
         p = Path(path)

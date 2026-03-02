@@ -29,3 +29,17 @@ def test_invalid_json_id_map_format_raises(tmp_path):
 
     with pytest.raises(ValueError, match="id_map"):
         VectorIndex(index_path, id_map_path, dim=4)
+
+
+def test_load_fails_closed_when_index_and_id_map_lengths_mismatch(tmp_path):
+    index_path = tmp_path / "i.npy"
+    id_map_path = tmp_path / "m.json"
+    idx = VectorIndex(index_path, id_map_path, dim=2, backend="numpy")
+    idx.rebuild(["doc:1"], [[0.0, 0.0]])
+
+    # Simulate a partial persistence failure: index has 2 vectors, id_map still has 1 ID.
+    with index_path.open("wb") as f:
+        np.save(f, np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype="float32"), allow_pickle=False)
+
+    with pytest.raises(RuntimeError, match="length mismatch"):
+        VectorIndex(index_path, id_map_path, dim=2, backend="numpy")

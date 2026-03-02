@@ -133,9 +133,12 @@ class VectorStorage(VectorRepoPort):
         return self.vector_index.search(query_vector, k)
 
     def similar(self, vector: Sequence[float], k: int) -> list[tuple[DocId, float]]:
-        indices, distances = self.search(vector, k)
-
-        id_map = self.vector_index.id_map
+        search_with_snapshot = getattr(self.vector_index, "search_with_snapshot", None)
+        if callable(search_with_snapshot):
+            indices, distances, id_map = search_with_snapshot(vector, k)
+        else:
+            indices, distances = self.search(vector, k)
+            id_map = list(self.vector_index.id_map)
         valid_results = [
             (id_map[i], float(d))
             for i, d in zip(indices, distances, strict=False)

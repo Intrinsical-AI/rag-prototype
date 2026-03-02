@@ -40,14 +40,15 @@ def _record_path(root: Path, op_id: str) -> Path:
 def _record_from_dict(obj: dict[str, Any]) -> MutationRecord:
     state_raw = str(obj.get("state") or "PREPARED")
     if state_raw not in _MUTATION_STATES:
-        logger.warning(
-            "Unrecognized mutation journal state %r; resetting to PREPARED. "
-            "This may indicate a version mismatch or a corrupted journal file.",
-            state_raw,
+        raise ValueError(
+            f"Invalid mutation journal state {state_raw!r}. "
+            "Record may be corrupted or produced by an incompatible version."
         )
-        state_raw = "PREPARED"
+    op_id = str(obj.get("op_id") or "")
+    if not op_id.strip():
+        raise ValueError("Mutation journal record has empty op_id.")
     return MutationRecord(
-        op_id=str(obj.get("op_id") or ""),
+        op_id=op_id,
         state=cast("MutationState", state_raw),
         intent=dict(obj.get("intent") or {}),
         before_image=(
@@ -128,14 +129,14 @@ class FileMutationJournal(MutationJournalPort):
                 break
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("Record payload is not a JSON object.")
+                rec = _record_from_dict(data)
             except Exception:
                 logger.warning(
                     "Skipping unreadable mutation journal record at %s", path, exc_info=True
                 )
                 continue
-            if not isinstance(data, dict):
-                continue
-            rec = _record_from_dict(data)
             if rec.state in {"COMMITTED", "ROLLED_BACK"}:
                 continue
             out.append(rec)
