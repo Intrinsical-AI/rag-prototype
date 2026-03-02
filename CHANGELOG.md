@@ -6,7 +6,37 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-02-26
+### Breaking
+
+- Removed legacy SQL shim module `src/local_rag_backend/infrastructure/persistence/sql/alchemy_engine.py`
+  and its remaining compatibility surface.
+
+### Added
+
+- Golden integration coverage for invariants F1-F5 in
+  `tests/integration/test_invariants_f1_f5_golden.py`:
+  - F1/F2 durable mutate + ingest + list contracts.
+  - F3 ask + ask_eval + history contracts.
+  - F4/F5 rebuild + health/readiness contracts.
+
+### Changed
+
+- Composition wiring is now centralized through `AppContainer.runtime_wiring_defaults()` with
+  `AppContainer.from_settings()` as the single runtime construction path.
+- Factory/container wiring overrides were unified to reduce duplication across API/CLI/runtime paths.
+- Bootstrap ingestion (`rag-bootstrap`) now goes through canonical durable mutation flow
+  (`MutationCoordinator`) instead of the legacy ETL-style path.
+- Bootstrap/integration naming and architecture docs were updated to reflect the canonical mutation
+  topology and single composition root.
+
+### Fixed
+
+- `composition.factory` now resolves runtime wiring overrides with safe defaults and keeps
+  monkeypatchable public symbols for test/runtime overrides.
+- Lock/offload assertions were hardened in mutation tests to check behavior instead of fragile
+  internal callable names.
+
+## [1.2.0] - 2026-02-26
 
 ### BREAKING
 

@@ -14,7 +14,11 @@ Current runtime baseline assumes split persistence:
 This creates architecture coupling if application code assumes this topology is mandatory.
 Target requirement is technology-agnostic persistence that can support:
 - split-store backends,
-- unified engines (ElasticSearch, pgvector, Qdrant) via adapters.
+- unified engines (Elasticsearch, pgvector, Qdrant) via adapters.
+
+Current state vs proposal:
+- Implemented now: capability primitives (`StorageProfile`, `StorageCapability`) and `DURABLE_SAGA` orchestration for current split-store runtime.
+- Not implemented yet: explicit `SplitStorePersistencePort` / `UnifiedKnowledgeStorePort` abstractions and unified-store adapter contract matrix.
 
 ## Decision (proposed)
 1. Keep application/use-case logic topology-agnostic and capability-driven.
@@ -28,7 +32,7 @@ Target requirement is technology-agnostic persistence that can support:
 
 ## Consequences
 Positive:
-- Core/use-cases stop hardcoding SQL+FAISS assumptions.
+- Core/use-cases stop hardcoding SQL + local-vector-index assumptions.
 - New backends can be integrated with limited blast radius.
 - Cross-backend behavior can be validated with contract tests.
 
@@ -39,7 +43,7 @@ Negative:
 ## Safeguards / Tests (planned)
 - [TODO] Add adapter contract tests that run the same behavior suite on:
   - split baseline (`SQLite + FAISS/numpy`),
-  - unified candidates (`ElasticSearch`, `pgvector`, `Qdrant`).
+  - unified candidates (`Elasticsearch`, `pgvector`, `Qdrant`).
 - [TODO] Add architecture guardrails to block backend-name branching in `core/use_cases`.
 
 ## Open Questions

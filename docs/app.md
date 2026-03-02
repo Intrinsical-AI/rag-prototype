@@ -78,6 +78,7 @@ Estas reglas están cubiertas por tests de arquitectura.
 - API ingest/import: internamente transforman a `MutationIntent`
 - CLI: `rag-mutate-docs`
 - CLI ingest: internamente transforma a `MutationIntent`
+- CLI bootstrap: `rag-bootstrap` usa `run_sample_data_ingestion` y delega en `MutationCoordinator`
 
 ### Ejecución
 
@@ -94,6 +95,12 @@ Estas reglas están cubiertas por tests de arquitectura.
 ### Garantía
 
 No se promete 2PC universal entre cualquier backend, pero sí garantía de operación `DURABLE_SAGA` por perfil de storage.
+
+### Bootstrap (actual)
+
+- `src/local_rag_backend/scripts/sample_data_ingestion.py` ya no usa una vía ETL paralela.
+- La carga de `faq.csv` se materializa como `MutationIntent` (upsert + delete stale por prefijo).
+- Eso preserva lock/journal/recovery y evita drift SQL/vector en bootstrap.
 
 ---
 

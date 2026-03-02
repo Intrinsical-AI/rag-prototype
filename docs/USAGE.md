@@ -14,6 +14,16 @@ Este documento describe cómo utilizar `rag-prototype` como una librería de Pyt
     uv sync --frozen
     ```
 
+3.  **Extras según el flujo** (opcionales):
+
+    ```bash
+    # Si vas a usar API HTTP / rag-server
+    uv sync --frozen --extra server
+
+    # Si además quieres endpoint /metrics (Prometheus)
+    uv sync --frozen --extra server --extra monitoring
+    ```
+
 ---
 
 ## Paso 1: Configuración del Entorno
@@ -88,7 +98,7 @@ from sqlalchemy.orm import sessionmaker
 # 1. Importar componentes de la librería
 from local_rag_backend.settings import settings
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.sql.base import Base
+from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
 # 2. Importar Loader (custom)
 from my_custom_loader import DictListLoader
@@ -106,8 +116,8 @@ def main():
     # Asegurarse de que el directorio de datos exista
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     engine = create_engine(settings.sqlite_url)
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(engine)
+    db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     # 5. Instanciar los componentes
     doc_storage = SqlDocumentStorage(session_factory=session_factory)
@@ -141,6 +151,8 @@ Ejecuta el script para poblar tu base de datos:
 ```bash
 python run_ingestion.py
 ```
+
+Nota: este ejemplo escribe directo en SQLite para mantener el flujo simple (útil en `sparse`). Para el write-path canónico y consistente entre `sparse`/`dense`/`hybrid`, usa `MutationCoordinator` (sección de mutaciones más abajo).
 
 ## Paso 4: Script de Consulta con Ollama
 
@@ -181,7 +193,7 @@ Ejecuta este script para obtener una respuesta:
 python run_query.py
 ```
 
-> Siguiendo estos pasos, puedes adaptar este proyecto para entender como construir un sistema RAG, con support a modelos locales con Ollama.
+> Siguiendo estos pasos, puedes adaptar este proyecto para entender cómo construir un sistema RAG, con soporte para modelos locales con Ollama.
 
 ---
 
@@ -193,13 +205,13 @@ Para un flujo rápido sin escribir código, puedes ingestar desde rutas locales:
 # Ingesta desde un fichero o un directorio (recursivo por defecto)
 rag-ingest ./docs ./notas.md ./data/faq.csv
 
-# Ver qué se procesaría sin escribir en SQLite/FAISS
+# Ver qué se procesaría sin escribir en SQLite/índice vectorial
 rag-ingest --dry-run ./docs
 ```
 
 Notas:
 
-* En `dense`/`hybrid`, la CLI actualiza SQLite y FAISS de forma consistente (y borra chunks obsoletos si un fichero se acorta).
+* En `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial de forma consistente (FAISS o NumPy, según `VECTOR_BACKEND`) y borra chunks obsoletos si un fichero se acorta.
 * La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
 * Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.
 
@@ -237,6 +249,12 @@ rag-rebuild-index
 
 ### 2) API (FastAPI)
 
+Levanta el servidor antes de llamar a la API:
+
+```bash
+rag-server
+```
+
 ```bash
 curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \
@@ -249,7 +267,7 @@ curl -X POST "http://localhost:8000/api/docs/mutate" \
 curl -X POST "http://localhost:8000/api/index/rebuild"
 ```
 
-Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"`.
+Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"`. Además, por defecto las peticiones no-locales requieren API key.
 
 ### 3) Como librería (flujo programático recomendado)
 
@@ -259,11 +277,12 @@ from local_rag_backend.core.use_cases.docs_mutation import (
     MutationIntent,
     MutationUpsertInput,
 )
-from local_rag_backend.composition.wiring.mutation_ports import build_docs_mutation_ports
 from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
+from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.settings import settings
 
-ports = build_docs_mutation_ports(
+container = AppContainer.from_settings(settings)
+ports = container.docs_mutation_ports(
     build_embedder=lambda: build_dense_embedder_from_settings(settings_obj=settings),
 )
 coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
@@ -288,10 +307,13 @@ Nota: el rebuild completo queda para reparación explícita (`rag-rebuild-index`
 Monitoring mínimo (Prometheus):
 
 ```bash
-uv sync --frozen --extra monitoring
+uv sync --frozen --extra server --extra monitoring
 export ENABLE_MONITORING=true
+rag-server
 curl -s http://localhost:8000/metrics | head
 ```
+
+Si tienes `API_KEY`, añade `-H "X-API-Key: <API_KEY>"` al `curl`.
 
 Evaluación offline reproducible (gate):
 

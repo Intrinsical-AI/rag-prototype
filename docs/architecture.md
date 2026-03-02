@@ -7,11 +7,11 @@
 
 ## 0) TL;DR (90 seconds)
 
-- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it runs mainly with split persistence (SQL + vector index), and target architecture evolves to backend-agnostic persistence adapters (split-store or unified-store engines).
+- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it runs with SQL + local vector index adapters, and target architecture evolves to backend-agnostic persistence adapters (split-store or unified-store engines).
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
-  - Canonical write path via `MutationCoordinator` (thin orchestrator), with batch and saga execution delegated to dedicated modules and consistency strategy selected by storage profile/capabilities (`DURABLE_SAGA` for split-store; single-store atomic when supported).
+  - Canonical write path via `MutationCoordinator` (thin orchestrator), with batch and saga execution delegated to dedicated modules. Current write consistency model is `DURABLE_SAGA`; capability-driven alternatives are future work.
   - SQL writes inside canonical mutation run under explicit `mutation_uow_factory` and shared SQL session context (`session_uow`).
   - App/runtime wiring centralized in `AppContainer` + `composition/*`.
   - Architecture guard tests enforce import boundaries in CI.
@@ -21,7 +21,7 @@
   - No direct writes to persistence backends outside canonical mutation/index use cases.
   - `core/{domain,ports,services}` must not depend on `infrastructure/`, `http/`, `composition/`.
   - `core/use_cases` depends on ports/contracts only (no concrete infra/composition imports).
-  - Application/core layers must not assume split persistence (`SQL + FAISS`) as mandatory architecture.
+  - Application/core layers must not assume split persistence (`SQL + local vector index`) as mandatory architecture.
   - Breaking changes are allowed during this deliverable; no migration compatibility layer is required.
   - CI gates (`pre-commit`, `ruff`, `mypy`, `pytest`, architecture tests) are mandatory.
 
@@ -33,7 +33,7 @@
 1. Close Deliverable D1: architecture stabilization + maximum practical decoupling.
 2. Make persistence layer technology-agnostic at application boundary (no hard dependency on split SQL+vector model).
 3. Enforce architectural guardrails in code (not only docs).
-4. Reduce blast radius in high-complexity modules (`docs_mutation`, `alchemy_engine`, composition wiring).
+4. Reduce blast radius in high-complexity modules (`docs_mutation`, vector persistence/index adapters, composition wiring).
 5. Freeze a clear, maintainable baseline for subsequent product work.
 
 ### 1.2 Non-goals
@@ -55,7 +55,7 @@
 | ------------ | -----: | ----------- |
 | Latency p95 (`POST /api/ask`, sparse, local sample dataset) | <= 2000ms | `rag_query_duration_seconds` metric + e2e smoke |
 | Availability (single instance) | >= 99.0% in controlled environment | `/api/health` + `/api/ready` checks |
-| Consistency | capability-driven (`ATOMIC` for single-store, `DURABLE_SAGA` for split-store) | mutation journal recovery tests + integration tests |
+| Consistency | `DURABLE_SAGA` (current write model), with capability-driven variants as future work | mutation journal recovery tests + integration tests |
 | Cost | single-node local runtime (no mandatory external SaaS except optional LLM provider) | Docker/local runtime footprint |
 
 ### 1.5 Definition of Done (Deliverable D1)
@@ -63,7 +63,7 @@
   - Architecture tests enforce strict `core/use_cases` boundaries (`infrastructure|composition` forbidden).
   - No forbidden imports remain in target modules.
 - Decoupling:
-  - `docs_query`, `mutations`, `openrouter`, `health`, `docs_import`, `rag_query`, and `evaluation` consume ports/adapters abstractions.
+  - `docs_import`, `docs_ingest`, `mutations`, `openrouter`, `health`, `rag_query`, and `evaluation` consume ports/adapters abstractions.
 - Stability:
   - CI baseline green (`pre-commit`, `ruff`, `mypy`, `pytest`).
   - Mutation consistency and recovery smoke tests pass.
@@ -111,7 +111,7 @@
 - **Lifecycle:** `PREPARED -> SQL_COMMITTED -> VECTOR_COMMITTED -> COMMITTED` with compensation paths (`COMPENSATING`, `ROLLED_BACK`, `FAILED_NEEDS_RECOVERY`)
 - **Invariants:** see section 4
 - **Context:** Document Mutation
-- **Storage:** file-backed mutation journal (`data/.mutation_journal`)
+- **Storage:** file-backed mutation journal in the coordination directory (`<coordination_dir>/.mutation_journal`)
 
 #### Entity: `QaHistory`
 - **Identity:** auto-increment integer
@@ -143,7 +143,7 @@
 - Target abstraction:
   - application uses persistence ports and capability profile, not concrete store topology;
   - supported topologies:
-    - split-store (`DocumentStorePort` + `VectorStorePort`);
+    - split-store (`DocumentRepoPort` + `VectorRepoPort`);
     - unified-store (single adapter handles document + vector + metadata operations).
 - Cache: in-process runtime cache (`RagService` cache versioned via `system_state`).
 - Files / blobs: local filesystem (`data/`, index artifacts, mutation journal).
@@ -277,7 +277,8 @@ Ports defined in `core/ports/use_cases.py` are active and used by all migrated u
 ### 5.5 Fase B hardening backlog
 - [x] `core/use_cases/docs_mutation.py` coordinator complexity reduced: intent normalization + journal payload shaping externalized (`docs_mutation_contracts.py`), SQL/vector/recovery + locking extracted to `_mutation_saga_executor.py`, and batching extracted to `_batch_coordinator.py`.
 - [TODO: Fase C] Unit-of-work boundary (`mutation_uow_factory`) is active and bound to shared SQL sessions (`session_uow`) for mutation SQL + rollback paths; extending the same transactional seam to other write-heavy workflows is intentionally deferred.
-- [x] Composition fan-out reduced with context bundles in `AppContainer` (`build_mutation_execution_bundle`, `build_docs_*_bundle`, `build_health_readiness_bundle`, `build_rag_*_bundle`) and router consumption.
+- [x] Composition fan-out reduced in `AppContainer`: routers/CLI consume focused builders/bundles (`build_docs_read_port`, `build_history_read_port`, `build_docs_mutation_bundle`, `index_mutation_ports`, `build_health_readiness_bundle`, `build_eval_execution_bundle`) instead of assembling adapters ad hoc.
+- [x] Bootstrap sample ingestion (`run_sample_data_ingestion`) migrated to canonical `MutationCoordinator` flow (no parallel ETL write path), preserving lock + journal + recovery semantics.
 - [x] Evaluation/CLI paths now consume `AppContainer` bundles/builders instead of direct adapter/wiring assembly (eval command, docs mutate/ingest CLI, index rebuild/status CLI).
 - [x] Focused characterization tests added for mutation failure semantics (journal recovery, rollback failure, vector delta failure) in `tests/unit/core/use_cases/test_docs_mutation_refactor.py`.
 - [x] External HTTP/CLI contracts remained stable across B1-B2.5 refactors (validated by e2e/unit smoke coverage and full regression suite).
@@ -302,7 +303,6 @@ Fase B closure (2026-03-01):
 ## 6) Components & interactions
 
 ### 6.1 Component diagram
-- Source of truth diagram path (to maintain in D1): `docs/diagrams/components.mmd`
 - Runtime key components:
   - `RagService` (query orchestration)
   - `MutationCoordinator` (thin write orchestration and delegation)
@@ -335,7 +335,7 @@ Fase B closure (2026-03-01):
     - unified-store: single backend mutation with backend-native atomicity when available;
   - release lock and return per-item summary (contract unchanged).
 - Side effects: backend writes and mutation journal entries.
-- Failure modes: capability mismatch, embedding precompute failure, partial batch failure requiring compensation, rollback failure, lock timeout/queue timeout.
+- Failure modes: capability mismatch, embedding precompute failure, partial batch failure requiring compensation, rollback failure, lock timeout.
 
 #### Flow: `Index rebuild/repair`
 - Trigger: `/api/index/rebuild` or `rag-rebuild-index`
@@ -349,14 +349,16 @@ Fase B closure (2026-03-01):
 
 ### 7.1 Public API
 - Protocol: REST + CLI + Python library usage.
-- Auth: optional `X-API-Key`, plus safe-bind enforcement for non-local requests.
+- Auth: `X-API-Key` is optional for localhost-only setups; with `PUBLIC_BIND_REQUIRES_API_KEY=true` (default), non-local requests are rejected when `API_KEY` is unset, and public bind startup without key is refused fail-closed.
 - Rate limiting: no explicit built-in limiter currently (must be handled by deployment edge if needed).
 - HTTP endpoints (current):
   - `/api/ask`, `/api/ask_eval`, `/api/history`
   - `/api/docs`, `/api/docs/import`, `/api/docs/mutate`
   - `/api/index/rebuild`
+  - `/api/config`, `/api/templates`
   - `/api/health`, `/api/ready`, `/api/health/ollama`
   - `/api/openrouter/generate`
+  - `/metrics` (when monitoring is enabled)
 
 ### 7.2 Events & messaging
 - Broker: none (no async message bus in current architecture).
@@ -403,22 +405,19 @@ Fase B closure (2026-03-01):
 
 ## 10) Observability
 
-- Logs: JSON-style structured event logs (`telemetry.log_event`).
+- Logs: JSON-style structured event logs (`infrastructure.observability.observability.log_event`).
 - Metrics (golden signals and domain):
   - `rag_queries_total`, `rag_query_duration_seconds`
   - `rag_ingest_requests_total`, `rag_ingest_docs_total`
-  - `rag_blocking_pending_tasks`, `rag_blocking_saturation_ratio`, queue wait/run histograms
-  - `mutation_embed_ms` (outside-lock preprocessing latency)
-  - `mutation_lock_wait_ms` (time blocked waiting for shared write lock)
-  - `mutation_lock_hold_ms` (critical section duration)
-  - `mutation_batch_size`, `mutation_batch_drain_ms`, `mutation_queue_depth`
-  - optional HTTP metrics via middleware when monitoring is enabled
+  - `rag_blocking_pending_tasks`, `rag_blocking_capacity_tasks`, `rag_blocking_saturation_ratio`
+  - `rag_blocking_queue_wait_seconds`, `rag_blocking_runs_total`, `rag_blocking_run_duration_seconds`
+  - optional HTTP metrics via middleware: `http_requests_total`, `http_request_duration_seconds`
 - Tracing: no distributed tracing backend integrated yet.
 - Alerting thresholds (initial recommendation):
   - readiness failures > 0 in rolling window
   - blocking saturation ratio > 0.8 sustained
-  - mutation lock wait p95 above agreed SLO window
-  - mutation journal incomplete records > 0 sustained
+  - blocking queue wait p95 above agreed SLO window
+  - mutation journal incomplete records > 0 sustained (from readiness diagnostics)
 
 ---
 
@@ -429,9 +428,9 @@ Fase B closure (2026-03-01):
 | Unit | domain/services/use cases/adapters | `pytest` | pass |
 | Integration | SQL/vector/index/recovery interactions | `pytest` | pass |
 | E2E | API behavior and retrieval smoke | `pytest` | pass |
-| Stress | multi-worker mutation contention and queue behavior | `pytest` + stress scripts | pass |
+| Stress | mutation contention and cross-process lock behavior | `pytest` (integration profile) | pass |
 | Architecture | import boundaries/layer rules | `pytest` + AST checks | pass |
-| Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | pass |
+| Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | CI jobs green (security includes report generation) |
 
 Mandatory CI gate: total coverage >= 85% (`pytest` config in `pyproject.toml`).
 
@@ -439,11 +438,7 @@ Key mutation/UoW characterization tests:
 - `tests/unit/core/use_cases/test_docs_mutation_refactor.py`
 - `tests/unit/infrastructure/persistence/sql/test_sql_storage.py`
 - `tests/integration/test_mutation_journal_recovery_e2e.py`
-- multiprocess stress profile (ground truth):
-  - real ASGI workers (>=4)
-  - synthetic embedding jitter `200-2000ms`
-  - synthetic embedding failure rate `5%` (`502/504` mapping)
-  - lock contention assertions on `mutation_lock_wait_ms` / `mutation_lock_hold_ms`
+- `tests/integration/test_multiprocess_write_lock.py` (cross-process write-lock serialization)
 
 ---
 

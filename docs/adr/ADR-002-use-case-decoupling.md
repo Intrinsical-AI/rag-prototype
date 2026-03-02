@@ -11,9 +11,9 @@ Accepted and implemented
 
 Final state:
 - `core/use_cases` no longer imports `infrastructure` or `composition`.
-- All target use cases are wired through ports in `core/ports/use_cases.py`.
+- All target use cases are wired through ports/contracts in `core/ports/*` (not concrete adapters).
 - Architecture debt snapshot for `core/use_cases -> infrastructure|composition` is empty.
-- Follow-up internal refactors (B2.2/B2.3) keep the rule sustainable: mutation coordinator helpers extracted and HTTP/CLI wiring fan-out reduced via container context bundles/builders.
+- Follow-up internal refactors (B2.2/B2.3) keep the rule sustainable: mutation coordinator helpers extracted and HTTP/CLI wiring fan-out reduced via focused `AppContainer` builders/bundles.
 
 ## Alternatives considered
 1. Keep soft architecture rules in docs only.
@@ -48,6 +48,9 @@ Negative:
 ## Review policy
 - Boundary test failures are treated as architecture regressions.
 - Adding `core/use_cases -> infrastructure|composition` imports is not allowed by default.
+- Guardrails are enforced by:
+  - `tests/unit/http/test_architecture_application_imports.py`
+  - `tests/unit/http/test_architecture_use_case_infra_debt.py`
 
 Target removal date:
 - Completed on 2026-03-01.

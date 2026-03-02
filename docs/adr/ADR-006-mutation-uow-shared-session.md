@@ -33,6 +33,7 @@ We implemented a shared-session UoW model for mutation paths:
 - reuse bound session when present;
 - avoid internal early commit under shared UoW;
 - flush instead of commit when session is externally owned.
+  (implemented through `get_managed_session()` + `autocommit` flags in SQL CRUD adapters)
 5. Keep fallback behavior unchanged when no UoW is active (own session + commit).
 
 ## Consequences
