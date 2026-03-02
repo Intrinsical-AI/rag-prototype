@@ -19,9 +19,10 @@ La estructura del proyecto separa preocupaciones en capas concéntricas: `core/`
 Casos de uso y coordinación transport-agnostic:
 
 - `docs_mutation.py`: `MutationCoordinator`, `MutationIntent`.
+- `_batch_coordinator.py`: `MutationBatchCoordinator` (micro-batching y drenado acotado).
+- `_mutation_saga_executor.py`: `MutationSagaExecutor` (saga durable + recovery).
 - `docs_ingest.py`: ingesta de textos con salida a mutación canónica.
 - `docs_import.py`: import de JSON (ChatGPT/Gemini) + delegación a ingesta.
-- `docs_query.py`: consulta/listado de documentos.
 - `rag_query.py`: ask_eval + history read path.
 - `mutations.py`: wrapper compartido de ejecución de mutaciones API/CLI.
 - `errors.py`: errores tipados de aplicación + `map_runtime_error`.
@@ -44,7 +45,6 @@ Composition root y lifecycle runtime (transport-neutral):
 
 - `container.py` + `factory.py`: construcción de retriever/generator/rag runtime, cache/versionado de `RagService`, wiring de puertos para mutaciones, recovery de journal.
 - `adapters.py`: builders de adaptadores de infraestructura.
-- `wiring/mutation_ports.py`: builders por defecto de dependencias para mutación/index.
 
 ### `http/routers/`
 
@@ -82,12 +82,14 @@ Estas reglas están cubiertas por tests de arquitectura.
 ### Ejecución
 
 1. Construcción de `MutationIntent` (con `op_id` idempotente opcional).
-2. `MutationCoordinator.execute(...)`.
-3. Lock multi-store + journal.
-4. SQL commit.
-5. Vector delta incremental (`apply_delta_atomic`).
-6. Compensación/recovery si falla fase vector.
-7. Invalidación de caché de `RagService`.
+2. `MutationCoordinator.execute(...)` (orquestador delgado).
+3. `MutationBatchCoordinator` agrupa y drena (`max_batch_size`, `max_wait_ms`).
+4. `MutationSagaExecutor` precomputa embeddings fuera de lock.
+5. Lock multi-store + journal.
+6. SQL commit.
+7. Vector delta incremental (`apply_delta_atomic`).
+8. Compensación/recovery si falla fase vector.
+9. Invalidación de caché de `RagService`.
 
 ### Garantía
 
@@ -100,6 +102,8 @@ No se promete 2PC universal entre cualquier backend, pero sí garantía de opera
 `/ask` y `/ask_eval` usan `core/services/rag_runtime.py::RagService` con retriever/generator resueltos en `AppContainer`.
 
 El offload de trabajo bloqueante está centralizado en `infrastructure/concurrency/blocking.py` con pools por tipo de tarea (`default|mutation|network|eval`).
+
+Los locks de escritura/archivo están en `infrastructure/concurrency/locks/{file_lock.py,write_lock.py}`.
 
 ---
 
@@ -115,3 +119,7 @@ Se eliminaron endpoints/commands legacy de mutación:
 - `rag-delete-external-ids`
 
 La mutación write-enabled se hace solo por la superficie unificada (`/api/docs/mutate`, `rag-mutate-docs`).
+
+## Artefactos de evaluación
+
+El dataset de evaluación por defecto vive en `datasets/rag_eval_v1.jsonl` (raíz del repositorio), no dentro de `src/`. Puede sobreescribirse con `RAG_EVAL_DATASET_PATH`.

@@ -107,7 +107,7 @@ flowchart TD
     GP --> OLL[infrastructure/llms/ollama_chat.py::OllamaGenerator]
 
     BRS --> HP[core/ports::QAHistoryPort]
-    HP --> HSQL[infrastructure/persistence/sql/alchemy_engine.py::HistorySqlStorage]
+    HP --> HSQL[infrastructure/persistence/sql/history_storage.py::HistorySqlStorage]
 
     RR --> RB[infrastructure/concurrency/blocking.py::run_blocking]
     RB --> RS
@@ -371,7 +371,7 @@ rag-mutate-docs --json /tmp/mutate_delete_external_ids.json
 rag-status
 
 
-# Offline retrieval evaluation (reproducible gate; default dataset is packaged)
+# Offline retrieval evaluation (reproducible gate; default dataset from `datasets/rag_eval_v1.jsonl`)
 rag-eval --retrieval-mode sparse
 ```
 

@@ -11,7 +11,7 @@
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
-  - Canonical write path via `MutationCoordinator`, with consistency strategy selected by storage profile/capabilities (`DURABLE_SAGA` for split-store; single-store atomic when supported).
+  - Canonical write path via `MutationCoordinator` (thin orchestrator), with batch and saga execution delegated to dedicated modules and consistency strategy selected by storage profile/capabilities (`DURABLE_SAGA` for split-store; single-store atomic when supported).
   - SQL writes inside canonical mutation run under explicit `mutation_uow_factory` and shared SQL session context (`session_uow`).
   - App/runtime wiring centralized in `AppContainer` + `composition/*`.
   - Architecture guard tests enforce import boundaries in CI.
@@ -147,6 +147,8 @@
     - unified-store (single adapter handles document + vector + metadata operations).
 - Cache: in-process runtime cache (`RagService` cache versioned via `system_state`).
 - Files / blobs: local filesystem (`data/`, index artifacts, mutation journal).
+- Concurrency locks: OS-level file/write lock adapters in `infrastructure/concurrency/locks/{file_lock.py,write_lock.py}`.
+- Evaluation fixtures: repository-level datasets under `datasets/` (for example `datasets/rag_eval_v1.jsonl`), optionally overridden by `RAG_EVAL_DATASET_PATH`.
 
 ### 3.2 Schemas
 - SQL models: `src/local_rag_backend/infrastructure/persistence/sql/models.py`
@@ -197,6 +199,9 @@
 - Canonical write flow is journaled and recoverable (`DURABLE_SAGA`).
 - Canonical SQL mutation and SQL compensation run inside explicit unit-of-work boundaries.
 - When UoW is active, SQL repositories must reuse the bound session and must not force early commit.
+- Lock scope is bounded to local commit work only (journal transition + SQL + vector/index commit).
+- Network I/O (`embeddings`/provider calls) must never execute while holding `multiprocess_write_lock`.
+- Mutation requests may be coalesced before lock acquisition and drained as bounded micro-batches (`max_batch_size`, `max_wait_ms`).
 - Dense/hybrid mutation cannot silently proceed when embeddings backend is unavailable.
 - Retrieval mode must be one of `sparse|dense|hybrid`.
 - Transport isolation rule: removing `http/` must not break core mutation/query capabilities.
@@ -214,6 +219,8 @@
 - Validation errors: mapped to `AppError` hierarchy (`400/401/404/409/413/422/5xx`).
 - Idempotency: `op_id` in mutation intent guarantees replay-safe behavior.
 - Retry safety: incomplete mutation records are recoverable at startup/background intervals.
+- Embedding failures are pre-lock failures: they must not leave partial SQL/vector state.
+- Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id` and journal state transitions.
 - Consistency model per operation:
   - SQL-only operations: atomic per DB transaction (owned session) or per explicit unit-of-work (shared session).
   - SQL + vector mutations: `DURABLE_SAGA` with compensation/recovery.
@@ -259,17 +266,16 @@ Ports defined in `core/ports/use_cases.py` are active and used by all migrated u
 
 | Use case module | Current coupling | Target port/abstraction |
 | --------------- | ---------------- | ----------------------- |
-| `docs_query.py` | migrated to port-based read path | `DocsReadPort` (`list_docs_page`) |
 | `docs_import.py` | migrated to loader/detector port | `DocsImportLoaderPort` |
 | `rag_query.py` | migrated to runtime/history ports | `HistoryReadPort` + `RagRuntimeFactoryPort` |
 | `health.py` | migrated to diagnostics port | `HealthDiagnosticsPort` |
 | `evaluation.py` | migrated to eval storage/retriever ports | `EvalStoragePort` + `EvalRetrieverFactoryPort` |
 | `openrouter.py` | migrated to port-based OpenAI-compatible client | `OpenRouterClientPort` (OpenAI-compatible adapter) |
 | `mutations.py` | migrated to blocking execution port | `BlockingExecutorPort` |
-| `docs_mutation.py` | orchestrator kept thin; contracts/handlers extracted | `docs_mutation_contracts.py` + `docs_mutation_handlers.py` |
+| `docs_mutation.py` | orchestrator kept thin; contracts/batch/saga extracted | `docs_mutation_contracts.py` + `_batch_coordinator.py` + `_mutation_saga_executor.py` |
 
 ### 5.5 Fase B hardening backlog
-- [x] `core/use_cases/docs_mutation.py` coordinator complexity reduced: intent normalization + journal payload shaping externalized (`docs_mutation_contracts.py` / `docs_mutation_runtime.py`), SQL/vector/recovery handlers extracted, coordinator now focused on orchestration.
+- [x] `core/use_cases/docs_mutation.py` coordinator complexity reduced: intent normalization + journal payload shaping externalized (`docs_mutation_contracts.py`), SQL/vector/recovery + locking extracted to `_mutation_saga_executor.py`, and batching extracted to `_batch_coordinator.py`.
 - [TODO: Fase C] Unit-of-work boundary (`mutation_uow_factory`) is active and bound to shared SQL sessions (`session_uow`) for mutation SQL + rollback paths; extending the same transactional seam to other write-heavy workflows is intentionally deferred.
 - [x] Composition fan-out reduced with context bundles in `AppContainer` (`build_mutation_execution_bundle`, `build_docs_*_bundle`, `build_health_readiness_bundle`, `build_rag_*_bundle`) and router consumption.
 - [x] Evaluation/CLI paths now consume `AppContainer` bundles/builders instead of direct adapter/wiring assembly (eval command, docs mutate/ingest CLI, index rebuild/status CLI).
@@ -299,7 +305,9 @@ Fase B closure (2026-03-01):
 - Source of truth diagram path (to maintain in D1): `docs/diagrams/components.mmd`
 - Runtime key components:
   - `RagService` (query orchestration)
-  - `MutationCoordinator` (write orchestration)
+  - `MutationCoordinator` (thin write orchestration and delegation)
+  - `MutationBatchCoordinator` (bounded in-memory queue: coalesce, timed drain, fairness)
+  - `MutationSagaExecutor` (DURABLE_SAGA execution and recovery)
   - `AppContainer` (composition root)
   - Context bundles from composition root to routers (reduced fan-out wiring seams)
   - SQL repository adapters
@@ -317,14 +325,17 @@ Fase B closure (2026-03-01):
 #### Flow: `Canonical mutation`
 - Trigger: `/api/docs/mutate`, `/api/docs`, `/api/docs/import`, `rag-mutate-docs`, `rag-ingest`
 - Steps:
-  - normalize intent -> acquire lock -> journal;
-  - resolve storage capabilities/profile;
-  - execute mutation in selected strategy:
+  - normalize intent and enqueue into `MutationBatchCoordinator`;
+  - batch coordinator drains by bounded policy (`max_batch_size`, `max_wait_ms`);
+  - phase A (outside lock): resolve storage profile/capabilities and precompute embeddings/vector payloads;
+  - acquire shared write lock for phase B only;
+  - phase B (inside lock): journal transition -> SQL mutation -> vector delta -> commit/finalize journal;
+  - execute selected consistency strategy:
     - split-store: SQL mutation + vector delta + compensation/recovery (`DURABLE_SAGA`);
     - unified-store: single backend mutation with backend-native atomicity when available;
-  - commit journal/cleanup.
+  - release lock and return per-item summary (contract unchanged).
 - Side effects: backend writes and mutation journal entries.
-- Failure modes: capability mismatch, partial failure requiring compensation, rollback failure, lock timeout.
+- Failure modes: capability mismatch, embedding precompute failure, partial batch failure requiring compensation, rollback failure, lock timeout/queue timeout.
 
 #### Flow: `Index rebuild/repair`
 - Trigger: `/api/index/rebuild` or `rag-rebuild-index`
@@ -350,7 +361,7 @@ Fase B closure (2026-03-01):
 ### 7.2 Events & messaging
 - Broker: none (no async message bus in current architecture).
 - Topics: none.
-- Delivery: synchronous request/response only.
+- Delivery: synchronous request/response at API boundary, with internal in-process batch queue for mutation coalescing.
 - Consumer idempotency: achieved in mutation path via `op_id` + journal, not via broker semantics.
 
 ---
@@ -376,15 +387,16 @@ Fase B closure (2026-03-01):
   - optional unified engine deployment in future cycles
   - moderate concurrent requests
 - Bottlenecks:
-  - embedding/generation network latency
+  - embedding/generation network latency (outside lock but still dominant end-to-end in dense mode)
   - index rebuild operations
-  - shared write lock under heavy mutation load
+  - shared write lock under heavy mutation load, plus SQLite exclusive-write serialization
 - Benchmarks:
   - functional: `pytest` integration/e2e suites
-  - runtime signals: `rag_query_duration_seconds`, blocking queue metrics
+  - runtime signals: `rag_query_duration_seconds`, mutation queue/lock/batch metrics
 - Scaling strategy:
   - vertical first (single instance)
   - optional multi-worker ASGI; process cache invalidation via `system_state` versioning
+  - mutation throughput improved via short critical section + micro-batching (fewer lock acquisitions, fewer write transactions)
   - no distributed storage orchestration in D1 scope
 
 ---
@@ -396,11 +408,16 @@ Fase B closure (2026-03-01):
   - `rag_queries_total`, `rag_query_duration_seconds`
   - `rag_ingest_requests_total`, `rag_ingest_docs_total`
   - `rag_blocking_pending_tasks`, `rag_blocking_saturation_ratio`, queue wait/run histograms
+  - `mutation_embed_ms` (outside-lock preprocessing latency)
+  - `mutation_lock_wait_ms` (time blocked waiting for shared write lock)
+  - `mutation_lock_hold_ms` (critical section duration)
+  - `mutation_batch_size`, `mutation_batch_drain_ms`, `mutation_queue_depth`
   - optional HTTP metrics via middleware when monitoring is enabled
 - Tracing: no distributed tracing backend integrated yet.
 - Alerting thresholds (initial recommendation):
   - readiness failures > 0 in rolling window
   - blocking saturation ratio > 0.8 sustained
+  - mutation lock wait p95 above agreed SLO window
   - mutation journal incomplete records > 0 sustained
 
 ---
@@ -412,6 +429,7 @@ Fase B closure (2026-03-01):
 | Unit | domain/services/use cases/adapters | `pytest` | pass |
 | Integration | SQL/vector/index/recovery interactions | `pytest` | pass |
 | E2E | API behavior and retrieval smoke | `pytest` | pass |
+| Stress | multi-worker mutation contention and queue behavior | `pytest` + stress scripts | pass |
 | Architecture | import boundaries/layer rules | `pytest` + AST checks | pass |
 | Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | pass |
 
@@ -421,6 +439,11 @@ Key mutation/UoW characterization tests:
 - `tests/unit/core/use_cases/test_docs_mutation_refactor.py`
 - `tests/unit/infrastructure/persistence/sql/test_sql_storage.py`
 - `tests/integration/test_mutation_journal_recovery_e2e.py`
+- multiprocess stress profile (ground truth):
+  - real ASGI workers (>=4)
+  - synthetic embedding jitter `200-2000ms`
+  - synthetic embedding failure rate `5%` (`502/504` mapping)
+  - lock contention assertions on `mutation_lock_wait_ms` / `mutation_lock_hold_ms`
 
 ---
 
@@ -474,6 +497,8 @@ Active ADR set for D1:
 5. ADR-005: Architecture test suite as release gate.
 6. ADR-006: Mutation UoW + shared SQL session boundary in `SqlDocumentStorage`/`HistorySqlStorage`.
 7. ADR-007 (proposed): persistence topology abstraction (split-store and unified-store), capability matrix, and cross-backend contract test policy.
+8. ADR-008 (proposed): short lock critical section (no network I/O under lock) with precomputed embedding/vector payloads.
+9. ADR-009 (proposed): single-writer micro-batching in `MutationCoordinator` (`max_batch_size`, `max_wait_ms`, drain-on-lock-owner).
 
 ---
 

@@ -87,7 +87,7 @@ from sqlalchemy.orm import sessionmaker
 
 # 1. Importar componentes de la librería
 from local_rag_backend.settings import settings
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.infrastructure.persistence.sql.base import Base
 
 # 2. Importar Loader (custom)
@@ -298,6 +298,8 @@ Evaluación offline reproducible (gate):
 ```bash
 rag-eval --retrieval-mode sparse
 ```
+
+Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
 
 Reranker opcional (mejora de calidad medible con `rag-eval`):
 
