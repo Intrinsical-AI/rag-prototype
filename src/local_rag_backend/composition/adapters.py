@@ -57,10 +57,10 @@ from local_rag_backend.infrastructure.observability.diagnostics import (
     get_incomplete_mutation_records_count,
     get_retrieval_index_stats,
 )
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
     SqlDocumentStorage,
+    base as db_base,
 )
 from local_rag_backend.infrastructure.persistence.sql.crud import get_history
 from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
@@ -402,10 +402,6 @@ def build_eval_storage_port() -> EvalStoragePort:
 
 def build_eval_retriever_factory_port() -> EvalRetrieverFactoryPort:
     return _DefaultEvalRetrieverFactoryPort()
-
-
-def get_sql_base_ref() -> Any:
-    return db_base
 
 
 def build_blocking_executor(

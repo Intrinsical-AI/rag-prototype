@@ -19,10 +19,10 @@ from local_rag_backend.core.services.ingestion import (
 )
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.persistence.sql import (
+    SqlDocumentStorage,
     base as db_base,
     models as _models,
 )
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.settings import settings as default_settings
 
@@ -38,7 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 def _run_with_multi_store_write_lock(settings_obj: Any, operation: Callable[[], Any]) -> Any:
-    from local_rag_backend.core.services.write_lock import multi_store_write_lock
+    from local_rag_backend.infrastructure.concurrency.locks.write_lock import (
+        multi_store_write_lock,
+    )
 
     with multi_store_write_lock(coordination_dir=settings_obj.get_coordination_dir()):
         return operation()

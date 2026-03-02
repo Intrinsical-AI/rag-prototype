@@ -2,7 +2,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from local_rag_backend.core.services.corpus import get_corpus_and_ids
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
@@ -17,6 +16,11 @@ from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorR
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.settings import settings
+
+
+def _get_corpus_and_ids(doc_repo):
+    docs = doc_repo.get_all_documents()
+    return [d.content for d in docs], [d.id for d in docs]
 
 
 class _DummyEmbeddingItem:
@@ -98,7 +102,7 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     assert len(scores) == 1
 
     # Hybrid: ensure sparse is wired and returns something too.
-    corpus, doc_ids = get_corpus_and_ids(doc_repo)
+    corpus, doc_ids = _get_corpus_and_ids(doc_repo)
     sparse = SparseBM25Retriever(documents=corpus, doc_ids=doc_ids, doc_repo=doc_repo)
     hybrid = HybridRetriever(dense=dense, sparse=sparse, alpha=0.5)
 
