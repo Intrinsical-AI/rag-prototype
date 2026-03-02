@@ -28,7 +28,7 @@ def test_bootstrap_main_uses_multi_store_write_lock(tmp_path, monkeypatch):
     entered: list[Path | None] = []
 
     @contextmanager
-    def _fake_lock(*, coordination_dir=None):
+    def _fake_lock(*, coordination_dir=None, timeout_s=None, poll_s=None):
         entered.append(coordination_dir)
         yield
 
@@ -57,7 +57,7 @@ def test_build_index_uses_multi_store_write_lock_for_sparse_storage(tmp_path, mo
     entered: list[Path | None] = []
 
     @contextmanager
-    def _fake_lock(*, coordination_dir=None):
+    def _fake_lock(*, coordination_dir=None, timeout_s=None, poll_s=None):
         entered.append(coordination_dir)
         yield
 
@@ -87,7 +87,7 @@ def test_build_index_raises_when_storage_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path / "coord", raising=False)
 
     @contextmanager
-    def _no_op_lock(*, coordination_dir=None):
+    def _no_op_lock(*, coordination_dir=None, timeout_s=None, poll_s=None):
         yield
 
     monkeypatch.setattr(
@@ -96,11 +96,11 @@ def test_build_index_raises_when_storage_fails(tmp_path, monkeypatch):
         raising=True,
     )
 
-    def _boom(self, texts):
+    def _boom(self, items):
         raise RuntimeError("forced store failure")
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.sql.alchemy_engine.SqlDocumentStorage.store_documents",
+        "local_rag_backend.infrastructure.persistence.sql.SqlDocumentStorage.upsert_documents_by_external_id",
         _boom,
         raising=True,
     )
@@ -122,11 +122,11 @@ def test_build_index_raises_when_schema_ensure_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path / 'app.db'}", raising=False)
     monkeypatch.setattr(settings, "data_dir", tmp_path / "coord", raising=False)
 
-    def _boom_schema(*, engine_to_use=None):
+    def _boom_schema(*, engine_to_use=None, id_map_path=None):
         raise RuntimeError("forced schema failure")
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.sql.base.ensure_sqlite_documents_identity_columns",
+        "local_rag_backend.infrastructure.persistence.sql.base.ensure_sqlite_schema_compatible",
         _boom_schema,
         raising=True,
     )

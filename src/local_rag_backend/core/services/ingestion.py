@@ -5,7 +5,7 @@ Ingestion service for document processing.
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from local_rag_backend.core.ports import LoaderPort
     from local_rag_backend.core.services.etl import ETLService
     from local_rag_backend.settings import Settings
-from local_rag_backend.core.domain.types import TransformStep, utc_now
+from local_rag_backend.core.domain.types import ItemLineage, TransformStep, utc_now
 from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.text_processing import preprocess_text
 
@@ -46,6 +46,35 @@ def default_formatter(text: str, metadata: Mapping[str, Any] | None = None) -> s
         if v is not None and not str(k).startswith("_")
     )
     return f"{header}\n\n{text}" if header else text
+
+
+def stable_lineage_metadata(lineage: ItemLineage) -> dict[str, Any]:
+    """
+    Build deterministic lineage metadata for persistence.
+
+    Runtime timestamps are intentionally omitted so repeated ingestion of unchanged
+    inputs remains idempotent at metadata level.
+    """
+    return {
+        "source_uri": str(lineage.source_uri),
+        "loader_name": str(lineage.loader_name),
+        "source_version": (
+            str(lineage.source_version) if lineage.source_version is not None else None
+        ),
+        "record_locator": (
+            str(lineage.record_locator) if lineage.record_locator is not None else None
+        ),
+        "offset_start": (int(lineage.offset_start) if lineage.offset_start is not None else None),
+        "offset_end": (int(lineage.offset_end) if lineage.offset_end is not None else None),
+        "transforms": [
+            {
+                "name": str(step.name),
+                "version": str(step.version),
+                "params": (dict(step.params) if step.params is not None else None),
+            }
+            for step in lineage.transforms
+        ],
+    }
 
 
 def build_preprocess_fn_from_settings(
@@ -126,7 +155,7 @@ class IngestionPipeline:
                     params={},
                 )
                 metadata = dict(loaded_item.metadata) if loaded_item.metadata else {}
-                metadata["_lineage"] = asdict(format_lineage)
+                metadata["_lineage"] = stable_lineage_metadata(format_lineage)
                 formatted_chunk = self.format_fn(chunk, metadata)
                 batch.append(formatted_chunk)
                 if len(batch) >= self.flush_batch_size:

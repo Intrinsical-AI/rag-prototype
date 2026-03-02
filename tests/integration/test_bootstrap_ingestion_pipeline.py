@@ -7,8 +7,8 @@ from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_inge
 from local_rag_backend.settings import settings
 
 
-def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, caplog):
-    """Test bootstrap using ingestion pipeline in sparse mode."""
+def test_bootstrap_with_canonical_mutation_sparse_mode(tmp_path, monkeypatch, caplog):
+    """Bootstrap should ingest CSV through canonical durable mutation flow (sparse)."""
     # Create test CSV
     csv_file = tmp_path / "faq.csv"
     with csv_file.open("w", encoding="utf-8", newline="") as fh:
@@ -37,7 +37,7 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
     from local_rag_backend.infrastructure.persistence.sql.base import Base
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
@@ -52,8 +52,8 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     assert any("funciona" in doc.content for doc in docs)
 
 
-def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, caplog):
-    """Test bootstrap using ingestion pipeline in dense mode."""
+def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, caplog):
+    """Bootstrap should ingest CSV through canonical durable mutation flow (dense)."""
 
     class DummyEmbedder:
         dim = 4
@@ -70,6 +70,11 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
 
         def add_to_index(self, ids, vecs):
             self.id_map.extend(ids)
+
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            delete_set = {str(x) for x in delete_ids}
+            self.id_map = [doc_id for doc_id in self.id_map if str(doc_id) not in delete_set]
+            self.id_map.extend([doc_id for doc_id, _ in upserts])
 
         def search(self, q, k):
             return ([0], [0.9])
@@ -138,7 +143,7 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
     from local_rag_backend.infrastructure.persistence.sql.base import Base
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
@@ -194,7 +199,7 @@ def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, caplog):
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 
-        from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import (
+        from local_rag_backend.infrastructure.persistence.sql import (
             SqlDocumentStorage,
         )
         from local_rag_backend.infrastructure.persistence.sql.base import Base

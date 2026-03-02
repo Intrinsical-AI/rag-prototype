@@ -5,7 +5,7 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
-from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
@@ -44,6 +44,8 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     r2 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert r2.exit_code == 0, r2.output
     assert "inserted=0" in r2.output
+    assert "updated=0" in r2.output
+    assert "unchanged=6" in r2.output
 
     docs2 = SqlDocumentStorage().get_all_documents()
     assert len(docs2) == 6  # idempotent

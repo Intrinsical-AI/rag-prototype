@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -85,7 +84,10 @@ def _build_file_ingest_plan(
     has_header: bool,
 ) -> IngestPlan | None:
     from local_rag_backend.core.services.chunking import chunk_chars_v1
-    from local_rag_backend.core.services.ingestion import default_formatter
+    from local_rag_backend.core.services.ingestion import (
+        default_formatter,
+        stable_lineage_metadata,
+    )
     from local_rag_backend.infrastructure.ingestion.loaders.factory import (
         detect_file_format,
         get_loader_for_file,
@@ -110,8 +112,8 @@ def _build_file_ingest_plan(
 
     for loaded in loader.load():
         md = dict(loaded.metadata) if loaded.metadata else {}
-        md["_lineage"] = json.loads(json.dumps(asdict(loaded.lineage), default=str))
-        md.setdefault("source", str(file_path))
+        md["_lineage"] = stable_lineage_metadata(loaded.lineage)
+        md.setdefault("source", source_id)
         md.setdefault("format", det.fmt)
         md.setdefault("filename", file_path.name)
 

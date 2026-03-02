@@ -22,6 +22,11 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, caplog):
         def add_to_index(self, ids, vecs):
             self.id_map.extend(ids)
 
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            delete_set = {str(x) for x in delete_ids}
+            self.id_map = [doc_id for doc_id in self.id_map if str(doc_id) not in delete_set]
+            self.id_map.extend([doc_id for doc_id, _ in upserts])
+
         def search(self, q, k):
             return ([0], [0.0])
 
@@ -72,7 +77,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, caplog):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sql.alchemy_engine import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url)
     Session = sessionmaker(bind=engine)
