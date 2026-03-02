@@ -5,6 +5,7 @@ This module contains transport-neutral shaping rules used by MutationCoordinator
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -12,7 +13,7 @@ from local_rag_backend.core.ports.contracts import MutationRecord
 from local_rag_backend.core.use_cases.results import MutationSummary, UpsertDocResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Sequence
 
 
 @dataclass(frozen=True)
@@ -47,8 +48,8 @@ def normalize_intent(
         for it in list(intent.upserts)
         if str(it.external_id).strip() and str(it.content).strip()
     ]
-    ext_ids = _normalize_str_items(intent.delete_external_ids)
-    delete_ids = _normalize_str_items(intent.delete_ids)
+    ext_ids = normalize_str_items(intent.delete_external_ids)
+    delete_ids = normalize_str_items(intent.delete_ids)
 
     if not upserts and not ext_ids and not delete_ids:
         raise ValueError("Mutation intent must include upserts and/or deletions.")
@@ -144,7 +145,7 @@ def intent_to_dict(intent: MutationIntent) -> dict[str, Any]:
     }
 
 
-def _normalize_str_items(values: Sequence[str]) -> list[str]:
+def normalize_str_items(values: Sequence[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for raw in values:
@@ -156,11 +157,26 @@ def _normalize_str_items(values: Sequence[str]) -> list[str]:
     return out
 
 
+def canonical_intent_payload(payload: Any) -> Any:
+    if isinstance(payload, Mapping):
+        return {
+            str(k): canonical_intent_payload(v)
+            for k, v in sorted(payload.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(payload, (list, tuple)):
+        return [canonical_intent_payload(v) for v in payload]
+    if isinstance(payload, set):
+        return sorted(canonical_intent_payload(v) for v in payload)
+    return payload
+
+
 __all__ = [
     "MutationIntent",
     "MutationUpsertInput",
+    "canonical_intent_payload",
     "intent_to_dict",
     "normalize_intent",
+    "normalize_str_items",
     "summary_from_record",
     "summary_to_payload",
 ]

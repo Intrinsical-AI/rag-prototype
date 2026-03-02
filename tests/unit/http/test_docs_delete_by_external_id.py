@@ -32,6 +32,34 @@ async def test_mutate_delete_by_external_id_sparse_creates_tombstone_and_blocks_
     assert SqlDocumentStorage().get_all_documents() == []
 
 
+async def test_mutate_upsert_rejects_tombstoned_external_id(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    r1 = await asgi_client.post(
+        "/api/docs/mutate",
+        json={"upserts": [{"external_id": "doc-tombstone-1", "content": "hello"}]},
+    )
+    assert r1.status_code == 200
+
+    r2 = await asgi_client.post(
+        "/api/docs/mutate",
+        json={"delete_external_ids": ["doc-tombstone-1"]},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["deleted_sql"] == 1
+    assert r2.json()["tombstoned"] == 1
+
+    r3 = await asgi_client.post(
+        "/api/docs/mutate",
+        json={"upserts": [{"external_id": "doc-tombstone-1", "content": "resurrect"}]},
+    )
+    assert r3.status_code == 400
+    assert "tombstoned" in r3.json()["detail"].lower()
+    assert SqlDocumentStorage().get_all_documents() == []
+
+
 async def test_mutate_delete_by_external_id_dense_is_consistent_and_survives_rebuild(
     asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):

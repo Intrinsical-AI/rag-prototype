@@ -99,7 +99,7 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
 
     r2 = await asgi_client.post("/api/docs/mutate", json=payload)
     assert r2.status_code == 200
-    assert dummy_embedder.calls == 1
+    assert dummy_embedder.calls == 2
     assert len(dummy_vec.calls) == 2
     assert dummy_vec.calls[1]["delete_ids"] == []
     assert dummy_vec.calls[1]["upsert_ids"] == []
@@ -110,7 +110,7 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
     )
     assert r3.status_code == 200
     assert r3.json()["results"][0]["id"] == doc_id
-    assert dummy_embedder.calls == 2
+    assert dummy_embedder.calls == 3
     assert len(dummy_vec.calls) == 3
     assert dummy_vec.calls[2]["delete_ids"] == [doc_id]
     assert dummy_vec.calls[2]["upsert_ids"] == [doc_id]

@@ -9,7 +9,9 @@ import pytest
 
 def _lock_worker(lock_dir: str, active: object, max_active: object) -> None:
     # Import inside worker so spawned processes initialize cleanly.
-    from local_rag_backend.core.services.write_lock import multi_store_write_lock
+    from local_rag_backend.infrastructure.concurrency.locks.write_lock import (
+        multi_store_write_lock,
+    )
 
     active_v = active
     max_active_v = max_active

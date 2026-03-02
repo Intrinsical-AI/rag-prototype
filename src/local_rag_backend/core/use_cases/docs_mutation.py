@@ -3,34 +3,32 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
-from local_rag_backend.core.use_cases.docs_mutation_contracts import (
-    MutationIntent,
-    MutationUpsertInput,
-    intent_to_dict,
-    normalize_intent,
-    summary_from_record,
+from local_rag_backend.core.use_cases._batch_coordinator import (
+    MutationBatchCoordinator,
+    MutationBatchItem,
 )
-from local_rag_backend.core.use_cases.docs_mutation_handlers import (
-    apply_sql_mutation,
-    apply_vector_delta,
-    capture_before_image,
-    recover_record,
-    rollback_sql,
-)
-from local_rag_backend.core.use_cases.docs_mutation_runtime import (
+from local_rag_backend.core.use_cases._mutation_saga_executor import (
+    MutationSagaExecutor,
+    PreparedMutation,
     build_journal,
     mutation_uow_context,
-    upsert_journal_record,
     uses_vector_index,
+    validate_rollback_contract,
     validate_storage_profile,
     write_lock_context,
 )
-from local_rag_backend.core.use_cases.results import MutationSummary
+from local_rag_backend.core.use_cases.docs_mutation_contracts import (
+    MutationIntent,
+    MutationUpsertInput,
+    normalize_intent,
+)
 
 if TYPE_CHECKING:
-    from local_rag_backend.core.ports.contracts import DocsMutationPorts
+    from local_rag_backend.core.ports.contracts import DocsMutationPorts, MutationJournalPort
+    from local_rag_backend.core.use_cases.results import MutationSummary
     from local_rag_backend.settings import Settings
 
 
@@ -39,9 +37,13 @@ def _new_op_id() -> str:
 
 
 class MutationCoordinator:
+    """Thin orchestration layer: normalize/validate, batch, and delegate saga execution."""
+
     def __init__(self, *, settings_obj: Settings, ports: DocsMutationPorts) -> None:
         self.settings_obj = settings_obj
         self.ports = ports
+        self._batcher = MutationBatchCoordinator()
+        self._saga = MutationSagaExecutor(settings_obj=settings_obj, ports=ports)
 
     def execute(self, intent: MutationIntent) -> MutationSummary:
         normalized = normalize_intent(intent=intent, new_op_id=_new_op_id)
@@ -51,156 +53,80 @@ class MutationCoordinator:
             ports=self.ports,
             vector_mode_enabled=vector_mode_enabled,
         )
+        if vector_mode_enabled:
+            validate_rollback_contract(ports=self.ports)
+
         journal = build_journal(ports=self.ports)
+        replay = self._saga.get_committed_replay_summary(journal=journal, intent=normalized)
+        if replay is not None:
+            return replay
 
-        existing = journal.get(normalized.op_id)
-        if existing is not None:
-            if existing.state == "COMMITTED":
-                return summary_from_record(existing)
-            recover_record(
-                journal=journal,
-                record=existing,
-                rollback_sql_fn=self._rollback_sql_with_uow,
-                doc_repo_factory=self.ports.doc_repo_factory,
-            )
-            existing = journal.get(normalized.op_id)
-            if existing is not None and existing.state == "COMMITTED":
-                return summary_from_record(existing)
+        precomputed_vectors = self._saga.precompute_vectors_for_intent(
+            intent=normalized,
+            vector_mode_enabled=vector_mode_enabled,
+        )
+        prepared = PreparedMutation(
+            intent=normalized,
+            vector_mode_enabled=vector_mode_enabled,
+            precomputed_vectors_by_external_id=precomputed_vectors,
+        )
 
-        with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
-            existing_locked = journal.get(normalized.op_id)
-            if existing_locked is not None and existing_locked.state == "COMMITTED":
-                return summary_from_record(existing_locked)
-
-            doc_repo = self.ports.doc_repo_factory()
-            before_image = capture_before_image(doc_repo=doc_repo, intent=normalized)
-            upsert_journal_record(
-                journal=journal,
-                op_id=normalized.op_id,
-                state="PREPARED",
-                intent=normalized,
-                before_image=before_image,
-            )
-
-            with mutation_uow_context(ports=self.ports):
-                sql_outcome = apply_sql_mutation(
-                    doc_repo=doc_repo,
-                    intent=normalized,
-                    build_upsert_doc=self.ports.build_upsert_doc,
-                )
-            upsert_journal_record(
-                journal=journal,
-                op_id=normalized.op_id,
-                state="SQL_COMMITTED",
-                intent=normalized,
-                before_image=before_image,
-            )
-
-            deleted_index: int | None = None
-            index_doc_count: int | None = None
-            try:
-                if vector_mode_enabled:
-                    deleted_index, index_doc_count = apply_vector_delta(
-                        sql_outcome=sql_outcome,
-                        doc_repo=doc_repo,
-                        settings_obj=self.settings_obj,
-                        ports=self.ports,
-                        uses_vector_index=vector_mode_enabled,
-                    )
-                    upsert_journal_record(
-                        journal=journal,
-                        op_id=normalized.op_id,
-                        state="VECTOR_COMMITTED",
-                        intent=normalized,
-                        before_image=before_image,
-                    )
-            except Exception as vector_err:
-                upsert_journal_record(
-                    journal=journal,
-                    op_id=normalized.op_id,
-                    state="COMPENSATING",
-                    intent=normalized,
-                    before_image=before_image,
-                    error=str(vector_err),
-                )
-                try:
-                    self._rollback_sql_with_uow(
-                        doc_repo=doc_repo,
-                        intent=intent_to_dict(normalized),
-                        before_image=before_image,
-                    )
-                    upsert_journal_record(
-                        journal=journal,
-                        op_id=normalized.op_id,
-                        state="ROLLED_BACK",
-                        intent=normalized,
-                        before_image=before_image,
-                        error=str(vector_err),
-                    )
-                except Exception as rollback_err:
-                    upsert_journal_record(
-                        journal=journal,
-                        op_id=normalized.op_id,
-                        state="FAILED_NEEDS_RECOVERY",
-                        intent=normalized,
-                        before_image=before_image,
-                        error=f"vector={vector_err}; rollback={rollback_err}",
-                    )
-                    raise RuntimeError(
-                        "Mutation failed after SQL commit and rollback did not complete."
-                    ) from rollback_err
-                raise
-
-            summary = MutationSummary(
-                op_id=normalized.op_id,
-                inserted=sql_outcome.inserted,
-                updated=sql_outcome.updated,
-                unchanged=sql_outcome.unchanged,
-                deleted_sql=sql_outcome.deleted_sql,
-                deleted_index=deleted_index,
-                tombstoned=sql_outcome.tombstoned,
-                missing_external_ids=list(sql_outcome.missing_external_ids),
-                index_rebuilt=False,
-                index_doc_count=index_doc_count,
-                results=list(sql_outcome.results),
-            )
-            upsert_journal_record(
-                journal=journal,
-                op_id=normalized.op_id,
-                state="COMMITTED",
-                intent=normalized,
-                before_image=before_image,
-                outcome=summary,
-            )
-            journal.delete(normalized.op_id)
-            return summary
+        return cast(
+            "MutationSummary",
+            self._batcher.submit(
+                queue_key=self._batch_state_key(),
+                payload=prepared,
+                max_batch_size=self._batch_max_size(),
+                max_wait_ms=self._batch_max_wait_ms(),
+                process_batch=lambda batch: self._process_batch(batch=batch, journal=journal),
+            ),
+        )
 
     def recover_incomplete(self, *, limit: int = 100) -> int:
-        journal = build_journal(ports=self.ports)
-        records = journal.list_incomplete(limit=limit)
-        if not records:
-            return 0
-        repaired = 0
-        with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
-            for record in records:
-                recover_record(
-                    journal=journal,
-                    record=record,
-                    rollback_sql_fn=self._rollback_sql_with_uow,
-                    doc_repo_factory=self.ports.doc_repo_factory,
-                )
-                repaired += 1
-        return repaired
+        return self._saga.recover_incomplete(limit=limit)
 
-    def _rollback_sql_with_uow(
+    def _batch_state_key(self) -> str:
+        coordination_dir = Path(self.settings_obj.get_coordination_dir())
+        return str(coordination_dir.resolve())
+
+    def _batch_max_size(self) -> int:
+        raw = int(getattr(self.settings_obj, "mutation_batch_max_size", 32))
+        return max(1, min(raw, 512))
+
+    def _batch_max_wait_ms(self) -> int:
+        raw = int(getattr(self.settings_obj, "mutation_batch_max_wait_ms", 50))
+        return max(0, min(raw, 5000))
+
+    def _process_batch(
         self,
         *,
-        doc_repo: Any,
-        intent: dict[str, Any],
-        before_image: dict[str, Any],
+        batch: list[MutationBatchItem],
+        journal: MutationJournalPort,
     ) -> None:
-        with mutation_uow_context(ports=self.ports):
-            rollback_sql(doc_repo=doc_repo, intent=intent, before_image=before_image)
+        with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
+            for item in batch:
+                try:
+                    item.result = self._saga.execute_locked(
+                        prepared=cast("PreparedMutation", item.payload),
+                        journal=journal,
+                    )
+                except Exception as exc:
+                    item.error = exc
+                finally:
+                    item.done.set()
 
 
-__all__ = ["MutationCoordinator", "MutationIntent", "MutationUpsertInput"]
+__all__ = [
+    "MutationBatchCoordinator",
+    "MutationCoordinator",
+    "MutationIntent",
+    "MutationSagaExecutor",
+    "MutationUpsertInput",
+    "build_journal",
+    "mutation_uow_context",
+    "normalize_intent",
+    "uses_vector_index",
+    "validate_rollback_contract",
+    "validate_storage_profile",
+    "write_lock_context",
+]

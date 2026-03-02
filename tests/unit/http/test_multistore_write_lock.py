@@ -40,6 +40,39 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
         _by_external_id: dict[str, tuple[int, str, str]] = {}
         _a_sql_done = threading.Event()
 
+        def snapshot_by_external_ids(self, external_ids):
+            snapshots = []
+            with self._lock:
+                for ext in external_ids:
+                    row = self._by_external_id.get(ext)
+                    if row is None:
+                        continue
+                    doc_id, content, content_sha256 = row
+                    snapshots.append(
+                        {
+                            "id": str(doc_id),
+                            "external_id": ext,
+                            "content": content,
+                            "content_sha256": content_sha256,
+                        }
+                    )
+            return snapshots
+
+        def hard_delete_by_external_ids(self, external_ids):
+            with self._lock:
+                for ext in external_ids:
+                    self._by_external_id.pop(ext, None)
+
+        def restore_from_snapshots(self, snapshots):
+            with self._lock:
+                for snap in snapshots:
+                    ext = str(snap["external_id"])
+                    doc_id = int(snap["id"])
+                    content = str(snap["content"])
+                    content_sha256 = str(snap["content_sha256"])
+                    self._by_external_id[ext] = (doc_id, content, content_sha256)
+                    self._next_id = max(self._next_id, doc_id + 1)
+
         def get_tombstoned_external_ids(self, external_ids):
             return set()
 
@@ -147,7 +180,8 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["count"] >= 1
-    assert called_funcs.count("run_multi_store_write_locked") == 1
+    assert called_funcs.count("run_multi_store_write_locked") == 0
+    assert called_funcs.count("_run_unlocked") == 1
     assert called_task_types == ["mutation"]
     assert "_ingest_sync" not in called_funcs
 

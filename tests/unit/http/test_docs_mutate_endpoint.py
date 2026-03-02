@@ -70,3 +70,28 @@ async def test_docs_mutate_rejects_conflicting_upsert_and_delete_external_id(
     )
 
     assert resp.status_code == 422
+
+
+async def test_docs_mutate_rejects_reusing_op_id_with_different_intent(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    first = await asgi_client.post(
+        "/api/docs/mutate",
+        json={
+            "op_id": "op-replay-1",
+            "upserts": [{"external_id": "doc-1", "content": "hello"}],
+        },
+    )
+    assert first.status_code == 200
+
+    second = await asgi_client.post(
+        "/api/docs/mutate",
+        json={
+            "op_id": "op-replay-1",
+            "upserts": [{"external_id": "doc-2", "content": "different"}],
+        },
+    )
+    assert second.status_code == 400
+    assert "replay mismatch" in second.json()["detail"].lower()
