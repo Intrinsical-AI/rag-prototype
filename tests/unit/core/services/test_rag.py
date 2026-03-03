@@ -1,5 +1,5 @@
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.core.services.rag import RagService
+from local_rag_backend.core.services.rag_runtime import NO_DOCS_ANSWER, RagService
 
 
 class DummyRetriever:
@@ -52,6 +52,6 @@ def test_rag_service_empty_docs():
     history = DummyHistory()
     rag = RagService(retriever, generator, history)
     resp = rag.ask("vacío", top_k=2)
-    assert resp["answer"].startswith("No hay documentos indexados")
+    assert resp["answer"] == NO_DOCS_ANSWER
     assert resp["docs"] == []
     assert resp["scores"] == []

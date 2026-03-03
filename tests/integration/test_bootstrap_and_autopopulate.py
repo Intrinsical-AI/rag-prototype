@@ -1,10 +1,10 @@
 import csv
-import importlib
 
+from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 from local_rag_backend.settings import settings
 
 
-def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
+def test_bootstrap_ingests_data(tmp_path, monkeypatch, caplog):
     class DummyEmbedder:
         dim = 4
 
@@ -12,7 +12,7 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
             return [[0.0] * self.dim for _ in texts]
 
     # Mock FAISS Index to ensure consistent dim
-    class DummyFaissIndex:
+    class DummyVectorIndex:
         def __init__(self, index_path, id_map_path, dim=None):  # <-- Aquí el cambio
             self.index_path = index_path
             self.id_map_path = id_map_path
@@ -21,6 +21,11 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
 
         def add_to_index(self, ids, vecs):
             self.id_map.extend(ids)
+
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            delete_set = {str(x) for x in delete_ids}
+            self.id_map = [doc_id for doc_id in self.id_map if str(doc_id) not in delete_set]
+            self.id_map.extend([doc_id for doc_id, _ in upserts])
 
         def search(self, q, k):
             return ([0], [0.0])
@@ -34,10 +39,10 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
         lambda model_name=None: DummyEmbedder(),
         raising=True,
     )
-    # Patch the class in the module where FaissVectorStorage uses it
+    # Patch the class in the module where VectorStorage uses it
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
-        DummyFaissIndex,
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
+        DummyVectorIndex,
     )
 
     # Temporary CSV and settings
@@ -50,30 +55,29 @@ def test_bootstrap_ingests_data(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "faq_csv", str(csv_file), raising=False)
     monkeypatch.setattr(settings, "csv_has_header", True, raising=False)
     monkeypatch.setattr(settings, "index_path", str(tmp_path / "idx.faiss"), raising=False)
-    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.json"), raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
     # Reset singleton if needed
     try:
-        from local_rag_backend.app import factory
+        from local_rag_backend.composition import factory
 
         if hasattr(factory, "reset_rag_service"):
             factory.reset_rag_service()
     except ImportError:
         pass
 
-    from local_rag_backend.scripts import bootstrap as bootstrap
+    import logging
 
-    importlib.reload(bootstrap)
-    bootstrap.main()
+    with caplog.at_level(logging.INFO):
+        run_sample_data_ingestion()
 
-    captured = capsys.readouterr()
-    assert "Ingested" in captured.out or "Ingerido" in captured.out
+    assert any("Ingested" in m or "Ingerido" in m for m in caplog.messages)
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 
     engine = create_engine(settings.sqlite_url)
     Session = sessionmaker(bind=engine)

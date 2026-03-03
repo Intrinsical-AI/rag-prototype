@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from openai import OpenAI
 
 from local_rag_backend.core.ports import EmbedderPort
+from local_rag_backend.infrastructure.llms.openai_chat import create_openai_client
 from local_rag_backend.settings import settings
 
 _MODEL_DIM: dict[str, int] = {
@@ -31,7 +32,11 @@ class OpenAIEmbedder(EmbedderPort):
         self.dim = _MODEL_DIM.get(self.model, 1536)
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required to use OpenAI embeddings.")
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.client = create_openai_client(
+            api_key=settings.openai_api_key,
+            timeout=settings.openai_request_timeout,
+            client_factory=OpenAI,
+        )
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         if not texts:

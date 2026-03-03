@@ -1,7 +1,7 @@
 [project]
 name = "rag-prototype"
-version = "1.1.0"
-description = "Enterprise-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
+version = "1.3.0"
+description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -11,7 +11,7 @@ keywords = [
   "rag","retrieval-augmented-generation","fastapi","faiss",
   "nlp","ai","machine-learning","semantic-search","llm",
   "hexagonal-architecture","vector-search","openai","ollama",
-  "enterprise","production-ready","microservices","docker"
+  "Experimental","production-ready","microservices","docker"
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -38,33 +38,30 @@ classifiers = [
 ]
 
 dependencies = [
-  # Web Framework & Server
-  "fastapi>=0.111,<0.112",
-  "uvicorn[standard]>=0.29,<1.0",
-  "anyio>=4.3,<4.4",
-
   # AI/ML Core (lightweight defaults; heavy deps are optional extras)
   "rank-bm25>=0.2,<1.0",
   "numpy>=2.0,<2.3",
-
   # LLM Integrations
   "openai>=1.24,<2.0",
-  "requests>=2.31,<3.0",
-
+  "httpx>=0.27,<0.28",
   # Database & ORM
   "sqlalchemy>=2.0,<3.0",
-
   # Configuration & Validation
   "pydantic>=2.0,<3.0",
   "pydantic-settings>=2.2,<3.0",
   "python-dotenv>=1.0,<2.0",
-
   # CLI & Utilities
   "click>=8.0,<9.0",
-  "rich>=13.0,<14.0"
+  "rich>=13.0,<14.0",
+  "pre-commit>=4.5.1",
 ]
 
 [project.optional-dependencies]
+server = [
+  "fastapi>=0.124,<0.125",
+  "uvicorn[standard]>=0.29,<1.0",
+  "python-multipart>=0.0.9,<1.0",
+]
 dense = [
   "faiss-cpu>=1.8.0,<2.0"
 ]
@@ -72,51 +69,13 @@ dense-st = [
   # Heavy dependency chain (torch/transformers). Prefer OpenAI embeddings when possible.
   "sentence-transformers>=2.7,<3.0"
 ]
-dev = [
-  # Testing
-  "pytest>=8.2,<9.0",
-  "pytest-cov>=6.1.1,<7.0",
-  "pytest-asyncio>=0.23,<1.0",
-  "pytest-xdist>=3.5,<4.0",
-  "httpx>=0.27,<0.28",
-
-  # Code Quality & Formatting
-  "ruff>=0.4,<1.0",
-  "black>=24.0,<25.0",
-  "isort>=5.13,<6.0",
-  "pre-commit>=4.2.0,<5.0",
-
-  # Type Checking
-  "mypy>=1.10,<2.0",
-  "types-requests>=2.31,<3.0",
-
-  # Dev Tools
-  "ipython>=8.0,<9.0",
-  "jupyter>=1.0,<2.0"
-]
-test = [
-  "pytest>=8.2,<9.0",
-  "pytest-cov>=6.1.1,<7.0",
-  "pytest-asyncio>=0.23,<1.0",
-  "httpx>=0.27,<0.28"
-]
-lint = [
-  "ruff>=0.4,<1.0",
-  "black>=24.0,<25.0",
-  "isort>=5.13,<6.0",
-  "mypy>=1.10,<2.0",
-  "types-requests>=2.31,<3.0"
-]
-docs = [
-  "mkdocs>=1.5,<2.0",
-  "mkdocs-material>=9.5,<10.0",
-  "mkdocstrings[python]>=0.24,<1.0",
-  "mkdocs-mermaid2-plugin>=1.1,<2.0",
-  "mkdocs-include-markdown-plugin>=6.0,<7.0"
-]
 loaders = [
   "langchain-community>=0.2,<1.0",
   "trafilatura>=1.8,<2.0"
+]
+magic = [
+  # Optional file type detection via libmagic. Requires system libmagic on many distros.
+  "python-magic>=0.4,<1.0"
 ]
 # CPU por defecto (retro-compat mantenida)
 performance = [
@@ -133,29 +92,44 @@ monitoring = [
   "sentry-sdk[fastapi]>=1.40,<2.0"
 ]
 all = [
-  "faiss-cpu>=1.8.0,<2.0",
-  "sentence-transformers>=2.7,<3.0",
+  "rag-prototype[server,dense,dense-st,loaders,magic,performance,monitoring]",
+]
+
+[dependency-groups]
+test = [
   "pytest>=8.2,<9.0",
   "pytest-cov>=6.1.1,<7.0",
   "pytest-asyncio>=0.23,<1.0",
   "pytest-xdist>=3.5,<4.0",
-  "httpx>=0.27,<0.28",
+]
+lint = [
   "ruff>=0.4,<1.0",
-  "black>=24.0,<25.0",
-  "isort>=5.13,<6.0",
-  "pre-commit>=4.2.0,<5.0",
   "mypy>=1.10,<2.0",
-  "types-requests>=2.31,<3.0",
+  "pre-commit>=4.2.0,<5.0",
+]
+dev = [
+  { include-group = "test" },
+  { include-group = "lint" },
   "ipython>=8.0,<9.0",
   "jupyter>=1.0,<2.0",
+]
+sec = [
+  "bandit[toml]>=1.7,<2.0",
+  "safety>=3.2,<4.0",
+]
+docs = [
   "mkdocs>=1.5,<2.0",
   "mkdocs-material>=9.5,<10.0",
   "mkdocstrings[python]>=0.24,<1.0",
   "mkdocs-mermaid2-plugin>=1.1,<2.0",
   "mkdocs-include-markdown-plugin>=6.0,<7.0",
-  "prometheus-client>=0.19,<1.0",
-  "structlog>=23.0,<24.0",
-  "sentry-sdk[fastapi]>=1.40,<2.0"
+]
+
+[tool.uv]
+default-groups = []
+environments = [
+  "python_version == '3.11'",
+  "python_version == '3.12'",
 ]
 
 [project.urls]
@@ -166,10 +140,13 @@ Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
 Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 
 [project.scripts]
-rag-build-index = "local_rag_backend.cli:rag_build_index"
 rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
+rag-ingest      = "local_rag_backend.cli:rag_ingest"
+rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
+rag-mutate-docs = "local_rag_backend.cli:rag_mutate_docs"
 rag-server      = "local_rag_backend.cli:rag_server"
 rag-status      = "local_rag_backend.cli:rag_status"
+rag-eval        = "local_rag_backend.cli:rag_eval"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -187,7 +164,6 @@ include = ["local_rag_backend*"]
 "*" = ["*.txt","*.md","*.yml","*.yaml","*.json","*.toml"]
 "local_rag_backend" = ["py.typed"]
 "local_rag_backend.frontend" = ["*.html","*.css","*.js","*.ico"]
-"local_rag_backend.data" = ["*.csv","*.json","*.parquet"]
 "local_rag_backend.config" = ["*.yaml","*.json"]
 
 # === DEVELOPMENT TOOLS ===
@@ -198,7 +174,7 @@ target-version = "py311"
 fix = true
 
 [tool.ruff.lint]
-select = ["E","W","F","I","B","C4","UP","ARG","SIM","TCH","S","N","RUF","PERF"]
+select = ["E","W","F","I","B","C4","UP","ARG","SIM","S","N","RUF","PERF"]
 ignore = ["E501","B008","B904","S101","S603","S607"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -214,32 +190,6 @@ ignore = ["E501","B008","B904","S101","S603","S607"]
 [tool.ruff.lint.isort]
 known-first-party = ["local_rag_backend"]
 combine-as-imports = true
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
-[tool.isort]
-profile = "black"
-line_length = 100
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
 
 [tool.mypy]
 python_version = "3.11"
@@ -267,6 +217,11 @@ warn_required_dynamic_aliases = true
 module = ["faiss.*","rank_bm25.*","sentence_transformers.*","prometheus_client.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+check_untyped_defs = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = [
@@ -285,7 +240,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-norecursedirs = [".venv",".git","build","dist",".mypy_cache",".ruff_cache",".pytest_cache"]
+norecursedirs = [".venv",".git","build","dist",".mypy_cache",".ruff_cache",".pytest_cache",".uv_cache"]
 filterwarnings = [
   "ignore::DeprecationWarning",
   "ignore::UserWarning",
@@ -309,8 +264,7 @@ omit = [
   "*/conftest.py",
   "scripts/*",
   "*/local_rag_backend/cli.py",
-  "*/local_rag_backend/app/dependencies.py",
-  "*/local_rag_backend/scripts/build_index.py"
+  "*/local_rag_backend/http/dependencies.py"
 ]
 
 [tool.coverage.report]

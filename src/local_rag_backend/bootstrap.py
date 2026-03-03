@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from local_rag_backend.app.factory import build_rag_service
+from local_rag_backend.composition.factory import build_rag_service
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
-    from local_rag_backend.core.services.rag import RagService
+    from local_rag_backend.core.services.rag_runtime import RagService
 
 
 def bootstrap_rag_service() -> RagService:

@@ -15,6 +15,10 @@ class DummyDocRepo:
         self.next_id += len(texts)
         return ids
 
+    def delete_documents(self, ids):
+        to_del = set(ids)
+        self.saved = [(i, t) for (i, t) in self.saved if i not in to_del]
+
 
 class DummyEmbedder:
     def __init__(self):
@@ -30,10 +34,14 @@ class DummyEmbedder:
 class DummyVectorRepo:
     def __init__(self):
         self.upserts = []
+        self.deletes = []
 
     def upsert(self, ids, embeddings):
         # Guarda para comprobación
         self.upserts.append((list(ids), list(embeddings)))
+
+    def delete(self, ids):
+        self.deletes.append(list(ids))
 
 
 def test_etl_ingest_happy_path():
@@ -100,8 +108,8 @@ def test_etl_error_propagation_on_docrepo():
     etl = ETLService(doc_repo, vector_repo, embedder)
     with pytest.raises(RuntimeError, match="fail-doc"):
         etl.ingest(["X"])
-    # Nothing should have been stored
-    assert embedder.calls == []
+    # Doc insert failed: embeddings may have been computed, but vector store not updated.
+    assert embedder.calls and embedder.calls[0] == ["X"]
     assert vector_repo.upserts == []
 
 
@@ -116,8 +124,8 @@ def test_etl_error_propagation_on_embedder():
     etl = ETLService(doc_repo, vector_repo, embedder)
     with pytest.raises(RuntimeError, match="fail-embed"):
         etl.ingest(["Y"])
-    # Documents stored, embeddings not generated, vector store not updated
-    assert [t for (_, t) in doc_repo.saved] == ["Y"]
+    # Embeddings failed: documents should not be stored.
+    assert doc_repo.saved == []
     assert vector_repo.upserts == []
 
 
@@ -132,9 +140,11 @@ def test_etl_error_propagation_on_vectorstore():
     etl = ETLService(doc_repo, vector_repo, embedder)
     with pytest.raises(RuntimeError, match="fail-vector"):
         etl.ingest(["Z"])
-    # Documents stored, embeddings generated, vector store not updated
-    assert [t for (_, t) in doc_repo.saved] == ["Z"]
+    # Vector store failed: SQL inserts should be rolled back (best-effort).
+    assert doc_repo.saved == []
     assert embedder.calls and "Z" in embedder.calls[0]
+    # And vector-store rollback should be attempted too.
+    assert vector_repo.deletes and vector_repo.deletes[0] == [1]
 
 
 def test_etl_handles_duplicates():

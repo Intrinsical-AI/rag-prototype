@@ -2,8 +2,8 @@
 import tempfile
 from pathlib import Path
 
-from local_rag_backend.app.dependencies import get_rag_service
-from local_rag_backend.app.main import app
+from local_rag_backend.http.dependencies import get_rag_service
+from local_rag_backend.http.main import app
 
 
 class DummyRagSvc:
@@ -44,11 +44,11 @@ async def test_get_root_frontend_not_found(asgi_client, tmp_path, monkeypatch):
     # Simulate that index.html does not exist neither in package nor in repo
     # 1) Force failure when searching for packaged resources
     monkeypatch.setattr(
-        "local_rag_backend.app.main.resources.files",
+        "local_rag_backend.http.main.resources.files",
         lambda *a, **k: object(),  # object without .joinpath -> will raise exception and fallback
     )
     # 2) Fallback points to empty directory
-    monkeypatch.setattr("local_rag_backend.app.main.FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr("local_rag_backend.http.main.FRONTEND_DIR", tmp_path)
     resp = await asgi_client.get("/")
     assert resp.status_code == 404
 
@@ -62,12 +62,44 @@ async def test_get_root_frontend_packaged_ok(asgi_client, monkeypatch):
         def joinpath(self, name):
             return idx
 
-    monkeypatch.setattr("local_rag_backend.app.main.resources.files", lambda *_: _Pkg())
+    monkeypatch.setattr("local_rag_backend.http.main.resources.files", lambda *_: _Pkg())
     resp = await asgi_client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
     assert "<body>ok</body>" in resp.text
     tmpdir.cleanup()
+
+
+async def test_get_frontend_assets_packaged_ok(asgi_client, monkeypatch):
+    tmpdir = tempfile.TemporaryDirectory()
+    base = Path(tmpdir.name)
+    (base / "index.html").write_text(
+        "<!doctype html><html><body>ok</body></html>", encoding="utf-8"
+    )
+    (base / "styles.css").write_text("body{background:#fff}", encoding="utf-8")
+    (base / "app.js").write_text("console.log('ok')", encoding="utf-8")
+
+    class _Pkg:
+        def joinpath(self, *parts):
+            return base.joinpath(*parts)
+
+    monkeypatch.setattr("local_rag_backend.http.main.resources.files", lambda *_: _Pkg())
+
+    r_css = await asgi_client.get("/assets/styles.css")
+    assert r_css.status_code == 200
+    assert "text/css" in (r_css.headers.get("content-type") or "")
+    assert "background" in r_css.text
+
+    r_js = await asgi_client.get("/assets/app.js")
+    assert r_js.status_code == 200
+    assert "javascript" in (r_js.headers.get("content-type") or "")
+    assert "console.log" in r_js.text
+    tmpdir.cleanup()
+
+
+async def test_get_frontend_assets_path_traversal_404(asgi_client):
+    r = await asgi_client.get("/assets/../pyproject.toml")
+    assert r.status_code == 404
 
 
 async def test_api_ask_schema_with_sources(asgi_client):
@@ -92,8 +124,8 @@ async def test_api_ask_schema_with_sources(asgi_client):
     assert "score" in source
     assert "id" in source["document"]
     assert "content" in source["document"]
-    assert source["document"]["id"] == 42
+    assert source["document"]["id"] == "42"
     assert source["document"]["content"] == "Test document"
-    assert isinstance(source["score"], (int, float))
+    assert isinstance(source["score"], int | float)
     assert 0.0 <= source["score"] <= 1.0
     app.dependency_overrides.clear()

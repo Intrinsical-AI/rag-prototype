@@ -1,4 +1,4 @@
-# ./conftest.py
+# tests/conftest.py
 from contextlib import suppress
 
 import pytest
@@ -7,7 +7,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 # Import models to ensure they are registered with Base.metadata
-from local_rag_backend.infrastructure.persistence.sqlalchemy import base as db_base, sql_
+from local_rag_backend.infrastructure.persistence.sql import base as db_base, models as _models
+
+_ = _models
 
 
 @pytest.fixture()
@@ -31,9 +33,6 @@ def in_memory_sqlite(monkeypatch):
     # Patch objects used in the code
     monkeypatch.setattr(db_base, "engine", engine)
     monkeypatch.setattr(db_base, "SessionLocal", TestingSessionLocal)
-    # Also patch in the sql_ module so SqlDocumentStorage uses the test session
-    monkeypatch.setattr(sql_, "SessionLocal", TestingSessionLocal)
-
     # Yield the session factory for tests that need it explicitly
     try:
         yield TestingSessionLocal
@@ -45,7 +44,19 @@ def in_memory_sqlite(monkeypatch):
         engine.dispose()
 
 
-class DummyFaissIndex:
+@pytest.fixture(autouse=True)
+def reset_app_context_between_tests():
+    """Ensure each test starts with a fresh app container/context."""
+    from local_rag_backend.composition.factory import reset_app_context
+
+    reset_app_context()
+    try:
+        yield
+    finally:
+        reset_app_context()
+
+
+class DummyVectorIndex:
     def __init__(self, index_path, id_map_path, dim=None):  # <--- dim opcional
         self.index_path = index_path
         self.id_map_path = id_map_path
@@ -54,6 +65,11 @@ class DummyFaissIndex:
 
     def add_to_index(self, ids, vecs):
         self.id_map.extend(ids)
+
+    def delete_ids(self, ids):
+        to_delete = set(ids)
+        self.id_map = [x for x in self.id_map if x not in to_delete]
+        return 0
 
     def search(self, q, k):
         return ([0], [0.0])
@@ -69,11 +85,24 @@ class DummyFaissIndex:
 
 
 @pytest.fixture()
-async def asgi_client():
-    """Async HTTP client against the ASGI app (avoids Starlette TestClient thread portal)."""
+async def asgi_client(in_memory_sqlite, monkeypatch, tmp_path):
+    """Async HTTP client against the ASGI app using isolated in-memory SQLite."""
+    _ = in_memory_sqlite
     import httpx
 
-    from local_rag_backend.app.main import app
+    from local_rag_backend.http.main import app
+    from local_rag_backend.settings import settings
+
+    # Give each test its own isolated data directory so that parallel
+    # pytest-xdist workers don't share the mutation journal.  Without this,
+    # the ASGI startup recovery (main.py:54) picks up PREPARED entries written
+    # by other workers and injects phantom documents into this test's fresh
+    # in-memory SQLite DB, causing spurious assertion failures.
+    # settings.get_coordination_dir() returns data_dir.resolve() when data_dir
+    # is absolute, so an absolute tmp_path fully isolates the journal.
+    isolated_data_dir = tmp_path / "data"
+    isolated_data_dir.mkdir()
+    monkeypatch.setattr(settings, "data_dir", isolated_data_dir)
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)

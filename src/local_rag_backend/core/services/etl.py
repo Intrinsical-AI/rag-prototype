@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
 
@@ -26,23 +27,42 @@ class ETLService:
         self._vec_store = vec_storage
         self._embedder = embedder
 
-    def ingest(self, texts: Sequence[str]) -> Sequence[int]:
+    def ingest(self, texts: Sequence[str]) -> Sequence[DocId]:
         """
         Processes and stores a sequence of texts.
 
         Returns:
-            A sequence of unique integer IDs for the stored documents.
+            A sequence of unique IDs for the stored documents.
         """
         if not texts:
             return []
 
-        # Store documents and get their IDs
-        doc_ids = self._doc_store.store_documents(texts)
-
-        # Generate and store vector embeddings
         embeddings = self._embedder.embed(texts)
+        if len(embeddings) != len(texts):
+            raise ValueError(
+                f"Embedder returned {len(embeddings)} embeddings for {len(texts)} texts."
+            )
 
-        # Upsert embeddings into vector store
-        self._vec_store.upsert(doc_ids, embeddings)
+        doc_ids = list(self._doc_store.store_documents(texts))
+        if len(doc_ids) != len(texts):
+            raise ValueError(f"Doc repo returned {len(doc_ids)} ids for {len(texts)} texts.")
+
+        try:
+            self._vec_store.upsert(doc_ids, embeddings)
+        except Exception as upsert_err:
+            rollback_errors: list[str] = []
+            try:
+                self._vec_store.delete(doc_ids)
+            except Exception as rollback_vec_err:
+                rollback_errors.append(f"vector rollback failed: {rollback_vec_err}")
+            try:
+                self._doc_store.delete_documents(doc_ids)
+            except Exception as rollback_sql_err:
+                rollback_errors.append(f"sql rollback failed: {rollback_sql_err}")
+            if rollback_errors:
+                raise RuntimeError(
+                    "ETL ingest failed and rollback was incomplete: " + "; ".join(rollback_errors)
+                ) from upsert_err
+            raise
 
         return doc_ids

@@ -10,9 +10,11 @@ services:
     environment:
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
-      # Default to sparse to keep the image lightweight. For dense/hybrid, install the `dense`
-      # extra in the image and set RETRIEVAL_MODE accordingly.
-      - RETRIEVAL_MODE=sparse
+      # Security (recommended when exposing beyond localhost)
+      # - API_KEY=${API_KEY}
+      # - CORS_ALLOW_ORIGINS=["http://localhost:5173"]
+      # Default sparse lightweight image. For dense/hybrid, install `dense` extra
+      - RETRIEVAL_MODE=sparse # if dense set accordingly.
       # OpenAI (optional)
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
       # OpenRouter (optional)
@@ -37,8 +39,8 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
-    # Optionally pre-pull models on first run:
-    # command: ["/bin/sh","-c","/bin/ollama serve & sleep 5 && ollama pull gemma:2b && tail -f /dev/null"]
+    # Optional: pre-pull models on first run:
+    # ["/bin/sh","-c","/bin/ollama serve & sleep 5 && ollama pull lfm2.5-thinking && tail -f /dev/null"]
 
 volumes:
   rag_data:

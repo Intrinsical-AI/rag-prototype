@@ -135,6 +135,9 @@ def test_langchain_loader_works_with_ingestion_pipeline(monkeypatch):
         def upsert(self, ids, vectors) -> None:
             pass
 
+        def delete(self, ids) -> None:
+            pass
+
     from local_rag_backend.core.services.etl import ETLService
 
     etl = ETLService(DummyDocRepo(), DummyVectorRepo(), DummyEmbedder())

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
+    from local_rag_backend.core.domain.types import DocId
 
 
 # -------- Ports --------
@@ -41,8 +42,9 @@ class RetrieverPort(Protocol):
 class DocumentRepoPort(Protocol):
     """Interface for storing and retrieving documents by ID."""
 
-    def store_documents(self, contents: Sequence[str]) -> Sequence[int]: ...
-    def get(self, ids: Sequence[int]) -> Sequence[Document]: ...
+    def store_documents(self, contents: Sequence[str]) -> Sequence[DocId]: ...
+    def delete_documents(self, ids: Sequence[DocId]) -> None: ...
+    def get(self, ids: Sequence[DocId]) -> Sequence[Document]: ...
     def get_all_documents(self) -> Sequence[Document]: ...
 
 
@@ -50,8 +52,28 @@ class DocumentRepoPort(Protocol):
 class VectorRepoPort(Protocol):
     """Interface for storing and searching vector embeddings."""
 
-    def upsert(self, ids: Sequence[int], vectors: Sequence[Embedding]) -> None: ...
-    def similar(self, vector: Embedding, k: int) -> Sequence[tuple[int, float]]:
+    @property
+    def ntotal(self) -> int: ...
+
+    def upsert(self, ids: Sequence[DocId], vectors: Sequence[Embedding]) -> None: ...
+    def apply_delta_atomic(
+        self,
+        *,
+        delete_ids: Sequence[DocId],
+        upserts: Sequence[tuple[DocId, Embedding]],
+    ) -> None:
+        """Apply delete+upsert delta atomically from the caller perspective."""
+        ...
+
+    def delete(self, ids: Sequence[DocId]) -> int:
+        """Delete vectors for given IDs (best-effort; may rebuild index)."""
+        ...
+
+    def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Embedding]) -> None:
+        """Rebuild the full index from scratch (idempotent)."""
+        ...
+
+    def similar(self, vector: Embedding, k: int) -> Sequence[tuple[DocId, float]]:
         """Find similar vectors, returning (ID, normalized_similarity_score)."""
         ...
 
@@ -60,7 +82,7 @@ class VectorRepoPort(Protocol):
 class QAHistoryPort(Protocol):
     """Interface for persisting question-answer interactions."""
 
-    def save(self, q: str, a: str, source_ids: Sequence[int]) -> None: ...
+    def save(self, q: str, a: str, source_ids: Sequence[DocId]) -> None: ...
 
 
 @runtime_checkable
@@ -68,3 +90,53 @@ class LoaderPort(Protocol):
     """Interface for loading data from a source into a standard format."""
 
     def load(self) -> Iterable[LoadedItem]: ...
+
+
+from local_rag_backend.core.ports.use_cases import (  # noqa: E402
+    BlockingExecutorPort,
+    BlockingTaskType,
+    DocsImportLoaderPort,
+    DocsReadPort,
+    EvalDatasetDocInput,
+    EvalRetrieverFactoryPort,
+    EvalRetrieverPort,
+    EvalStoragePort,
+    HealthDiagnosticsPort,
+    HistoryEntry,
+    HistoryReadPort,
+    ImportDocsLoadResult,
+    ListedDocument,
+    OpenRouterClientPort,
+    OpenRouterGenerateRequest,
+    OpenRouterGenerateResult,
+    OpenRouterUsage,
+    RagRuntimeFactoryPort,
+)
+
+__all__ = [
+    "BlockingExecutorPort",
+    "BlockingTaskType",
+    "DocsImportLoaderPort",
+    "DocsReadPort",
+    "DocumentRepoPort",
+    "EmbedderPort",
+    "EvalDatasetDocInput",
+    "EvalRetrieverFactoryPort",
+    "EvalRetrieverPort",
+    "EvalStoragePort",
+    "GeneratorPort",
+    "HealthDiagnosticsPort",
+    "HistoryEntry",
+    "HistoryReadPort",
+    "ImportDocsLoadResult",
+    "ListedDocument",
+    "LoaderPort",
+    "OpenRouterClientPort",
+    "OpenRouterGenerateRequest",
+    "OpenRouterGenerateResult",
+    "OpenRouterUsage",
+    "QAHistoryPort",
+    "RagRuntimeFactoryPort",
+    "RetrieverPort",
+    "VectorRepoPort",
+]

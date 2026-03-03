@@ -9,11 +9,13 @@ via environment variables or .env file.
 Example:
     export OPENAI_API_KEY=\"your-key-here\"
     export RETRIEVAL_MODE=\"hybrid\"
-    python -m local_rag_backend.app.main
+    python -m local_rag_backend.http.main
 """
 
 from __future__ import annotations
 
+import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
@@ -27,7 +29,7 @@ class Settings(BaseSettings):
     All fields have default values, so the class can be instantiated without arguments.
     """
 
-    # This block is only for telling mypy that all fields have default values
+    # Block for telling mypy that all fields have default values
     if False:
 
         def __init__(self, **kwargs: Any) -> None: ...
@@ -40,12 +42,45 @@ class Settings(BaseSettings):
         "INFO", description="Logging level."
     )
     enable_monitoring: bool = Field(False, description="Enable Prometheus metrics.")
+    enable_reranker: bool = Field(
+        False, description="Enable reranking of retrieved documents (best-effort)."
+    )
+
+    # --- Security / HTTP --- #
+    api_key: str | None = Field(
+        None,
+        description=(
+            "Optional API key to protect HTTP endpoints. "
+            "If set, clients must send it in the X-API-Key header."
+        ),
+    )
+    public_bind_requires_api_key: bool = Field(
+        True,
+        description=(
+            "If True, refuse to start when binding to a non-localhost address without API key. "
+            "Prevents accidental exposure when using 0.0.0.0 / Docker port publishing."
+        ),
+    )
+    cors_allow_origins: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowed CORS origins (exact match) when DEBUG=false. "
+            "Leave empty to disable cross-origin requests."
+        ),
+    )
 
     # --- Retrieval --- #
     retrieval_mode: Literal["sparse", "dense", "hybrid"] = Field(
         # Default to sparse to keep the base installation lightweight; dense/hybrid require extra deps.
         "sparse",
         description="Retrieval strategy.",
+    )
+    vector_backend: Literal["auto", "faiss", "numpy"] = Field(
+        "auto",
+        description=(
+            "Vector index engine selection for dense/hybrid modes. "
+            "'auto' prefers faiss when installed, else numpy."
+        ),
     )
     hybrid_retrieval_alpha: float = Field(
         0.5, ge=0.0, le=1.0, description="Weight of sparse vs. dense in hybrid mode."
@@ -59,6 +94,12 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", description="Default OpenAI chat model.")
     openai_embedding_model: str = Field(
         "text-embedding-3-small", description="Default OpenAI embedding model."
+    )
+    openai_request_timeout: int = Field(
+        60,
+        ge=1,
+        le=600,
+        description="Timeout in seconds for OpenAI-compatible HTTP requests.",
     )
     openai_temperature: float = Field(0.2, ge=0.0, le=2.0, description="OpenAI temperature.")
     openai_top_p: float = Field(1.0, ge=0.0, le=1.0, description="OpenAI top_p parameter.")
@@ -77,21 +118,98 @@ class Settings(BaseSettings):
         None, description="Application title for OpenRouter usage headers."
     )
     ollama_enabled: bool = Field(False, description="Enable Ollama integration.")
-    ollama_model: str = Field("gemma3:1b", description="Default Ollama model.")
+    ollama_model: str = Field("lfm2.5-thinking", description="Default Ollama model.")
     ollama_base_url: str = Field("http://localhost:11434", description="Ollama server URL.")
     ollama_request_timeout: int = Field(180, description="Ollama request timeout in seconds.")
 
     # --- File Paths --- #
     data_dir: Path = Field(Path("data"), description="Base directory for data files.")
-    index_path: str = Field("data/index.faiss", description="Path to the FAISS index file.")
-    id_map_path: str = Field("data/id_map.pkl", description="Path to the FAISS ID map.")
+    index_path: str = Field("data/index.faiss", description="Path to the vector index file.")
+    id_map_path: str = Field("data/id_map.json", description="Path to the vector index ID map.")
     sqlite_url: str = Field("sqlite:///./data/app.db", description="SQLite database URL.")
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
+    storage_profile: str = Field(
+        "",
+        description=(
+            "Storage profile identifier (optional). If empty, it is inferred from retrieval_mode "
+            "and vector backend."
+        ),
+    )
+    write_lock_timeout_s: float = Field(
+        30.0,
+        ge=0.1,
+        le=600.0,
+        description="Timeout in seconds when waiting for multi-store write lock acquisition.",
+    )
+    write_lock_poll_s: float = Field(
+        0.05,
+        ge=0.005,
+        le=5.0,
+        description="Polling interval in seconds for lock acquisition retries.",
+    )
+    mutation_batch_max_size: int = Field(
+        32,
+        ge=1,
+        le=512,
+        description=(
+            "Maximum number of queued mutation requests drained by one lock holder in a single "
+            "batch cycle."
+        ),
+    )
+    mutation_batch_max_wait_ms: int = Field(
+        50,
+        ge=0,
+        le=5000,
+        description=(
+            "Maximum wait (milliseconds) to coalesce additional mutation requests before "
+            "draining a batch."
+        ),
+    )
+    mutation_recovery_enabled: bool = Field(
+        True,
+        description="Enable startup recovery of incomplete durable mutation records.",
+    )
+    mutation_recovery_interval_s: float = Field(
+        30.0,
+        ge=1.0,
+        le=3600.0,
+        description="Background interval (seconds) for retrying incomplete mutation recovery.",
+    )
 
     # --- Ingestion --- #
+    ingest_chunk_strategy: Literal["chars_v1"] = Field(
+        "chars_v1", description="Chunking strategy identifier (deterministic)."
+    )
+    ingest_chunker_version: str = Field(
+        "chars_v1",
+        description=(
+            "Version token included in dedup hashes to force re-chunk/re-embed when changed "
+            "(even if the strategy name stays the same)."
+        ),
+    )
     ingest_chunk_chars: int = Field(1200, ge=200, le=8000, description="Chunk size in characters.")
     ingest_chunk_overlap: int = Field(200, ge=0, le=4000, description="Overlap between chunks.")
     csv_has_header: bool = Field(True, description="Whether CSV files have header rows.")
+    ingest_batch_size: int = Field(
+        64, ge=1, le=512, description="Number of file-plans processed per ingestion batch."
+    )
+    ingest_clean_lowercase: bool = Field(True, description="Lowercase during ingestion cleaning.")
+    ingest_clean_remove_html: bool = Field(True, description="Remove HTML tags during cleaning.")
+    ingest_clean_collapse_whitespace: bool = Field(
+        True, description="Collapse whitespace during cleaning."
+    )
+    ingest_clean_strip: bool = Field(True, description="Strip leading/trailing whitespace first.")
+
+    # --- Retrieval quality (optional) --- #
+    reranker_strategy: Literal["overlap_v1"] = Field(
+        "overlap_v1", description="Reranker strategy identifier."
+    )
+    reranker_candidate_k: int = Field(
+        20,
+        ge=3,
+        le=200,
+        description="Candidates to fetch before reranking (top-k is returned).",
+    )
 
     # --- Prompt Templates --- #
     openai_prompt_template: str = Field(
@@ -102,7 +220,12 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        # Allow non-JSON env vars for complex fields (e.g., comma-separated CORS origins).
+        enable_decoding=False,
     )
 
     @field_validator("log_level", mode="before")
@@ -111,6 +234,33 @@ class Settings(BaseSettings):
         # Make env/config more forgiving while keeping a strict Literal type.
         if isinstance(v, str):
             return v.upper()
+        return v
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _parse_cors_allow_origins(cls, v: Any) -> Any:
+        """
+        Allow `CORS_ALLOW_ORIGINS` to be set as:
+        - JSON list (recommended): ["http://localhost:5173", ...]
+        - Comma-separated string: http://localhost:5173,http://127.0.0.1:5173
+        - Empty string: (disable CORS)
+        """
+        if v is None:
+            return []
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            # JSON list string (common in docker-compose env)
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                except Exception:
+                    # Fall back to comma-separated parsing.
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in s.split(",") if item.strip()]
         return v
 
     @field_validator("data_dir", mode="before")
@@ -146,6 +296,29 @@ class Settings(BaseSettings):
             db_path = self.sqlite_url[10:]  # Remove 'sqlite:///'
             return Path(db_path)
         raise ValueError("Invalid SQLite URL format")
+
+    def get_coordination_dir(self) -> Path:
+        """
+        Return the directory used for cross-process coordination artifacts.
+
+        Priority:
+        - Explicit absolute `data_dir` (user intent).
+        - Parent dir of absolute SQLite path (keeps workers aligned on shared DB).
+        - Resolved `data_dir` for purely relative deployments.
+
+        Rationale:
+        - A relative `data_dir` can resolve differently per process (different CWD),
+          splitting write locks while sharing the same absolute SQLite database.
+          Prefer the DB parent in that case to avoid multi-process lock drift.
+        """
+        data_dir = Path(self.data_dir).expanduser()
+        if data_dir.is_absolute():
+            return data_dir.resolve()
+        with suppress(Exception):
+            db_path = self.get_database_path().expanduser()
+            if db_path.is_absolute():
+                return db_path.parent.resolve()
+        return data_dir.resolve()
 
 
 # Global settings instance

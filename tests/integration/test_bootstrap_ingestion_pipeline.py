@@ -1,13 +1,14 @@
 import csv
-import importlib
 from unittest.mock import patch
 
 from local_rag_backend.core.domain.entities import LoadedItem
+from local_rag_backend.core.domain.types import ItemLineage
+from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 from local_rag_backend.settings import settings
 
 
-def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, capsys):
-    """Test bootstrap using ingestion pipeline in sparse mode."""
+def test_bootstrap_with_canonical_mutation_sparse_mode(tmp_path, monkeypatch, caplog):
+    """Bootstrap should ingest CSV through canonical durable mutation flow (sparse)."""
     # Create test CSV
     csv_file = tmp_path / "faq.csv"
     with csv_file.open("w", encoding="utf-8", newline="") as fh:
@@ -24,21 +25,20 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     monkeypatch.setattr(settings, "ingest_chunk_chars", 1200, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 200, raising=False)
 
-    from local_rag_backend.scripts import bootstrap
+    import logging
 
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    with caplog.at_level(logging.INFO):
+        run_sample_data_ingestion(settings_obj=settings)
 
-    captured = capsys.readouterr()
-    assert "Ingested" in captured.out
-    assert "sparse mode" in captured.out
+    assert any("Ingested" in m for m in caplog.messages)
+    assert any("sparse mode" in m for m in caplog.messages)
 
     # Verify documents were stored
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.base import Base
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -52,8 +52,8 @@ def test_bootstrap_with_ingestion_pipeline_sparse_mode(tmp_path, monkeypatch, ca
     assert any("funciona" in doc.content for doc in docs)
 
 
-def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, capsys):
-    """Test bootstrap using ingestion pipeline in dense mode."""
+def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, caplog):
+    """Bootstrap should ingest CSV through canonical durable mutation flow (dense)."""
 
     class DummyEmbedder:
         dim = 4
@@ -61,8 +61,8 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
         def embed(self, texts):
             return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
 
-    class DummyFaissIndex:
-        def __init__(self, index_path, id_map_path, dim=None):
+    class DummyVectorIndex:
+        def __init__(self, index_path, id_map_path, dim=None, **_kwargs):
             self.index_path = index_path
             self.id_map_path = id_map_path
             self.dim = 4
@@ -70,6 +70,11 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
 
         def add_to_index(self, ids, vecs):
             self.id_map.extend(ids)
+
+        def apply_delta_atomic(self, *, delete_ids, upserts):
+            delete_set = {str(x) for x in delete_ids}
+            self.id_map = [doc_id for doc_id in self.id_map if str(doc_id) not in delete_set]
+            self.id_map.extend([doc_id for doc_id, _ in upserts])
 
         def search(self, q, k):
             return ([0], [0.9])
@@ -90,7 +95,7 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
     monkeypatch.setattr(settings, "index_path", str(tmp_path / "idx.faiss"), raising=False)
-    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.pkl"), raising=False)
+    monkeypatch.setattr(settings, "id_map_path", str(tmp_path / "id.json"), raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_chars", 50, raising=False)
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 10, raising=False)
 
@@ -101,18 +106,17 @@ def test_bootstrap_with_ingestion_pipeline_dense_mode(tmp_path, monkeypatch, cap
         raising=True,
     )
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.faiss.faiss_.FaissIndex",
-        DummyFaissIndex,
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
+        DummyVectorIndex,
     )
 
-    from local_rag_backend.scripts import bootstrap
+    import logging
 
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    with caplog.at_level(logging.INFO):
+        run_sample_data_ingestion(settings_obj=settings)
 
-    captured = capsys.readouterr()
-    assert "Ingested" in captured.out
-    assert "SQL and FAISS" in captured.out
+    assert any("Ingested" in m for m in caplog.messages)
+    assert any("SQL and FAISS" in m for m in caplog.messages)
 
 
 def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
@@ -133,17 +137,14 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "ingest_chunk_chars", 50, raising=False)  # Small chunks
     monkeypatch.setattr(settings, "ingest_chunk_overlap", 10, raising=False)
 
-    from local_rag_backend.scripts import bootstrap
-
-    importlib.reload(bootstrap)
-    bootstrap.main(settings=settings)
+    run_sample_data_ingestion(settings_obj=settings)
 
     # Verify multiple chunks were created
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-    from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
+    from local_rag_backend.infrastructure.persistence.sql.base import Base
 
     engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -158,15 +159,19 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
     assert all("Long Question" in doc.content for doc in docs)
 
 
-def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
-    """Test bootstrap falls back to packaged CSV when local file doesn't exist."""
+def test_bootstrap_with_repo_csv_fallback(tmp_path, monkeypatch, caplog):
+    """Test bootstrap falls back to the repo CSV when the configured file doesn't exist."""
 
-    # Mock the packaged CSV loader to return test data
+    # Mock CSV loader to return test data (regardless of which fallback path is used)
     def mock_csv_loader_load(self):
         return iter(
             [
                 LoadedItem(
                     text="Packaged Question\n\nPackaged Answer",
+                    lineage=ItemLineage(
+                        source_uri="test://bootstrap",
+                        loader_name="mock",
+                    ),
                     metadata={"title": "Packaged Question"},
                 )
             ]
@@ -178,25 +183,26 @@ def test_bootstrap_with_packaged_csv_fallback(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
-    # Mock CSVLoader to simulate packaged data
+    # Mock CSVLoader to simulate fallback data
+    import logging
+
     with patch(
         "local_rag_backend.infrastructure.ingestion.loaders.csv_loader.CSVLoader.load",
         mock_csv_loader_load,
     ):
-        from local_rag_backend.scripts import bootstrap
+        with caplog.at_level(logging.INFO):
+            run_sample_data_ingestion()
 
-        importlib.reload(bootstrap)
-        bootstrap.main()
+        assert any("Ingested" in m for m in caplog.messages)
 
-        captured = capsys.readouterr()
-        assert "Ingested" in captured.out
-
-        # Verify packaged data was loaded
+        # Verify fallback data was loaded
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-        from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+        from local_rag_backend.infrastructure.persistence.sql import (
+            SqlDocumentStorage,
+        )
+        from local_rag_backend.infrastructure.persistence.sql.base import Base
 
         engine = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
         SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

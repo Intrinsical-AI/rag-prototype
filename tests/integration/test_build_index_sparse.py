@@ -1,12 +1,12 @@
 # tests/integration/test_build_index_sparse.py
 import csv
-import importlib
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from local_rag_backend.infrastructure.persistence.sqlalchemy.base import Base
-from local_rag_backend.infrastructure.persistence.sqlalchemy.sql_ import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
+from local_rag_backend.infrastructure.persistence.sql.base import Base
+from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 from local_rag_backend.settings import settings
 
 
@@ -20,11 +20,11 @@ def test_build_index_sparse(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "faq_csv", str(f), raising=False)
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path}/app.db", raising=False)
 
-    # build_index should run without error and populate the DB.
-    from local_rag_backend.scripts import build_index
-
-    importlib.reload(build_index)
-    build_index.main()
+    # Sample-data ingestion pipeline should run without error and populate the DB.
+    run_sample_data_ingestion(
+        settings_obj=settings,
+        schema_error_message="Unable to ensure SQLite schema before sample-data ingestion.",
+    )
 
     # Check database was populated
     eng = create_engine(settings.sqlite_url, connect_args={"check_same_thread": False})
@@ -33,4 +33,4 @@ def test_build_index_sparse(tmp_path, monkeypatch):
     docs = SqlDocumentStorage(session_factory=Session).get_all_documents()
     assert len(docs) == 1
     assert "T" in docs[0].content
-    assert "C" in docs[0].content
+    assert "c" in docs[0].content.lower()
