@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-03
+
 ### Breaking
 
 - Removed legacy SQL shim module `src/local_rag_backend/infrastructure/persistence/sql/alchemy_engine.py`
