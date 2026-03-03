@@ -9,7 +9,7 @@ class _DummyRag:
 
 
 async def test_health_endpoint_ok(asgi_client):
-    r = await asgi_client.get("/api/health")
+    r = await asgi_client.get("/healthz")
     assert r.status_code == 200
     assert r.json().get("status") == "healthy"
 
@@ -24,9 +24,9 @@ async def test_ready_endpoint_503_without_llm(asgi_client, monkeypatch):
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    assert r.json()["detail"]["status"] == "not_ready"
+    assert r.json()["status"] == "not_ready"
 
 
 async def test_ready_endpoint_200_with_openai(asgi_client, monkeypatch):
@@ -38,7 +38,7 @@ async def test_ready_endpoint_200_with_openai(asgi_client, monkeypatch):
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 200
     assert r.json()["status"] == "ready"
 
@@ -53,9 +53,9 @@ async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path
         return _DummyRag()
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    detail = r.json()["detail"]
+    detail = r.json()
     assert detail["status"] == "not_ready"
     assert detail["checks"]["retrieval_index"].startswith("failed")
 
@@ -82,9 +82,9 @@ async def test_ready_endpoint_503_when_dense_index_drifts_from_sql(
         return _DummyRag()
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    detail = r.json()["detail"]
+    detail = r.json()
     assert detail["status"] == "not_ready"
     assert detail["checks"]["retrieval_index"].startswith("failed: drift")
 
@@ -94,7 +94,7 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
 ):
     """
     Counts can match while the actual ID set differs (stale vectors + missing docs).
-    /api/ready should catch this for small corpora and return actionable drift details.
+    /readyz should catch this for small corpora and return actionable drift details.
     """
     from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
     from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
@@ -118,9 +118,9 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
         return _DummyRag()
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    detail = r.json()["detail"]
+    detail = r.json()
     assert detail["status"] == "not_ready"
     assert detail["checks"]["retrieval_index"].startswith(
         "failed: drift detected (ID set mismatch)"
@@ -149,9 +149,9 @@ async def test_ready_endpoint_503_when_dense_id_map_is_corrupt(
         return _DummyRag()
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    detail = r.json()["detail"]
+    detail = r.json()
     assert detail["status"] == "not_ready"
     assert detail["checks"]["retrieval_index"].startswith("failed: corrupt")
 
@@ -176,9 +176,9 @@ async def test_ready_endpoint_503_when_dense_manifest_missing(
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    detail = r.json()["detail"]
+    detail = r.json()
     assert detail["status"] == "not_ready"
     assert "manifest" in detail["checks"]["retrieval_index_stats"].get("error", "")
 
@@ -225,9 +225,9 @@ async def test_ready_endpoint_503_when_dense_manifest_mismatch_embedding_model(
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
-    detail = r.json()["detail"]
+    detail = r.json()
     assert detail["status"] == "not_ready"
     stats = detail["checks"]["retrieval_index_stats"]
     assert stats["status"] == "drift"
@@ -273,12 +273,12 @@ async def test_rebuild_index_rewrites_manifest_and_ready_becomes_ok(
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
     # Not ready due to manifest drift.
-    r1 = await asgi_client.get("/api/ready")
+    r1 = await asgi_client.get("/readyz")
     assert r1.status_code == 503
 
     # Rebuild should rewrite manifest to match current settings.
     rr = await asgi_client.post("/api/index/rebuild")
     assert rr.status_code == 200
 
-    r2 = await asgi_client.get("/api/ready")
+    r2 = await asgi_client.get("/readyz")
     assert r2.status_code == 200

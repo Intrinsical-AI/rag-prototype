@@ -255,6 +255,13 @@ Levanta el servidor antes de llamar a la API:
 rag-server
 ```
 
+Probes operacionales (públicas):
+
+```bash
+curl -s http://localhost:8000/healthz
+curl -s http://localhost:8000/readyz
+```
+
 ```bash
 curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \

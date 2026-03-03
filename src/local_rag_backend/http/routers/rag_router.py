@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from local_rag_backend.composition.container import AppContainer
-    from local_rag_backend.core.services.rag_runtime import RagService
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
@@ -49,10 +48,10 @@ router = APIRouter()
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
 async def ask(
     request: AskRequest,
-    service: RagService = Depends(get_rag_service),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> AskResponse:
     """Ask a question using Retrieval-Augmented Generation."""
+    service = await get_rag_service()
     t = Timer()
     ok = False
     try:

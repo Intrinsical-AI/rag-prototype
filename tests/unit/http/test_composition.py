@@ -11,7 +11,7 @@ from local_rag_backend.composition.adapters import (
     build_retriever_with_default_embedder_from_settings,
     resolve_preferred_llm_provider,
 )
-from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
 
 
 def test_build_dense_embedder_uses_default_missing_backend_message():
@@ -144,5 +144,5 @@ def test_resolve_preferred_llm_provider(openai_api_key, ollama_enabled, expected
 
 def test_resolve_preferred_llm_provider_raises_when_none_available():
     cfg = SimpleNamespace(openai_api_key=None, ollama_enabled=False)
-    with pytest.raises(RuntimeError, match="No LLM configured"):
+    with pytest.raises(LLMConfigurationError, match="No LLM configured"):
         resolve_preferred_llm_provider(settings_obj=cfg)

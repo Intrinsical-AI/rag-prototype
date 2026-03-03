@@ -19,7 +19,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
 from local_rag_backend.core.ports import (
     BlockingExecutorPort,
     BlockingTaskType,
@@ -538,7 +538,7 @@ def resolve_preferred_llm_provider(*, settings_obj: Settings) -> str:
         settings_obj, "openrouter_api_key", None
     ):
         return "openrouter"
-    raise RuntimeError(
+    raise LLMConfigurationError(
         "No LLM configured. Set OPENAI_API_KEY, enable OLLAMA_ENABLED, "
         "or set OPENROUTER_ENABLED=true with OPENROUTER_API_KEY."
     )

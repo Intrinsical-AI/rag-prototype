@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from local_rag_backend.composition.adapters import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
@@ -53,7 +54,7 @@ def _check_llm_providers(*, checks: dict[str, Any], settings_obj: Settings) -> b
     return True
 
 
-@router.get("/health", tags=["Health"], summary="Health check endpoint")
+@router.get("/healthz", tags=["Health"], summary="Health probe endpoint")
 async def health_check(
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> dict[str, str]:
@@ -66,11 +67,11 @@ async def health_check(
         raise ServiceUnavailableError(f"Database connection failed: {e!s}") from e
 
 
-@router.get("/ready", tags=["Health"], summary="Readiness check endpoint")
+@router.get("/readyz", tags=["Health"], summary="Readiness probe endpoint")
 async def readiness_check(
     settings_obj: Settings = Depends(get_settings_dependency),
     container: AppContainer = Depends(get_app_container_dependency),
-) -> dict[str, Any]:
+) -> Any:
     """Check if all dependencies are ready to handle requests."""
     checks: dict[str, Any] = {}
     is_ready = True
@@ -103,11 +104,11 @@ async def readiness_check(
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:
-        raise ServiceUnavailableError(response_payload)
+        return JSONResponse(status_code=503, content=response_payload)
     return response_payload
 
 
-@router.get("/health/ollama", tags=["Health"], summary="Ollama server health check")
+@router.get("/healthz/ollama", tags=["Health"], summary="Ollama server health check")
 async def ollama_health_check(
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> dict[str, Any]:
