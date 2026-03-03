@@ -142,7 +142,9 @@ async def test_dependencies_no_llm(monkeypatch, in_memory_sqlite):
         await deps.get_rag_service()
 
 
-async def test_ask_returns_503_without_llm_for_valid_payload(asgi_client, in_memory_sqlite, monkeypatch):
+async def test_ask_returns_503_without_llm_for_valid_payload(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
     monkeypatch.setattr(settings, "openrouter_enabled", False, raising=False)
