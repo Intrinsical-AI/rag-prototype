@@ -515,6 +515,7 @@ sequenceDiagram
 UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --extra server --no-default-groups
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
+PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run --active --no-sync lint-imports
 uv run pre-commit run --all-files
 ```
 
@@ -527,6 +528,7 @@ Current CI gates include:
 - `pre-commit run --all-files`
 - `ruff check src tests` and `ruff format --check src tests`
 - `mypy src`
+- `lint-imports` (macro architecture contracts via `.importlinter`)
 - architecture guardrails: `pytest -q -o addopts='' tests/unit/http/test_architecture_*.py`
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
 - security scan job (`bandit` + `safety` report generation)
@@ -540,6 +542,7 @@ For local parity, use:
 
 ```bash
 make lint
+make lint-imports
 make type
 make test
 make sec        # strict
