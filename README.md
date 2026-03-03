@@ -204,7 +204,7 @@ The ingestion process is orchestrated by `IngestionPipeline`:
 2. Preprocess (`preprocess_text`) and chunk (`default_chunker`) with overlap.
 3. Format chunks (metadata header) and batch-ingest via `ETLService.ingest()`.
 
-### CLI support 
+### CLI support
 
 * **Sparse**: stores directly in SQLite (no embeddings required).
 * **Dense / Hybrid**:
