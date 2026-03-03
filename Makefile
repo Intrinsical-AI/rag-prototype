@@ -1,6 +1,6 @@
 # Simple developer helpers (uv-first).
 
-.PHONY: help venv sync sync-sec lint type test test-architecture sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
+.PHONY: help venv sync sync-sec lint lint-imports type test test-architecture sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
 UV_CACHE_DIR ?= .uv_cache
@@ -34,6 +34,9 @@ lint: sync ## Run Ruff lint and format checks
 	$(UV) run --active --no-sync ruff check .
 	$(UV) run --active --no-sync ruff format --check .
 
+lint-imports: sync ## Run import-linter architecture contracts
+	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
+
 type: sync ## Run mypy type checking
 	$(UV) run --active --no-sync mypy .
 
@@ -41,6 +44,7 @@ test: sync ## Run test suite
 	$(UV) run --active --no-sync pytest -q
 
 test-architecture: sync ## Run architecture guardrail tests only
+	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
 	DEBUG=false $(UV) run --active --no-sync pytest -q -o addopts='' tests/unit/http/test_architecture_*.py
 
 sec: sec-hard ## Run strict security checks

@@ -429,7 +429,7 @@ Fase B closure (2026-03-01):
 | Integration | SQL/vector/index/recovery interactions | `pytest` | pass |
 | E2E | API behavior and retrieval smoke | `pytest` | pass |
 | Stress | mutation contention and cross-process lock behavior | `pytest` (integration profile) | pass |
-| Architecture | import boundaries/layer rules | `pytest` + AST checks | pass |
+| Architecture | import boundaries/layer rules | `import-linter` + `pytest` (AST checks) | pass |
 | Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | CI jobs green (security includes report generation) |
 
 Mandatory CI gate: total coverage >= 85% (`pytest` config in `pyproject.toml`).
@@ -506,6 +506,7 @@ Active ADR set for D1:
   - `rag-server`
 - How to run tests:
   - full: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q`
+  - import contracts: `PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run lint-imports`
   - architecture smoke: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q -o addopts='' tests/unit/http/test_architecture_*.py`
 - Where to add a new feature:
   - domain rules in `core/domain` or `core/services`
