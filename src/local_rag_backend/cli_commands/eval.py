@@ -46,36 +46,42 @@ def eval_cmd(
     json_out: Path | None,
 ) -> None:
     """Offline retrieval evaluation (reproducible, dependency-free by default)."""
-    from local_rag_backend.core.services.evaluation import (
-        eval_result_to_json,
-        format_eval_result,
-        load_eval_dataset,
-    )
-    from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
-
-    container = get_cli_container()
-    eval_bundle = container.build_eval_execution_bundle()
-    ds = load_eval_dataset(dataset)
-    res = run_retrieval_eval(
-        dataset=ds,
-        eval_storage_port=eval_bundle.eval_storage_port,
-        eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
-        retrieval_mode=retrieval_mode,
-        k=k,
-        reranker_enabled=bool(reranker),
-        reranker_candidate_k=eval_bundle.reranker_candidate_k,
-        reranker_strategy=eval_bundle.reranker_strategy,
-        max_queries=max_queries,
-    )
-    click.echo(format_eval_result(res))
-
-    if json_out is not None:
-        json_out.write_text(json.dumps(eval_result_to_json(res)), encoding="utf-8")
-
-    if res.hit_rate < float(fail_below_hit_rate) or res.mrr < float(fail_below_mrr):
-        click.echo(
-            f"[ERROR] Eval regression: hit_rate={res.hit_rate:.3f} (min {fail_below_hit_rate}), "
-            f"mrr={res.mrr:.3f} (min {fail_below_mrr})",
-            err=True,
+    try:
+        from local_rag_backend.core.services.evaluation import (
+            eval_result_to_json,
+            format_eval_result,
+            load_eval_dataset,
         )
+        from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
+
+        container = get_cli_container()
+        eval_bundle = container.build_eval_execution_bundle()
+        ds = load_eval_dataset(dataset)
+        res = run_retrieval_eval(
+            dataset=ds,
+            eval_storage_port=eval_bundle.eval_storage_port,
+            eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
+            retrieval_mode=retrieval_mode,
+            k=k,
+            reranker_enabled=bool(reranker),
+            reranker_candidate_k=eval_bundle.reranker_candidate_k,
+            reranker_strategy=eval_bundle.reranker_strategy,
+            max_queries=max_queries,
+        )
+        click.echo(format_eval_result(res))
+
+        if json_out is not None:
+            json_out.write_text(json.dumps(eval_result_to_json(res)), encoding="utf-8")
+
+        if res.hit_rate < float(fail_below_hit_rate) or res.mrr < float(fail_below_mrr):
+            click.echo(
+                f"[ERROR] Eval regression: hit_rate={res.hit_rate:.3f} (min {fail_below_hit_rate}), "
+                f"mrr={res.mrr:.3f} (min {fail_below_mrr})",
+                err=True,
+            )
+            raise SystemExit(1)
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.echo(f"[ERROR] Error evaluating dataset: {e}", err=True)
         raise SystemExit(1)

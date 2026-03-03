@@ -38,7 +38,7 @@
 * **API**
 
   * FastAPI with validation and OpenAPI at `/docs`.
-  * Health: `/api/health`, Readiness: `/api/ready`, Ollama health: `/api/health/ollama`.
+  * Public probes: `/healthz`, `/readyz`, Ollama health: `/healthz/ollama`.
   * Config: `/api/config`, Templates: `/api/templates`.
   * OpenRouter proxy (OpenAI-compatible): `POST /api/openrouter/generate`.
 * **Tests**
@@ -83,8 +83,8 @@ rag-bootstrap
 # FastAPI server
 rag-server
 # UI: http://localhost:8000/
-# Health: http://localhost:8000/api/health
-# Ollama health: http://localhost:8000/api/health/ollama
+# Health: http://localhost:8000/healthz
+# Ollama health: http://localhost:8000/healthz/ollama
 # Docs: http://localhost:8000/docs
 ```
 
@@ -117,7 +117,7 @@ Key variables (non-exhaustive):
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
-| `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
+| `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | Bootstrap CSV path (must exist; no fallback)          |
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
 | `INGEST_CHUNK_STRATEGY`          | `chars_v1`                | ingestion    | Chunking strategy identifier (deterministic)           |
 | `INGEST_CHUNKER_VERSION`         | `chars_v1`                | ingestion    | Version token included in chunk dedup hashes           |
@@ -171,7 +171,7 @@ Key variables (non-exhaustive):
 When `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
-If you change any of these settings, `/api/ready` and `rag-status` will report drift and instruct you to rebuild:
+If you change any of these settings, `/readyz` and `rag-status` will report drift and instruct you to rebuild:
 `rag-rebuild-index` (or `POST /api/index/rebuild`).
 
 **Note:**  **fresh-install only** storage contract.
@@ -304,8 +304,8 @@ docker compose up -d --build
 docker exec -it ollama ollama pull lfm2.5-thinking
 
 # Verify services
-curl http://localhost:8000/api/health
-curl http://localhost:8000/api/health/ollama
+curl http://localhost:8000/healthz
+curl http://localhost:8000/healthz/ollama
 ```
 
 Notes:
@@ -360,8 +360,8 @@ docker compose up -d
 ## API
 
 * `GET /` → Serves packaged `index.html` or the source tree `src/local_rag_backend/frontend/index.html`.
-* `GET /api/health` and `GET /api/ready`
-* `GET /api/health/ollama`
+* `GET /healthz` and `GET /readyz`
+* `GET /healthz/ollama`
 * `GET /api/config` and `GET /api/templates`
 * `POST /api/ask`
   * Body: `{ "question": "str", "k": int (1..10, default 3) }`
@@ -386,7 +386,7 @@ Notes:
 * Write-path consistency uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
 * v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
-* In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
+* In dense/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
 * For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
 Example:
