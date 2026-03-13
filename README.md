@@ -11,7 +11,7 @@
 [![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/) -->
 
 > General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, dense vector, hybrid), and swappable LLM connectors (OpenAI, OpenRouter, Ollama). Designed as a solid base to iterate in experimental environments.
-> Default runtime mode is `sparse` (SQLite-only). In dense/hybrid modes, vector state is persisted to disk (`faiss` or `numpy` backend).
+> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend.
 
 ---
 
@@ -24,8 +24,8 @@
 * **Retrieval**
 
   * Sparse: BM25 (offline).
-  * Dense: vector index (`faiss`/`numpy`) + embeddings backend (OpenAI or SentenceTransformers).
-  * Hybrid: dense + BM25 combination with configurable weight.
+  * Dense: local vector index (`faiss`/`numpy`) or unified Elasticsearch vector search.
+  * Hybrid: local dense+BM25 combination or Elasticsearch lexical+vector fusion.
 * **LLMs**
 
   * OpenAI Chat (via API key).
@@ -33,8 +33,8 @@
   * Local Ollama (over HTTP). Current clients are synchronous.
 * **Persistence**
 
-  * SQLite via SQLAlchemy: documents and Q\&A history.
-  * Vector index on disk for dense/hybrid mode (`faiss` or `numpy` backend).
+  * `local_split`: SQLite via SQLAlchemy for documents/history + on-disk vector index for dense/hybrid.
+  * `elasticsearch`: unified documents, vectors, history, system state, and tombstones in Elasticsearch.
 * **API**
 
   * FastAPI with validation and OpenAPI at `/docs`.
@@ -63,7 +63,7 @@ source .venv/bin/activate
 # Install runtime deps (uses uv.lock); --extra server adds FastAPI/uvicorn
 uv sync --frozen --extra server
 
-# (Optional) Dense/Hybrid deps (FAISS)
+# (Optional) Dense/Hybrid deps for local split backend (FAISS)
 # uv sync --frozen --extra server --extra dense
 #
 # (Optional) SentenceTransformers embeddings (heavy: torch/transformers)
@@ -76,7 +76,7 @@ uv sync --frozen --extra server
 Initialize sample data and start:
 
 ```bash
-# Load sample CSV into SQLite and, if applicable, build vector index
+# Load sample CSV into the configured backend and, if applicable, build/rebuild retrieval state
 rag-bootstrap
 
 
@@ -115,6 +115,7 @@ Key variables (non-exhaustive):
 | `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse unsafe public startup and reject non-local `/api/*` + `/metrics` requests when `API_KEY` is unset |
 | `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
 | `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
+| `PERSISTENCE_BACKEND`            | `local_split`             | storage      | `local_split` \| `elasticsearch`                       |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
 | `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
@@ -130,8 +131,8 @@ Key variables (non-exhaustive):
 | `INGEST_CLEAN_STRIP`             | `true`                    | ingestion    | Strip leading/trailing whitespace                       |
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
-| `VECTOR_BACKEND`                 | `auto`                    | dense/hybrid | Vector backend selector: `auto` \| `faiss` \| `numpy` |
-| `STORAGE_PROFILE`                | _(auto)_                  | consistency  | Optional explicit storage profile (`sql_only_local`, `sql_faiss_local`, `sql_numpy_local`) |
+| `VECTOR_BACKEND`                 | `auto`                    | local_split  | Vector backend selector: `auto` \| `faiss` \| `numpy` |
+| `STORAGE_PROFILE`                | _(auto)_                  | consistency  | Optional explicit storage profile (`sql_only_local`, `sql_faiss_local`, `sql_numpy_local`, `es_unified_dense`, `es_unified_hybrid`) |
 | `WRITE_LOCK_TIMEOUT_S`           | `30.0`                    | consistency  | Timeout (seconds) for multi-store write lock           |
 | `WRITE_LOCK_POLL_S`              | `0.05`                    | consistency  | Poll interval (seconds) while waiting for lock         |
 | `MUTATION_BATCH_MAX_SIZE`        | `32`                      | consistency  | Max queued mutation requests coalesced per batch cycle (`1..512`) |
@@ -141,6 +142,20 @@ Key variables (non-exhaustive):
 | `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
 | `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
 | (derived) `index_manifest.json`  | `data/index_manifest.json`| dense/hybrid | Index manifest (model/dim/chunker) for drift detection |
+| `ES_BASE_URL`                    | —                         | elasticsearch| Elasticsearch base URL                                 |
+| `ES_API_KEY`                     | —                         | elasticsearch| Elasticsearch API key                                  |
+| `ES_USERNAME`                    | —                         | elasticsearch| Elasticsearch username                                 |
+| `ES_PASSWORD`                    | —                         | elasticsearch| Elasticsearch password                                 |
+| `ES_VERIFY_TLS`                  | `true`                    | elasticsearch| Verify TLS certificates                                |
+| `ES_REQUEST_TIMEOUT_S`           | `30.0`                    | elasticsearch| HTTP timeout for Elasticsearch                          |
+| `ES_DOCS_INDEX`                  | `rag-docs`                | elasticsearch| Documents index                                         |
+| `ES_HISTORY_INDEX`               | `rag-history`             | elasticsearch| History index                                           |
+| `ES_SYSTEM_INDEX`                | `rag-system`              | elasticsearch| System state / cache invalidation index                |
+| `ES_TOMBSTONES_INDEX`            | `rag-tombstones`          | elasticsearch| Tombstones index                                        |
+| `ES_CONTENT_FIELD`               | `content`                 | elasticsearch| Text field used for lexical retrieval                   |
+| `ES_EMBEDDING_FIELD`             | `embedding`               | elasticsearch| Dense vector field                                      |
+| `ES_HYBRID_LEXICAL_K`            | `50`                      | elasticsearch| Lexical candidate pool for hybrid                       |
+| `ES_HYBRID_VECTOR_K`             | `50`                      | elasticsearch| Vector candidate pool for hybrid                        |
 | `ENABLE_RERANKER`                | `false`                   | retrieval    | Wrap selected retriever with reranking layer           |
 | `RERANKER_CANDIDATE_K`           | `20`                      | retrieval    | Candidate set size fetched before reranking (`3..200`) |
 | `RERANKER_STRATEGY`              | `overlap_v1`              | retrieval    | Reranker strategy identifier                            |
@@ -166,9 +181,18 @@ Key variables (non-exhaustive):
 | `OLLAMA_PROMPT_TEMPLATE`         | _(builtin template)_      | prompting    | Prompt template for Ollama generator                   |
 
 
-### Index manifest (dense/hybrid)
+### Backend matrix
 
-When `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
+| Persistence backend | Retrieval modes | Canonical write model | Notes |
+| --- | --- | --- | --- |
+| `local_split` | `sparse`, `dense`, `hybrid` | `DURABLE_SAGA` | `sparse` is SQLite-only; dense/hybrid use SQLite + local vector state |
+| `elasticsearch` | `dense`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch |
+
+`PERSISTENCE_BACKEND=elasticsearch` rejects `RETRIEVAL_MODE=sparse` at startup.
+
+### Index manifest (`local_split` dense/hybrid only)
+
+When `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
 If you change any of these settings, `/api/ready` and `rag-status` will report drift and instruct you to rebuild:
@@ -184,10 +208,14 @@ If you change any of these settings, `/api/ready` and `rag-status` will report d
 
 * `RETRIEVAL_MODE=sparse`:
   `RetrieverPort := SparseBM25Retriever` (BM25 corpus + SQL doc repo)
-* `RETRIEVAL_MODE=dense`:
-  `RetrieverPort := DenseVectorRetriever` (embedder + vector index + SQL doc repo)
-* `RETRIEVAL_MODE=hybrid`:
+* `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=dense`:
+  `RetrieverPort := DenseVectorRetriever` (embedder + local vector index + SQL doc repo)
+* `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=hybrid`:
   `RetrieverPort := HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`
+* `PERSISTENCE_BACKEND=elasticsearch` and `RETRIEVAL_MODE=dense`:
+  `RetrieverPort := DenseVectorRetriever` (embedder + Elasticsearch vector repo + ES doc repo)
+* `PERSISTENCE_BACKEND=elasticsearch` and `RETRIEVAL_MODE=hybrid`:
+  `RetrieverPort := HybridRetriever(DenseVectorRetriever, Elastic lexical retriever, alpha)`
 * If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
   `RetrieverPort := RerankingRetriever(base=<selected>)`
 
@@ -207,10 +235,14 @@ The ingestion process is orchestrated by `IngestionPipeline`:
 ### CLI support
 
 * **Sparse**: stores directly in SQLite (no embeddings required).
-* **Dense / Hybrid**:
+* **Dense / Hybrid on `local_split`**:
   1. Save chunks in SQLite
   2. Generate embeddings with OpenAI (if `OPENAI_API_KEY`) or SentenceTransformers (`ST_EMBEDDING_MODEL`)
   3. Upsert into the vector index (`INDEX_PATH`, `ID_MAP_PATH`)
+* **Dense / Hybrid on `elasticsearch`**:
+  1. Generate embeddings for changed chunks
+  2. Upsert documents and embeddings atomically by `external_id`
+  3. Use native Elasticsearch lexical/vector retrieval for runtime queries
 
 Chunking parameters (in settings):
 
@@ -233,7 +265,7 @@ rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
 rag-ingest --no-follow-symlinks ./docs
 
 
-# Rebuild vector index from current SQLite documents (idempotent; dense/hybrid only)
+# Rebuild retrieval state from the current document store (idempotent; dense/hybrid only)
 rag-rebuild-index
 
 
@@ -312,8 +344,8 @@ Notes:
 - Backend listens on `8000`, Ollama on `11434`.
 - Configure providers via `.env` or environment variables (see `.env.example`).
 - In `docker-compose.yml`, `OLLAMA_ENABLED=true` and `OLLAMA_BASE_URL=http://ollama:11434` are set.
-- `docker-compose.yml` defaults to `RETRIEVAL_MODE=sparse` for a lightweight image.
-- For dense/hybrid in compose, build backend with extras, for example:
+- `docker-compose.yml` defaults to `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=sparse` for a lightweight image.
+- For `local_split` dense/hybrid in compose, build backend with extras, for example:
 
 ```bash
 docker compose build --build-arg RAG_EXTRAS=dense rag-backend
@@ -374,7 +406,7 @@ docker compose up -d
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
 * `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
-* `POST /api/index/rebuild` (idempotent rebuild of vector index from SQLite; dense/hybrid only)
+* `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
 
 Notes:
@@ -382,11 +414,13 @@ Notes:
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources (best-effort; retrieval/answer response is not blocked if history persistence fails).
 * For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active configuration.
-* In dense/hybrid mode, the vector index is **derived operational state**; write via `/api/docs/mutate` (or `rag-mutate-docs`) rather than mutating stores independently.
-* Write-path consistency uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
+* In dense/hybrid mode, write via `/api/docs/mutate` (or `rag-mutate-docs`) rather than mutating stores independently.
+* `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
+* `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
 * v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
-* In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
+* In `local_split` dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
+* In `elasticsearch` mode, `/api/ready` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
 * For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
 Example:

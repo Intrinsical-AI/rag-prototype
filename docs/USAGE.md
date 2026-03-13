@@ -41,8 +41,20 @@ OLLAMA_MODEL="lfm2.5-thinking" # O el modelo que prefieras
 # Para empezar, 'sparse' es el más sencillo ya que no requiere embeddings.
 RETRIEVAL_MODE="sparse"
 
+# Topología de persistencia:
+# - local_split: SQLite (+ índice vectorial local en dense/hybrid)
+# - elasticsearch: backend unificado; solo soporta dense/hybrid
+PERSISTENCE_BACKEND="local_split"
+
 # Ruta de la base de datos para almacenar los documentos
 SQLITE_URL="sqlite:///./data/custom_app.db"
+
+# Si usas PERSISTENCE_BACKEND=elasticsearch:
+# ES_BASE_URL="http://localhost:9200"
+# ES_DOCS_INDEX="rag-docs"
+# ES_HISTORY_INDEX="rag-history"
+# ES_SYSTEM_INDEX="rag-system"
+# ES_TOMBSTONES_INDEX="rag-tombstones"
 
 # Opcional: ajusta los parámetros de logging
 LOG_LEVEL="INFO"
@@ -113,6 +125,7 @@ def main():
     print("--- Iniciando script de ingesta ---")
 
     # 4. Configurar la base de datos
+    # Este ejemplo es para local_split/sparse. En elasticsearch no necesitas abrir SQLite.
     # Asegurarse de que el directorio de datos exista
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     engine = create_engine(settings.sqlite_url)
@@ -211,7 +224,8 @@ rag-ingest --dry-run ./docs
 
 Notas:
 
-* En `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial de forma consistente (FAISS o NumPy, según `VECTOR_BACKEND`) y borra chunks obsoletos si un fichero se acorta.
+* En `local_split` + `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial local de forma consistente (FAISS o NumPy, según `VECTOR_BACKEND`) y borra chunks obsoletos si un fichero se acorta.
+* En `elasticsearch` + `dense`/`hybrid`, la CLI usa el backend unificado: documentos, embeddings, history, system state y tombstones viven en Elasticsearch.
 * La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
 * Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.
 
@@ -219,8 +233,10 @@ Notas:
 
 ## Mantenimiento (dense/hybrid): mutación canónica + repair explícito
 
-En `dense`/`hybrid`, SQLite es el store de entidad y el índice vectorial es estado operacional incremental.
-El write-path canónico usa `MutationCoordinator` (`DURABLE_SAGA`) con journal duradero.
+`MutationCoordinator` es el write-path canónico en ambos backends:
+
+* `local_split`: `DURABLE_SAGA` con journal duradero, SQLite como store canónico y vector index local como estado derivado.
+* `elasticsearch`: path atómico sobre backend unificado; no hay journal de mutación local ni lock SQL.
 
 ### 1) CLI (canónico)
 
@@ -243,7 +259,7 @@ cat > /tmp/mutate_delete_ext.json <<'JSON'
 JSON
 rag-mutate-docs --json /tmp/mutate_delete_ext.json
 
-# Repair explícito del índice
+# Repair explícito del estado de retrieval
 rag-rebuild-index
 ```
 
@@ -298,7 +314,11 @@ summary = coordinator.execute(
 print(summary)
 ```
 
-Nota: el rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
+Notas:
+
+* En `local_split`, el rebuild recompone el índice vectorial local desde el store canónico.
+* En `elasticsearch`, el rebuild re-embebe los documentos del índice de documentos y actualiza los vectores in-place.
+* El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
 
 ---
 
