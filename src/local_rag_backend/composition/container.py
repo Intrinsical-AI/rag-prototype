@@ -41,6 +41,13 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
+from local_rag_backend.infrastructure.persistence.elasticsearch import (
+    ElasticDocsRepository,
+    ElasticHistoryStorage,
+    ElasticSystemStateStorage,
+    ElasticVectorRepo,
+    purge_index_artifacts_noop,
+)
 from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
 from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
@@ -157,6 +164,7 @@ class AppContainer:
         system_state_factory: Callable[[], SystemStateStorage] | None = None,
     ) -> None:
         defaults = self.runtime_wiring_defaults()
+        use_elasticsearch = settings_obj.persistence_backend == "elasticsearch"
         self.settings_obj = settings_obj
         self.openai_embedder_factory = openai_embedder_factory or cast(
             "Callable[[], EmbedderPort]", defaults["openai_embedder_factory"]
@@ -170,13 +178,22 @@ class AppContainer:
         self.ollama_generator_factory = ollama_generator_factory or cast(
             "Callable[..., GeneratorPort]", defaults["ollama_generator_factory"]
         )
-        self.doc_repo_factory = doc_repo_factory or cast(
-            "Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"]
-        )
-        self.build_upsert_doc = build_upsert_doc or defaults["build_upsert_doc"]
-        self.history_repo_factory = history_repo_factory or cast(
+        default_doc_repo_factory = cast("Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"])
+        self.doc_repo_factory = doc_repo_factory or default_doc_repo_factory
+        if use_elasticsearch and self.doc_repo_factory == default_doc_repo_factory:
+            self.doc_repo_factory = lambda: ElasticDocsRepository(settings_obj=self.settings_obj)
+
+        default_build_upsert_doc = defaults["build_upsert_doc"]
+        self.build_upsert_doc = build_upsert_doc or default_build_upsert_doc
+        if use_elasticsearch and self.build_upsert_doc == default_build_upsert_doc:
+            self.build_upsert_doc = ElasticDocsRepository.UpsertDoc
+
+        default_history_repo_factory = cast(
             "Callable[[], QAHistoryPort]", defaults["history_repo_factory"]
         )
+        self.history_repo_factory = history_repo_factory or default_history_repo_factory
+        if use_elasticsearch and self.history_repo_factory == default_history_repo_factory:
+            self.history_repo_factory = lambda: ElasticHistoryStorage(settings_obj=self.settings_obj)
         self.sparse_retriever_factory = sparse_retriever_factory or cast(
             "Callable[..., RetrieverPort]", defaults["sparse_retriever_factory"]
         )
@@ -186,16 +203,25 @@ class AppContainer:
         self.hybrid_retriever_factory = hybrid_retriever_factory or cast(
             "Callable[..., RetrieverPort]", defaults["hybrid_retriever_factory"]
         )
-        self.vector_repo_factory = vector_repo_factory or cast(
+        default_vector_repo_factory = cast(
             "Callable[..., VectorRepoPort]", defaults["vector_repo_factory"]
         )
+        self.vector_repo_factory = vector_repo_factory or default_vector_repo_factory
+        if use_elasticsearch and self.vector_repo_factory == default_vector_repo_factory:
+            self.vector_repo_factory = lambda **kwargs: ElasticVectorRepo(
+                settings_obj=self.settings_obj,
+                **kwargs,
+            )
         self.reranker_factory = reranker_factory or cast(
             "Callable[..., RetrieverPort]", defaults["reranker_factory"]
         )
         self.rebuild_fn = rebuild_fn or cast("Callable[..., int]", defaults["rebuild_fn"])
-        self.purge_index_artifacts_fn = purge_index_artifacts_fn or cast(
+        default_purge_index_artifacts_fn = cast(
             "Callable[..., None]", defaults["purge_index_artifacts_fn"]
         )
+        self.purge_index_artifacts_fn = purge_index_artifacts_fn or default_purge_index_artifacts_fn
+        if use_elasticsearch and self.purge_index_artifacts_fn == default_purge_index_artifacts_fn:
+            self.purge_index_artifacts_fn = purge_index_artifacts_noop
         self.write_lock = write_lock or cast("Callable[..., Any]", defaults["write_lock"])
         self.mutation_journal_factory = mutation_journal_factory or (
             lambda: FileMutationJournal(
@@ -207,10 +233,16 @@ class AppContainer:
         self.rag_service_factory = rag_service_factory or cast(
             "Callable[..., RagService]", defaults["rag_service_factory"]
         )
-        self._system_state = (
-            system_state_factory
-            or cast("Callable[[], SystemStateStorage]", defaults["system_state_factory"])
-        )()
+        default_system_state_factory = cast(
+            "Callable[[], SystemStateStorage]", defaults["system_state_factory"]
+        )
+        resolved_system_state_factory = system_state_factory or default_system_state_factory
+        if use_elasticsearch and resolved_system_state_factory == default_system_state_factory:
+            resolved_system_state_factory = cast(
+                "Callable[[], SystemStateStorage]",
+                lambda: ElasticSystemStateStorage(settings_obj=self.settings_obj),
+            )
+        self._system_state = resolved_system_state_factory()
         self._rag_service_cache_lock = Lock()
         self._rag_service_cache: RagService | None = None
         self._rag_service_cache_version: int | None = None
@@ -256,14 +288,21 @@ class AppContainer:
         with self.write_lock():
             return fn()
 
-    def build_docs_read_port(self, *, db: Any) -> DocsReadPort:
-        return build_docs_read_port(db=db)
+    def build_docs_read_port(self) -> DocsReadPort:
+        return build_docs_read_port(
+            settings_obj=self.settings_obj,
+            doc_repo_factory=self.doc_repo_factory,
+        )
 
-    def build_history_read_port(self, *, db: Any) -> HistoryReadPort:
-        return build_history_read_port(db=db)
+    def build_history_read_port(self) -> HistoryReadPort:
+        return build_history_read_port(
+            settings_obj=self.settings_obj,
+            history_repo_factory=self.history_repo_factory,
+        )
 
     def build_health_diagnostics_port(self, *, engine: Any | None = None) -> HealthDiagnosticsPort:
         return build_health_diagnostics_port(
+            settings_obj=self.settings_obj,
             engine=(engine if engine is not None else db_base.engine)
         )
 
@@ -346,7 +385,11 @@ class AppContainer:
             write_lock=self.write_lock,
             mutation_journal_factory=self.mutation_journal_factory,
             storage_profile_registry=self.storage_profile_registry,
-            mutation_uow_factory=self.mutation_uow_factory or db_base.session_uow,
+            mutation_uow_factory=(
+                None
+                if self.settings_obj.persistence_backend == "elasticsearch"
+                else (self.mutation_uow_factory or db_base.session_uow)
+            ),
         )
 
     def index_mutation_ports(

@@ -34,7 +34,6 @@ from local_rag_backend.core.use_cases.errors import (
 from local_rag_backend.core.use_cases.mutations import run_api_mutation
 from local_rag_backend.http.dependencies import (
     get_app_container_dependency,
-    get_db,
     get_settings_dependency,
     reset_rag_service,
 )
@@ -55,8 +54,6 @@ from local_rag_backend.infrastructure.observability.observability import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
     from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.core.use_cases.results import MutationSummary
     from local_rag_backend.settings import Settings
@@ -104,10 +101,9 @@ async def _run_docs_mutation_operation(
 async def list_docs(
     limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
-    db: Session = Depends(get_db),
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
-    docs_reader = container.build_docs_read_port(db=db)
+    docs_reader = container.build_docs_read_port()
     docs = docs_reader.list_docs_page(limit=limit, offset=offset)
     return [DocumentInDB(id=item.id, content=item.content) for item in docs]
 

@@ -15,7 +15,6 @@ from local_rag_backend.core.use_cases.rag_query import (
 )
 from local_rag_backend.http.dependencies import (
     get_app_container_dependency,
-    get_db,
     get_rag_service,
     get_settings_dependency,
 )
@@ -37,8 +36,6 @@ from local_rag_backend.infrastructure.observability.observability import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
     from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.core.services.rag_runtime import RagService
     from local_rag_backend.settings import Settings
@@ -92,11 +89,10 @@ async def ask(
 async def history(
     limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
     offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
-    db: Session = Depends(get_db),
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[HistoryItem]:
     """Retrieve historical Q&A pairs from the database."""
-    history_reader = container.build_history_read_port(db=db)
+    history_reader = container.build_history_read_port()
     history_entries = list_history_entries_sync(
         history_reader=history_reader,
         limit=limit,

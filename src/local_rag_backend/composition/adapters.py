@@ -39,6 +39,7 @@ from local_rag_backend.core.ports import (
     OpenRouterGenerateResult,
     OpenRouterUsage,
     RagRuntimeFactoryPort,
+    RetrieverPort,
 )
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
@@ -57,13 +58,15 @@ from local_rag_backend.infrastructure.observability.diagnostics import (
     get_incomplete_mutation_records_count,
     get_retrieval_index_stats,
 )
+from local_rag_backend.infrastructure.persistence.elasticsearch import (
+    ElasticHealthDiagnostics,
+)
 from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
     SqlDocumentStorage,
     base as db_base,
 )
 from local_rag_backend.infrastructure.persistence.sql.crud import get_history
-from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 from local_rag_backend.infrastructure.persistence.vector.manifest import (
     expected_manifest_config_from_settings,
 )
@@ -74,8 +77,6 @@ from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Ret
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
-
-    from sqlalchemy.orm import Session
 
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.domain.types import DocId
@@ -100,26 +101,21 @@ DEFAULT_DENSE_BACKEND_MESSAGE = (
 
 
 @dataclass(frozen=True)
-class _SqlDocsReadPort(DocsReadPort):
-    db: Session
+class _RepoDocsReadPort(DocsReadPort):
+    doc_repo_factory: Callable[[], DocumentRepoPort]
 
     def list_docs_page(self, *, limit: int, offset: int) -> tuple[ListedDocument, ...]:
-        rows = (
-            self.db.query(DbDocument)
-            .order_by(DbDocument.doc_id.asc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        rows = list(self.doc_repo_factory().get_all_documents())
+        page = rows[offset : offset + limit]
         return tuple(
             ListedDocument(
-                id=str(row.doc_id),
+                id=str(row.id),
                 content=str(row.content),
                 external_id=row.external_id,
                 source_id=row.source_id,
-                metadata=row.metadata_,
+                metadata=dict(row.metadata or {}) if row.metadata is not None else None,
             )
-            for row in rows
+            for row in page
         )
 
 
@@ -143,10 +139,11 @@ class _DefaultBlockingExecutor(BlockingExecutorPort):
 
 @dataclass(frozen=True)
 class _SqlHistoryReadPort(HistoryReadPort):
-    db: Session
+    session_factory: Any
 
     def list_history_entries(self, *, limit: int, offset: int) -> tuple[HistoryEntry, ...]:
-        rows = get_history(db=self.db, limit=limit, offset=offset)
+        with self.session_factory() as db:
+            rows = get_history(db=db, limit=limit, offset=offset)
         entries: list[HistoryEntry] = []
         for row in rows:
             created_at = getattr(row, "created_at", None)
@@ -166,6 +163,28 @@ class _SqlHistoryReadPort(HistoryReadPort):
                 )
             )
         return tuple(entries)
+
+
+@dataclass(frozen=True)
+class _StorageHistoryReadPort(HistoryReadPort):
+    history_repo_factory: Callable[[], QAHistoryPort]
+
+    def list_history_entries(self, *, limit: int, offset: int) -> tuple[HistoryEntry, ...]:
+        repo = self.history_repo_factory()
+        list_entries = getattr(repo, "list_entries", None)
+        if not callable(list_entries):
+            raise RuntimeError("Configured history backend does not support list_entries.")
+        rows = list_entries(limit=limit, offset=offset)
+        return tuple(
+            HistoryEntry(
+                id=int(getattr(row, "id", 0) or 0),
+                question=str(getattr(row, "question", "") or ""),
+                answer=str(getattr(row, "answer", "") or ""),
+                created_at=str(getattr(row, "created_at", "") or ""),
+                source_ids=tuple(str(x) for x in (getattr(row, "source_ids", ()) or ())),
+            )
+            for row in rows
+        )
 
 
 @dataclass(frozen=True)
@@ -355,15 +374,54 @@ class _OpenAICompatibleOpenRouterClient(OpenRouterClientPort):
         return OpenRouterGenerateResult(text=text, usage=usage)
 
 
-def build_docs_read_port(*, db: Session) -> DocsReadPort:
-    return _SqlDocsReadPort(db=db)
+class _ElasticLexicalRetriever(RetrieverPort):
+    def __init__(self, *, vector_repo: Any, doc_repo: DocumentRepoPort) -> None:
+        self._vector_repo = vector_repo
+        self._doc_repo = doc_repo
+
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[DomainDocument], Sequence[float]]:
+        if k <= 0:
+            return [], []
+        lexical_search = getattr(self._vector_repo, "lexical_search", None)
+        if not callable(lexical_search):
+            raise RuntimeError("Configured vector backend does not support lexical_search.")
+        id_score_pairs = lexical_search(query, k=k)
+        if not id_score_pairs:
+            return [], []
+        doc_ids, _scores = zip(*id_score_pairs, strict=False)
+        docs = self._doc_repo.get(list(doc_ids))
+        docs_by_id = {doc.id: doc for doc in docs}
+        ordered_docs = [docs_by_id[doc_id] for doc_id in doc_ids if doc_id in docs_by_id]
+        ordered_scores = [score for doc_id, score in id_score_pairs if doc_id in docs_by_id]
+        return ordered_docs, ordered_scores
 
 
-def build_history_read_port(*, db: Session) -> HistoryReadPort:
-    return _SqlHistoryReadPort(db=db)
+def build_docs_read_port(
+    *,
+    settings_obj: Settings,
+    doc_repo_factory: Callable[[], DocumentRepoPort],
+) -> DocsReadPort:
+    _ = settings_obj
+    return _RepoDocsReadPort(doc_repo_factory=doc_repo_factory)
 
 
-def build_health_diagnostics_port(*, engine: Any) -> HealthDiagnosticsPort:
+def build_history_read_port(
+    *,
+    settings_obj: Settings,
+    history_repo_factory: Callable[[], QAHistoryPort],
+) -> HistoryReadPort:
+    if settings_obj.persistence_backend == "elasticsearch":
+        return _StorageHistoryReadPort(history_repo_factory=history_repo_factory)
+    return _SqlHistoryReadPort(session_factory=db_base.SessionLocal)
+
+
+def build_health_diagnostics_port(
+    *,
+    settings_obj: Settings,
+    engine: Any,
+) -> HealthDiagnosticsPort:
+    if settings_obj.persistence_backend == "elasticsearch":
+        return ElasticHealthDiagnostics(settings_obj=settings_obj)
     return _DefaultHealthDiagnosticsPort(engine=engine)
 
 
@@ -564,13 +622,19 @@ def build_retriever_from_settings(
     mode = str(retrieval_mode)
     if mode not in {"sparse", "dense", "hybrid"}:
         raise ValueError(f"Unsupported retrieval_mode: {mode}")
+    persistence_backend = str(getattr(settings_obj, "persistence_backend", "local_split"))
+
+    if persistence_backend == "elasticsearch" and mode == "sparse":
+        raise ValueError(
+            "PERSISTENCE_BACKEND=elasticsearch supports only retrieval_mode=dense|hybrid"
+        )
 
     retriever: RetrieverPort
     docs_for_sparse: Sequence[DomainDocument] | None = None
     corpus: list[str] | None = None
     doc_ids: list[DocId] | None = None
 
-    if mode in {"sparse", "hybrid"}:
+    if mode in {"sparse", "hybrid"} and persistence_backend != "elasticsearch":
         docs_for_sparse = (
             list(preloaded_docs) if preloaded_docs is not None else doc_repo.get_all_documents()
         )
@@ -605,16 +669,23 @@ def build_retriever_from_settings(
         if mode == "dense":
             retriever = dense_retriever
         else:
-            if corpus is None or doc_ids is None or docs_for_sparse is None:
-                raise RuntimeError(
-                    f"Internal error: hybrid retrieval vars uninitialized for mode '{mode}'"
+            sparse_retriever: RetrieverPort
+            if persistence_backend == "elasticsearch":
+                sparse_retriever = _ElasticLexicalRetriever(
+                    vector_repo=vector_repo,
+                    doc_repo=doc_repo,
                 )
-            sparse_retriever = sparse_retriever_factory(
-                documents=corpus,
-                doc_ids=doc_ids,
-                doc_repo=doc_repo,
-                preloaded_docs=docs_for_sparse,
-            )
+            else:
+                if corpus is None or doc_ids is None or docs_for_sparse is None:
+                    raise RuntimeError(
+                        f"Internal error: hybrid retrieval vars uninitialized for mode '{mode}'"
+                    )
+                sparse_retriever = sparse_retriever_factory(
+                    documents=corpus,
+                    doc_ids=doc_ids,
+                    doc_repo=doc_repo,
+                    preloaded_docs=docs_for_sparse,
+                )
             alpha = (
                 hybrid_alpha if hybrid_alpha is not None else settings_obj.hybrid_retrieval_alpha
             )

@@ -15,7 +15,7 @@ from local_rag_backend.settings import settings
 
 @click.command("rebuild-index")
 def rebuild_index_cmd() -> None:
-    """Rebuild FAISS index from the current SQLite documents (idempotent)."""
+    """Rebuild retrieval index from the current document store (idempotent)."""
     try:
         from local_rag_backend.core.use_cases import index as index_service
 
@@ -42,11 +42,9 @@ def rebuild_index_cmd() -> None:
 @click.command("status")
 def status_cmd() -> None:
     """Display system status and configuration."""
-    from local_rag_backend.infrastructure.persistence.sql import base as db_base
-
-    ensure_sqlite_schema_for_cli()
     container = get_cli_container()
-    readiness_bundle = container.build_health_readiness_bundle(engine=db_base.engine)
+    ensure_sqlite_schema_for_cli()
+    readiness_bundle = container.build_health_readiness_bundle()
     diagnostics = readiness_bundle.diagnostics
 
     title_fg = "cyan"
@@ -61,6 +59,9 @@ def status_cmd() -> None:
     )
     click.echo(
         f"  {click.style('Retrieval Mode:', fg=key_fg, bold=True)} {settings.retrieval_mode}"
+    )
+    click.echo(
+        f"  {click.style('Persistence Backend:', fg=key_fg, bold=True)} {settings.persistence_backend}"
     )
     click.echo(
         f"  {click.style('Debug Mode:', fg=key_fg, bold=True)} {'✅' if settings.debug else '❌'}"
@@ -81,16 +82,28 @@ def status_cmd() -> None:
         click.echo(f"    {click.style('Model:', fg=key_fg, bold=True)} {settings.openai_model}")
     click.echo()
 
-    click.secho("📁 File Status", fg=title_fg, bold=True)
-    for name, path_str in [
-        ("Database", settings.sqlite_url.replace("sqlite:///", "")),
-        ("FAISS index", settings.index_path),
-        ("Sample data", settings.faq_csv),
-    ]:
-        path = Path(path_str)
-        status_icon = "✅ YES" if path.exists() else "❌ NO"
-        click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {status_icon}")
-        click.echo(f"    Path: {path}")
+    click.secho("📁 Storage Status", fg=title_fg, bold=True)
+    if settings.persistence_backend == "elasticsearch":
+        click.echo(
+            f"  {click.style('Elasticsearch:', fg=key_fg, bold=True)} {settings.es_base_url or '[MISSING]'}"
+        )
+        for name, value in [
+            ("Docs index", settings.es_docs_index),
+            ("History index", settings.es_history_index),
+            ("System index", settings.es_system_index),
+            ("Tombstones index", settings.es_tombstones_index),
+        ]:
+            click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {value}")
+    else:
+        for name, path_str in [
+            ("Database", settings.sqlite_url.replace("sqlite:///", "")),
+            ("FAISS index", settings.index_path),
+            ("Sample data", settings.faq_csv),
+        ]:
+            path = Path(path_str)
+            status_icon = "✅ YES" if path.exists() else "❌ NO"
+            click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {status_icon}")
+            click.echo(f"    Path: {path}")
 
     click.echo()
     click.secho("📊 Data & Index Diagnostics", fg=title_fg, bold=True)
@@ -123,10 +136,11 @@ def status_cmd() -> None:
                 f"{stats.get('vectors')} vectors "
                 f"(dim={stats.get('dim')}, backend={stats.get('backend')})"
             )
-            click.echo(
-                f"  {click.style('Manifest:', fg=key_fg, bold=True)} OK "
-                f"(path={stats.get('manifest_path')})"
-            )
+            if settings.persistence_backend != "elasticsearch":
+                click.echo(
+                    f"  {click.style('Manifest:', fg=key_fg, bold=True)} OK "
+                    f"(path={stats.get('manifest_path')})"
+                )
             if int(stats.get("duplicates") or 0):
                 click.echo(
                     f"  {click.style('Index drift:', fg=key_fg, bold=True)} "
@@ -147,7 +161,7 @@ def status_cmd() -> None:
                 f"[ERROR] {status_txt} "
                 f"(hint: {stats.get('hint')})"
             )
-            if status_txt == "drift":
+            if status_txt == "drift" and settings.persistence_backend != "elasticsearch":
                 mm = stats.get("manifest_mismatches") or []
                 if isinstance(mm, list) and mm:
                     sample = ", ".join(

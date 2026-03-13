@@ -129,6 +129,10 @@ def check_mutation_journal(
     settings_obj: Settings,
     diagnostics: HealthDiagnosticsPort,
 ) -> None:
+    if str(getattr(settings_obj, "persistence_backend", "local_split")) == "elasticsearch":
+        checks["mutation_journal"] = {"status": "not_applicable"}
+        return
+
     try:
         incomplete = diagnostics.get_incomplete_mutation_records_count(
             coordination_dir=settings_obj.get_coordination_dir()
