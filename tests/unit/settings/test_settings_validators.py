@@ -11,6 +11,34 @@ def test_sqlite_url_validator():
         Settings(sqlite_url="postgres://x")
 
 
+def test_elasticsearch_backend_requires_es_base_url():
+    with pytest.raises(ValueError, match="ES_BASE_URL is required"):
+        Settings(
+            persistence_backend="elasticsearch",
+            retrieval_mode="dense",
+            es_base_url=None,
+        )
+
+
+def test_elasticsearch_backend_rejects_sparse():
+    with pytest.raises(ValueError, match="supports only retrieval_mode=dense\\|hybrid"):
+        Settings(
+            persistence_backend="elasticsearch",
+            retrieval_mode="sparse",
+            es_base_url="http://localhost:9200",
+        )
+
+
+def test_elasticsearch_backend_does_not_validate_sqlite_url():
+    s = Settings(
+        persistence_backend="elasticsearch",
+        retrieval_mode="dense",
+        es_base_url="http://localhost:9200",
+        sqlite_url="postgres://ignored-in-es-mode",
+    )
+    assert s.sqlite_url == "postgres://ignored-in-es-mode"
+
+
 def test_ollama_url_validator():
     with pytest.raises(ValueError):
         Settings(ollama_base_url="localhost:11434")

@@ -129,6 +129,84 @@ def test_build_retriever_passes_vector_backend_to_repo_factory():
     }
 
 
+def test_build_retriever_rejects_sparse_for_elasticsearch_backend():
+    cfg = SimpleNamespace(
+        persistence_backend="elasticsearch",
+        retrieval_mode="sparse",
+        es_base_url="http://localhost:9200",
+        openai_api_key="k",
+        st_embedding_model="all-MiniLM-L6-v2",
+        hybrid_retrieval_alpha=0.5,
+        enable_reranker=False,
+        reranker_candidate_k=20,
+        reranker_strategy="overlap_v1",
+        index_path="index.faiss",
+        id_map_path="id_map.json",
+        vector_backend="auto",
+    )
+
+    with pytest.raises(ValueError, match="supports only retrieval_mode=dense\\|hybrid"):
+        build_retriever_with_default_embedder_from_settings(
+            settings_obj=cfg,
+            retrieval_mode="sparse",
+            doc_repo=SimpleNamespace(get_all_documents=lambda: []),
+            openai_embedder_factory=lambda: object(),
+            st_embedder_factory=lambda _model_name: object(),
+        )
+
+
+def test_build_retriever_hybrid_uses_elasticsearch_lexical_path():
+    cfg = SimpleNamespace(
+        persistence_backend="elasticsearch",
+        openai_api_key="k",
+        st_embedding_model="all-MiniLM-L6-v2",
+        hybrid_retrieval_alpha=0.25,
+        enable_reranker=False,
+        reranker_candidate_k=20,
+        reranker_strategy="overlap_v1",
+        index_path="index.faiss",
+        id_map_path="id_map.json",
+        vector_backend="auto",
+    )
+    seen: dict[str, object] = {}
+
+    class DummyEmbedder:
+        dim = 4
+
+    class DummyVectorRepo:
+        def similar(self, _vector, _k):
+            return []
+
+        def lexical_search(self, _query, *, k):
+            seen["lexical_k"] = k
+            return []
+
+    def _dense_retriever_factory(**kwargs):
+        seen["dense_kwargs"] = kwargs
+        return SimpleNamespace(retrieve=lambda _query, _k=5: ([], []))
+
+    def _hybrid_retriever_factory(**kwargs):
+        seen["hybrid_kwargs"] = kwargs
+        kwargs["sparse"].retrieve("hello", 3)
+        return "hybrid-retriever"
+
+    out = build_retriever_with_default_embedder_from_settings(
+        settings_obj=cfg,
+        retrieval_mode="hybrid",
+        doc_repo=SimpleNamespace(get=lambda _ids: []),
+        openai_embedder_factory=lambda: DummyEmbedder(),
+        st_embedder_factory=lambda _model_name: DummyEmbedder(),
+        vector_repo_factory=lambda **kwargs: DummyVectorRepo(),
+        dense_retriever_factory=_dense_retriever_factory,
+        hybrid_retriever_factory=_hybrid_retriever_factory,
+    )
+
+    assert out == "hybrid-retriever"
+    assert seen["lexical_k"] == 3
+    assert seen["dense_kwargs"]["doc_repo"] is not None
+    assert seen["hybrid_kwargs"]["alpha"] == 0.25
+
+
 @pytest.mark.parametrize(
     ("openai_api_key", "ollama_enabled", "expected"),
     [
