@@ -93,6 +93,7 @@ class SqlDocumentStorage(DocumentRepoPort):
         source_id: str | None = None
         metadata: Mapping[str, Any] | None = None
         chunk_dedup_sha256: str | None = None
+        embedding: Sequence[float] | None = None
 
     @dataclass(frozen=True)
     class UpsertResult:

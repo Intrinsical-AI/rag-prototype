@@ -19,7 +19,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     if False:
 
         def __init__(self, **kwargs: Any) -> None: ...
+
+    persistence_backend: Literal["local_split", "elasticsearch"] = Field(
+        "local_split",
+        description=(
+            "Persistence backend topology. "
+            "'local_split' uses SQLite + local vector index; "
+            "'elasticsearch' uses Elasticsearch as unified storage."
+        ),
+    )
 
     # --- Core --- #
     app_host: str = Field("127.0.0.1", description="Server host IP.")
@@ -175,6 +184,30 @@ class Settings(BaseSettings):
         le=3600.0,
         description="Background interval (seconds) for retrying incomplete mutation recovery.",
     )
+    es_base_url: str | None = Field(None, description="Elasticsearch base URL.")
+    es_api_key: str | None = Field(None, description="Elasticsearch API key.")
+    es_username: str | None = Field(None, description="Elasticsearch username.")
+    es_password: str | None = Field(None, description="Elasticsearch password.")
+    es_verify_tls: bool = Field(True, description="Verify Elasticsearch TLS certificates.")
+    es_request_timeout_s: float = Field(
+        30.0, ge=0.5, le=600.0, description="Elasticsearch request timeout in seconds."
+    )
+    es_docs_index: str = Field("rag-docs", description="Elasticsearch index for documents.")
+    es_history_index: str = Field("rag-history", description="Elasticsearch index for history.")
+    es_system_index: str = Field("rag-system", description="Elasticsearch index for system state.")
+    es_tombstones_index: str = Field(
+        "rag-tombstones", description="Elasticsearch index for document tombstones."
+    )
+    es_content_field: str = Field("content", description="Elasticsearch content field name.")
+    es_embedding_field: str = Field(
+        "embedding", description="Elasticsearch dense vector field name."
+    )
+    es_hybrid_lexical_k: int = Field(
+        50, ge=1, le=1000, description="Lexical candidate count for Elasticsearch hybrid."
+    )
+    es_hybrid_vector_k: int = Field(
+        50, ge=1, le=1000, description="Vector candidate count for Elasticsearch hybrid."
+    )
 
     # --- Ingestion --- #
     ingest_chunk_strategy: Literal["chars_v1"] = Field(
@@ -271,7 +304,10 @@ class Settings(BaseSettings):
 
     @field_validator("sqlite_url")
     @classmethod
-    def _validate_sqlite_url(cls, v: str) -> str:
+    def _validate_sqlite_url(cls, v: str, info: ValidationInfo) -> str:
+        persistence_backend = str(info.data.get("persistence_backend") or "local_split")
+        if persistence_backend == "elasticsearch":
+            return v
         if not v.startswith("sqlite:///"):
             raise ValueError("SQLite URL must start with 'sqlite:///'")
         return v
@@ -283,11 +319,32 @@ class Settings(BaseSettings):
             raise ValueError("Ollama URL must start with http:// or https://")
         return v.rstrip("/")
 
+    @field_validator("es_base_url")
+    @classmethod
+    def _validate_es_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Elasticsearch URL must start with http:// or https://")
+        return v.rstrip("/")
+
     @model_validator(mode="after")
     def _validate_chunking(self) -> Settings:
         """Ensure chunk overlap is strictly less than chunk size."""
         if self.ingest_chunk_overlap >= self.ingest_chunk_chars:
             raise ValueError("ingest_chunk_overlap must be strictly less than ingest_chunk_chars")
+        if self.persistence_backend == "elasticsearch":
+            if self.retrieval_mode == "sparse":
+                raise ValueError(
+                    "PERSISTENCE_BACKEND=elasticsearch supports only retrieval_mode=dense|hybrid"
+                )
+            if not self.es_base_url:
+                raise ValueError(
+                    "ES_BASE_URL is required when PERSISTENCE_BACKEND=elasticsearch"
+                )
+        else:
+            if not self.sqlite_url.startswith("sqlite:///"):
+                raise ValueError("SQLite URL must start with 'sqlite:///'")
         return self
 
     def get_database_path(self) -> Path:
