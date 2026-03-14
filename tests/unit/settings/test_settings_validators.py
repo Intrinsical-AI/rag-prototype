@@ -21,11 +21,35 @@ def test_elasticsearch_backend_requires_es_base_url():
 
 
 def test_elasticsearch_backend_rejects_sparse():
-    with pytest.raises(ValueError, match="supports only retrieval_mode=dense\\|hybrid"):
+    with pytest.raises(ValueError, match="supports retrieval_mode=sparse only when"):
         Settings(
             persistence_backend="elasticsearch",
             retrieval_mode="sparse",
             es_base_url="http://localhost:9200",
+        )
+
+
+def test_elasticsearch_backend_accepts_sparse_with_elasticsearch_search_backend():
+    s = Settings(
+        persistence_backend="elasticsearch",
+        search_backend="elasticsearch",
+        retrieval_mode="sparse",
+        es_base_url="http://localhost:9200",
+    )
+    assert s.search_backend == "elasticsearch"
+
+
+def test_opensearch_search_backend_requires_url():
+    with pytest.raises(ValueError, match="OS_BASE_URL is required"):
+        Settings(search_backend="opensearch", retrieval_mode="dense")
+
+
+def test_solr_search_backend_rejects_dense():
+    with pytest.raises(ValueError, match="supports only retrieval_mode=sparse"):
+        Settings(
+            search_backend="solr",
+            retrieval_mode="dense",
+            solr_base_url="http://localhost:8983",
         )
 
 

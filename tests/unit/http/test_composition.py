@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import ANY
 
 import pytest
 
@@ -12,6 +11,7 @@ from local_rag_backend.composition.adapters import (
     resolve_preferred_llm_provider,
 )
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
+from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 
 
 def test_build_dense_embedder_uses_default_missing_backend_message():
@@ -74,18 +74,13 @@ def test_build_retriever_with_default_embedder_uses_openai_factory_when_key_pres
         dense_retriever_factory=_dense_retriever_factory,
     )
 
-    assert out == "dense-retriever"
+    assert isinstance(out, LocalSplitSearchRetriever)
     assert seen["vector_kwargs"] == {
         "index_path": "index.faiss",
         "id_map_path": "id_map.json",
         "dim": 7,
         "backend": "auto",
         "settings_obj": cfg,
-    }
-    assert seen["dense_kwargs"] == {
-        "embedder": ANY,
-        "vector_repo": "vec-repo",
-        "doc_repo": doc_repo,
     }
 
 
@@ -132,6 +127,7 @@ def test_build_retriever_passes_vector_backend_to_repo_factory():
 def test_build_retriever_rejects_sparse_for_elasticsearch_backend():
     cfg = SimpleNamespace(
         persistence_backend="elasticsearch",
+        search_backend="local_split",
         retrieval_mode="sparse",
         es_base_url="http://localhost:9200",
         openai_api_key="k",
@@ -145,7 +141,7 @@ def test_build_retriever_rejects_sparse_for_elasticsearch_backend():
         vector_backend="auto",
     )
 
-    with pytest.raises(ValueError, match="supports only retrieval_mode=dense\\|hybrid"):
+    with pytest.raises(ValueError, match="supports retrieval_mode=sparse only when"):
         build_retriever_with_default_embedder_from_settings(
             settings_obj=cfg,
             retrieval_mode="sparse",
@@ -158,6 +154,7 @@ def test_build_retriever_rejects_sparse_for_elasticsearch_backend():
 def test_build_retriever_hybrid_uses_elasticsearch_lexical_path():
     cfg = SimpleNamespace(
         persistence_backend="elasticsearch",
+        search_backend="elasticsearch",
         openai_api_key="k",
         st_embedding_model="all-MiniLM-L6-v2",
         hybrid_retrieval_alpha=0.25,
