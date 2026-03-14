@@ -20,6 +20,11 @@ from local_rag_backend.core.use_cases.docs_import import (
     UnsupportedImportFormatError,
     execute_import_docs_sync,
 )
+from local_rag_backend.core.use_cases.docs_import_canonical import (
+    CanonicalImportDocumentInput,
+    CanonicalImportRequestInput,
+    execute_import_canonical_sync,
+)
 from local_rag_backend.core.use_cases.docs_ingest import ingest_docs_sync
 from local_rag_backend.core.use_cases.docs_mutation import (
     MutationCoordinator,
@@ -38,6 +43,8 @@ from local_rag_backend.http.dependencies import (
     reset_rag_service,
 )
 from local_rag_backend.http.schemas.docs import (
+    CanonicalImportRequest,
+    CanonicalImportResponse,
     DocsMutateRequest,
     DocsMutateResponse,
     ImportResponse,
@@ -84,13 +91,14 @@ async def _run_docs_mutation_operation(
     *,
     operation: Callable[[], Any],
     container: AppContainer,
+    run_locked: Callable[[Callable[[], Any]], Any] | None = None,
     map_error: Callable[
         [Exception], PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None
     ],
 ) -> Any:
     return await run_api_mutation(
         operation=operation,
-        run_locked=lambda fn: fn(),
+        run_locked=(run_locked or (lambda fn: fn())),
         reset_after=reset_rag_service,
         blocking_executor=container.blocking_executor(run_blocking_fn=run_blocking),
         map_error=map_error,
@@ -150,6 +158,8 @@ async def mutate_docs(
                         external_id=item.external_id,
                         content=item.content,
                         source_id=item.source_id,
+                        scope=item.scope,
+                        snapshot_id=item.snapshot_id,
                         metadata=item.metadata,
                     )
                     for item in payload.upserts
@@ -188,6 +198,68 @@ async def mutate_docs(
             )
             for r in list(summary.results or [])
         ],
+    )
+
+
+@router.post("/docs/import-canonical", response_model=CanonicalImportResponse)
+async def import_canonical_docs(
+    payload: Annotated[CanonicalImportRequest, Body(...)],
+    container: AppContainer = Depends(get_app_container_dependency),
+    settings_obj: Settings = Depends(get_settings_dependency),
+) -> CanonicalImportResponse:
+    mutation_bundle = container.build_docs_mutation_bundle(
+        missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
+    )
+
+    def _import_operation() -> CanonicalImportResponse:
+        summary = execute_import_canonical_sync(
+            request=CanonicalImportRequestInput(
+                scope=payload.scope,
+                snapshot_id=payload.snapshot_id,
+                replace_scope=payload.replace_scope,
+                documents=tuple(
+                    CanonicalImportDocumentInput(
+                        external_id=item.external_id,
+                        content=item.content,
+                        source_id=item.source_id,
+                        metadata=item.metadata,
+                    )
+                    for item in payload.documents
+                ),
+                source="api:/docs/import-canonical",
+            ),
+            settings_obj=settings_obj,
+            ports=mutation_bundle.ports,
+        )
+        return CanonicalImportResponse(
+            scope=summary.scope,
+            snapshot_id=summary.snapshot_id,
+            replace_scope=summary.replace_scope,
+            inserted=summary.inserted,
+            updated=summary.updated,
+            unchanged=summary.unchanged,
+            deleted_sql=summary.deleted_sql,
+            deleted_index=summary.deleted_index,
+            deleted_external_ids=list(summary.deleted_external_ids or []),
+            results=[
+                UpsertDocResult(
+                    external_id=row.external_id,
+                    id=row.id,
+                    action=row.action,
+                    content_changed=row.content_changed,
+                )
+                for row in list(summary.results or [])
+            ],
+        )
+
+    return cast(
+        "CanonicalImportResponse",
+        await _run_docs_mutation_operation(
+            operation=_import_operation,
+            container=container,
+            map_error=lambda exc: _map_docs_error(exc, operation="mutate"),
+            run_locked=container.run_multi_store_write_locked,
+        ),
     )
 
 
