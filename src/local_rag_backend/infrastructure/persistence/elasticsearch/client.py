@@ -165,30 +165,37 @@ class ElasticClient:
 
     def _ensure_docs_index(self, *, index: str, embed_dim: int | None) -> None:
         if self.head_ok(f"/{index}"):
-            if embed_dim is None:
-                return
             mapping = self.get_mapping(index=index)
             props = (((mapping.get(index) or {}).get("mappings") or {}).get("properties") or {})
-            embedding = props.get(str(self._settings.es_embedding_field)) or {}
-            dims = embedding.get("dims")
-            if dims is not None and int(dims) != int(embed_dim):
-                raise ElasticBackendError(
-                    f"Elasticsearch index {index!r} embedding dims mismatch: {dims} != {embed_dim}"
-                )
-            if dims is None:
+            properties_to_add: dict[str, Any] = {
+                field_name: field_mapping
+                for field_name, field_mapping in {
+                "scope": {"type": "keyword"},
+                "snapshot_id": {"type": "keyword"},
+                }.items()
+                if field_name not in props
+            }
+
+            if embed_dim is not None:
+                embedding = props.get(str(self._settings.es_embedding_field)) or {}
+                dims = embedding.get("dims")
+                if dims is not None and int(dims) != int(embed_dim):
+                    raise ElasticBackendError(
+                        f"Elasticsearch index {index!r} embedding dims mismatch: {dims} != {embed_dim}"
+                    )
+                if dims is None:
+                    properties_to_add[str(self._settings.es_embedding_field)] = {
+                        "type": "dense_vector",
+                        "dims": int(embed_dim),
+                        "index": True,
+                        "similarity": "cosine",
+                    }
+
+            if properties_to_add:
                 self.request_json(
                     "PUT",
                     f"/{index}/_mapping",
-                    json_body={
-                        "properties": {
-                            str(self._settings.es_embedding_field): {
-                                "type": "dense_vector",
-                                "dims": int(embed_dim),
-                                "index": True,
-                                "similarity": "cosine",
-                            }
-                        }
-                    },
+                    json_body={"properties": properties_to_add},
                     expected=(200,),
                 )
             return
@@ -196,6 +203,8 @@ class ElasticClient:
         properties: dict[str, Any] = {
             "external_id": {"type": "keyword"},
             "source_id": {"type": "keyword"},
+            "scope": {"type": "keyword"},
+            "snapshot_id": {"type": "keyword"},
             str(self._settings.es_content_field): {"type": "text"},
             "metadata": {"type": "object", "dynamic": True},
             "content_sha256": {"type": "keyword"},
