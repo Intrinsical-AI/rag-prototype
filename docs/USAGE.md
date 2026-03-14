@@ -259,6 +259,23 @@ cat > /tmp/mutate_delete_ext.json <<'JSON'
 JSON
 rag-mutate-docs --json /tmp/mutate_delete_ext.json
 
+# Import/sync canónico para productores externos (p.ej. RepoGPT)
+cat > /tmp/canonical_import.json <<'JSON'
+{
+  "scope":"repogpt:demo",
+  "snapshot_id":"snap-1",
+  "documents":[
+    {
+      "external_id":"repogpt:demo:1",
+      "source_id":"repogpt:demo:file:src/app.py",
+      "content":"def hello():\n    return 1\n",
+      "metadata":{"path":"src/app.py","unit_type":"function"}
+    }
+  ]
+}
+JSON
+rag-import-canonical --json /tmp/canonical_import.json
+
 # Repair explícito del estado de retrieval
 rag-rebuild-index
 ```
@@ -279,6 +296,10 @@ curl -X POST "http://localhost:8000/api/docs/mutate" \
 curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \
   -d '{"op_id":"op-2","delete_external_ids":["chunk:<sha256>"]}'
+
+curl -X POST "http://localhost:8000/api/docs/import-canonical" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"repogpt:demo","snapshot_id":"snap-1","replace_scope":true,"documents":[{"external_id":"repogpt:demo:1","source_id":"repogpt:demo:file:src/app.py","content":"def hello():\n    return 1\n","metadata":{"path":"src/app.py","unit_type":"function"}}]}'
 
 curl -X POST "http://localhost:8000/api/index/rebuild"
 ```
@@ -319,6 +340,7 @@ Notas:
 * En `local_split`, el rebuild recompone el índice vectorial local desde el store canónico.
 * En `elasticsearch`, el rebuild re-embebe los documentos del índice de documentos y actualiza los vectores in-place.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
+* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones.
 
 ---
 

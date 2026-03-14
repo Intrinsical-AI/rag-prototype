@@ -275,6 +275,12 @@ cat > /tmp/mutate_upsert.json <<'JSON'
 JSON
 rag-mutate-docs --json /tmp/mutate_upsert.json
 
+# Canonical external import/sync (e.g. RepoGPT code-units)
+cat > /tmp/canonical_import.json <<'JSON'
+{"scope":"repogpt:demo","snapshot_id":"snap-1","documents":[{"external_id":"repogpt:demo:1","source_id":"repogpt:demo:file:src/app.py","content":"def hello():\n    return 1\n","metadata":{"path":"src/app.py","unit_type":"function"}}]}
+JSON
+rag-import-canonical --json /tmp/canonical_import.json
+
 # Delete by SQL doc IDs
 cat > /tmp/mutate_delete_ids.json <<'JSON'
 {"op_id":"op-del-ids-1","delete_ids":["doc:...","doc:..."]}
@@ -406,6 +412,7 @@ docker compose up -d
 * `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
 * `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
+* `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
 * `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
 
@@ -414,7 +421,7 @@ Notes:
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources (best-effort; retrieval/answer response is not blocked if history persistence fails).
 * For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active configuration.
-* In dense/hybrid mode, write via `/api/docs/mutate` (or `rag-mutate-docs`) rather than mutating stores independently.
+* In dense/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
 * `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
 * `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
