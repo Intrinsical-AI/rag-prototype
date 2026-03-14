@@ -5,7 +5,10 @@ from local_rag_backend.composition.adapters import (
     build_eval_storage_port,
 )
 from local_rag_backend.core.ports import EvalDatasetDocInput
-from local_rag_backend.core.services.evaluation import load_eval_dataset, run_retrieval_eval as run_core_eval
+from local_rag_backend.core.services.evaluation import (
+    load_eval_dataset,
+    run_retrieval_eval as run_core_eval,
+)
 from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 
 

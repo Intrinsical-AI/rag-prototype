@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import ir_measures
-from ir_measures import AP, P, R, RR, nDCG
+from ir_measures import AP, RR, P, R, nDCG
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -170,7 +170,9 @@ def run_retrieval_eval(
         raise ValueError("No queries to evaluate after max_queries.")
     if retrieve_external_ids is None:
         raise ValueError("retrieve_external_ids callback is required for sparse evaluation.")
-    known_doc_ids = {str(doc.external_id).strip() for doc in dataset.docs if str(doc.external_id).strip()}
+    known_doc_ids = {
+        str(doc.external_id).strip() for doc in dataset.docs if str(doc.external_id).strip()
+    }
     if not known_doc_ids:
         raise ValueError("Dataset contains no known corpus document IDs.")
 

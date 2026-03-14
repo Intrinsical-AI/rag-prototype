@@ -149,7 +149,7 @@ def test_run_retrieval_eval_reports_standard_ir_metrics_for_perfect_run() -> Non
             return ("doc:lisbon",)
         if "Italy" in query:
             return ("doc:rome",)
-        return tuple()
+        return ()
 
     res = run_retrieval_eval(
         dataset=ds,
@@ -184,7 +184,7 @@ def test_run_retrieval_eval_filters_unknown_ids_and_deduplicates_run() -> None:
             return ("doc:unknown", "doc:paris", "doc:paris")
         if "Spain" in query:
             return ("doc:paris", "doc:madrid")
-        return tuple()
+        return ()
 
     res = run_retrieval_eval(
         dataset=ds,

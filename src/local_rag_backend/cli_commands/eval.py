@@ -83,10 +83,7 @@ def eval_cmd(
 
         if failures:
             click.echo(
-                "[ERROR] Eval regression: "
-                + format_eval_result(res)
-                + " | "
-                + "; ".join(failures),
+                "[ERROR] Eval regression: " + format_eval_result(res) + " | " + "; ".join(failures),
                 err=True,
             )
             raise SystemExit(1)
