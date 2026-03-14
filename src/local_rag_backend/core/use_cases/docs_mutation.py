@@ -141,7 +141,9 @@ class MutationCoordinator:
                         )
                     else:
                         if journal is None:  # pragma: no cover
-                            raise RuntimeError("Mutation journal is required for durable saga mode.")
+                            raise RuntimeError(
+                                "Mutation journal is required for durable saga mode."
+                            )
                         item.result = self._saga.execute_locked(
                             prepared=cast("PreparedMutation", item.payload),
                             journal=journal,

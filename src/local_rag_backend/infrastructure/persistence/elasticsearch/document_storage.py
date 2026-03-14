@@ -173,12 +173,10 @@ class ElasticDocsRepository(DocumentRepoPort):
                 action = "inserted"
             else:
                 content_changed = (
-                    (existing_doc.content_sha256 or "") != content_sha
-                    or existing_doc.content != content
-                )
-                metadata_changed = (
-                    item.metadata is not None
-                    and dict(item.metadata) != dict(existing_doc.metadata or {})
+                    existing_doc.content_sha256 or ""
+                ) != content_sha or existing_doc.content != content
+                metadata_changed = item.metadata is not None and dict(item.metadata) != dict(
+                    existing_doc.metadata or {}
                 )
                 source_changed = (
                     item.source_id is not None and str(item.source_id) != existing_doc.source_id
@@ -265,7 +263,7 @@ class ElasticDocsRepository(DocumentRepoPort):
             "sort": [{"external_id": "asc"}],
         }
         data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-        hits = (((data.get("hits") or {}).get("hits")) or [])
+        hits = ((data.get("hits") or {}).get("hits")) or []
         out: list[tuple[DocId, str]] = []
         for hit in hits:
             source = dict(hit.get("_source") or {})
@@ -367,7 +365,7 @@ class ElasticDocsRepository(DocumentRepoPort):
             "sort": [{"external_id": "asc"}],
         }
         data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-        hits = (((data.get("hits") or {}).get("hits")) or [])
+        hits = ((data.get("hits") or {}).get("hits")) or []
         return [
             str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or "")
             for hit in hits
@@ -417,8 +415,7 @@ class ElasticDocsRepository(DocumentRepoPort):
         to_tombstone = [ext for ext in ext_ids if ext not in already_ts]
 
         ops: list[dict[str, Any]] = [
-            {"delete": {"_index": str(self._settings.es_docs_index), "_id": ext}}
-            for ext in found
+            {"delete": {"_index": str(self._settings.es_docs_index), "_id": ext}} for ext in found
         ]
         now = _utc_now_iso()
         for ext in to_tombstone:
@@ -449,7 +446,7 @@ class ElasticDocsRepository(DocumentRepoPort):
             if search_after is not None:
                 body["search_after"] = list(search_after)
             data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-            hits = (((data.get("hits") or {}).get("hits")) or [])
+            hits = ((data.get("hits") or {}).get("hits")) or []
             if not hits:
                 break
             docs.extend(self._to_domain_document(hit) for hit in hits)
@@ -470,7 +467,9 @@ class ElasticDocsRepository(DocumentRepoPort):
             id=DocId(external_id),
             content=str(source.get(self._settings.es_content_field) or ""),
             external_id=external_id,
-            source_id=(str(source.get("source_id")) if source.get("source_id") is not None else None),
+            source_id=(
+                str(source.get("source_id")) if source.get("source_id") is not None else None
+            ),
             metadata=metadata,
         )
 
@@ -512,7 +511,11 @@ class ElasticVectorRepo(VectorRepoPort):
             ops.extend(
                 [
                     {"update": {"_index": str(self._settings.es_docs_index), "_id": ext}},
-                    {"script": {"source": f"ctx._source.remove('{self._settings.es_embedding_field}')"}},
+                    {
+                        "script": {
+                            "source": f"ctx._source.remove('{self._settings.es_embedding_field}')"
+                        }
+                    },
                 ]
             )
         for doc_id, vector in upserts:
@@ -550,7 +553,7 @@ class ElasticVectorRepo(VectorRepoPort):
             "_source": False,
         }
         data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-        hits = (((data.get("hits") or {}).get("hits")) or [])
+        hits = ((data.get("hits") or {}).get("hits")) or []
         if not hits:
             return []
         scores = [float(hit.get("_score") or 0.0) for hit in hits]
@@ -578,7 +581,7 @@ class ElasticVectorRepo(VectorRepoPort):
             "_source": False,
         }
         data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-        hits = (((data.get("hits") or {}).get("hits")) or [])
+        hits = ((data.get("hits") or {}).get("hits")) or []
         if not hits:
             return []
         scores = [float(hit.get("_score") or 0.0) for hit in hits]
@@ -596,7 +599,9 @@ class ElasticVectorRepo(VectorRepoPort):
 
     def get_mapping_dimension(self) -> int | None:
         mapping = self._client.get_mapping(index=str(self._settings.es_docs_index))
-        props = (((mapping.get(str(self._settings.es_docs_index)) or {}).get("mappings") or {}).get("properties") or {})
+        props = ((mapping.get(str(self._settings.es_docs_index)) or {}).get("mappings") or {}).get(
+            "properties"
+        ) or {}
         field = props.get(str(self._settings.es_embedding_field)) or {}
         dims = field.get("dims")
         return int(dims) if dims is not None else None

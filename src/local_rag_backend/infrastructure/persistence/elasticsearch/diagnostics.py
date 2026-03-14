@@ -50,7 +50,7 @@ class ElasticHealthDiagnostics:
             "sort": [{"external_id": "asc"}],
         }
         data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-        hits = (((data.get("hits") or {}).get("hits")) or [])
+        hits = ((data.get("hits") or {}).get("hits")) or []
         return tuple(str(hit.get("_id")) for hit in hits if str(hit.get("_id") or "").strip())
 
     def get_retrieval_index_stats(

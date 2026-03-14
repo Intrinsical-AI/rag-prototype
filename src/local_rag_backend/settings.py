@@ -339,9 +339,7 @@ class Settings(BaseSettings):
                     "PERSISTENCE_BACKEND=elasticsearch supports only retrieval_mode=dense|hybrid"
                 )
             if not self.es_base_url:
-                raise ValueError(
-                    "ES_BASE_URL is required when PERSISTENCE_BACKEND=elasticsearch"
-                )
+                raise ValueError("ES_BASE_URL is required when PERSISTENCE_BACKEND=elasticsearch")
         else:
             if not self.sqlite_url.startswith("sqlite:///"):
                 raise ValueError("SQLite URL must start with 'sqlite:///'")

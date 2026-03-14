@@ -115,7 +115,10 @@ async def test_import_canonical_replace_scope_hard_deletes_stale_docs(
     r3 = await asgi_client.post("/api/docs/import-canonical", json=third)
     assert r3.status_code == 200
     assert r3.json()["inserted"] == 1
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-1", "doc-2"}
+    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {
+        "doc-1",
+        "doc-2",
+    }
 
 
 async def test_import_canonical_rejects_duplicate_external_ids(

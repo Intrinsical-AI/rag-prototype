@@ -166,12 +166,12 @@ class ElasticClient:
     def _ensure_docs_index(self, *, index: str, embed_dim: int | None) -> None:
         if self.head_ok(f"/{index}"):
             mapping = self.get_mapping(index=index)
-            props = (((mapping.get(index) or {}).get("mappings") or {}).get("properties") or {})
+            props = ((mapping.get(index) or {}).get("mappings") or {}).get("properties") or {}
             properties_to_add: dict[str, Any] = {
                 field_name: field_mapping
                 for field_name, field_mapping in {
-                "scope": {"type": "keyword"},
-                "snapshot_id": {"type": "keyword"},
+                    "scope": {"type": "keyword"},
+                    "snapshot_id": {"type": "keyword"},
                 }.items()
                 if field_name not in props
             }

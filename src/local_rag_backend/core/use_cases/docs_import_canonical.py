@@ -187,7 +187,9 @@ def _delete_stale_scope_documents(
 
     hard_delete = getattr(doc_repo, "hard_delete_by_external_ids", None)
     if not callable(hard_delete):
-        raise RuntimeError("Configured document repository does not support hard_delete_by_external_ids.")
+        raise RuntimeError(
+            "Configured document repository does not support hard_delete_by_external_ids."
+        )
     deleted_sql_raw = hard_delete(stale_external_ids)
     deleted_sql = int(deleted_sql_raw) if deleted_sql_raw is not None else len(stale_external_ids)
 
@@ -207,7 +209,9 @@ def _delete_vectors_for_doc_ids(
     settings_obj: Settings,
     ports: DocsMutationPorts,
 ) -> int:
-    deduped_doc_ids = [DocId(str(doc_id)) for doc_id in {str(doc_id) for doc_id in doc_ids if str(doc_id)}]
+    deduped_doc_ids = [
+        DocId(str(doc_id)) for doc_id in {str(doc_id) for doc_id in doc_ids if str(doc_id)}
+    ]
     if not deduped_doc_ids:
         return 0
     vec_repo = ports.vector_repo_factory(

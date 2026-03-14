@@ -51,7 +51,9 @@ def validate_storage_profile(
         raise RuntimeError(
             f"Storage profile {profile.profile_id!r} is read-only and cannot serve mutations."
         )
-    if not profile.has(StorageCapability.DURABLE_SAGA) and not profile.has(StorageCapability.ATOMIC):
+    if not profile.has(StorageCapability.DURABLE_SAGA) and not profile.has(
+        StorageCapability.ATOMIC
+    ):
         raise RuntimeError(
             f"Storage profile {profile.profile_id!r} does not satisfy writable storage capabilities."
         )

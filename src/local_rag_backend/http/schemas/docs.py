@@ -80,7 +80,9 @@ class CanonicalImportRequest(BaseModel):
     scope: str = Field(..., min_length=1, max_length=512)
     snapshot_id: str = Field(..., min_length=1, max_length=512)
     replace_scope: bool = False
-    documents: list[CanonicalImportDocItem] = Field(default_factory=list, min_length=1, max_length=5000)
+    documents: list[CanonicalImportDocItem] = Field(
+        default_factory=list, min_length=1, max_length=5000
+    )
 
     @field_validator("scope", "snapshot_id")
     @classmethod

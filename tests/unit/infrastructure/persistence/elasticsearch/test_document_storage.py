@@ -44,7 +44,7 @@ def _build_transport() -> httpx.MockTransport:
         if method == "PUT" and path.count("/") == 1:
             index = path.strip("/")
             body = _json(request)
-            mapping = (((body.get("mappings") or {}).get("properties")) or {})
+            mapping = ((body.get("mappings") or {}).get("properties")) or {}
             indices[index] = {"docs": {}, "mapping": dict(mapping)}
             return httpx.Response(200, json={"acknowledged": True})
 
@@ -99,21 +99,35 @@ def _build_transport() -> httpx.MockTransport:
             body = _json(request)
             query = dict(body.get("query") or {})
             sort = list(body.get("sort") or [])
-            term_scope = ((query.get("term") or {}).get("scope")) if isinstance(query, dict) else None
+            term_scope = (
+                ((query.get("term") or {}).get("scope")) if isinstance(query, dict) else None
+            )
             prefix_external_id = (
-                ((query.get("prefix") or {}).get("external_id")) if isinstance(query, dict) else None
+                ((query.get("prefix") or {}).get("external_id"))
+                if isinstance(query, dict)
+                else None
             )
             hits = []
             for doc_id, source in docs.items():
                 if term_scope is not None and source.get("scope") != term_scope:
                     continue
-                if prefix_external_id is not None and not str(source.get("external_id") or "").startswith(
-                    str(prefix_external_id)
-                ):
+                if prefix_external_id is not None and not str(
+                    source.get("external_id") or ""
+                ).startswith(str(prefix_external_id)):
                     continue
-                hits.append({"_id": str(doc_id), "_source": dict(source), "sort": [source.get("external_id")]})
+                hits.append(
+                    {
+                        "_id": str(doc_id),
+                        "_source": dict(source),
+                        "sort": [source.get("external_id")],
+                    }
+                )
             if sort:
-                hits.sort(key=lambda hit: str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or ""))
+                hits.sort(
+                    key=lambda hit: str(
+                        (hit.get("_source") or {}).get("external_id") or hit.get("_id") or ""
+                    )
+                )
             return httpx.Response(200, json={"hits": {"hits": hits}})
 
         raise AssertionError(f"Unhandled {method} {path}")

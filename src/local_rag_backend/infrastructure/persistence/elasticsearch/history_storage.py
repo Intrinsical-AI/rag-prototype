@@ -56,14 +56,16 @@ class ElasticHistoryStorage(QAHistoryPort):
             "query": {"match_all": {}},
         }
         data = self._client.search(index=str(self._settings.es_history_index), body=body)
-        hits = (((data.get("hits") or {}).get("hits")) or [])
+        hits = ((data.get("hits") or {}).get("hits")) or []
         return tuple(
             ElasticHistoryEntry(
                 id=int((hit.get("_source") or {}).get("id") or 0),
                 question=str((hit.get("_source") or {}).get("question") or ""),
                 answer=str((hit.get("_source") or {}).get("answer") or ""),
                 created_at=str((hit.get("_source") or {}).get("created_at") or ""),
-                source_ids=tuple(str(x) for x in ((hit.get("_source") or {}).get("source_ids") or [])),
+                source_ids=tuple(
+                    str(x) for x in ((hit.get("_source") or {}).get("source_ids") or [])
+                ),
             )
             for hit in hits
             if isinstance(hit, dict)

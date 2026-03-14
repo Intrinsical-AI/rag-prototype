@@ -147,7 +147,9 @@ class _ElasticTestState:
                         hits = [
                             hit
                             for hit in hits
-                            if str((hit.get("_source") or {}).get(str(field)) or hit.get("_id") or "")
+                            if str(
+                                (hit.get("_source") or {}).get(str(field)) or hit.get("_id") or ""
+                            )
                             > cursor
                         ]
                 elif hits and any(float(hit.get("_score") or 0.0) != 1.0 for hit in hits):
@@ -342,10 +344,15 @@ def test_elastic_client_index_management_and_errors() -> None:
         error_client.request_json("GET", "/")
 
     api_key_settings = backend.settings.model_copy(update={"es_api_key": "secret"})
-    assert ElasticClient(
-        settings_obj=api_key_settings,
-        client=httpx.Client(base_url="http://example.test", transport=backend.state.transport()),
-    )._resolve_headers()["Authorization"] == "ApiKey secret"
+    assert (
+        ElasticClient(
+            settings_obj=api_key_settings,
+            client=httpx.Client(
+                base_url="http://example.test", transport=backend.state.transport()
+            ),
+        )._resolve_headers()["Authorization"]
+        == "ApiKey secret"
+    )
 
 
 def test_document_repository_crud_snapshot_restore_and_scan() -> None:
@@ -410,7 +417,9 @@ def test_document_repository_crud_snapshot_restore_and_scan() -> None:
     assert len(snapshots_by_id) == 2
     assert len(snapshots_by_external_id) == 2
 
-    deleted_count, deleted_ids, missing, tombstoned = repo.delete_by_external_ids(["doc-2", "missing"])
+    deleted_count, deleted_ids, missing, tombstoned = repo.delete_by_external_ids(
+        ["doc-2", "missing"]
+    )
     assert deleted_count == 1
     assert deleted_ids == [DocId("doc-2")]
     assert missing == ["missing"]
@@ -524,9 +533,12 @@ def test_vector_history_system_and_diagnostics_roundtrip() -> None:
         "documents": 3,
     }
     with TemporaryDirectory() as tmp_dir:
-        assert backend.diagnostics.get_incomplete_mutation_records_count(
-            coordination_dir=Path(tmp_dir)
-        ) == 0
+        assert (
+            backend.diagnostics.get_incomplete_mutation_records_count(
+                coordination_dir=Path(tmp_dir)
+            )
+            == 0
+        )
     assert purge_index_artifacts_noop(index_path="x", id_map_path="y") is None
 
 

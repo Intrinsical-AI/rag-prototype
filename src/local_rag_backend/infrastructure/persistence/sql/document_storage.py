@@ -41,7 +41,14 @@ class _DocumentChanges:
 
     @property
     def any_changed(self) -> bool:
-        return self.content or self.metadata or self.source or self.scope or self.snapshot or self.dedup
+        return (
+            self.content
+            or self.metadata
+            or self.source
+            or self.scope
+            or self.snapshot
+            or self.dedup
+        )
 
 
 def _to_domain_document(d: DbDocument) -> DomainDocument:

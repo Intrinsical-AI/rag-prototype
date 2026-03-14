@@ -178,7 +178,9 @@ class AppContainer:
         self.ollama_generator_factory = ollama_generator_factory or cast(
             "Callable[..., GeneratorPort]", defaults["ollama_generator_factory"]
         )
-        default_doc_repo_factory = cast("Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"])
+        default_doc_repo_factory = cast(
+            "Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"]
+        )
         self.doc_repo_factory = doc_repo_factory or default_doc_repo_factory
         if use_elasticsearch and self.doc_repo_factory == default_doc_repo_factory:
             self.doc_repo_factory = lambda: ElasticDocsRepository(settings_obj=self.settings_obj)
@@ -193,7 +195,9 @@ class AppContainer:
         )
         self.history_repo_factory = history_repo_factory or default_history_repo_factory
         if use_elasticsearch and self.history_repo_factory == default_history_repo_factory:
-            self.history_repo_factory = lambda: ElasticHistoryStorage(settings_obj=self.settings_obj)
+            self.history_repo_factory = lambda: ElasticHistoryStorage(
+                settings_obj=self.settings_obj
+            )
         self.sparse_retriever_factory = sparse_retriever_factory or cast(
             "Callable[..., RetrieverPort]", defaults["sparse_retriever_factory"]
         )
@@ -303,7 +307,7 @@ class AppContainer:
     def build_health_diagnostics_port(self, *, engine: Any | None = None) -> HealthDiagnosticsPort:
         return build_health_diagnostics_port(
             settings_obj=self.settings_obj,
-            engine=(engine if engine is not None else db_base.engine)
+            engine=(engine if engine is not None else db_base.engine),
         )
 
     def build_health_readiness_bundle(self, *, engine: Any | None = None) -> HealthReadinessBundle:
