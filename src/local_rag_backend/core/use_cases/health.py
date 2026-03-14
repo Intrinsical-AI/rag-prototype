@@ -81,7 +81,9 @@ def check_retrieval_index(
     diagnostics: HealthDiagnosticsPort,
     expected_manifest: dict[str, Any] | None = None,
 ) -> bool:
-    if settings_obj.retrieval_mode not in ("dense", "hybrid"):
+    if settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
+        return True
+    if str(getattr(settings_obj, "search_backend", "local_split")) != "local_split":
         return True
 
     stats = diagnostics.get_retrieval_index_stats(

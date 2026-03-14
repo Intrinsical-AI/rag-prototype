@@ -12,7 +12,9 @@ class TemplateResponse(BaseModel):
 
 
 class ConfigResponse(BaseModel):
+    search_backend: str
     retrieval_mode: str
+    dual_candidate_k: int
     hybrid_alpha: float
     temperature: float
     max_tokens: int

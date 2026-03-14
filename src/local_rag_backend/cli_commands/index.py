@@ -20,8 +20,8 @@ def rebuild_index_cmd() -> None:
         from local_rag_backend.core.use_cases import index as index_service
 
         container = get_cli_container()
-        if container.settings_obj.retrieval_mode not in ("dense", "hybrid"):
-            raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|hybrid")
+        if container.settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
+            raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|dual|hybrid")
         ports = container.index_mutation_ports(
             build_embedder=build_dense_embedder,
         )
@@ -121,7 +121,7 @@ def status_cmd() -> None:
     except Exception as e:
         click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
 
-    if settings.retrieval_mode in ("dense", "hybrid"):
+    if settings.retrieval_mode in ("dense", "dual", "hybrid"):
         stats = diagnostics.get_retrieval_index_stats(
             index_path=settings.index_path,
             id_map_path=settings.id_map_path,
