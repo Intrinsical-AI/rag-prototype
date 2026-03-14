@@ -264,8 +264,29 @@ class AppContainer:
 
     def validate_rag_config(self, config: AskEvalConfigLike) -> list[str]:
         errors = []
-        if config.retrieval_mode not in ["sparse", "dense", "hybrid"]:
+        if config.retrieval_mode not in ["sparse", "dense", "dual", "hybrid"]:
             errors.append(f"Invalid retrieval_mode: {config.retrieval_mode}")
+        if self.settings_obj.search_backend == "solr" and config.retrieval_mode in {
+            "dense",
+            "dual",
+        }:
+            errors.append("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
+        if config.retrieval_mode == "hybrid" and self.settings_obj.search_backend not in {
+            "local_split",
+            "elasticsearch",
+        }:
+            errors.append(
+                "retrieval_mode=hybrid is supported only with SEARCH_BACKEND=local_split|elasticsearch"
+            )
+        if (
+            config.retrieval_mode == "hybrid"
+            and self.settings_obj.search_backend == "elasticsearch"
+            and self.settings_obj.persistence_backend != "elasticsearch"
+        ):
+            errors.append(
+                "retrieval_mode=hybrid with SEARCH_BACKEND=elasticsearch requires "
+                "PERSISTENCE_BACKEND=elasticsearch"
+            )
         if config.prompt_template is not None:
             try:
                 validate_prompt_template(config.prompt_template)

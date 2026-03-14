@@ -104,7 +104,7 @@ class RagService:
                 self.history_storage.save(question, answer, [])
             except Exception as e:  # pragma: no cover
                 logger.warning("History persistence failed (ignored): %s", e)
-            return {"answer": answer, "docs": [], "scores": []}
+            return {"answer": answer, "docs": [], "scores": [], "retrieval": retrieval}
 
         # 3. Generate an answer using the retrieved contexts
         contexts = [doc.content for doc in docs]

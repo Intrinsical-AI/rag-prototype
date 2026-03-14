@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def uses_vector_index(*, settings_obj: Settings) -> bool:
-    return str(settings_obj.retrieval_mode) in ("dense", "hybrid")
+    return str(settings_obj.retrieval_mode) in ("dense", "dual", "hybrid")
 
 
 def validate_storage_profile(

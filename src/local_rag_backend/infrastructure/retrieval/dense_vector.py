@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalRequest,
+    RetrievalResult,
+    retrieval_result_from_pairs,
+)
 from local_rag_backend.core.ports import (
     DocumentRepoPort,
     EmbedderPort,
@@ -27,7 +32,28 @@ class DenseVectorRetriever(RetrieverPort):
         self.vector_repo = vector_repo
         self.doc_repo = doc_repo
 
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
+    @overload
+    def retrieve(self, query: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
+
+    @overload
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
+
+    def retrieve(
+        self, query: str | RetrievalRequest, k: int = 5
+    ) -> tuple[Sequence[Document], Sequence[float]] | RetrievalResult:
+        if isinstance(query, RetrievalRequest):
+            request = query
+            legacy = self.retrieve(request.query, request.top_k)
+            if isinstance(legacy, RetrievalResult):
+                return legacy
+            docs, scores = legacy
+            return retrieval_result_from_pairs(
+                docs=docs,
+                scores=scores,
+                mode_used="dense",
+                backend_used="legacy_dense",
+                stage="dense",
+            )
         if k <= 0:
             return [], []
 

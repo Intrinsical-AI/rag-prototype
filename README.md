@@ -568,7 +568,7 @@ Current CI gates include:
 - `pre-commit run --all-files`
 - `ruff check src tests` and `ruff format --check src tests`
 - `mypy src`
-- architecture guardrails: `pytest -q -o addopts='' tests/unit/http/test_architecture_*.py`
+- architecture guardrails: `pytest -q -o addopts='' tests/architecture/test_*.py`
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
 - security scan job (`bandit` + `safety` report generation)
 - Docker build for `--target production` on `main/master`

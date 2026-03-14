@@ -79,7 +79,16 @@ class Settings(BaseSettings):
     )
 
     # --- Retrieval --- #
-    retrieval_mode: Literal["sparse", "dense", "hybrid"] = Field(
+    search_backend: Literal["local_split", "elasticsearch", "opensearch", "solr"] = Field(
+        "local_split",
+        description=(
+            "Search execution backend. "
+            "'local_split' queries the local SQL/vector stores; "
+            "'elasticsearch' and 'opensearch' query remote search clusters; "
+            "'solr' queries a remote Solr core."
+        ),
+    )
+    retrieval_mode: Literal["sparse", "dense", "dual", "hybrid"] = Field(
         # Default to sparse to keep the base installation lightweight; dense/hybrid require extra deps.
         "sparse",
         description="Retrieval strategy.",
@@ -93,6 +102,12 @@ class Settings(BaseSettings):
     )
     hybrid_retrieval_alpha: float = Field(
         0.5, ge=0.0, le=1.0, description="Weight of sparse vs. dense in hybrid mode."
+    )
+    dual_candidate_k: int = Field(
+        50,
+        ge=1,
+        le=1000,
+        description="Sparse candidate count for dual retrieval before dense rerank.",
     )
     st_embedding_model: str = Field(
         "all-MiniLM-L6-v2", description="Sentence Transformers model for embeddings."
@@ -207,6 +222,26 @@ class Settings(BaseSettings):
     )
     es_hybrid_vector_k: int = Field(
         50, ge=1, le=1000, description="Vector candidate count for Elasticsearch hybrid."
+    )
+    os_base_url: str | None = Field(None, description="OpenSearch base URL.")
+    os_api_key: str | None = Field(None, description="OpenSearch API key.")
+    os_username: str | None = Field(None, description="OpenSearch username.")
+    os_password: str | None = Field(None, description="OpenSearch password.")
+    os_verify_tls: bool = Field(True, description="Verify OpenSearch TLS certificates.")
+    os_request_timeout_s: float = Field(
+        30.0, ge=0.5, le=600.0, description="OpenSearch request timeout in seconds."
+    )
+    os_docs_index: str = Field("rag-docs", description="OpenSearch index for documents.")
+    os_content_field: str = Field("content", description="OpenSearch content field name.")
+    os_embedding_field: str = Field("embedding", description="OpenSearch dense vector field name.")
+    os_dense_candidate_k: int = Field(
+        50, ge=1, le=1000, description="Vector candidate count for OpenSearch dense retrieval."
+    )
+    solr_base_url: str | None = Field(None, description="Solr base URL.")
+    solr_core: str = Field("rag-docs", description="Solr core/collection for documents.")
+    solr_content_field: str = Field("content", description="Solr content field name.")
+    solr_request_timeout_s: float = Field(
+        30.0, ge=0.5, le=600.0, description="Solr request timeout in seconds."
     )
 
     # --- Ingestion --- #
@@ -328,21 +363,65 @@ class Settings(BaseSettings):
             raise ValueError("Elasticsearch URL must start with http:// or https://")
         return v.rstrip("/")
 
+    @field_validator("os_base_url")
+    @classmethod
+    def _validate_os_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("OpenSearch URL must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("solr_base_url")
+    @classmethod
+    def _validate_solr_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Solr URL must start with http:// or https://")
+        return v.rstrip("/")
+
     @model_validator(mode="after")
     def _validate_chunking(self) -> Settings:
         """Ensure chunk overlap is strictly less than chunk size."""
         if self.ingest_chunk_overlap >= self.ingest_chunk_chars:
             raise ValueError("ingest_chunk_overlap must be strictly less than ingest_chunk_chars")
         if self.persistence_backend == "elasticsearch":
-            if self.retrieval_mode == "sparse":
+            if self.retrieval_mode == "sparse" and self.search_backend != "elasticsearch":
                 raise ValueError(
-                    "PERSISTENCE_BACKEND=elasticsearch supports only retrieval_mode=dense|hybrid"
+                    "PERSISTENCE_BACKEND=elasticsearch supports retrieval_mode=sparse only when "
+                    "SEARCH_BACKEND=elasticsearch"
                 )
             if not self.es_base_url:
                 raise ValueError("ES_BASE_URL is required when PERSISTENCE_BACKEND=elasticsearch")
         else:
             if not self.sqlite_url.startswith("sqlite:///"):
                 raise ValueError("SQLite URL must start with 'sqlite:///'")
+
+        if self.search_backend == "elasticsearch" and not self.es_base_url:
+            raise ValueError("ES_BASE_URL is required when SEARCH_BACKEND=elasticsearch")
+        if self.search_backend == "opensearch" and not self.os_base_url:
+            raise ValueError("OS_BASE_URL is required when SEARCH_BACKEND=opensearch")
+        if self.search_backend == "solr" and not self.solr_base_url:
+            raise ValueError("SOLR_BASE_URL is required when SEARCH_BACKEND=solr")
+        if self.search_backend == "solr" and self.retrieval_mode in {"dense", "dual"}:
+            raise ValueError("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
+        if self.retrieval_mode == "hybrid" and self.search_backend not in {
+            "local_split",
+            "elasticsearch",
+        }:
+            raise ValueError(
+                "retrieval_mode=hybrid is supported only with SEARCH_BACKEND=local_split|elasticsearch"
+            )
+        if (
+            self.retrieval_mode == "hybrid"
+            and self.search_backend == "elasticsearch"
+            and self.persistence_backend != "elasticsearch"
+        ):
+            raise ValueError(
+                "retrieval_mode=hybrid with SEARCH_BACKEND=elasticsearch requires "
+                "PERSISTENCE_BACKEND=elasticsearch"
+            )
         return self
 
     def get_database_path(self) -> Path:

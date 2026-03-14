@@ -11,7 +11,8 @@ def _reset_cache() -> None:
     deps.reset_rag_service()
 
 
-async def test_get_rag_service_sparse_openai(monkeypatch):
+async def test_get_rag_service_sparse_openai(monkeypatch, reset_app_context):
+    _ = reset_app_context
     _reset_cache()
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
@@ -40,7 +41,8 @@ async def test_get_rag_service_sparse_openai(monkeypatch):
     assert hasattr(svc1, "retriever")
 
 
-async def test_get_rag_service_dense_ollama(monkeypatch):
+async def test_get_rag_service_dense_ollama(monkeypatch, reset_app_context):
+    _ = reset_app_context
     _reset_cache()
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
@@ -66,7 +68,8 @@ async def test_get_rag_service_dense_ollama(monkeypatch):
     assert hasattr(svc, "retriever")
 
 
-async def test_get_rag_service_hybrid_openai(monkeypatch):
+async def test_get_rag_service_hybrid_openai(monkeypatch, reset_app_context):
+    _ = reset_app_context
     _reset_cache()
     monkeypatch.setattr(settings, "retrieval_mode", "hybrid", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
@@ -126,7 +129,10 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
     assert svc2 is not svc1
 
 
-async def test_app_context_and_settings_dependencies_share_runtime_context() -> None:
+async def test_app_context_and_settings_dependencies_share_runtime_context(
+    reset_app_context,
+) -> None:
+    _ = reset_app_context
     deps.reset_rag_service()
     ctx = deps.get_app_context()
     assert await deps.get_settings_dependency() is ctx.settings
