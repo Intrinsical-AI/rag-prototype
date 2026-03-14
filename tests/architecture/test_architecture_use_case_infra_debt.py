@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+# Intentional zero-debt baseline: any new infra/composition import in use cases must be explicit.
 _EXPECTED_USE_CASE_INFRA_IMPORTS: dict[str, set[str]] = {}
 
 _DEBT_PREFIXES = (

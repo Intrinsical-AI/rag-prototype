@@ -1,4 +1,4 @@
-# tests/unit/app/test_cli.py
+# tests/unit/cli/test_cli.py
 
 from click.testing import CliRunner
 

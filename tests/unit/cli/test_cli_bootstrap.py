@@ -36,3 +36,16 @@ def test_bootstrap_cli_runs_sample_data_ingestion(monkeypatch) -> None:
     assert calls["settings_obj"] is settings
     assert calls["ingestion_kwargs"] == {}
     assert calls["mutation_kwargs"] == {"use_lock": False, "ensure_schema": False}
+
+
+def test_bootstrap_cli_reports_ingestion_failure(monkeypatch) -> None:
+    def _boom(operation, **kwargs):
+        _ = (operation, kwargs)
+        raise RuntimeError("sample ingestion failed")
+
+    monkeypatch.setattr(bootstrap_cmd_module, "run_cli_mutation", _boom, raising=True)
+
+    result = CliRunner().invoke(bootstrap_cmd_module.bootstrap_cmd)
+
+    assert result.exit_code == 1
+    assert "[ERROR] Error bootstrapping: sample ingestion failed" in result.output
