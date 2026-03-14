@@ -12,6 +12,7 @@ from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
     RetrievalResult,
     RetrievedDoc,
+    metadata_key_for_filter_field,
     retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
@@ -22,7 +23,15 @@ def _doc_field_value(doc: Document, field: str) -> str | None:
     if field == "source_id":
         return str(doc.source_id) if doc.source_id is not None else None
     metadata = dict(doc.metadata or {})
-    value = metadata.get(field)
+    metadata_key = metadata_key_for_filter_field(field)
+    if metadata_key is None:
+        value = metadata.get(field)
+    else:
+        value = metadata
+        for part in metadata_key.split("."):
+            if not isinstance(value, dict):
+                return None
+            value = value.get(part)
     return str(value) if value is not None else None
 
 

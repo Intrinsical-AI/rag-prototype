@@ -14,6 +14,7 @@ from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
     RetrievalResult,
     RetrievedDoc,
+    metadata_key_for_filter_field,
 )
 from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.ports import EmbedderPort
@@ -93,7 +94,10 @@ class ElasticLikeSearchRetriever:
             if filter_item.field in {"scope", "source_id"}:
                 field_name = filter_item.field
             else:
-                field_name = f"metadata.{filter_item.field}.keyword"
+                metadata_key = metadata_key_for_filter_field(filter_item.field)
+                if metadata_key is None:
+                    raise ValueError(f"Unsupported filter field: {filter_item.field}")
+                field_name = f"metadata.{metadata_key}.keyword"
             clauses.append({"terms": {field_name: list(filter_item.values)}})
         return clauses
 

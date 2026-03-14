@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field, field_validator
 
-from local_rag_backend.core.domain.retrieval import RetrievalFilter
+from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
 from local_rag_backend.http.schemas.shared import DocumentInDB
 
 
@@ -16,8 +14,13 @@ class QueryResult(BaseModel):
 
 
 class RetrievalFilterModel(BaseModel):
-    field: Literal["scope", "source_id", "path", "language", "unit_type"]
+    field: str = Field(..., min_length=1, max_length=256)
     values: list[str] = Field(..., min_length=1)
+
+    @field_validator("field")
+    @classmethod
+    def _field_is_supported(cls, v: str) -> str:
+        return normalize_filter_field(v)
 
     def to_domain(self) -> RetrievalFilter:
         return RetrievalFilter(field=self.field, values=tuple(self.values))
