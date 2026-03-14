@@ -436,6 +436,8 @@ def _apply_sql_mutation(
                 external_id=u.external_id,
                 content=u.content,
                 source_id=u.source_id,
+                scope=u.scope,
+                snapshot_id=u.snapshot_id,
                 metadata=u.metadata,
             )
             for u in intent.upserts

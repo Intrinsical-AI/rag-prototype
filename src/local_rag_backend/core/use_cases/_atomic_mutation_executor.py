@@ -40,6 +40,8 @@ class AtomicMutationExecutor:
                     external_id=u.external_id,
                     content=u.content,
                     source_id=u.source_id,
+                    scope=u.scope,
+                    snapshot_id=u.snapshot_id,
                     metadata=u.metadata,
                     embedding=prepared.precomputed_vectors_by_external_id.get(u.external_id),
                 )
