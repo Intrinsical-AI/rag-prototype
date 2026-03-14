@@ -122,13 +122,17 @@ def status_cmd() -> None:
         click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
 
     if settings.retrieval_mode in ("dense", "dual", "hybrid"):
-        stats = diagnostics.get_retrieval_index_stats(
-            index_path=settings.index_path,
-            id_map_path=settings.id_map_path,
-            vector_backend=settings.vector_backend,
-            dim=None,
-            expected_manifest=readiness_bundle.expected_manifest,
-        )
+        try:
+            stats = diagnostics.get_retrieval_index_stats(
+                index_path=settings.index_path,
+                id_map_path=settings.id_map_path,
+                vector_backend=settings.vector_backend,
+                dim=None,
+                expected_manifest=readiness_bundle.expected_manifest,
+            )
+        except Exception as e:
+            click.echo(f"  {click.style('Index:', fg=key_fg, bold=True)} [ERROR] {e!s}")
+            return
         status_txt = str(stats.get("status"))
         if status_txt == "ok":
             click.echo(

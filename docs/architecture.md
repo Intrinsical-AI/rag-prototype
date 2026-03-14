@@ -510,7 +510,7 @@ Active ADR set for D1:
   - `rag-server`
 - How to run tests:
   - full: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q`
-  - architecture smoke: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q -o addopts='' tests/unit/http/test_architecture_*.py`
+  - architecture smoke: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q -o addopts='' tests/architecture/test_*.py`
 - Where to add a new feature:
   - domain rules in `core/domain` or `core/services`
   - orchestration in `core/use_cases`
