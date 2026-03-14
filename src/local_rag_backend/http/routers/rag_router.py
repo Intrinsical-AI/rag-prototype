@@ -79,10 +79,10 @@ def _build_ask_call(
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
 async def ask(
     request: AskRequest,
-    service: RagService = Depends(get_rag_service),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> AskResponse:
     """Ask a question using Retrieval-Augmented Generation."""
+    service = await get_rag_service()
     t = Timer()
     ok = False
     try:

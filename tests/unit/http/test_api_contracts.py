@@ -4,8 +4,7 @@ API contract validation tests for parameter bounds and validation.
 
 import pytest
 
-from local_rag_backend.http import dependencies as deps
-from local_rag_backend.http.main import app
+from local_rag_backend.http.routers import rag_router
 
 
 class _MockRagService:
@@ -25,15 +24,13 @@ class _MockRagService:
 
 
 @pytest.fixture(autouse=True)
-def _mock_rag_service():
-    """Override RAG service dependency for all tests in this module."""
+def _mock_rag_service(monkeypatch):
+    """Override RAG service resolver for all tests in this module."""
 
     async def _override():
         return _MockRagService()
 
-    app.dependency_overrides[deps.get_rag_service] = _override
-    yield
-    app.dependency_overrides.pop(deps.get_rag_service, None)
+    monkeypatch.setattr(rag_router, "get_rag_service", _override, raising=True)
 
 
 async def test_ask_rejects_k_out_of_range(asgi_client, in_memory_sqlite) -> None:

@@ -38,7 +38,7 @@
 * **API**
 
   * FastAPI with validation and OpenAPI at `/docs`.
-  * Health: `/api/health`, Readiness: `/api/ready`, Ollama health: `/api/health/ollama`.
+  * Public probes: `/healthz`, `/readyz`, Ollama health: `/healthz/ollama`.
   * Config: `/api/config`, Templates: `/api/templates`.
   * OpenRouter proxy (OpenAI-compatible): `POST /api/openrouter/generate`.
 * **Tests**
@@ -83,8 +83,8 @@ rag-bootstrap
 # FastAPI server
 rag-server
 # UI: http://localhost:8000/
-# Health: http://localhost:8000/api/health
-# Ollama health: http://localhost:8000/api/health/ollama
+# Health: http://localhost:8000/healthz
+# Ollama health: http://localhost:8000/healthz/ollama
 # Docs: http://localhost:8000/docs
 ```
 
@@ -118,7 +118,7 @@ Key variables (non-exhaustive):
 | `PERSISTENCE_BACKEND`            | `local_split`             | storage      | `local_split` \| `elasticsearch`                       |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
-| `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
+| `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | Bootstrap CSV path (must exist; no fallback)          |
 | `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
 | `INGEST_CHUNK_STRATEGY`          | `chars_v1`                | ingestion    | Chunking strategy identifier (deterministic)           |
 | `INGEST_CHUNKER_VERSION`         | `chars_v1`                | ingestion    | Version token included in chunk dedup hashes           |
@@ -195,7 +195,7 @@ Key variables (non-exhaustive):
 When `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
-If you change any of these settings, `/api/ready` and `rag-status` will report drift and instruct you to rebuild:
+If you change any of these settings, `/readyz` and `rag-status` will report drift and instruct you to rebuild:
 `rag-rebuild-index` (or `POST /api/index/rebuild`).
 
 **Note:**  **fresh-install only** storage contract.
@@ -342,8 +342,8 @@ docker compose up -d --build
 docker exec -it ollama ollama pull lfm2.5-thinking
 
 # Verify services
-curl http://localhost:8000/api/health
-curl http://localhost:8000/api/health/ollama
+curl http://localhost:8000/healthz
+curl http://localhost:8000/healthz/ollama
 ```
 
 Notes:
@@ -398,8 +398,8 @@ docker compose up -d
 ## API
 
 * `GET /` → Serves packaged `index.html` or the source tree `src/local_rag_backend/frontend/index.html`.
-* `GET /api/health` and `GET /api/ready`
-* `GET /api/health/ollama`
+* `GET /healthz` and `GET /readyz`
+* `GET /healthz/ollama`
 * `GET /api/config` and `GET /api/templates`
 * `POST /api/ask`
   * Body: `{ "question": "str", "k": int (1..10, default 3) }`
@@ -556,6 +556,7 @@ sequenceDiagram
 UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --extra server --no-default-groups
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
+PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run --active --no-sync lint-imports
 uv run pre-commit run --all-files
 ```
 
@@ -569,6 +570,7 @@ Current CI gates include:
 - `ruff check src tests` and `ruff format --check src tests`
 - `mypy src`
 - architecture guardrails: `pytest -q -o addopts='' tests/architecture/test_*.py`
+- `lint-imports` (macro architecture contracts via `.importlinter`)
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
 - security scan job (`bandit` + `safety` report generation)
 - Docker build for `--target production` on `main/master`
@@ -581,6 +583,7 @@ For local parity, use:
 
 ```bash
 make lint
+make lint-imports
 make type
 make test
 make sec        # strict

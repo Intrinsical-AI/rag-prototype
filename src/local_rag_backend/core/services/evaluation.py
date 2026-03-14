@@ -129,16 +129,13 @@ def run_retrieval_eval(
         relevant = set(q.relevant_external_ids)
         retrieved_ext = [str(eid) for eid in retrieve_external_ids(q.query, k) if str(eid).strip()]
 
-        hit = any(eid in relevant for eid in retrieved_ext)
-        if hit:
-            hits += 1
-
         rank = None
         for i, eid in enumerate(retrieved_ext, 1):
             if eid in relevant:
                 rank = i
                 break
         if rank is not None:
+            hits += 1
             rr_sum += 1.0 / float(rank)
 
     n = len(qs)

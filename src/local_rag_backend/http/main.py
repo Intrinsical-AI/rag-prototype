@@ -24,6 +24,7 @@ from local_rag_backend.http.api_router import router
 from local_rag_backend.http.dependencies import get_rag_service
 from local_rag_backend.http.exception_handlers import register_exception_handlers
 from local_rag_backend.http.middleware import MetricsMiddleware, get_metrics
+from local_rag_backend.http.routers.health import router as health_router
 from local_rag_backend.http.security import enforce_safe_bind_config, require_api_key
 from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.settings import settings
@@ -164,6 +165,7 @@ app.add_middleware(
 if settings.enable_monitoring:
     app.add_middleware(MetricsMiddleware)
 
+app.include_router(health_router)
 app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
 
 

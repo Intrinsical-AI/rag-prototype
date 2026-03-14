@@ -38,3 +38,21 @@ def test_rag_eval_fails_below_threshold(tmp_path: Path) -> None:
     )
     assert r.exit_code == 1, r.output
     assert "Eval regression" in r.output
+
+
+def test_rag_eval_reports_invalid_jsonl_cleanly(tmp_path: Path) -> None:
+    ds = tmp_path / "bad.jsonl"
+    ds.write_text('{"not":"valid"\n', encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["eval", "--dataset", str(ds)])
+    assert r.exit_code == 1
+    assert "[ERROR] Error evaluating dataset:" in r.output
+
+
+def test_rag_eval_reports_empty_dataset_cleanly(tmp_path: Path) -> None:
+    ds = tmp_path / "empty.jsonl"
+    ds.write_text("", encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["eval", "--dataset", str(ds)])
+    assert r.exit_code == 1
+    assert "[ERROR] Error evaluating dataset:" in r.output
