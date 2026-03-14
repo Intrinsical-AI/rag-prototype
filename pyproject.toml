@@ -40,6 +40,7 @@ classifiers = [
 dependencies = [
   # AI/ML Core (lightweight defaults; heavy deps are optional extras)
   "rank-bm25>=0.2,<1.0",
+  "ir-measures>=0.4,<1.0",
   "numpy>=2.0,<2.3",
   # LLM Integrations
   "openai>=1.24,<2.0",

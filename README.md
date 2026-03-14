@@ -298,7 +298,8 @@ rag-mutate-docs --json /tmp/mutate_delete_external_ids.json
 rag-status
 
 
-# Offline retrieval evaluation (reproducible gate; default dataset from `datasets/rag_eval_v1.jsonl`)
+# Offline IR evaluation with standard metrics via `ir_measures`
+# (reproducible gate; default dataset from `datasets/rag_eval_v1.jsonl`)
 rag-eval --retrieval-mode sparse
 ```
 

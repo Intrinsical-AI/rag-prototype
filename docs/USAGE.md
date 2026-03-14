@@ -371,6 +371,8 @@ rag-eval --retrieval-mode sparse
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
+El comando reporta métricas estándar de IR a `@k` (`nDCG`, `MAP`, `MRR`, `P`, `Recall`).
+El dataset se valida de forma estricta: IDs duplicados, relevantes vacíos o relevantes fuera del corpus fallan al cargar.
 
 Reranker opcional (mejora de calidad medible con `rag-eval`):
 

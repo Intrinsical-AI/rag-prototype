@@ -27,7 +27,8 @@ from local_rag_backend.cli_commands.runtime import get_cli_container
 @click.option("--k", type=int, default=3, show_default=True)
 @click.option("--max-queries", type=int, default=None, help="Evaluate only the first N queries.")
 @click.option("--reranker/--no-reranker", default=False, show_default=True)
-@click.option("--fail-below-hit-rate", type=float, default=1.0, show_default=True)
+@click.option("--fail-below-ndcg", type=float, default=1.0, show_default=True)
+@click.option("--fail-below-map", type=float, default=0.9, show_default=True)
 @click.option("--fail-below-mrr", type=float, default=0.9, show_default=True)
 @click.option(
     "--json-out",
@@ -41,11 +42,12 @@ def eval_cmd(
     k: int,
     max_queries: int | None,
     reranker: bool,
-    fail_below_hit_rate: float,
+    fail_below_ndcg: float,
+    fail_below_map: float,
     fail_below_mrr: float,
     json_out: Path | None,
 ) -> None:
-    """Offline retrieval evaluation (reproducible, dependency-free by default)."""
+    """Offline IR evaluation with standard retrieval metrics."""
     try:
         from local_rag_backend.core.services.evaluation import (
             eval_result_to_json,
@@ -68,18 +70,27 @@ def eval_cmd(
             reranker_strategy=eval_bundle.reranker_strategy,
             max_queries=max_queries,
         )
-        click.echo(format_eval_result(res))
-
         if json_out is not None:
             json_out.write_text(json.dumps(eval_result_to_json(res)), encoding="utf-8")
 
-        if res.hit_rate < float(fail_below_hit_rate) or res.mrr < float(fail_below_mrr):
+        failures: list[str] = []
+        if res.ndcg_at_k < float(fail_below_ndcg):
+            failures.append(f"nDCG@{k}={res.ndcg_at_k:.3f} (min {fail_below_ndcg})")
+        if res.map_at_k < float(fail_below_map):
+            failures.append(f"MAP@{k}={res.map_at_k:.3f} (min {fail_below_map})")
+        if res.mrr_at_k < float(fail_below_mrr):
+            failures.append(f"MRR@{k}={res.mrr_at_k:.3f} (min {fail_below_mrr})")
+
+        if failures:
             click.echo(
-                f"[ERROR] Eval regression: hit_rate={res.hit_rate:.3f} (min {fail_below_hit_rate}), "
-                f"mrr={res.mrr:.3f} (min {fail_below_mrr})",
+                "[ERROR] Eval regression: "
+                + format_eval_result(res)
+                + " | "
+                + "; ".join(failures),
                 err=True,
             )
             raise SystemExit(1)
+        click.echo(format_eval_result(res))
     except SystemExit:
         raise
     except Exception as e:

@@ -1,5 +1,5 @@
 """
-Offline evaluation for retrieval quality.
+Offline IR evaluation for retrieval quality.
 
 Focus: reproducible retrieval metrics without requiring an LLM provider.
 """
@@ -10,6 +10,9 @@ import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import ir_measures
+from ir_measures import AP, P, R, RR, nDCG
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -110,7 +113,7 @@ def run_retrieval_eval(
     _ = (reranker_candidate_k, reranker_strategy)
     if retrieval_mode != "sparse":
         raise ValueError(
-            "This eval currently supports retrieval_mode=sparse only (dependency-free)."
+            "This offline IR evaluation currently supports retrieval_mode=sparse only."
         )
     if k <= 0:
         raise ValueError("k must be positive")
@@ -123,21 +126,33 @@ def run_retrieval_eval(
     if retrieve_external_ids is None:
         raise ValueError("retrieve_external_ids callback is required for sparse evaluation.")
 
-    hits = 0
-    rr_sum = 0.0
-    for q in qs:
-        relevant = set(q.relevant_external_ids)
-        retrieved_ext = [str(eid) for eid in retrieve_external_ids(q.query, k) if str(eid).strip()]
+    qrels: dict[str, dict[str, int]] = {}
+    run: dict[str, dict[str, float]] = {}
+    for idx, q in enumerate(qs, start=1):
+        query_id = f"q{idx:06d}"
+        qrels[query_id] = {external_id: 1 for external_id in q.relevant_external_ids}
 
-        rank = None
-        for i, eid in enumerate(retrieved_ext, 1):
-            if eid in relevant:
-                rank = i
+        ranked_docs: dict[str, float] = {}
+        seen_external_ids: set[str] = set()
+        for external_id in retrieve_external_ids(q.query, k):
+            normalized_external_id = str(external_id).strip()
+            if not normalized_external_id or normalized_external_id in seen_external_ids:
+                continue
+            seen_external_ids.add(normalized_external_id)
+            rank = len(ranked_docs) + 1
+            ranked_docs[normalized_external_id] = float(max(k - rank + 1, 1))
+            if len(ranked_docs) >= int(k):
                 break
-        if rank is not None:
-            hits += 1
-            rr_sum += 1.0 / float(rank)
+        run[query_id] = ranked_docs
 
+    measures = (
+        nDCG @ k,
+        AP @ k,
+        RR @ k,
+        P @ k,
+        R @ k,
+    )
+    aggregated = ir_measures.calc_aggregate(measures, qrels, run)
     n = len(qs)
     return EvalResult(
         dataset_id=dataset.dataset_id,
@@ -145,15 +160,23 @@ def run_retrieval_eval(
         reranker_enabled=bool(reranker_enabled),
         k=int(k),
         queries=n,
-        hit_rate=float(hits / n),
-        mrr=float(rr_sum / n),
+        ndcg_at_k=float(aggregated[nDCG @ k]),
+        map_at_k=float(aggregated[AP @ k]),
+        mrr_at_k=float(aggregated[RR @ k]),
+        precision_at_k=float(aggregated[P @ k]),
+        recall_at_k=float(aggregated[R @ k]),
     )
 
 
 def format_eval_result(result: EvalResult) -> str:
     return (
         f"dataset={result.dataset_id} mode={result.retrieval_mode} reranker={result.reranker_enabled} "
-        f"k={result.k} queries={result.queries} hit_rate={result.hit_rate:.3f} mrr={result.mrr:.3f}"
+        f"k={result.k} queries={result.queries} "
+        f"nDCG@{result.k}={result.ndcg_at_k:.3f} "
+        f"MAP@{result.k}={result.map_at_k:.3f} "
+        f"MRR@{result.k}={result.mrr_at_k:.3f} "
+        f"P@{result.k}={result.precision_at_k:.3f} "
+        f"Recall@{result.k}={result.recall_at_k:.3f}"
     )
 
 
@@ -164,6 +187,11 @@ def eval_result_to_json(result: EvalResult) -> dict[str, Any]:
         "reranker_enabled": result.reranker_enabled,
         "k": result.k,
         "queries": result.queries,
-        "hit_rate": result.hit_rate,
-        "mrr": result.mrr,
+        "metrics": {
+            f"nDCG@{result.k}": result.ndcg_at_k,
+            f"MAP@{result.k}": result.map_at_k,
+            f"MRR@{result.k}": result.mrr_at_k,
+            f"P@{result.k}": result.precision_at_k,
+            f"Recall@{result.k}": result.recall_at_k,
+        },
     }
