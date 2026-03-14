@@ -7,7 +7,7 @@
 
 ## 0) TL;DR (90 seconds)
 
-- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it supports both split-store persistence (`local_split`: SQLite + local vector index) and unified persistence (`elasticsearch`), while keeping application contracts backend-agnostic.
+- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it supports split-store persistence (`local_split`: SQLite + local vector index), unified persistence (`elasticsearch`), and external search adapters (`opensearch`, `solr`) controlled via `SEARCH_BACKEND`, while keeping application contracts backend-agnostic.
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
@@ -49,7 +49,7 @@
 - Legal / regulatory: no special regulated-domain requirement declared for D1.
 - Budget / latency / throughput: local-first single-node operation, optional Docker; avoid infra-heavy dependencies by default.
 - Team: small maintainer set; changes must be reviewable in small increments.
-- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current supported backends are `local_split` (SQLite + local vector index) and `elasticsearch`, and architecture must keep room for future unified engines (OpenSearch, pgvector, Qdrant) through ports.
+- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current supported persistence backends are `local_split` (SQLite + local vector index) and `elasticsearch`. Active search adapters: `local_split`, `elasticsearch`, `opensearch`, `solr` (controlled via `SEARCH_BACKEND`). Architecture keeps room for future unified engines (pgvector, Qdrant) through ports.
 - Product constraint: breaking changes explicitly allowed for this deliverable.
 
 ### 1.4 Quality attributes
@@ -87,7 +87,8 @@
 - **MutationIntent:** Requested write operation (upserts/deletes) for canonical mutation flow.
 - **MutationRecord:** Durable journal state for multi-store writes.
 - **StorageProfile:** Capability profile (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`) for allowed operations.
-- **Retriever mode:** `sparse`, `dense`, `hybrid` retrieval strategy.
+- **Retriever mode:** `sparse`, `dense`, `dual`, `hybrid` retrieval strategy.
+- **Search backend:** `SEARCH_BACKEND` setting decouples query execution engine from persistence topology (`local_split`, `elasticsearch`, `opensearch`, `solr`).
 
 ### 2.2 Bounded contexts
 
@@ -143,6 +144,9 @@
 - Current supported backends:
   - `local_split`: relational persistence via SQLite + SQLAlchemy plus vector index via FAISS/numpy adapters on local disk.
   - `elasticsearch`: unified document/vector/history/system-state/tombstone persistence via HTTP adapter.
+  - `opensearch` (`SEARCH_BACKEND=opensearch`): OpenSearch adapter for query execution; persistence still handled by `local_split` SQL layer.
+  - `solr` (`SEARCH_BACKEND=solr`): Solr adapter for sparse (lexical) retrieval; only `RETRIEVAL_MODE=sparse` is supported in v1.
+- `SEARCH_BACKEND` decouples the query-execution engine from `PERSISTENCE_BACKEND`. When both are set to the same system (e.g. `elasticsearch`/`elasticsearch`), writes and reads are colocated; mixed configurations (e.g. `local_split` + `opensearch`) split SQL writes from remote retrieval.
 - Target abstraction:
   - application uses persistence ports and capability profile, not concrete store topology;
   - supported topologies:
@@ -206,7 +210,7 @@
 - Network I/O (`embeddings`/provider calls) must never execute while holding `multiprocess_write_lock`.
 - Mutation requests may be coalesced before lock acquisition and drained as bounded micro-batches (`max_batch_size`, `max_wait_ms`).
 - Dense/hybrid mutation cannot silently proceed when embeddings backend is unavailable.
-- Retrieval mode must be one of `sparse|dense|hybrid`.
+- Retrieval mode must be one of `sparse|dense|dual|hybrid`.
 - Transport isolation rule: removing `http/` must not break core mutation/query capabilities.
 - Persistence topology isolation rule: application behavior must be invariant under split-store vs unified-store backends (except declared capability differences).
 
@@ -295,7 +299,8 @@ Ports defined in `core/ports/use_cases.py` are active and used by all migrated u
 - [TODO: architecture] Move SQL/FAISS-specific assumptions fully to adapters/composition.
 - [TODO: architecture] Add contract test suite to validate adapter parity across:
   - split baseline (`SQLite + FAISS/numpy`);
-  - unified candidates (`ElasticSearch`, `pgvector`, `Qdrant`).
+  - active search adapters (`OpenSearch`, `Solr`);
+  - unified candidates (`pgvector`, `Qdrant`).
 - [TODO: architecture] Keep external HTTP/CLI contracts stable while allowing internal breaking changes.
 
 Fase B closure (2026-03-01):

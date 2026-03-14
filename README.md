@@ -88,6 +88,9 @@ rag-server
 # Docs: http://localhost:8000/docs
 ```
 
+> `rag-server` does not accept CLI flags (`--host`, `--port`, etc.). Host and port are controlled
+> exclusively via `APP_HOST` / `APP_PORT` environment variables (or `.env`).
+
 > Alternative startup (without `rag-server` wrapper):
 > `uvicorn local_rag_backend.http.main:app --reload`.
 
@@ -114,8 +117,9 @@ Key variables (non-exhaustive):
 | `API_KEY`                        | —                         | security     | If set, require `X-API-Key: <API_KEY>` for `/api/*` and `/metrics` |
 | `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse unsafe public startup and reject non-local `/api/*` + `/metrics` requests when `API_KEY` is unset |
 | `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
-| `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
+| `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `dual` \| `hybrid`              |
 | `PERSISTENCE_BACKEND`            | `local_split`             | storage      | `local_split` \| `elasticsearch`                       |
+| `SEARCH_BACKEND`                 | `local_split`             | retrieval    | `local_split` \| `elasticsearch` \| `opensearch` \| `solr` — controls query execution backend independently of persistence |
 | `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
 | `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
 | `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | Bootstrap CSV path (must exist; no fallback)          |
@@ -168,6 +172,21 @@ Key variables (non-exhaustive):
 | `OPENROUTER_SITE_URL`            | —                        | OpenRouter   | Optional Referer header                                |
 | `OPENROUTER_APP_TITLE`           | —                        | OpenRouter   | Optional X-Title header                                |
 | `HYBRID_RETRIEVAL_ALPHA`         | `0.5`                     | hybrid       | Weight of the **sparse** component (0=dense, 1=sparse) |
+| `DUAL_CANDIDATE_K`               | `50`                      | dual         | Sparse candidate count fetched before dense rerank in `dual` mode (`1..1000`) |
+| `OS_BASE_URL`                    | —                         | opensearch   | OpenSearch base URL (required when `SEARCH_BACKEND=opensearch`) |
+| `OS_API_KEY`                     | —                         | opensearch   | OpenSearch API key |
+| `OS_USERNAME`                    | —                         | opensearch   | OpenSearch username |
+| `OS_PASSWORD`                    | —                         | opensearch   | OpenSearch password |
+| `OS_VERIFY_TLS`                  | `true`                    | opensearch   | Verify TLS certificates |
+| `OS_REQUEST_TIMEOUT_S`           | `30.0`                    | opensearch   | HTTP timeout (seconds) |
+| `OS_DOCS_INDEX`                  | `rag-docs`                | opensearch   | Documents index |
+| `OS_CONTENT_FIELD`               | `content`                 | opensearch   | Lexical retrieval field |
+| `OS_EMBEDDING_FIELD`             | `embedding`               | opensearch   | Dense vector field |
+| `OS_DENSE_CANDIDATE_K`           | `50`                      | opensearch   | Vector candidate pool for dense retrieval (`1..1000`) |
+| `SOLR_BASE_URL`                  | —                         | solr         | Solr base URL (required when `SEARCH_BACKEND=solr`) |
+| `SOLR_CORE`                      | `rag-docs`                | solr         | Solr core/collection for documents |
+| `SOLR_CONTENT_FIELD`             | `content`                 | solr         | Content field name |
+| `SOLR_REQUEST_TIMEOUT_S`         | `30.0`                    | solr         | HTTP timeout (seconds). Only `sparse` retrieval is supported in v1 |
 | `OPENAI_API_KEY`                 | —                         | OpenAI       | API key                                                |
 | `OPENAI_MODEL`                   | `gpt-4o-mini`             | OpenAI       | Chat model                                             |
 | `OPENAI_REQUEST_TIMEOUT`         | `60`                      | OpenAI       | Timeout (s) for OpenAI-compatible HTTP requests        |
@@ -183,12 +202,14 @@ Key variables (non-exhaustive):
 
 ### Backend matrix
 
-| Persistence backend | Retrieval modes | Canonical write model | Notes |
-| --- | --- | --- | --- |
-| `local_split` | `sparse`, `dense`, `hybrid` | `DURABLE_SAGA` | `sparse` is SQLite-only; dense/hybrid use SQLite + local vector state |
-| `elasticsearch` | `dense`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch |
+| `PERSISTENCE_BACKEND` | `SEARCH_BACKEND` | Retrieval modes | Canonical write model | Notes |
+| --- | --- | --- | --- | --- |
+| `local_split` | `local_split` (default) | `sparse`, `dense`, `dual`, `hybrid` | `DURABLE_SAGA` | `sparse`/`dual` are SQLite-only; dense/hybrid add local vector state |
+| `elasticsearch` | `elasticsearch` | `sparse`, `dense`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch |
+| `local_split` | `opensearch` | `sparse`, `dense` | `DURABLE_SAGA` | SQL persistence + OpenSearch for query execution; `hybrid` not supported |
+| `local_split` | `solr` | `sparse` | `DURABLE_SAGA` | SQL persistence + Solr for lexical retrieval only; dense/dual not supported in v1 |
 
-`PERSISTENCE_BACKEND=elasticsearch` rejects `RETRIEVAL_MODE=sparse` at startup.
+`PERSISTENCE_BACKEND=elasticsearch` with `RETRIEVAL_MODE=sparse` is only valid when `SEARCH_BACKEND=elasticsearch`; otherwise rejected at startup.
 
 ### Index manifest (`local_split` dense/hybrid only)
 
