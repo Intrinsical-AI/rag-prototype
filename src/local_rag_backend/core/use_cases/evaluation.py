@@ -28,24 +28,22 @@ def run_retrieval_eval(
 ) -> EvalResult:
     if retrieval_mode != "sparse":
         raise ValueError(
-            "This eval currently supports retrieval_mode=sparse only (dependency-free)."
+            "This offline IR evaluation currently supports retrieval_mode=sparse only."
         )
     if k <= 0:
         raise ValueError("k must be positive")
 
-    known_external_ids = set(
-        eval_storage_port.upsert_dataset_docs(
-            dataset_id=dataset.dataset_id,
-            docs=tuple(
-                EvalDatasetDocInput(
-                    external_id=d.external_id,
-                    content=d.content,
-                    source_id=d.source_id,
-                    metadata={"dataset_id": dataset.dataset_id},
-                )
-                for d in dataset.docs
-            ),
-        )
+    eval_storage_port.upsert_dataset_docs(
+        dataset_id=dataset.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": dataset.dataset_id},
+            )
+            for d in dataset.docs
+        ),
     )
 
     retriever = eval_retriever_factory_port.build_sparse_retriever(
@@ -60,7 +58,7 @@ def run_retrieval_eval(
         return [
             str(external_id)
             for external_id in (getattr(d, "external_id", None) for d in docs)
-            if external_id is not None and str(external_id) in known_external_ids
+            if external_id is not None and str(external_id).strip()
         ]
 
     return run_retrieval_eval_core(
