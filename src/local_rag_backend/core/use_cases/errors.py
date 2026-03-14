@@ -89,7 +89,7 @@ def map_runtime_error(exc: Exception) -> AppError | None:
     if isinstance(exc, LLMResponseError):
         return BadGatewayError(str(exc))
     if isinstance(exc, LLMConfigurationError):
-        return InternalServerError(str(exc))
+        return ServiceUnavailableError(str(exc))
     if isinstance(exc, LLMProviderError):
         return BadGatewayError(str(exc))
     return None

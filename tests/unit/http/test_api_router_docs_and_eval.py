@@ -187,7 +187,7 @@ async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 200
     checks = r.json()["checks"]
     assert checks.get("retrieval_index") == "ok"
