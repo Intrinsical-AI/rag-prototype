@@ -22,6 +22,7 @@ from local_rag_backend.infrastructure.persistence.shared.id_map_json import (
     load_id_map_json,
     save_id_map_json,
 )
+from local_rag_backend.infrastructure.persistence.vector.engines.numpy_engine import NumpyEngine
 from local_rag_backend.infrastructure.persistence.vector.factory import build_vector_engine
 
 if TYPE_CHECKING:
@@ -57,17 +58,29 @@ class VectorIndex:
         self.id_map_path = Path(id_map_path)
         self.dim = dim if dim is not None else 0
 
+        self._backend_name = str(backend).strip().lower()
         self.engine = build_vector_engine(backend=backend)
         self._state_lock = threading.RLock()
         self._lock_path = self.index_path.with_name(self.index_path.name + ".lock")
 
         if dim is None:
-            self.dim = self.engine.infer_dim_or_raise(self.index_path)
+            self.dim = self._infer_dim_with_fallback()
         self._load_or_initialize()
 
     @property
     def backend(self) -> str:
         return self.engine.backend
+
+    def _infer_dim_with_fallback(self) -> int:
+        try:
+            return self.engine.infer_dim_or_raise(self.index_path)
+        except Exception:
+            if self._backend_name != "auto" or self.engine.backend != "faiss":
+                raise
+            fallback_engine = NumpyEngine()
+            inferred = fallback_engine.infer_dim_or_raise(self.index_path)
+            self.engine = fallback_engine
+            return inferred
 
     @property
     def ntotal(self) -> int:

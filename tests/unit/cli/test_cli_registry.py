@@ -10,6 +10,7 @@ def test_cli_registers_all_expected_commands() -> None:
         "server",
         "rebuild-index",
         "mutate-docs",
+        "import-canonical",
         "bootstrap",
         "status",
         "eval",
@@ -27,6 +28,7 @@ def test_cli_registers_all_expected_commands() -> None:
         ("rag_eval", ["eval", "--flag"]),
         ("rag_rebuild_index", ["rebuild-index", "--flag"]),
         ("rag_mutate_docs", ["mutate-docs", "--flag"]),
+        ("rag_import_canonical", ["import-canonical", "--flag"]),
         ("rag_ingest", ["ingest", "--flag"]),
     ],
 )

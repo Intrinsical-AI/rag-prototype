@@ -31,6 +31,9 @@ def ensure_sqlite_schema_for_cli() -> None:
     CLI commands can be run without starting the FastAPI server, so they must
     apply the same best-effort SQLite migrations that the app does at startup.
     """
+    if settings.persistence_backend == "elasticsearch":
+        return
+
     from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
     settings.data_dir.mkdir(parents=True, exist_ok=True)

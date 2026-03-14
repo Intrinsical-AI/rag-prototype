@@ -81,7 +81,9 @@ def check_retrieval_index(
     diagnostics: HealthDiagnosticsPort,
     expected_manifest: dict[str, Any] | None = None,
 ) -> bool:
-    if settings_obj.retrieval_mode not in ("dense", "hybrid"):
+    if settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
+        return True
+    if str(getattr(settings_obj, "search_backend", "local_split")) != "local_split":
         return True
 
     stats = diagnostics.get_retrieval_index_stats(
@@ -129,6 +131,10 @@ def check_mutation_journal(
     settings_obj: Settings,
     diagnostics: HealthDiagnosticsPort,
 ) -> None:
+    if str(getattr(settings_obj, "persistence_backend", "local_split")) == "elasticsearch":
+        checks["mutation_journal"] = {"status": "not_applicable"}
+        return
+
     try:
         incomplete = diagnostics.get_incomplete_mutation_records_count(
             coordination_dir=settings_obj.get_coordination_dir()

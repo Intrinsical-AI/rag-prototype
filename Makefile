@@ -38,7 +38,7 @@ lint-imports: sync ## Run import-linter architecture contracts
 	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
 
 type: sync ## Run mypy type checking
-	$(UV) run --active --no-sync mypy .
+	DEBUG=false $(UV) run --no-sync mypy --python-executable .venv/bin/python src/local_rag_backend
 
 test: sync ## Run test suite
 	$(UV) run --active --no-sync pytest -q

@@ -93,6 +93,52 @@ def test_upsert_source_only_change(in_memory_sqlite):
     assert repo.get([doc_id])[0].source_id == "src-b"
 
 
+def test_upsert_scope_and_snapshot_are_persisted_and_queryable(in_memory_sqlite):
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
+
+    first, *_ = repo.upsert_documents_by_external_id(
+        [
+            SqlDocumentStorage.UpsertDoc(
+                external_id="doc-1",
+                content="text",
+                scope="repogpt:demo",
+                snapshot_id="snap-1",
+                metadata={"kind": "code"},
+            )
+        ]
+    )
+    doc_id = first[0].id
+
+    doc = repo.get([doc_id])[0]
+    assert doc.metadata == {
+        "kind": "code",
+        "scope": "repogpt:demo",
+        "snapshot_id": "snap-1",
+    }
+    assert repo.list_external_ids_by_scope("repogpt:demo") == ["doc-1"]
+
+    second, changed, updated_ids = repo.upsert_documents_by_external_id(
+        [
+            SqlDocumentStorage.UpsertDoc(
+                external_id="doc-1",
+                content="text",
+                scope="repogpt:demo",
+                snapshot_id="snap-2",
+                metadata={"kind": "code"},
+            )
+        ]
+    )
+    assert second[0].action == "updated"
+    assert second[0].content_changed is False
+    assert changed == []
+    assert updated_ids == []
+    assert repo.get([doc_id])[0].metadata == {
+        "kind": "code",
+        "scope": "repogpt:demo",
+        "snapshot_id": "snap-2",
+    }
+
+
 def test_upsert_dedup_only_change(in_memory_sqlite):
     """chunk_dedup_sha256 update triggers action=updated with content_changed=False."""
     repo = SqlDocumentStorage(session_factory=in_memory_sqlite)

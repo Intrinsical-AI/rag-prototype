@@ -1,4 +1,5 @@
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.domain.retrieval import RetrievalRequest
 from local_rag_backend.core.services.rag_runtime import NO_DOCS_ANSWER, RagService
 
 
@@ -42,6 +43,8 @@ def test_rag_service_flow():
     assert resp["answer"].startswith("dummy-answer-for")
     assert resp["docs"] == [doc]
     assert resp["scores"] == [0.85]
+    assert isinstance(retriever.last_query, RetrievalRequest)
+    assert retriever.last_query.query == "¿Qué es esto?"
     # Check history
     assert history.saved == [("¿Qué es esto?", resp["answer"], [1])]
 

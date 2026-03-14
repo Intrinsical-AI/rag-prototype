@@ -5,10 +5,15 @@ Sparse retriever using BM25.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 import numpy as np
 
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalRequest,
+    RetrievalResult,
+    retrieval_result_from_pairs,
+)
 from local_rag_backend.core.ports import DocumentRepoPort, RetrieverPort
 
 if TYPE_CHECKING:
@@ -92,8 +97,29 @@ class SparseBM25Retriever(RetrieverPort):
 
         return re.findall(r"\w+", preprocess_text(text))
 
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
+    @overload
+    def retrieve(self, query: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
+
+    @overload
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
+
+    def retrieve(
+        self, query: str | RetrievalRequest, k: int = 5
+    ) -> tuple[Sequence[Document], Sequence[float]] | RetrievalResult:
         """Retrieve documents using BM25 scores."""
+        if isinstance(query, RetrievalRequest):
+            request = query
+            legacy = self.retrieve(request.query, request.top_k)
+            if isinstance(legacy, RetrievalResult):
+                return legacy
+            docs, scores = legacy
+            return retrieval_result_from_pairs(
+                docs=docs,
+                scores=scores,
+                mode_used="sparse",
+                backend_used="legacy_sparse",
+                stage="sparse",
+            )
         if k <= 0:
             return [], []
         if not self.bm25 or not query:

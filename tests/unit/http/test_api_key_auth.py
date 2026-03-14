@@ -28,8 +28,9 @@ async def test_api_key_required_when_configured(asgi_client, in_memory_sqlite, m
 
 @pytest.mark.unit
 async def test_non_local_requests_require_api_key_when_public_bind_guard_enabled(
-    in_memory_sqlite, monkeypatch
+    in_memory_sqlite, monkeypatch, reset_app_context
 ):
+    _ = reset_app_context
     monkeypatch.setattr(settings, "api_key", None, raising=False)
     monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
 
@@ -45,7 +46,10 @@ async def test_non_local_requests_require_api_key_when_public_bind_guard_enabled
 
 
 @pytest.mark.unit
-async def test_non_local_requests_can_be_allowed_explicitly(in_memory_sqlite, monkeypatch):
+async def test_non_local_requests_can_be_allowed_explicitly(
+    in_memory_sqlite, monkeypatch, reset_app_context
+):
+    _ = reset_app_context
     monkeypatch.setattr(settings, "api_key", None, raising=False)
     monkeypatch.setattr(settings, "public_bind_requires_api_key", False, raising=False)
 
@@ -75,8 +79,9 @@ async def test_unknown_client_host_requires_api_key_when_public_bind_guard_enabl
 
 @pytest.mark.unit
 async def test_forwarded_non_local_host_requires_api_key_even_when_client_is_local(
-    in_memory_sqlite, monkeypatch
+    in_memory_sqlite, monkeypatch, reset_app_context
 ):
+    _ = reset_app_context
     monkeypatch.setattr(settings, "api_key", None, raising=False)
     monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
 
@@ -96,8 +101,9 @@ async def test_forwarded_non_local_host_requires_api_key_even_when_client_is_loc
 
 @pytest.mark.unit
 async def test_rfc7239_forwarded_non_local_host_requires_api_key_when_client_is_local(
-    in_memory_sqlite, monkeypatch
+    in_memory_sqlite, monkeypatch, reset_app_context
 ):
+    _ = reset_app_context
     monkeypatch.setattr(settings, "api_key", None, raising=False)
     monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
 
@@ -117,8 +123,9 @@ async def test_rfc7239_forwarded_non_local_host_requires_api_key_when_client_is_
 
 @pytest.mark.unit
 async def test_rfc7239_forwarded_unknown_requires_api_key_when_client_is_local(
-    in_memory_sqlite, monkeypatch
+    in_memory_sqlite, monkeypatch, reset_app_context
 ):
+    _ = reset_app_context
     monkeypatch.setattr(settings, "api_key", None, raising=False)
     monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
 
@@ -138,8 +145,9 @@ async def test_rfc7239_forwarded_unknown_requires_api_key_when_client_is_local(
 
 @pytest.mark.unit
 async def test_x_forwarded_for_blank_chain_requires_api_key_when_client_is_local(
-    in_memory_sqlite, monkeypatch
+    in_memory_sqlite, monkeypatch, reset_app_context
 ):
+    _ = reset_app_context
     monkeypatch.setattr(settings, "api_key", None, raising=False)
     monkeypatch.setattr(settings, "public_bind_requires_api_key", True, raising=False)
 

@@ -46,8 +46,11 @@ class UpsertDocBuilderPort(Protocol):
         external_id: str,
         content: str,
         source_id: str | None = None,
+        scope: str | None = None,
+        snapshot_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
         chunk_dedup_sha256: str | None = None,
+        embedding: Sequence[float] | None = None,
     ) -> object: ...
 
 

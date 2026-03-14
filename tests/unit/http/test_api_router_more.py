@@ -132,7 +132,8 @@ async def test_openrouter_generate_not_configured(asgi_client, monkeypatch):
     assert r.status_code == 400
 
 
-async def test_dependencies_no_llm(monkeypatch, in_memory_sqlite):
+async def test_dependencies_no_llm(monkeypatch, in_memory_sqlite, reset_app_context):
+    _ = reset_app_context
     deps.reset_rag_service()
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)

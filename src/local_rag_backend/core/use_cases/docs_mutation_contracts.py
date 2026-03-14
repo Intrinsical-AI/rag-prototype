@@ -21,6 +21,8 @@ class MutationUpsertInput:
     external_id: str
     content: str
     source_id: str | None = None
+    scope: str | None = None
+    snapshot_id: str | None = None
     metadata: Mapping[str, Any] | None = None
 
 
@@ -43,6 +45,8 @@ def normalize_intent(
             external_id=str(it.external_id).strip(),
             content=str(it.content).strip(),
             source_id=(str(it.source_id) if it.source_id is not None else None),
+            scope=(str(it.scope) if it.scope is not None else None),
+            snapshot_id=(str(it.snapshot_id) if it.snapshot_id is not None else None),
             metadata=dict(it.metadata) if it.metadata is not None else None,
         )
         for it in list(intent.upserts)
@@ -136,6 +140,8 @@ def intent_to_dict(intent: MutationIntent) -> dict[str, Any]:
                 "external_id": u.external_id,
                 "content": u.content,
                 "source_id": u.source_id,
+                "scope": u.scope,
+                "snapshot_id": u.snapshot_id,
                 "metadata": dict(u.metadata) if u.metadata is not None else None,
             }
             for u in intent.upserts

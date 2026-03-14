@@ -4,7 +4,9 @@ Bounded router for core RAG query/evaluation endpoints.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import inspect
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Query
 
@@ -15,7 +17,6 @@ from local_rag_backend.core.use_cases.rag_query import (
 )
 from local_rag_backend.http.dependencies import (
     get_app_container_dependency,
-    get_db,
     get_rag_service,
     get_settings_dependency,
 )
@@ -37,12 +38,42 @@ from local_rag_backend.infrastructure.observability.observability import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
     from local_rag_backend.composition.container import AppContainer
+    from local_rag_backend.core.services.rag_runtime import RagService
+    from local_rag_backend.core.use_cases.rag_query import AskEvalConfigLike
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
+
+
+def _build_ask_call(
+    *, service: RagService, request: AskRequest, retrieval_mode: str
+) -> Callable[[], dict[str, Any]]:
+    signature = inspect.signature(service.ask)
+    top_k = int(request.k)
+    filters = tuple(item.to_domain() for item in request.filters)
+    if "filters" in signature.parameters:
+        if "retrieval_mode" in signature.parameters:
+
+            def ask_call() -> dict[str, Any]:
+                return service.ask(
+                    request.question,
+                    top_k=top_k,
+                    filters=filters,
+                    retrieval_mode=str(retrieval_mode),
+                )
+
+            return ask_call
+
+        def ask_call() -> dict[str, Any]:
+            return service.ask(request.question, top_k=top_k, filters=filters)
+
+        return ask_call
+
+    def legacy_ask_call() -> dict[str, Any]:
+        return service.ask(request.question, top_k=top_k)
+
+    return legacy_ask_call
 
 
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
@@ -55,7 +86,12 @@ async def ask(
     t = Timer()
     ok = False
     try:
-        rag_result = await run_blocking(service.ask, request.question, request.k)
+        ask_call = _build_ask_call(
+            service=service,
+            request=request,
+            retrieval_mode=str(settings_obj.retrieval_mode),
+        )
+        rag_result = await run_blocking(ask_call)
         ok = True
     finally:
         observe_query(
@@ -91,11 +127,10 @@ async def ask(
 async def history(
     limit: int = Query(10, ge=1, le=100, description="Max number of history items to retrieve"),
     offset: int = Query(0, ge=0, description="Number of items to skip (useful for pagination)"),
-    db: Session = Depends(get_db),
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[HistoryItem]:
     """Retrieve historical Q&A pairs from the database."""
-    history_reader = container.build_history_read_port(db=db)
+    history_reader = container.build_history_read_port()
     history_entries = list_history_entries_sync(
         history_reader=history_reader,
         limit=limit,
@@ -130,7 +165,7 @@ async def ask_eval(
 ) -> AskEvalResponse:
     """Execute a RAG query with per-request configuration."""
     cfg = payload.config
-    if validation_errors := container.validate_rag_config(cfg):
+    if validation_errors := container.validate_rag_config(cast("AskEvalConfigLike", cfg)):
         raise BadRequestError(f"Invalid config: {'; '.join(validation_errors)}")
 
     try:

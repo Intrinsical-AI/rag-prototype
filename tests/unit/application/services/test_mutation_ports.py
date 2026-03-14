@@ -124,3 +124,34 @@ def test_from_settings_preserves_injectable_overrides() -> None:
 
     assert isinstance(ports.doc_repo_factory(), _Repo)
     assert ports.build_upsert_doc is _CustomUpsert
+
+
+def test_elasticsearch_defaults_bind_elastic_runtime() -> None:
+    es_settings = settings.model_copy(
+        update={
+            "persistence_backend": "elasticsearch",
+            "retrieval_mode": "dense",
+            "es_base_url": "http://localhost:9200",
+        }
+    )
+
+    class _DummySystemState:
+        def get_version(self, key: str) -> int:
+            _ = key
+            return 0
+
+        def bump_version(self, key: str) -> int:
+            _ = key
+            return 1
+
+    container = AppContainer(
+        settings_obj=es_settings,
+        system_state_factory=_DummySystemState,
+    )
+    ports = container.docs_mutation_ports(build_embedder=lambda: DummyEmbedder())
+
+    assert ports.build_upsert_doc.__qualname__.endswith("ElasticDocsRepository.UpsertDoc")
+    assert ports.mutation_uow_factory is None
+    assert container.doc_repo_factory.__name__ == "<lambda>"
+    assert container.history_repo_factory.__name__ == "<lambda>"
+    assert container.vector_repo_factory.__name__ == "<lambda>"

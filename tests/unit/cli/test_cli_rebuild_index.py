@@ -49,3 +49,19 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
     assert "build_embedder" in calls["ports_kwargs"]
     assert "use_wiring_defaults" not in calls["ports_kwargs"]
     assert calls["mutation_kwargs"] == {}
+
+
+def test_rebuild_index_cli_rejects_non_dense_modes(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    class _FakeContainer:
+        settings_obj = settings
+
+    monkeypatch.setattr(
+        index_cmd_module, "get_cli_container", lambda: _FakeContainer(), raising=True
+    )
+
+    result = CliRunner().invoke(index_cmd_module.rebuild_index_cmd)
+
+    assert result.exit_code == 1
+    assert "RETRIEVAL_MODE=dense|dual|hybrid" in result.output

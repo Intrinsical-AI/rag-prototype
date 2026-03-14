@@ -197,7 +197,7 @@ def run_sample_data_ingestion(
     )
     processed = int(summary.inserted + summary.updated + summary.unchanged)
 
-    if settings_obj.retrieval_mode in ("dense", "hybrid"):
+    if settings_obj.retrieval_mode in ("dense", "dual", "hybrid"):
         logger.info("Ingested %d docs into SQL and FAISS.", processed)
     else:
         logger.info("Ingested %d docs into SQL only (sparse mode).", processed)

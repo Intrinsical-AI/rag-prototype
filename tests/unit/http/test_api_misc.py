@@ -24,7 +24,15 @@ async def test_get_config_defaults(asgi_client, monkeypatch):
     assert r.status_code == 200
     data = r.json()
     assert set(
-        ["retrieval_mode", "hybrid_alpha", "temperature", "max_tokens", "available_providers"]
+        [
+            "search_backend",
+            "retrieval_mode",
+            "dual_candidate_k",
+            "hybrid_alpha",
+            "temperature",
+            "max_tokens",
+            "available_providers",
+        ]
     ).issubset(data.keys())
     assert data["retrieval_mode"] == settings.retrieval_mode
     assert isinstance(data["available_providers"], list)

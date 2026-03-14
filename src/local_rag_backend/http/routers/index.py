@@ -30,8 +30,8 @@ async def rebuild_index(
     settings_obj: Settings = Depends(get_settings_dependency),
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> RebuildIndexResponse:
-    if settings_obj.retrieval_mode not in ("dense", "hybrid"):
-        raise BadRequestError("Index rebuild requires dense or hybrid mode.")
+    if settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
+        raise BadRequestError("Index rebuild requires dense, dual, or hybrid mode.")
 
     def _rebuild_operation() -> int:
         return index_service.rebuild_index_sync(
