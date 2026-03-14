@@ -14,6 +14,7 @@ from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
     RetrievalResult,
     RetrievedDoc,
+    metadata_key_for_filter_field,
 )
 from local_rag_backend.core.domain.types import DocId
 
@@ -46,7 +47,11 @@ class SolrSearchRetriever:
         self._client = client or httpx.Client(base_url=base_url, timeout=float(request_timeout_s))
 
     def _fq(self, filter_item: RetrievalFilter) -> str:
-        field_name = filter_item.field
+        if filter_item.field in {"scope", "source_id", "path", "language", "unit_type"}:
+            field_name = filter_item.field
+        else:
+            metadata_key = metadata_key_for_filter_field(filter_item.field)
+            field_name = f"metadata.{metadata_key}"
         encoded = " OR ".join(json.dumps(str(value)) for value in filter_item.values)
         if len(filter_item.values) == 1:
             return f"{field_name}:{encoded}"

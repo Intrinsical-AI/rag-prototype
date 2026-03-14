@@ -9,22 +9,49 @@ from typing import Any, Literal
 from local_rag_backend.core.domain.entities import Document
 
 RetrievalMode = Literal["sparse", "dense", "dual", "hybrid"]
-FilterField = Literal["scope", "source_id", "path", "language", "unit_type"]
+LEGACY_METADATA_FILTER_FIELDS = frozenset({"path", "language", "unit_type"})
+TOP_LEVEL_FILTER_FIELDS = frozenset({"scope", "source_id"})
+METADATA_FILTER_PREFIX = "metadata."
+
+
+def normalize_filter_field(field: str) -> str:
+    normalized = str(field).strip()
+    if not normalized:
+        raise ValueError("RetrievalFilter.field must not be blank")
+    if normalized in TOP_LEVEL_FILTER_FIELDS or normalized in LEGACY_METADATA_FILTER_FIELDS:
+        return normalized
+    if normalized.startswith(METADATA_FILTER_PREFIX):
+        metadata_key = normalized[len(METADATA_FILTER_PREFIX) :].strip()
+        if metadata_key and all(part.strip() for part in metadata_key.split(".")):
+            return normalized
+    raise ValueError(
+        "RetrievalFilter.field must be one of "
+        "scope, source_id, path, language, unit_type, or metadata.<key>"
+    )
+
+
+def metadata_key_for_filter_field(field: str) -> str | None:
+    normalized = normalize_filter_field(field)
+    if normalized in TOP_LEVEL_FILTER_FIELDS:
+        return None
+    if normalized in LEGACY_METADATA_FILTER_FIELDS:
+        return normalized
+    return normalized[len(METADATA_FILTER_PREFIX) :]
 
 
 @dataclass(frozen=True)
 class RetrievalFilter:
     """Structured filter applied during retrieval."""
 
-    field: FilterField
+    field: str
     values: tuple[str, ...]
 
     def __post_init__(self) -> None:
         normalized = tuple(str(value).strip() for value in self.values if str(value).strip())
-        if not str(self.field).strip():
-            raise ValueError("RetrievalFilter.field must not be blank")
+        field = normalize_filter_field(self.field)
         if not normalized:
             raise ValueError("RetrievalFilter.values must not be empty")
+        object.__setattr__(self, "field", field)
         object.__setattr__(self, "values", normalized)
 
 

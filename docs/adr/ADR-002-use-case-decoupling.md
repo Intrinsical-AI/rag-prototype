@@ -49,8 +49,8 @@ Negative:
 - Boundary test failures are treated as architecture regressions.
 - Adding `core/use_cases -> infrastructure|composition` imports is not allowed by default.
 - Guardrails are enforced by:
-  - `tests/unit/http/test_architecture_application_imports.py`
-  - `tests/unit/http/test_architecture_use_case_infra_debt.py`
+  - `tests/architecture/test_architecture_application_imports.py`
+  - `tests/architecture/test_architecture_use_case_infra_debt.py`
 
 Target removal date:
 - Completed on 2026-03-01.

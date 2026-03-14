@@ -2,7 +2,7 @@ import pytest
 
 
 @pytest.mark.unit
-async def test_bootstrap_rag_service_builds(monkeypatch, in_memory_sqlite):
+async def test_bootstrap_rag_service_builds(monkeypatch, in_memory_sqlite, reset_app_context):
     from local_rag_backend import bootstrap
     from local_rag_backend.composition import factory
     from local_rag_backend.settings import settings
@@ -16,6 +16,7 @@ async def test_bootstrap_rag_service_builds(monkeypatch, in_memory_sqlite):
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     monkeypatch.setattr(factory, "OpenAIGenerator", lambda **_k: DummyGen())
 
+    _ = reset_app_context
     svc = bootstrap.bootstrap_rag_service()
     assert hasattr(svc, "ask")
     resp = svc.ask("hello", top_k=1)

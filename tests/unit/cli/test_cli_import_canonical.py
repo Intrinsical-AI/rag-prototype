@@ -5,6 +5,7 @@ import json
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
+from local_rag_backend.cli_commands.docs import docs_import_canonical as import_cmd_module
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
@@ -64,3 +65,49 @@ def test_cli_import_canonical_syncs_scope(in_memory_sqlite, tmp_path, monkeypatc
     assert "updated=1" in r2.output
     assert "deleted_sql=1" in r2.output
     assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-2"}
+
+
+def test_read_payload_rejects_non_object_json(tmp_path) -> None:
+    payload = tmp_path / "payload.json"
+    payload.write_text('["not-an-object"]', encoding="utf-8")
+
+    try:
+        import_cmd_module._read_payload(payload)
+    except ValueError as exc:
+        assert "--json must contain a JSON object payload" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_build_request_rejects_non_list_documents() -> None:
+    try:
+        import_cmd_module._build_request(
+            {"scope": "repo", "snapshot_id": "snap", "documents": "bad-documents"},
+            replace_scope=True,
+        )
+    except ValueError as exc:
+        assert "payload.documents must be a list" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_build_request_rejects_non_object_document_items() -> None:
+    try:
+        import_cmd_module._build_request(
+            {"scope": "repo", "snapshot_id": "snap", "documents": ["bad-item"]},
+            replace_scope=True,
+        )
+    except ValueError as exc:
+        assert "each payload.documents item must be an object" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_cli_import_canonical_reports_invalid_json(tmp_path) -> None:
+    payload = tmp_path / "invalid.json"
+    payload.write_text("{not-json", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
+
+    assert result.exit_code == 1
+    assert "[ERROR] Error importing canonical documents:" in result.output
