@@ -44,6 +44,8 @@ class RetrievalRequest:
         query = str(self.query).strip()
         if not query:
             raise ValueError("RetrievalRequest.query must not be blank")
+        if str(self.mode) not in {"sparse", "dense", "dual", "hybrid"}:
+            raise ValueError(f"Unsupported retrieval mode: {self.mode}")
         if int(self.top_k) <= 0:
             raise ValueError("RetrievalRequest.top_k must be positive")
         if self.candidate_k is not None and int(self.candidate_k) <= 0:

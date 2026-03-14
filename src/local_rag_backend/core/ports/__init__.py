@@ -5,7 +5,7 @@ Application Ports (Hex Architecture / Ports & Adapters).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, overload, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -36,7 +36,11 @@ class GeneratorPort(Protocol):
 class RetrieverPort(Protocol):
     """Interface for retrieving relevant documents for a given query."""
 
+    @overload
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult: ...
+
+    @overload
+    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
 
 
 @runtime_checkable
