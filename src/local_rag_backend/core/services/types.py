@@ -44,8 +44,11 @@ class EvalResult:
     reranker_enabled: bool
     k: int
     queries: int
-    hit_rate: float
-    mrr: float
+    ndcg_at_k: float
+    map_at_k: float
+    mrr_at_k: float
+    precision_at_k: float
+    recall_at_k: float
 
 
 # --- INFRASTRUCTURE INGESTION DETECTION ---

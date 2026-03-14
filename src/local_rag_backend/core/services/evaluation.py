@@ -1,5 +1,5 @@
 """
-Offline evaluation for retrieval quality.
+Offline IR evaluation for retrieval quality.
 
 Focus: reproducible retrieval metrics without requiring an LLM provider.
 """
@@ -10,6 +10,9 @@ import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import ir_measures
+from ir_measures import AP, RR, P, R, nDCG
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -26,6 +29,15 @@ def _default_eval_dataset_path() -> Path:
         return Path(env)
     # src/local_rag_backend/core/services/evaluation.py -> repo root
     return Path(__file__).resolve().parents[4] / "datasets" / "rag_eval_v1.jsonl"
+
+
+def _parse_schema_version(raw_value: Any, *, lineno: int) -> int:
+    try:
+        return int(raw_value or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid dataset line {lineno}: schema_version must be an integer."
+        ) from exc
 
 
 def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
@@ -47,6 +59,7 @@ def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
     schema_version = 0
     docs: list[EvalDoc] = []
     queries: list[EvalQuery] = []
+    known_doc_ids: set[str] = set()
 
     for lineno, line in enumerate(content.splitlines(), 1):
         s = line.strip()
@@ -58,11 +71,19 @@ def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
         t = obj.get("type")
         if t == "meta":
             dataset_id = str(obj.get("dataset_id") or dataset_id)
-            schema_version = int(obj.get("schema_version") or 0)
+            schema_version = _parse_schema_version(obj.get("schema_version"), lineno=lineno)
         elif t == "doc":
+            external_id = str(obj["external_id"]).strip()
+            if not external_id:
+                raise ValueError(f"Invalid dataset line {lineno}: external_id must not be blank.")
+            if external_id in known_doc_ids:
+                raise ValueError(
+                    f"Invalid dataset line {lineno}: duplicate doc external_id={external_id!r}."
+                )
+            known_doc_ids.add(external_id)
             docs.append(
                 EvalDoc(
-                    external_id=str(obj["external_id"]),
+                    external_id=external_id,
                     content=str(obj["content"]),
                     source_id=(
                         str(obj.get("source_id")) if obj.get("source_id") is not None else None
@@ -75,7 +96,21 @@ def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
                 raise ValueError(
                     f"Invalid dataset line {lineno}: relevant_external_ids must be list[str]."
                 )
-            queries.append(EvalQuery(query=str(obj["query"]), relevant_external_ids=tuple(rel)))
+            normalized_rel = tuple(str(external_id).strip() for external_id in rel)
+            if not normalized_rel:
+                raise ValueError(
+                    f"Invalid dataset line {lineno}: relevant_external_ids must not be empty."
+                )
+            if any(not external_id for external_id in normalized_rel):
+                raise ValueError(
+                    f"Invalid dataset line {lineno}: relevant_external_ids must not contain blank IDs."
+                )
+            queries.append(
+                EvalQuery(
+                    query=str(obj["query"]),
+                    relevant_external_ids=normalized_rel,
+                )
+            )
         else:
             raise ValueError(f"Invalid dataset line {lineno}: unknown type={t!r}")
 
@@ -85,6 +120,19 @@ def load_eval_dataset(path: str | Path | None = None) -> EvalDataset:
         raise ValueError("Dataset contains no docs.")
     if not queries:
         raise ValueError("Dataset contains no queries.")
+    for query in queries:
+        missing_ids = sorted(
+            {
+                external_id
+                for external_id in query.relevant_external_ids
+                if external_id not in known_doc_ids
+            }
+        )
+        if missing_ids:
+            raise ValueError(
+                "Dataset query references relevant_external_ids outside the corpus: "
+                + ", ".join(missing_ids[:10])
+            )
 
     return EvalDataset(
         dataset_id=str(dataset_id),
@@ -110,7 +158,7 @@ def run_retrieval_eval(
     _ = (reranker_candidate_k, reranker_strategy)
     if retrieval_mode != "sparse":
         raise ValueError(
-            "This eval currently supports retrieval_mode=sparse only (dependency-free)."
+            "This offline IR evaluation currently supports retrieval_mode=sparse only."
         )
     if k <= 0:
         raise ValueError("k must be positive")
@@ -122,22 +170,51 @@ def run_retrieval_eval(
         raise ValueError("No queries to evaluate after max_queries.")
     if retrieve_external_ids is None:
         raise ValueError("retrieve_external_ids callback is required for sparse evaluation.")
+    known_doc_ids = {
+        str(doc.external_id).strip() for doc in dataset.docs if str(doc.external_id).strip()
+    }
+    if not known_doc_ids:
+        raise ValueError("Dataset contains no known corpus document IDs.")
 
-    hits = 0
-    rr_sum = 0.0
-    for q in qs:
-        relevant = set(q.relevant_external_ids)
-        retrieved_ext = [str(eid) for eid in retrieve_external_ids(q.query, k) if str(eid).strip()]
+    qrels: dict[str, dict[str, int]] = {}
+    run: dict[str, dict[str, float]] = {}
+    for idx, q in enumerate(qs, start=1):
+        query_id = f"q{idx:06d}"
+        qrels[query_id] = {
+            external_id: 1
+            for external_id in q.relevant_external_ids
+            if external_id in known_doc_ids
+        }
+        if not qrels[query_id]:
+            raise ValueError(
+                f"Query {query_id} has no relevant corpus IDs after dataset validation."
+            )
 
-        rank = None
-        for i, eid in enumerate(retrieved_ext, 1):
-            if eid in relevant:
-                rank = i
+        ranked_docs: dict[str, float] = {}
+        seen_external_ids: set[str] = set()
+        for external_id in retrieve_external_ids(q.query, k):
+            normalized_external_id = str(external_id).strip()
+            if (
+                not normalized_external_id
+                or normalized_external_id in seen_external_ids
+                or normalized_external_id not in known_doc_ids
+            ):
+                continue
+            seen_external_ids.add(normalized_external_id)
+            rank = len(ranked_docs) + 1
+            ranked_docs[normalized_external_id] = float(max(k - rank + 1, 1))
+            if len(ranked_docs) >= int(k):
                 break
-        if rank is not None:
-            hits += 1
-            rr_sum += 1.0 / float(rank)
+        run[query_id] = ranked_docs
 
+    measures = (
+        nDCG @ k,
+        AP @ k,
+        RR @ k,
+        P @ k,
+        R @ k,
+    )
+    aggregated = ir_measures.calc_aggregate(measures, qrels, run)
     n = len(qs)
     return EvalResult(
         dataset_id=dataset.dataset_id,
@@ -145,15 +222,23 @@ def run_retrieval_eval(
         reranker_enabled=bool(reranker_enabled),
         k=int(k),
         queries=n,
-        hit_rate=float(hits / n),
-        mrr=float(rr_sum / n),
+        ndcg_at_k=float(aggregated[nDCG @ k]),
+        map_at_k=float(aggregated[AP @ k]),
+        mrr_at_k=float(aggregated[RR @ k]),
+        precision_at_k=float(aggregated[P @ k]),
+        recall_at_k=float(aggregated[R @ k]),
     )
 
 
 def format_eval_result(result: EvalResult) -> str:
     return (
         f"dataset={result.dataset_id} mode={result.retrieval_mode} reranker={result.reranker_enabled} "
-        f"k={result.k} queries={result.queries} hit_rate={result.hit_rate:.3f} mrr={result.mrr:.3f}"
+        f"k={result.k} queries={result.queries} "
+        f"nDCG@{result.k}={result.ndcg_at_k:.3f} "
+        f"MAP@{result.k}={result.map_at_k:.3f} "
+        f"MRR@{result.k}={result.mrr_at_k:.3f} "
+        f"P@{result.k}={result.precision_at_k:.3f} "
+        f"Recall@{result.k}={result.recall_at_k:.3f}"
     )
 
 
@@ -164,6 +249,11 @@ def eval_result_to_json(result: EvalResult) -> dict[str, Any]:
         "reranker_enabled": result.reranker_enabled,
         "k": result.k,
         "queries": result.queries,
-        "hit_rate": result.hit_rate,
-        "mrr": result.mrr,
+        "metrics": {
+            f"nDCG@{result.k}": result.ndcg_at_k,
+            f"MAP@{result.k}": result.map_at_k,
+            f"MRR@{result.k}": result.mrr_at_k,
+            f"P@{result.k}": result.precision_at_k,
+            f"Recall@{result.k}": result.recall_at_k,
+        },
     }
