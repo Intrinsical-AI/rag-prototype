@@ -22,6 +22,8 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
         external_id: str
         content: str
         source_id: str | None = None
+        scope: str | None = None
+        snapshot_id: str | None = None
         metadata: dict[str, object] | None = None
         chunk_dedup_sha256: str | None = None
 

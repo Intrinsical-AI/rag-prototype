@@ -93,6 +93,29 @@ def _build_transport() -> httpx.MockTransport:
                 raise AssertionError(f"unexpected bulk op: {op}")
             return httpx.Response(200, json={"errors": False})
 
+        if method == "POST" and path.endswith("/_search"):
+            index = path.strip("/").split("/")[0]
+            docs = _docs(index)
+            body = _json(request)
+            query = dict(body.get("query") or {})
+            sort = list(body.get("sort") or [])
+            term_scope = ((query.get("term") or {}).get("scope")) if isinstance(query, dict) else None
+            prefix_external_id = (
+                ((query.get("prefix") or {}).get("external_id")) if isinstance(query, dict) else None
+            )
+            hits = []
+            for doc_id, source in docs.items():
+                if term_scope is not None and source.get("scope") != term_scope:
+                    continue
+                if prefix_external_id is not None and not str(source.get("external_id") or "").startswith(
+                    str(prefix_external_id)
+                ):
+                    continue
+                hits.append({"_id": str(doc_id), "_source": dict(source), "sort": [source.get("external_id")]})
+            if sort:
+                hits.sort(key=lambda hit: str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or ""))
+            return httpx.Response(200, json={"hits": {"hits": hits}})
+
         raise AssertionError(f"Unhandled {method} {path}")
 
     return httpx.MockTransport(handler)
@@ -148,3 +171,26 @@ def test_delete_by_external_id_creates_tombstone() -> None:
     assert missing == []
     assert tombstoned == 1
     assert repo.get_tombstoned_external_ids(["doc-1"]) == {"doc-1"}
+
+
+def test_scope_and_snapshot_are_persisted_and_queryable() -> None:
+    repo = _build_repo()
+    repo.upsert_documents_by_external_id(
+        [
+            ElasticDocsRepository.UpsertDoc(
+                external_id="doc-1",
+                content="hello world",
+                scope="repogpt:demo",
+                snapshot_id="snap-1",
+                metadata={"kind": "code"},
+            )
+        ]
+    )
+
+    doc = repo.get(["doc-1"])[0]
+    assert doc.metadata == {
+        "kind": "code",
+        "scope": "repogpt:demo",
+        "snapshot_id": "snap-1",
+    }
+    assert repo.list_external_ids_by_scope("repogpt:demo") == ["doc-1"]

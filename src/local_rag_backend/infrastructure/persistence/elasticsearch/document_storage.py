@@ -34,6 +34,8 @@ class ElasticDocsRepository(DocumentRepoPort):
         external_id: str
         content: str
         source_id: str | None = None
+        scope: str | None = None
+        snapshot_id: str | None = None
         metadata: Mapping[str, Any] | None = None
         chunk_dedup_sha256: str | None = None
         embedding: Sequence[float] | None = None
@@ -52,6 +54,8 @@ class ElasticDocsRepository(DocumentRepoPort):
         content: str
         content_sha256: str | None
         source_id: str | None
+        scope: str | None
+        snapshot_id: str | None
         metadata: dict[str, Any] | None
         chunk_dedup_sha256: str | None
 
@@ -125,6 +129,12 @@ class ElasticDocsRepository(DocumentRepoPort):
                 source_id=(
                     str(source.get("source_id")) if source.get("source_id") is not None else None
                 ),
+                scope=(str(source.get("scope")) if source.get("scope") is not None else None),
+                snapshot_id=(
+                    str(source.get("snapshot_id"))
+                    if source.get("snapshot_id") is not None
+                    else None
+                ),
                 metadata=dict(source.get("metadata") or {}),
                 chunk_dedup_sha256=(
                     str(source.get("chunk_dedup_sha256"))
@@ -173,11 +183,23 @@ class ElasticDocsRepository(DocumentRepoPort):
                 source_changed = (
                     item.source_id is not None and str(item.source_id) != existing_doc.source_id
                 )
+                scope_changed = item.scope is not None and str(item.scope) != existing_doc.scope
+                snapshot_changed = (
+                    item.snapshot_id is not None
+                    and str(item.snapshot_id) != existing_doc.snapshot_id
+                )
                 dedup_changed = (
                     item.chunk_dedup_sha256 is not None
                     and str(item.chunk_dedup_sha256) != existing_doc.chunk_dedup_sha256
                 )
-                if content_changed or metadata_changed or source_changed or dedup_changed:
+                if (
+                    content_changed
+                    or metadata_changed
+                    or source_changed
+                    or scope_changed
+                    or snapshot_changed
+                    or dedup_changed
+                ):
                     action = "updated"
                 else:
                     action = "unchanged"
@@ -193,6 +215,10 @@ class ElasticDocsRepository(DocumentRepoPort):
                     body["created_at"] = body["updated_at"]
                 if item.source_id is not None:
                     body["source_id"] = str(item.source_id)
+                if item.scope is not None:
+                    body["scope"] = str(item.scope)
+                if item.snapshot_id is not None:
+                    body["snapshot_id"] = str(item.snapshot_id)
                 if item.metadata is not None:
                     body["metadata"] = dict(item.metadata)
                 if item.chunk_dedup_sha256 is not None:
@@ -256,7 +282,13 @@ class ElasticDocsRepository(DocumentRepoPort):
                 "external_id": doc.external_id,
                 "content": doc.content,
                 "source_id": doc.source_id,
-                "metadata": dict(doc.metadata or {}),
+                "scope": (doc.metadata or {}).get("scope"),
+                "snapshot_id": (doc.metadata or {}).get("snapshot_id"),
+                "metadata": {
+                    key: value
+                    for key, value in dict(doc.metadata or {}).items()
+                    if key not in {"scope", "snapshot_id"}
+                },
                 "content_sha256": hashlib.sha256(doc.content.encode("utf-8")).hexdigest(),
             }
             for doc in docs
@@ -278,6 +310,8 @@ class ElasticDocsRepository(DocumentRepoPort):
                     "external_id": str(source.get("external_id") or doc.get("_id") or ""),
                     "content": str(source.get(self._settings.es_content_field) or ""),
                     "source_id": source.get("source_id"),
+                    "scope": source.get("scope"),
+                    "snapshot_id": source.get("snapshot_id"),
                     "metadata": dict(source.get("metadata") or {}),
                     "content_sha256": source.get("content_sha256"),
                     "chunk_dedup_sha256": source.get("chunk_dedup_sha256"),
@@ -295,6 +329,8 @@ class ElasticDocsRepository(DocumentRepoPort):
                 "external_id": external_id,
                 str(self._settings.es_content_field): str(snap.get("content") or ""),
                 "source_id": snap.get("source_id"),
+                "scope": snap.get("scope"),
+                "snapshot_id": snap.get("snapshot_id"),
                 "metadata": dict(snap.get("metadata") or {}),
                 "content_sha256": snap.get("content_sha256"),
                 "chunk_dedup_sha256": snap.get("chunk_dedup_sha256"),
@@ -319,6 +355,24 @@ class ElasticDocsRepository(DocumentRepoPort):
             ops.append({"delete": {"_index": str(self._settings.es_tombstones_index), "_id": ext}})
         if ops:
             self._client.bulk(ops)
+
+    def list_external_ids_by_scope(self, scope: str) -> list[str]:
+        scope_s = str(scope).strip()
+        if not scope_s:
+            return []
+        body = {
+            "size": 1000,
+            "_source": ["external_id"],
+            "query": {"term": {"scope": scope_s}},
+            "sort": [{"external_id": "asc"}],
+        }
+        data = self._client.search(index=str(self._settings.es_docs_index), body=body)
+        hits = (((data.get("hits") or {}).get("hits")) or [])
+        return [
+            str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or "")
+            for hit in hits
+            if str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or "").strip()
+        ]
 
     def delete_tombstones(self, external_ids: Sequence[str]) -> int:
         ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
@@ -407,12 +461,17 @@ class ElasticDocsRepository(DocumentRepoPort):
     def _to_domain_document(self, hit: Mapping[str, Any]) -> DomainDocument:
         source = dict(hit.get("_source") or {})
         external_id = str(source.get("external_id") or hit.get("_id") or "")
+        metadata = dict(source.get("metadata") or {})
+        if source.get("scope") is not None:
+            metadata["scope"] = source.get("scope")
+        if source.get("snapshot_id") is not None:
+            metadata["snapshot_id"] = source.get("snapshot_id")
         return DomainDocument(
             id=DocId(external_id),
             content=str(source.get(self._settings.es_content_field) or ""),
             external_id=external_id,
             source_id=(str(source.get("source_id")) if source.get("source_id") is not None else None),
-            metadata=dict(source.get("metadata") or {}),
+            metadata=metadata,
         )
 
 
