@@ -2,6 +2,7 @@
 
 from local_rag_backend.cli_commands.docs import (
     bootstrap_cmd,
+    import_canonical_cmd,
     ingest_cmd,
     mutate_docs_cmd,
 )
@@ -12,6 +13,7 @@ from local_rag_backend.cli_commands.server import server_cmd
 __all__ = [
     "bootstrap_cmd",
     "eval_cmd",
+    "import_canonical_cmd",
     "ingest_cmd",
     "mutate_docs_cmd",
     "rebuild_index_cmd",

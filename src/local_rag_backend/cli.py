@@ -10,6 +10,7 @@ from local_rag_backend import __version__
 from local_rag_backend.cli_commands import (
     bootstrap_cmd,
     eval_cmd,
+    import_canonical_cmd,
     ingest_cmd,
     mutate_docs_cmd,
     rebuild_index_cmd,
@@ -28,6 +29,7 @@ def cli() -> None:
 cli.add_command(server_cmd)
 cli.add_command(rebuild_index_cmd)
 cli.add_command(mutate_docs_cmd)
+cli.add_command(import_canonical_cmd)
 cli.add_command(bootstrap_cmd)
 cli.add_command(status_cmd)
 cli.add_command(eval_cmd)
@@ -74,6 +76,11 @@ def rag_ingest() -> None:
 def rag_mutate_docs() -> None:
     """Entry point for rag-mutate-docs command."""
     _dispatch_entrypoint(command="mutate-docs", include_argv=True)
+
+
+def rag_import_canonical() -> None:
+    """Entry point for rag-import-canonical command."""
+    _dispatch_entrypoint(command="import-canonical", include_argv=True)
 
 
 if __name__ == "__main__":
