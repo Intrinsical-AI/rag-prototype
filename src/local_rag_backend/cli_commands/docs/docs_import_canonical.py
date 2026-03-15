@@ -57,6 +57,21 @@ def _build_request(
     )
 
 
+def _resolve_replace_scope(
+    payload: dict[str, Any],
+    *,
+    replace_scope_override: bool | None,
+) -> bool:
+    if replace_scope_override is not None:
+        return bool(replace_scope_override)
+    payload_value = payload.get("replace_scope")
+    if payload_value is None:
+        return True
+    if isinstance(payload_value, bool):
+        return payload_value
+    raise ValueError("payload.replace_scope must be a boolean when provided")
+
+
 @click.command("import-canonical")
 @click.option(
     "--json",
@@ -66,16 +81,29 @@ def _build_request(
     help="Path to canonical import JSON ({scope, snapshot_id, documents[]}).",
 )
 @click.option(
-    "--replace-scope/--upsert-only",
-    default=True,
-    show_default=True,
+    "--replace-scope",
+    "replace_scope_override",
+    flag_value=True,
+    default=None,
     help="Delete stale docs in the same scope after importing the snapshot.",
 )
-def import_canonical_cmd(payload_json: Path, replace_scope: bool) -> None:
+@click.option(
+    "--upsert-only",
+    "replace_scope_override",
+    flag_value=False,
+    help="Do not delete stale docs in the same scope after importing the snapshot.",
+)
+def import_canonical_cmd(payload_json: Path, replace_scope_override: bool | None) -> None:
     """Import/sync external canonical documents through the native mutation stack."""
     try:
         payload = _read_payload(payload_json)
-        request = _build_request(payload, replace_scope=replace_scope)
+        request = _build_request(
+            payload,
+            replace_scope=_resolve_replace_scope(
+                payload,
+                replace_scope_override=replace_scope_override,
+            ),
+        )
         container = get_cli_container()
         mutation_bundle = container.build_docs_mutation_bundle()
 
