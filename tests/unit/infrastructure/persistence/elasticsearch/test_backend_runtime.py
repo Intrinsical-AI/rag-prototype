@@ -355,6 +355,39 @@ def test_elastic_client_index_management_and_errors() -> None:
     )
 
 
+def test_elastic_client_tolerates_index_already_exists_race() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "HEAD":
+            return httpx.Response(404)
+        if request.method == "PUT" and request.url.path.count("/") == 1:
+            index = request.url.path.strip("/")
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "type": "resource_already_exists_exception",
+                        "reason": f"index [{index}] already exists",
+                    },
+                    "status": 400,
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url.path}")
+
+    client = ElasticClient(
+        settings_obj=Settings(
+            persistence_backend="elasticsearch",
+            search_backend="elasticsearch",
+            es_base_url="http://elastic.test",
+        ),
+        client=httpx.Client(
+            base_url="http://elastic.test",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    client.ensure_indices(embed_dim=None)
+
+
 def test_document_repository_crud_snapshot_restore_and_scan() -> None:
     backend = _build_backend()
     repo = backend.docs

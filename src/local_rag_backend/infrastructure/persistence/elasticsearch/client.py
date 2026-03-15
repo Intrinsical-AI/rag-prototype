@@ -47,6 +47,11 @@ class ElasticClient:
             headers["Authorization"] = f"ApiKey {self._settings.es_api_key}"
         return headers
 
+    @staticmethod
+    def _is_index_already_exists_error(exc: ElasticBackendError) -> bool:
+        message = str(exc)
+        return "resource_already_exists_exception" in message or "already_exists_exception" in message
+
     def _request(
         self,
         method: str,
@@ -220,7 +225,12 @@ class ElasticClient:
                 "similarity": "cosine",
             }
         payload = {"mappings": {"dynamic": True, "properties": properties}}
-        self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        try:
+            self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        except ElasticBackendError as exc:
+            if self._is_index_already_exists_error(exc):
+                return
+            raise
 
     def _ensure_history_index(self, *, index: str) -> None:
         if self.head_ok(f"/{index}"):
@@ -237,7 +247,12 @@ class ElasticClient:
                 },
             }
         }
-        self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        try:
+            self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        except ElasticBackendError as exc:
+            if self._is_index_already_exists_error(exc):
+                return
+            raise
 
     def _ensure_system_index(self, *, index: str) -> None:
         if self.head_ok(f"/{index}"):
@@ -252,7 +267,12 @@ class ElasticClient:
                 },
             }
         }
-        self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        try:
+            self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        except ElasticBackendError as exc:
+            if self._is_index_already_exists_error(exc):
+                return
+            raise
 
     def _ensure_tombstones_index(self, *, index: str) -> None:
         if self.head_ok(f"/{index}"):
@@ -266,4 +286,9 @@ class ElasticClient:
                 },
             }
         }
-        self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        try:
+            self.request_json("PUT", f"/{index}", json_body=payload, expected=(200,))
+        except ElasticBackendError as exc:
+            if self._is_index_already_exists_error(exc):
+                return
+            raise
