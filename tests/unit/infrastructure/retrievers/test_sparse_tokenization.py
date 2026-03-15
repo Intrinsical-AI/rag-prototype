@@ -1,5 +1,6 @@
 # tests/unit/infrastructure/retrievers/test_sparse_tokenization.py
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.domain.retrieval import RetrievalRequest
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 
@@ -33,6 +34,6 @@ def test_sparse_preprocess_and_norm(monkeypatch):
     retr = SparseBM25Retriever(
         documents=["<b>Hola</b> mundo", "Adios..."], doc_ids=[1, 2], doc_repo=Repo()
     )
-    docs, scores = retr.retrieve("HOLA", k=1)
-    assert docs and docs[0].id == 1
-    assert 0.0 <= scores[0] <= 1.0
+    result = retr.retrieve(RetrievalRequest(query="HOLA", top_k=1, mode="sparse"))
+    assert result.documents and result.documents[0].id == 1
+    assert 0.0 <= result.scores[0] <= 1.0

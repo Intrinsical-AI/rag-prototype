@@ -1,24 +1,10 @@
 # tests/unit/infrastructure/retrievers/test_dense_edgecases.py
-from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
+import pytest
+
+from local_rag_backend.core.domain.retrieval import RetrievalRequest
 
 
-class E:
-    def embed(self, xs):
-        return [[0.0, 0.0]]
-
-
-class I:
-    id_map = [1]
-
-    def search(self, q, k):
-        return [0], [0.0]
-
-
-class R:
-    def get(self, ids):
-        return []
-
-
-def test_dense_k_le_zero_returns_empty():
-    retr = DenseVectorRetriever(embedder=E(), vector_repo=I(), doc_repo=R())
-    assert retr.retrieve("q", k=0) == ([], [])
+def test_dense_k_le_zero_raises():
+    """RetrievalRequest rejects top_k=0 at construction time."""
+    with pytest.raises(ValueError, match="top_k must be positive"):
+        RetrievalRequest(query="q", top_k=0, mode="dense")
