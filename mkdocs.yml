@@ -14,6 +14,6 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Architecture: architecture.md
-  - App Layer: architecture/app.md
-  - Advanced Usage (Ollama): custom_usage_guide.md
+  - App Layer: app.md
+  - Advanced Usage (Ollama): USAGE.md
   - LangChain Loaders: langchain_loaders.md

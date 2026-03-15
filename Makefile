@@ -45,7 +45,7 @@ test: sync ## Run test suite
 
 test-architecture: sync ## Run architecture guardrail tests only
 	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
-	DEBUG=false $(UV) run --active --no-sync pytest -q -o addopts='' tests/unit/http/test_architecture_*.py
+	DEBUG=false $(UV) run --active --no-sync pytest -q -o addopts='' tests/architecture/test_*.py
 
 sec: sec-hard ## Run strict security checks
 

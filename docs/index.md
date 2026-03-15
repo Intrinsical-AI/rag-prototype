@@ -5,7 +5,7 @@ This folder contains the project documentation.
 ## Pages
 
 - [Architecture](architecture.md)
-- [App Layer Boundaries](architecture/app.md)
+- [App Layer Boundaries](app.md)
 - [Advanced usage: Ollama orchestration](USAGE.md)
 - [LangChain loaders adapter](langchain_loaders.md)
 

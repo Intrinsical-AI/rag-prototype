@@ -328,18 +328,25 @@ rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 
 # Shared cross-repo RepoGPT demo/eval pack lives in synergy root
-bash ../scripts/repogpt_ingest_demo.sh
-bash ../scripts/repogpt_eval_smoke.sh
+bash ../synergy/scripts/repogpt_ingest_demo.sh
+bash ../synergy/scripts/repogpt_eval_smoke.sh
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
 
 RepoGPT integration pack:
 
-* Shared fixture repo: `../fixtures/repogpt_eval_repo/`
-* Cross-repo demos/smokes: `../scripts/repogpt_ingest_demo.sh`, `../scripts/repogpt_eval_smoke.sh`
+* Shared fixture repo: `../synergy/fixtures/repogpt_eval_repo/`
+* Cross-repo demos/smokes: `../synergy/scripts/repogpt_ingest_demo.sh`, `../synergy/scripts/repogpt_eval_smoke.sh`
 * Consumer-owned eval dataset: `datasets/repogpt_rag_eval_v1.jsonl`
 * Maintained import/search coverage: `tests/e2e/test_repogpt_ingest_search_eval.py`
+
+Vulnerability pilot pack:
+
+* Shared prepared snapshot: `../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl`
+* Cross-repo batch/import scripts: `../synergy/scripts/vulns_batch_triage.py`, `../synergy/scripts/vulns_ingest_rag.py`
+* Consumer-owned eval dataset: `datasets/vuln_pilot_rag_eval_v1.jsonl`
+* Maintained import/search coverage: `tests/e2e/test_vuln_pilot_ingest_search_eval.py`
 
 Optional: better file type detection (best-effort) using `python-magic`:
 
@@ -359,6 +366,15 @@ uv sync --frozen --extra monitoring
 export ENABLE_MONITORING=true
 rag-server
 ```
+
+Optional: performance extras (`torch` + `orjson` for faster JSON serialization):
+
+```bash
+uv sync --frozen --extra performance      # torch + orjson (CPU)
+uv sync --frozen --extra performance-cpu  # alias, identical to performance
+```
+
+These extras are included in `all` but are **not required** for sparse or dense retrieval. Install only when you have profiled a serialization or inference bottleneck that justifies the `torch` dependency weight.
 
 Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 

@@ -50,10 +50,10 @@ Composition root y lifecycle runtime (transport-neutral):
 
 Adaptadores HTTP por bounded context:
 
-- `docs.py`: `GET /docs`, `POST /docs`, `POST /docs/import`, `POST /docs/mutate`
+- `docs.py`: `GET /docs`, `POST /docs`, `POST /docs/import`, `POST /docs/mutate`, `POST /docs/import-canonical`
 - `rag_router.py`: `POST /ask`, `POST /ask_eval`, `GET /history`
 - `index.py`: `POST /index/rebuild`
-- `health.py`: `GET /health`, `GET /ready`, `GET /health/ollama`
+- `health.py`: `GET /healthz`, `GET /readyz`, `GET /healthz/ollama`
 - `openrouter.py`, `meta.py`
 
 ---
