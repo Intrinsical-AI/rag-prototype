@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from local_rag_backend.core.domain.retrieval import RetrievalRequest
 from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
@@ -96,10 +97,10 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     assert len(list(ids)) == 2
 
     dense = DenseVectorRetriever(embedder=embedder, vector_repo=vec_repo, doc_repo=doc_repo)
-    docs, scores = dense.retrieve("alpha", k=1)
-    assert len(docs) == 1
-    assert docs[0].content.startswith("alpha")
-    assert len(scores) == 1
+    result = dense.retrieve(RetrievalRequest(query="alpha", top_k=1, mode="dense"))
+    assert len(result.documents) == 1
+    assert result.documents[0].content.startswith("alpha")
+    assert len(result.scores) == 1
 
     # Hybrid: ensure sparse is wired and returns something too.
     corpus, doc_ids = _get_corpus_and_ids(doc_repo)

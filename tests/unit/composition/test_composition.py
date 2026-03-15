@@ -10,6 +10,7 @@ from local_rag_backend.composition.adapters import (
     build_retriever_with_default_embedder_from_settings,
     resolve_preferred_llm_provider,
 )
+from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 
@@ -180,11 +181,13 @@ def test_build_retriever_hybrid_uses_elasticsearch_lexical_path():
 
     def _dense_retriever_factory(**kwargs):
         seen["dense_kwargs"] = kwargs
-        return SimpleNamespace(retrieve=lambda _query, _k=5: ([], []))
+        return SimpleNamespace(
+            retrieve=lambda _req: RetrievalResult(items=(), mode_used="dense", backend_used="test")
+        )
 
     def _hybrid_retriever_factory(**kwargs):
         seen["hybrid_kwargs"] = kwargs
-        kwargs["sparse"].retrieve("hello", 3)
+        kwargs["sparse"].retrieve(RetrievalRequest(query="hello", top_k=3, mode="sparse"))
         return "hybrid-retriever"
 
     out = build_retriever_with_default_embedder_from_settings(

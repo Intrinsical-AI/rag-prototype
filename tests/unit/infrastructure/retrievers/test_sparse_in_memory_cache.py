@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.domain.retrieval import RetrievalRequest
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 
@@ -26,10 +27,10 @@ def test_sparse_retriever_uses_in_memory_doc_cache_after_initial_load():
     # One call during retriever construction to populate in-memory cache.
     assert repo.get_calls == 1
 
-    docs1, _scores1 = retriever.retrieve("alpha", k=1)
-    docs2, _scores2 = retriever.retrieve("beta", k=1)
+    result1 = retriever.retrieve(RetrievalRequest(query="alpha", top_k=1, mode="sparse"))
+    result2 = retriever.retrieve(RetrievalRequest(query="beta", top_k=1, mode="sparse"))
 
-    assert docs1 and docs1[0].id == 1
-    assert docs2 and docs2[0].id == 2
+    assert result1.documents and result1.documents[0].id == 1
+    assert result2.documents and result2.documents[0].id == 2
     # No per-query DB roundtrip once cache is populated.
     assert repo.get_calls == 1
