@@ -8,7 +8,10 @@ import pytest
 from click.testing import CliRunner
 from support.vuln_pilot_fixture import SYNERGY_ROOT, VULN_PILOT_PREPARED, load_vulns_ingest_module
 
-if not VULN_PILOT_PREPARED.exists() or not (SYNERGY_ROOT / "scripts" / "vulns_ingest_rag.py").exists():
+if (
+    not VULN_PILOT_PREPARED.exists()
+    or not (SYNERGY_ROOT / "scripts" / "vulns_ingest_rag.py").exists()
+):
     pytest.skip(
         "cross-repo vuln pilot data not available (synergy monorepo layout required)",
         allow_module_level=True,
