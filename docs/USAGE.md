@@ -372,6 +372,10 @@ rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
+
+# Pack RepoGPT -> rag-prototype (fixture compartida en synergy root)
+bash ../scripts/repogpt_ingest_demo.sh
+bash ../scripts/repogpt_eval_smoke.sh
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
@@ -408,6 +412,34 @@ El JSON de salida incluye:
 - `baseline`
 - `candidate`
 - `delta`
+
+Dataset específico de RepoGPT:
+
+```bash
+rag-eval \
+  --dataset datasets/repogpt_rag_eval_v1.jsonl \
+  --retrieval-mode sparse \
+  --k 1 \
+  --fail-below-ndcg 0.0 \
+  --fail-below-map 0.0 \
+  --fail-below-mrr 0.0
+
+rag-eval-compare \
+  --dataset datasets/repogpt_rag_eval_v1.jsonl \
+  --k 1 \
+  --candidate-mode sparse \
+  --min-delta-ndcg 0.0 \
+  --min-delta-map 0.0 \
+  --min-delta-mrr 0.0 \
+  --max-regression-precision 0.0 \
+  --max-regression-recall 0.0
+```
+
+Notas:
+
+* La fixture repo compartida vive en `../fixtures/repogpt_eval_repo/`.
+* El wiring cross-repo oficial vive en `../scripts/repogpt_ingest_demo.sh`.
+* El dataset `datasets/repogpt_rag_eval_v1.jsonl` pertenece a `rag-prototype`, no a `RepoGPT`, porque define la barra de calidad del consumidor.
 - `gate`
 
 Smoke e2e reproducible:

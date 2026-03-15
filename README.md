@@ -326,9 +326,20 @@ rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
+
+# Shared cross-repo RepoGPT demo/eval pack lives in synergy root
+bash ../scripts/repogpt_ingest_demo.sh
+bash ../scripts/repogpt_eval_smoke.sh
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
+
+RepoGPT integration pack:
+
+* Shared fixture repo: `../fixtures/repogpt_eval_repo/`
+* Cross-repo demos/smokes: `../scripts/repogpt_ingest_demo.sh`, `../scripts/repogpt_eval_smoke.sh`
+* Consumer-owned eval dataset: `datasets/repogpt_rag_eval_v1.jsonl`
+* Maintained import/search coverage: `tests/e2e/test_repogpt_ingest_search_eval.py`
 
 Optional: better file type detection (best-effort) using `python-magic`:
 
