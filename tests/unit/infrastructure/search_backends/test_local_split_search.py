@@ -188,6 +188,41 @@ def test_sparse_supports_metadata_prefixed_filters():
     assert [item.document.id for item in result.items] == ["doc-node"]
 
 
+def test_sparse_supports_membership_filters_for_metadata_sequences():
+    docs = [
+        Document(
+            id="doc-node",
+            content="AP node seen by sensors alpha and beta",
+            source_id="tr3v0r:dataset:artifact:net_nodes",
+            metadata={
+                "doc_type": "net_node",
+                "sensor_ids": ["sensor-alpha", "sensor-beta"],
+            },
+        ),
+        Document(
+            id="doc-edge",
+            content="Edge observed by sensor gamma",
+            source_id="tr3v0r:dataset:artifact:net_edges",
+            metadata={"doc_type": "net_edge", "sensor_ids": ["sensor-gamma"]},
+        ),
+    ]
+    retriever = LocalSplitSearchRetriever(doc_repo=DummyDocRepo(docs), preloaded_docs=docs)
+
+    result = retriever.retrieve(
+        RetrievalRequest(
+            query="sensor",
+            top_k=2,
+            mode="sparse",
+            filters=(
+                RetrievalFilter(field="metadata.doc_type", values=("net_node",)),
+                RetrievalFilter(field="metadata.sensor_ids", values=("sensor-beta",)),
+            ),
+        )
+    )
+
+    assert [item.document.id for item in result.items] == ["doc-node"]
+
+
 def test_dense_requires_embedder_and_vector_repo():
     retriever = LocalSplitSearchRetriever(doc_repo=DummyDocRepo([]), preloaded_docs=[])
 

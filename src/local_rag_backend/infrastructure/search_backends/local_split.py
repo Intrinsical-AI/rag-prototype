@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import overload
+from typing import Any, overload
 
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import (
@@ -19,9 +19,18 @@ from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorR
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 
-def _doc_field_value(doc: Document, field: str) -> str | None:
+def _normalize_filter_values(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(str(item) for item in value if item is not None and str(item).strip())
+    rendered = str(value).strip()
+    return (rendered,) if rendered else ()
+
+
+def _doc_field_values(doc: Document, field: str) -> tuple[str, ...]:
     if field == "source_id":
-        return str(doc.source_id) if doc.source_id is not None else None
+        return _normalize_filter_values(doc.source_id)
     metadata = dict(doc.metadata or {})
     metadata_key = metadata_key_for_filter_field(field)
     if metadata_key is None:
@@ -30,17 +39,17 @@ def _doc_field_value(doc: Document, field: str) -> str | None:
         value = metadata
         for part in metadata_key.split("."):
             if not isinstance(value, dict):
-                return None
+                return ()
             value = value.get(part)
-    return str(value) if value is not None else None
+    return _normalize_filter_values(value)
 
 
 def _matches_filters(doc: Document, filters: Sequence[RetrievalFilter]) -> bool:
     if not filters:
         return True
     for filter_item in filters:
-        value = _doc_field_value(doc, filter_item.field)
-        if value is None or value not in filter_item.values:
+        values = _doc_field_values(doc, filter_item.field)
+        if not values or not any(value in filter_item.values for value in values):
             return False
     return True
 
