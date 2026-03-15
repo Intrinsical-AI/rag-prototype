@@ -371,6 +371,7 @@ rag-eval --retrieval-mode sparse
 rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
+rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
@@ -381,6 +382,39 @@ Los overrides de modo son explícitos:
 - `--candidate-k` sólo para `dense`
 - `--dual-candidate-k` sólo para `dual`
 - `--hybrid-alpha` sólo para `hybrid`
+
+Comparación baseline-vs-candidate (“Detector de Placebo RAG”):
+
+```bash
+rag-eval-compare \
+  --candidate-mode dual \
+  --candidate-dual-candidate-k 50 \
+  --min-delta-ndcg 0.02 \
+  --min-delta-map 0.02 \
+  --min-delta-mrr 0.02 \
+  --max-regression-precision 0.01 \
+  --max-regression-recall 0.01 \
+  --json-out /tmp/rag-eval-compare.json
+```
+
+Comportamiento:
+- baseline por defecto: `sparse` sin reranker
+- candidate: la configuración que quieras validar
+- exit code `0`: pasa el gate
+- exit code `1`: la candidate no mejora lo suficiente o degrada métricas críticas
+- exit code `2`: error de configuración, dependencia o entorno
+
+El JSON de salida incluye:
+- `baseline`
+- `candidate`
+- `delta`
+- `gate`
+
+Smoke e2e reproducible:
+
+```bash
+bash scripts/test_rag_eval_compare_e2e.sh
+```
 
 Reranker opcional (mejora de calidad medible con `rag-eval`):
 
