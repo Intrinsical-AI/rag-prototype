@@ -5,15 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
 from local_rag_backend.core.services.types import EvalRetrievalConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from local_rag_backend.core.domain.entities import Document
-    from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
+    from local_rag_backend.core.domain.retrieval import (
+        RetrievalFilter,
+        RetrievalRequest,
+        RetrievalResult,
+    )
 
 BlockingTaskType = Literal["default", "mutation", "network", "eval"]
 T = TypeVar("T")
@@ -75,7 +76,13 @@ class EvalDatasetDocInput:
 
 
 class DocsReadPort(Protocol):
-    def list_docs_page(self, *, limit: int, offset: int) -> tuple[ListedDocument, ...]: ...
+    def query_docs(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        filters: tuple[RetrievalFilter, ...],
+    ) -> tuple[ListedDocument, ...]: ...
 
 
 class HistoryReadPort(Protocol):
@@ -134,15 +141,7 @@ class EvalStoragePort(Protocol):
 
 
 class EvalRetrieverPort(Protocol):
-    @overload
     def retrieve(self, query: RetrievalRequest) -> RetrievalResult: ...
-
-    @overload
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
-
-    def retrieve(
-        self, query: RetrievalRequest | str, k: int = 5
-    ) -> RetrievalResult | tuple[Sequence[Document], Sequence[float]]: ...
 
 
 class EvalRetrieverFactoryPort(Protocol):
