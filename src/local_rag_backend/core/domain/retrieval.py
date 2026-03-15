@@ -9,8 +9,7 @@ from typing import Any, Literal
 from local_rag_backend.core.domain.entities import Document
 
 RetrievalMode = Literal["sparse", "dense", "dual", "hybrid"]
-LEGACY_METADATA_FILTER_FIELDS = frozenset({"path", "language", "unit_type"})
-TOP_LEVEL_FILTER_FIELDS = frozenset({"scope", "source_id"})
+TOP_LEVEL_FILTER_FIELDS = frozenset({"scope", "snapshot_id", "source_id"})
 METADATA_FILTER_PREFIX = "metadata."
 
 
@@ -18,15 +17,14 @@ def normalize_filter_field(field: str) -> str:
     normalized = str(field).strip()
     if not normalized:
         raise ValueError("RetrievalFilter.field must not be blank")
-    if normalized in TOP_LEVEL_FILTER_FIELDS or normalized in LEGACY_METADATA_FILTER_FIELDS:
+    if normalized in TOP_LEVEL_FILTER_FIELDS:
         return normalized
     if normalized.startswith(METADATA_FILTER_PREFIX):
         metadata_key = normalized[len(METADATA_FILTER_PREFIX) :].strip()
         if metadata_key and all(part.strip() for part in metadata_key.split(".")):
             return normalized
     raise ValueError(
-        "RetrievalFilter.field must be one of "
-        "scope, source_id, path, language, unit_type, or metadata.<key>"
+        "RetrievalFilter.field must be one of scope, snapshot_id, source_id, or metadata.<key>"
     )
 
 
@@ -34,9 +32,43 @@ def metadata_key_for_filter_field(field: str) -> str | None:
     normalized = normalize_filter_field(field)
     if normalized in TOP_LEVEL_FILTER_FIELDS:
         return None
-    if normalized in LEGACY_METADATA_FILTER_FIELDS:
-        return normalized
     return normalized[len(METADATA_FILTER_PREFIX) :]
+
+
+def normalize_filter_values(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(str(item) for item in value if item is not None and str(item).strip())
+    rendered = str(value).strip()
+    return (rendered,) if rendered else ()
+
+
+def document_field_values(document: Document, field: str) -> tuple[str, ...]:
+    if field == "source_id":
+        return normalize_filter_values(document.source_id)
+    metadata = dict(document.metadata or {})
+    if field in {"scope", "snapshot_id"}:
+        return normalize_filter_values(metadata.get(field))
+    metadata_key = metadata_key_for_filter_field(field)
+    if metadata_key is None:
+        return ()
+    value: Any = metadata
+    for part in metadata_key.split("."):
+        if not isinstance(value, dict):
+            return ()
+        value = value.get(part)
+    return normalize_filter_values(value)
+
+
+def document_matches_filters(document: Document, filters: Sequence[RetrievalFilter]) -> bool:
+    if not filters:
+        return True
+    for filter_item in filters:
+        values = document_field_values(document, filter_item.field)
+        if not values or not any(value in filter_item.values for value in values):
+            return False
+    return True
 
 
 @dataclass(frozen=True)
