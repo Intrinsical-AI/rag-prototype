@@ -74,12 +74,12 @@ def test_rag_query_list_history_entries_sync_delegates_to_crud() -> None:
 def test_evaluation_run_retrieval_eval_validates_inputs() -> None:
     dataset = SimpleNamespace(docs=[], dataset_id="d", queries=[])
 
-    with pytest.raises(ValueError, match="retrieval_mode=sparse only"):
+    with pytest.raises(ValueError, match="Unsupported retrieval_mode"):
         evaluation.run_retrieval_eval(
             dataset=dataset,
             eval_storage_port=SimpleNamespace(),
             eval_retriever_factory_port=SimpleNamespace(),
-            retrieval_mode="dense",
+            retrieval_mode="invalid",
         )
 
     with pytest.raises(ValueError, match="k must be positive"):
@@ -89,4 +89,13 @@ def test_evaluation_run_retrieval_eval_validates_inputs() -> None:
             eval_retriever_factory_port=SimpleNamespace(),
             retrieval_mode="sparse",
             k=0,
+        )
+
+    with pytest.raises(ValueError, match="candidate-k is supported only"):
+        evaluation.run_retrieval_eval(
+            dataset=dataset,
+            eval_storage_port=SimpleNamespace(),
+            eval_retriever_factory_port=SimpleNamespace(),
+            retrieval_mode="sparse",
+            candidate_k=2,
         )

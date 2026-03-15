@@ -123,10 +123,17 @@ def test_load_eval_dataset_rejects_blank_ids_after_normalization(tmp_path: Path)
         load_eval_dataset(p)
 
 
-def test_run_retrieval_eval_rejects_non_sparse_mode() -> None:
+def test_run_retrieval_eval_allows_non_sparse_modes_when_callback_is_valid() -> None:
     ds = load_eval_dataset()
-    with pytest.raises(ValueError, match="sparse only"):
-        run_retrieval_eval(dataset=ds, retrieval_mode="dense")
+    result = run_retrieval_eval(
+        dataset=ds,
+        retrieve_external_ids=lambda _query, _top_k: (),
+        retrieval_mode="dense",
+        k=1,
+    )
+
+    assert result.retrieval_mode == "dense"
+    assert result.queries == len(ds.queries)
 
 
 def test_run_retrieval_eval_max_queries_zero_raises() -> None:
