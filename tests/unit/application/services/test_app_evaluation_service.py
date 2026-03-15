@@ -1,23 +1,97 @@
 # tests/unit/app/services/test_evaluation.py
 
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
 from local_rag_backend.composition.adapters import (
     build_eval_retriever_factory_port,
     build_eval_storage_port,
 )
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalRequest,
+    RetrievalResult,
+    retrieval_result_from_pairs,
+)
 from local_rag_backend.core.ports import EvalDatasetDocInput
 from local_rag_backend.core.services.evaluation import (
+    EvalDataset,
+    EvalDoc,
+    EvalQuery,
     load_eval_dataset,
     run_retrieval_eval as run_core_eval,
 )
+from local_rag_backend.core.services.types import EvalRetrievalConfig
 from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
+from local_rag_backend.settings import settings
+
+
+class DummyEmbedder:
+    dim = 2
+
+    def embed(self, texts):
+        out = []
+        for text in texts:
+            normalized = text.lower()
+            if "auth" in normalized:
+                out.append([1.0, 0.0])
+            elif "sql" in normalized:
+                out.append([0.0, 1.0])
+            else:
+                out.append([0.5, 0.5])
+        return out
+
+
+def _coerce_retrieval_result(raw_result: Any, *, request: RetrievalRequest) -> RetrievalResult:
+    if isinstance(raw_result, RetrievalResult):
+        return raw_result
+    docs, scores = raw_result
+    return retrieval_result_from_pairs(
+        docs=docs,
+        scores=scores,
+        mode_used=request.mode,
+        backend_used="legacy_test",
+    )
+
+
+def _eval_settings():
+    return settings.model_copy(
+        update={
+            "persistence_backend": "local_split",
+            "search_backend": "local_split",
+            "vector_backend": "numpy",
+            "openai_api_key": None,
+        }
+    )
+
+
+def _mode_dataset() -> EvalDataset:
+    return EvalDataset(
+        dataset_id="multi-mode",
+        schema_version=1,
+        docs=(
+            EvalDoc(external_id="doc-auth", content="auth auth guard"),
+            EvalDoc(external_id="doc-sql", content="sql sql helper"),
+        ),
+        queries=(
+            EvalQuery(query="auth", relevant_external_ids=("doc-auth",)),
+            EvalQuery(query="sql", relevant_external_ids=("doc-sql",)),
+        ),
+    )
 
 
 def test_run_retrieval_eval_app_service_passes_on_default_repo_dataset() -> None:
     ds = load_eval_dataset()
+    cfg = _eval_settings()
     res = run_retrieval_eval(
         dataset=ds,
-        eval_storage_port=build_eval_storage_port(),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(),
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: DummyEmbedder(),
+        ),
         retrieval_mode="sparse",
         reranker_enabled=True,
         reranker_candidate_k=20,
@@ -33,7 +107,8 @@ def test_run_retrieval_eval_app_service_passes_on_default_repo_dataset() -> None
 
 def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
     ds = load_eval_dataset()
-    storage = build_eval_storage_port()
+    cfg = _eval_settings()
+    storage = build_eval_storage_port(settings_obj=cfg)
     storage.upsert_dataset_docs(
         dataset_id=ds.dataset_id,
         docs=tuple(
@@ -46,18 +121,27 @@ def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
             for d in ds.docs
         ),
     )
-    retriever = build_eval_retriever_factory_port().build_sparse_retriever(
+    retriever = build_eval_retriever_factory_port(
+        st_embedder_factory=lambda _model_name: DummyEmbedder(),
+    ).build_retriever(
         storage=storage,
-        reranker_enabled=True,
-        candidate_k=20,
-        strategy="overlap_v1",
+        config=EvalRetrievalConfig(
+            retrieval_mode="sparse",
+            k=3,
+            reranker_enabled=True,
+        ),
+        reranker_candidate_k=20,
+        reranker_strategy="overlap_v1",
     )
 
     def _retrieve_external_ids(query: str, top_k: int) -> list[str]:
-        docs, _scores = retriever.retrieve(query, top_k)
+        request = RetrievalRequest(query=query, top_k=top_k, mode="sparse")
+        retrieval = _coerce_retrieval_result(retriever.retrieve(request), request=request)
         return [
             str(external_id)
-            for external_id in (getattr(d, "external_id", None) for d in docs)
+            for external_id in (
+                getattr(document, "external_id", None) for document in retrieval.documents
+            )
             if external_id is not None and str(external_id).strip()
         ]
 
@@ -70,8 +154,10 @@ def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
     )
     app_res = run_retrieval_eval(
         dataset=ds,
-        eval_storage_port=build_eval_storage_port(),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(),
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: DummyEmbedder(),
+        ),
         retrieval_mode="sparse",
         k=3,
         reranker_enabled=True,
@@ -80,3 +166,60 @@ def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
     )
 
     assert app_res == core_res
+
+
+def test_build_eval_storage_port_uses_isolated_local_paths(tmp_path: Path) -> None:
+    base = settings.model_copy(
+        update={
+            "data_dir": tmp_path / "main-data",
+            "index_path": str(tmp_path / "main.index"),
+            "id_map_path": str(tmp_path / "main_id_map.json"),
+            "sqlite_url": f"sqlite:///{tmp_path / 'main.db'}",
+            "persistence_backend": "elasticsearch",
+            "search_backend": "elasticsearch",
+        }
+    )
+
+    storage = build_eval_storage_port(settings_obj=base)
+    eval_settings = storage.get_eval_settings()
+
+    assert eval_settings.persistence_backend == "local_split"
+    assert eval_settings.search_backend == "local_split"
+    assert Path(eval_settings.index_path) != Path(base.index_path)
+    assert Path(eval_settings.id_map_path) != Path(base.id_map_path)
+    assert eval_settings.sqlite_url != base.sqlite_url
+
+
+@pytest.mark.parametrize(
+    ("retrieval_mode", "extra_kwargs"),
+    [
+        ("dense", {"candidate_k": 1}),
+        ("dual", {"dual_candidate_k": 2}),
+        ("hybrid", {"hybrid_alpha": 0.5}),
+    ],
+)
+def test_run_retrieval_eval_app_service_supports_multi_mode_runtime(
+    retrieval_mode: str,
+    extra_kwargs: dict[str, Any],
+) -> None:
+    ds = _mode_dataset()
+    cfg = _eval_settings()
+
+    res = run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: DummyEmbedder(),
+        ),
+        retrieval_mode=retrieval_mode,
+        k=1,
+        reranker_enabled=False,
+        **extra_kwargs,
+    )
+
+    assert res.retrieval_mode == retrieval_mode
+    assert res.ndcg_at_k == pytest.approx(1.0)
+    assert res.map_at_k == pytest.approx(1.0)
+    assert res.mrr_at_k == pytest.approx(1.0)
+    assert res.precision_at_k == pytest.approx(1.0)
+    assert res.recall_at_k == pytest.approx(1.0)

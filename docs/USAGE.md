@@ -368,11 +368,19 @@ Evaluación offline reproducible (gate):
 
 ```bash
 rag-eval --retrieval-mode sparse
+rag-eval --retrieval-mode dense --candidate-k 20
+rag-eval --retrieval-mode dual --dual-candidate-k 50
+rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
 El comando reporta métricas estándar de IR a `@k` (`nDCG`, `MAP`, `MRR`, `P`, `Recall`).
+La evaluación usa un runtime local aislado y efímero; no reutiliza ni muta el índice principal.
 El dataset se valida de forma estricta: IDs duplicados, relevantes vacíos o relevantes fuera del corpus fallan al cargar.
+Los overrides de modo son explícitos:
+- `--candidate-k` sólo para `dense`
+- `--dual-candidate-k` sólo para `dual`
+- `--hybrid-alpha` sólo para `hybrid`
 
 Reranker opcional (mejora de calidad medible con `rag-eval`):
 

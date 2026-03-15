@@ -320,8 +320,11 @@ rag-status
 
 
 # Offline IR evaluation with standard metrics via `ir_measures`
-# (reproducible gate; default dataset from `datasets/rag_eval_v1.jsonl`)
+# Uses an isolated local eval runtime; does not touch the main doc store or index.
 rag-eval --retrieval-mode sparse
+rag-eval --retrieval-mode dense --candidate-k 20
+rag-eval --retrieval-mode dual --dual-candidate-k 50
+rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
