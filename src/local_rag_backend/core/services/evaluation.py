@@ -18,7 +18,15 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
-from local_rag_backend.core.services.types import EvalDataset, EvalDoc, EvalQuery, EvalResult
+from local_rag_backend.core.services.types import (
+    EvalCompareDelta,
+    EvalCompareGate,
+    EvalCompareResult,
+    EvalDataset,
+    EvalDoc,
+    EvalQuery,
+    EvalResult,
+)
 
 _EVAL_DATASET_ENV = "RAG_EVAL_DATASET_PATH"
 
@@ -238,6 +246,16 @@ def format_eval_result(result: EvalResult) -> str:
     )
 
 
+def _eval_metrics_to_json(result: EvalResult) -> dict[str, float]:
+    return {
+        f"nDCG@{result.k}": result.ndcg_at_k,
+        f"MAP@{result.k}": result.map_at_k,
+        f"MRR@{result.k}": result.mrr_at_k,
+        f"P@{result.k}": result.precision_at_k,
+        f"Recall@{result.k}": result.recall_at_k,
+    }
+
+
 def eval_result_to_json(result: EvalResult) -> dict[str, Any]:
     return {
         "dataset_id": result.dataset_id,
@@ -245,11 +263,120 @@ def eval_result_to_json(result: EvalResult) -> dict[str, Any]:
         "reranker_enabled": result.reranker_enabled,
         "k": result.k,
         "queries": result.queries,
-        "metrics": {
-            f"nDCG@{result.k}": result.ndcg_at_k,
-            f"MAP@{result.k}": result.map_at_k,
-            f"MRR@{result.k}": result.mrr_at_k,
-            f"P@{result.k}": result.precision_at_k,
-            f"Recall@{result.k}": result.recall_at_k,
+        "metrics": _eval_metrics_to_json(result),
+    }
+
+
+def compare_eval_results(
+    *,
+    baseline: EvalResult,
+    candidate: EvalResult,
+    min_delta_ndcg: float = 0.0,
+    min_delta_map: float = 0.0,
+    min_delta_mrr: float = 0.0,
+    max_regression_precision: float = 0.0,
+    max_regression_recall: float = 0.0,
+) -> EvalCompareResult:
+    if baseline.dataset_id != candidate.dataset_id:
+        raise ValueError("Baseline and candidate dataset_id must match.")
+    if baseline.k != candidate.k:
+        raise ValueError("Baseline and candidate k must match.")
+
+    delta = EvalCompareDelta(
+        ndcg_at_k=float(candidate.ndcg_at_k - baseline.ndcg_at_k),
+        map_at_k=float(candidate.map_at_k - baseline.map_at_k),
+        mrr_at_k=float(candidate.mrr_at_k - baseline.mrr_at_k),
+        precision_at_k=float(candidate.precision_at_k - baseline.precision_at_k),
+        recall_at_k=float(candidate.recall_at_k - baseline.recall_at_k),
+    )
+
+    reasons: list[str] = []
+    if delta.ndcg_at_k < float(min_delta_ndcg):
+        reasons.append(
+            f"nDCG@{baseline.k} delta={delta.ndcg_at_k:.3f} (min {float(min_delta_ndcg):.3f})"
+        )
+    if delta.map_at_k < float(min_delta_map):
+        reasons.append(
+            f"MAP@{baseline.k} delta={delta.map_at_k:.3f} (min {float(min_delta_map):.3f})"
+        )
+    if delta.mrr_at_k < float(min_delta_mrr):
+        reasons.append(
+            f"MRR@{baseline.k} delta={delta.mrr_at_k:.3f} (min {float(min_delta_mrr):.3f})"
+        )
+    if delta.precision_at_k < -abs(float(max_regression_precision)):
+        reasons.append(
+            f"P@{baseline.k} delta={delta.precision_at_k:.3f} "
+            f"(max regression {float(max_regression_precision):.3f})"
+        )
+    if delta.recall_at_k < -abs(float(max_regression_recall)):
+        reasons.append(
+            f"Recall@{baseline.k} delta={delta.recall_at_k:.3f} "
+            f"(max regression {float(max_regression_recall):.3f})"
+        )
+
+    return EvalCompareResult(
+        dataset_id=baseline.dataset_id,
+        k=int(baseline.k),
+        baseline=baseline,
+        candidate=candidate,
+        delta=delta,
+        gate=EvalCompareGate(
+            passed=not reasons,
+            reasons=tuple(reasons),
+            min_delta_ndcg=float(min_delta_ndcg),
+            min_delta_map=float(min_delta_map),
+            min_delta_mrr=float(min_delta_mrr),
+            max_regression_precision=float(max_regression_precision),
+            max_regression_recall=float(max_regression_recall),
+        ),
+    )
+
+
+def format_eval_compare_result(result: EvalCompareResult) -> tuple[str, str, str, str]:
+    k = int(result.k)
+    baseline_line = "BASELINE  " + format_eval_result(result.baseline)
+    candidate_line = "CANDIDATE " + format_eval_result(result.candidate)
+    delta_line = (
+        f"DELTA     nDCG@{k}={result.delta.ndcg_at_k:+.3f} "
+        f"MAP@{k}={result.delta.map_at_k:+.3f} "
+        f"MRR@{k}={result.delta.mrr_at_k:+.3f} "
+        f"P@{k}={result.delta.precision_at_k:+.3f} "
+        f"Recall@{k}={result.delta.recall_at_k:+.3f}"
+    )
+    gate_line = "PASS" if result.gate.passed else "FAIL: " + "; ".join(result.gate.reasons)
+    return baseline_line, candidate_line, delta_line, gate_line
+
+
+def eval_compare_result_to_json(result: EvalCompareResult) -> dict[str, Any]:
+    return {
+        "dataset_id": result.dataset_id,
+        "k": result.k,
+        "baseline": {
+            "retrieval_mode": result.baseline.retrieval_mode,
+            "reranker_enabled": result.baseline.reranker_enabled,
+            "metrics": _eval_metrics_to_json(result.baseline),
+        },
+        "candidate": {
+            "retrieval_mode": result.candidate.retrieval_mode,
+            "reranker_enabled": result.candidate.reranker_enabled,
+            "metrics": _eval_metrics_to_json(result.candidate),
+        },
+        "delta": {
+            f"nDCG@{result.k}": result.delta.ndcg_at_k,
+            f"MAP@{result.k}": result.delta.map_at_k,
+            f"MRR@{result.k}": result.delta.mrr_at_k,
+            f"P@{result.k}": result.delta.precision_at_k,
+            f"Recall@{result.k}": result.delta.recall_at_k,
+        },
+        "gate": {
+            "passed": result.gate.passed,
+            "reasons": list(result.gate.reasons),
+            "thresholds": {
+                "min_delta_ndcg": result.gate.min_delta_ndcg,
+                "min_delta_map": result.gate.min_delta_map,
+                "min_delta_mrr": result.gate.min_delta_mrr,
+                "max_regression_precision": result.gate.max_regression_precision,
+                "max_regression_recall": result.gate.max_regression_recall,
+            },
         },
     }

@@ -15,11 +15,13 @@ from local_rag_backend.core.ports import (
     EvalStoragePort,
 )
 from local_rag_backend.core.services.evaluation import (
+    EvalCompareResult,
     EvalDataset,
     EvalResult,
+    compare_eval_results,
     run_retrieval_eval as run_retrieval_eval_core,
 )
-from local_rag_backend.core.services.types import EvalRetrievalConfig
+from local_rag_backend.core.services.types import EvalCompareConfig, EvalRetrievalConfig
 
 
 def _coerce_retrieval_result(
@@ -143,4 +145,60 @@ def run_retrieval_eval(
         k=k,
         reranker_enabled=reranker_enabled,
         max_queries=max_queries,
+    )
+
+
+def compare_retrieval_eval(
+    *,
+    dataset: EvalDataset,
+    eval_storage_port: EvalStoragePort,
+    eval_retriever_factory_port: EvalRetrieverFactoryPort,
+    baseline: EvalCompareConfig,
+    candidate: EvalCompareConfig,
+    k: int = 3,
+    reranker_candidate_k: int = 20,
+    reranker_strategy: str = "overlap_v1",
+    max_queries: int | None = None,
+    min_delta_ndcg: float = 0.0,
+    min_delta_map: float = 0.0,
+    min_delta_mrr: float = 0.0,
+    max_regression_precision: float = 0.0,
+    max_regression_recall: float = 0.0,
+) -> EvalCompareResult:
+    baseline_result = run_retrieval_eval(
+        dataset=dataset,
+        eval_storage_port=eval_storage_port,
+        eval_retriever_factory_port=eval_retriever_factory_port,
+        retrieval_mode=baseline.retrieval_mode,
+        k=k,
+        candidate_k=baseline.candidate_k,
+        reranker_enabled=baseline.reranker_enabled,
+        dual_candidate_k=baseline.dual_candidate_k,
+        hybrid_alpha=baseline.hybrid_alpha,
+        reranker_candidate_k=reranker_candidate_k,
+        reranker_strategy=reranker_strategy,
+        max_queries=max_queries,
+    )
+    candidate_result = run_retrieval_eval(
+        dataset=dataset,
+        eval_storage_port=eval_storage_port,
+        eval_retriever_factory_port=eval_retriever_factory_port,
+        retrieval_mode=candidate.retrieval_mode,
+        k=k,
+        candidate_k=candidate.candidate_k,
+        reranker_enabled=candidate.reranker_enabled,
+        dual_candidate_k=candidate.dual_candidate_k,
+        hybrid_alpha=candidate.hybrid_alpha,
+        reranker_candidate_k=reranker_candidate_k,
+        reranker_strategy=reranker_strategy,
+        max_queries=max_queries,
+    )
+    return compare_eval_results(
+        baseline=baseline_result,
+        candidate=candidate_result,
+        min_delta_ndcg=min_delta_ndcg,
+        min_delta_map=min_delta_map,
+        min_delta_mrr=min_delta_mrr,
+        max_regression_precision=max_regression_precision,
+        max_regression_recall=max_regression_recall,
     )
