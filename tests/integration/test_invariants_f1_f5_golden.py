@@ -62,12 +62,15 @@ async def test_golden_f1_f2_docs_mutation_ingest_and_list(
     assert p4["count"] == 2
     assert len(p4["ids"]) == 2
 
-    r5 = await asgi_client.get("/api/docs")
+    r5 = await asgi_client.post("/api/docs/query", json={"limit": 100, "offset": 0, "filters": []})
     assert r5.status_code == 200
     docs = r5.json()
     assert isinstance(docs, list)
     assert len(docs) >= 3
-    assert all(set(item.keys()) >= {"id", "content"} for item in docs)
+    assert all(
+        set(item.keys()) >= {"id", "content", "external_id", "source_id", "metadata"}
+        for item in docs
+    )
 
 
 async def test_golden_f3_query_eval_and_history_contract(

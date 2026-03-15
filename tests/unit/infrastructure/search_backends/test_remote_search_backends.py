@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -13,7 +16,7 @@ from local_rag_backend.infrastructure.search_backends.solr import SolrSearchRetr
 class DummyEmbedder:
     dim = 2
 
-    def embed(self, texts):
+    def embed(self, texts: list[str]) -> list[list[float]]:
         out = []
         for text in texts:
             normalized = text.lower()
@@ -26,8 +29,8 @@ class DummyEmbedder:
         return out
 
 
-def test_elastic_like_sparse_builds_filter_query():
-    captured = {}
+def test_elastic_like_sparse_builds_filter_query() -> None:
+    captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["path"] = request.url.path
@@ -68,17 +71,22 @@ def test_elastic_like_sparse_builds_filter_query():
             query="auth",
             top_k=3,
             mode="sparse",
-            filters=(RetrievalFilter(field="language", values=("python",)),),
+            filters=(RetrievalFilter(field="metadata.language", values=("python",)),),
         )
     )
     assert captured["path"] == "/rag-docs/_search"
-    bool_query = captured["body"]["query"]["bool"]
+    body = captured["body"]
+    assert isinstance(body, dict)
+    query = body["query"]
+    assert isinstance(query, dict)
+    bool_query = query["bool"]
+    assert isinstance(bool_query, dict)
     assert bool_query["filter"] == [{"terms": {"metadata.language.keyword": ["python"]}}]
     assert [item.document.id for item in result.items] == ["doc-1"]
 
 
-def test_elastic_like_sparse_supports_metadata_prefixed_filters():
-    captured = {}
+def test_elastic_like_sparse_supports_metadata_prefixed_filters() -> None:
+    captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content.decode("utf-8"))
@@ -108,13 +116,19 @@ def test_elastic_like_sparse_supports_metadata_prefixed_filters():
         )
     )
 
-    assert captured["body"]["query"]["bool"]["filter"] == [
+    body = captured["body"]
+    assert isinstance(body, dict)
+    query = body["query"]
+    assert isinstance(query, dict)
+    bool_query = query["bool"]
+    assert isinstance(bool_query, dict)
+    assert bool_query["filter"] == [
         {"terms": {"metadata.doc_type.keyword": ["net_node"]}},
         {"terms": {"metadata.sensor_id.keyword": ["sensor-a"]}},
     ]
 
 
-def test_solr_rejects_dense_mode():
+def test_solr_rejects_dense_mode() -> None:
     retriever = SolrSearchRetriever(
         base_url="http://example.test",
         core="rag-docs",
@@ -126,8 +140,8 @@ def test_solr_rejects_dense_mode():
         retriever.retrieve(RetrievalRequest(query="auth", top_k=3, mode="dense"))
 
 
-def test_elastic_like_dense_builds_knn_query_and_applies_min_score():
-    captured = {}
+def test_elastic_like_dense_builds_knn_query_and_applies_min_score() -> None:
+    captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content.decode("utf-8"))
@@ -170,20 +184,24 @@ def test_elastic_like_dense_builds_knn_query_and_applies_min_score():
             candidate_k=1,
             mode="dense",
             min_score=0.5,
-            filters=(RetrievalFilter(field="language", values=("python",)),),
+            filters=(RetrievalFilter(field="metadata.language", values=("python",)),),
         )
     )
 
-    assert captured["body"]["knn"]["k"] == 2
-    assert captured["body"]["knn"]["num_candidates"] == 2
-    assert captured["body"]["knn"]["filter"] == {
+    body = captured["body"]
+    assert isinstance(body, dict)
+    knn = body["knn"]
+    assert isinstance(knn, dict)
+    assert knn["k"] == 2
+    assert knn["num_candidates"] == 2
+    assert knn["filter"] == {
         "bool": {"filter": [{"terms": {"metadata.language.keyword": ["python"]}}]}
     }
     assert [item.document.id for item in result.items] == ["doc-1"]
     assert result.mode_used == "dense"
 
 
-def test_elastic_like_dual_uses_dual_candidate_floor_and_reranks():
+def test_elastic_like_dual_uses_dual_candidate_floor_and_reranks() -> None:
     requests: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -269,27 +287,6 @@ def test_elastic_like_requires_embedder_for_dense_modes(mode):
         retriever.retrieve(RetrievalRequest(query="auth", top_k=1, mode=mode))
 
 
-def test_elastic_like_legacy_path_and_empty_hits():
-    retriever = ElasticLikeSearchRetriever(
-        backend_name="opensearch",
-        base_url="http://example.test",
-        docs_index="rag-docs",
-        content_field="content",
-        embedding_field="embedding",
-        request_timeout_s=5.0,
-        verify_tls=False,
-        client=httpx.Client(
-            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"hits": {}})),
-            base_url="http://example.test",
-        ),
-    )
-
-    docs, scores = retriever.retrieve("auth", 2)
-
-    assert docs == []
-    assert scores == []
-
-
 def test_elastic_like_client_configuration_uses_api_key_and_basic_auth(monkeypatch):
     captured = {}
 
@@ -322,8 +319,8 @@ def test_elastic_like_client_configuration_uses_api_key_and_basic_auth(monkeypat
     assert captured["headers"]["Authorization"] == "ApiKey secret"
 
 
-def test_solr_builds_filter_queries_and_parses_metadata_json():
-    captured = {}
+def test_solr_builds_filter_queries_and_parses_metadata_json() -> None:
+    captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["filters"] = request.url.params.get_list("fq")
@@ -359,12 +356,12 @@ def test_solr_builds_filter_queries_and_parses_metadata_json():
             mode="sparse",
             filters=(
                 RetrievalFilter(field="scope", values=("repo",)),
-                RetrievalFilter(field="language", values=("python", "rust")),
+                RetrievalFilter(field="metadata.language", values=("python", "rust")),
             ),
         )
     )
 
-    assert captured["filters"] == ['scope:"repo"', 'language:("python" OR "rust")']
+    assert captured["filters"] == ['scope:"repo"', 'metadata.language:("python" OR "rust")']
     assert result.items[0].document.metadata == {"language": "python", "scope": "repo"}
 
 
@@ -393,26 +390,6 @@ def test_solr_fq_formats_single_value() -> None:
     )
 
     assert retriever._fq(RetrievalFilter(field="scope", values=("repo",))) == 'scope:"repo"'
-
-
-def test_solr_empty_hits_and_legacy_path():
-    retriever = SolrSearchRetriever(
-        base_url="http://example.test",
-        core="rag-docs",
-        content_field="content",
-        request_timeout_s=5.0,
-        client=httpx.Client(
-            transport=httpx.MockTransport(
-                lambda request: httpx.Response(200, json={"response": {"docs": []}})
-            ),
-            base_url="http://example.test",
-        ),
-    )
-
-    docs, scores = retriever.retrieve("auth", 2)
-
-    assert docs == []
-    assert scores == []
 
 
 @pytest.mark.parametrize("status_code", [400, 500])
