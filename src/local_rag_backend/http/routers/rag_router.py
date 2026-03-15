@@ -46,6 +46,18 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
+def _to_document_in_db(doc: Any) -> DocumentInDB:
+    return DocumentInDB(
+        id=str(doc.id),
+        content=str(doc.content),
+        external_id=(
+            str(doc.external_id) if getattr(doc, "external_id", None) is not None else None
+        ),
+        source_id=(str(doc.source_id) if getattr(doc, "source_id", None) is not None else None),
+        metadata=(dict(doc.metadata or {}) if getattr(doc, "metadata", None) is not None else None),
+    )
+
+
 def _build_ask_call(
     *, service: RagService, request: AskRequest, retrieval_mode: str
 ) -> Callable[[], dict[str, Any]]:
@@ -115,7 +127,7 @@ async def ask(
 
     sources = [
         QueryResult(
-            document=DocumentInDB(id=str(doc.id), content=doc.content),
+            document=_to_document_in_db(doc),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)
@@ -186,7 +198,7 @@ async def ask_eval(
     scores = rag_result["scores"]
     sources = [
         QueryResult(
-            document=DocumentInDB(id=str(doc.id), content=doc.content),
+            document=_to_document_in_db(doc),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)
