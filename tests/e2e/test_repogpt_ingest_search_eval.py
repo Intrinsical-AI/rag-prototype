@@ -55,7 +55,8 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
 
     dataset = load_eval_dataset(DATASET_PATH)
     emitted_external_ids = {
-        str(document["external_id"]) for document in list(payload["documents"])  # type: ignore[index]
+        str(document["external_id"])
+        for document in list(payload["documents"])  # type: ignore[index]
     }
     dataset_external_ids = {doc.external_id for doc in dataset.docs}
     assert dataset_external_ids <= emitted_external_ids

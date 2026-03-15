@@ -6,8 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-SYNERGY_ROOT = Path(__file__).resolve().parents[3]
-REPOGPT_ROOT = SYNERGY_ROOT / "RepoGPT"
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+SYNERGY_ROOT = WORKSPACE_ROOT / "synergy"
+REPOGPT_ROOT = WORKSPACE_ROOT / "RepoGPT"
 REPOGPT_FIXTURE_REPO = SYNERGY_ROOT / "fixtures" / "repogpt_eval_repo"
 
 
