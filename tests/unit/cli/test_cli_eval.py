@@ -227,3 +227,136 @@ def test_rag_eval_rejects_incompatible_mode_specific_flags(tmp_path: Path) -> No
 
     assert r.exit_code == 1
     assert "--candidate-k is supported only with retrieval_mode=dense" in r.output
+
+
+def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) -> None:
+    ds = tmp_path / "compare.jsonl"
+    json_out = tmp_path / "compare-result.json"
+    ds.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"x","schema_version":1}',
+                '{"type":"doc","external_id":"doc-auth","source_id":"eval","content":"auth auth"}',
+                '{"type":"doc","external_id":"doc-sql","source_id":"eval","content":"sql sql"}',
+                '{"type":"query","query":"auth","relevant_external_ids":["doc-auth"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "vector_backend", "numpy", raising=False)
+    monkeypatch.setattr(
+        factory,
+        "SentenceTransformerEmbedder",
+        lambda model_name=None: DummyEmbedder(),
+        raising=True,
+    )
+    factory.reset_app_context()
+
+    r = CliRunner().invoke(
+        cli,
+        [
+            "eval-compare",
+            "--dataset",
+            str(ds),
+            "--k",
+            "1",
+            "--candidate-mode",
+            "dual",
+            "--candidate-dual-candidate-k",
+            "1",
+            "--min-delta-ndcg",
+            "0.0",
+            "--min-delta-map",
+            "0.0",
+            "--min-delta-mrr",
+            "0.0",
+            "--max-regression-precision",
+            "0.0",
+            "--max-regression-recall",
+            "0.0",
+            "--json-out",
+            str(json_out),
+        ],
+    )
+
+    assert r.exit_code == 0, r.output
+    assert "BASELINE" in r.output
+    assert "CANDIDATE" in r.output
+    assert "DELTA" in r.output
+    assert "PASS" in r.output
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert set(payload.keys()) == {"dataset_id", "k", "baseline", "candidate", "delta", "gate"}
+    assert payload["gate"]["passed"] is True
+    factory.reset_app_context()
+
+
+def test_rag_eval_compare_fails_gate_with_exit_code_one(tmp_path: Path) -> None:
+    ds = tmp_path / "compare.jsonl"
+    ds.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"x","schema_version":1}',
+                '{"type":"doc","external_id":"doc:1","source_id":"eval","content":"zzz zzz"}',
+                '{"type":"doc","external_id":"doc:2","source_id":"eval","content":"alpha alpha"}',
+                '{"type":"query","query":"alpha","relevant_external_ids":["doc:1"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    r = CliRunner().invoke(
+        cli,
+        [
+            "eval-compare",
+            "--dataset",
+            str(ds),
+            "--k",
+            "1",
+            "--candidate-mode",
+            "sparse",
+            "--candidate-reranker",
+            "--min-delta-ndcg",
+            "0.1",
+        ],
+    )
+
+    assert r.exit_code == 1
+    assert "FAIL:" in r.output
+    assert "nDCG@1" in r.output
+
+
+def test_rag_eval_compare_reports_invalid_candidate_mode_config_with_exit_code_two(
+    tmp_path: Path,
+) -> None:
+    ds = tmp_path / "compare.jsonl"
+    ds.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"x","schema_version":1}',
+                '{"type":"doc","external_id":"doc:1","source_id":"eval","content":"alpha"}',
+                '{"type":"query","query":"alpha","relevant_external_ids":["doc:1"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    r = CliRunner().invoke(
+        cli,
+        [
+            "eval-compare",
+            "--dataset",
+            str(ds),
+            "--candidate-mode",
+            "sparse",
+            "--candidate-candidate-k",
+            "5",
+        ],
+    )
+
+    assert r.exit_code == 2
+    assert "[ERROR] Error comparing eval runs:" in r.output

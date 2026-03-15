@@ -10,6 +10,7 @@ from local_rag_backend import __version__
 from local_rag_backend.cli_commands import (
     bootstrap_cmd,
     eval_cmd,
+    eval_compare_cmd,
     import_canonical_cmd,
     ingest_cmd,
     mutate_docs_cmd,
@@ -33,6 +34,7 @@ cli.add_command(import_canonical_cmd)
 cli.add_command(bootstrap_cmd)
 cli.add_command(status_cmd)
 cli.add_command(eval_cmd)
+cli.add_command(eval_compare_cmd)
 cli.add_command(ingest_cmd)
 
 
@@ -61,6 +63,11 @@ def rag_status() -> None:
 def rag_eval() -> None:
     """Entry point for rag-eval command."""
     _dispatch_entrypoint(command="eval", include_argv=True)
+
+
+def rag_eval_compare() -> None:
+    """Entry point for rag-eval-compare command."""
+    _dispatch_entrypoint(command="eval-compare", include_argv=True)
 
 
 def rag_rebuild_index() -> None:

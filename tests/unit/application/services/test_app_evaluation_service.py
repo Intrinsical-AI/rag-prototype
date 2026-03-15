@@ -24,8 +24,8 @@ from local_rag_backend.core.services.evaluation import (
     load_eval_dataset,
     run_retrieval_eval as run_core_eval,
 )
-from local_rag_backend.core.services.types import EvalRetrievalConfig
-from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
+from local_rag_backend.core.services.types import EvalCompareConfig, EvalRetrievalConfig
+from local_rag_backend.core.use_cases.evaluation import compare_retrieval_eval, run_retrieval_eval
 from local_rag_backend.settings import settings
 
 
@@ -223,3 +223,30 @@ def test_run_retrieval_eval_app_service_supports_multi_mode_runtime(
     assert res.mrr_at_k == pytest.approx(1.0)
     assert res.precision_at_k == pytest.approx(1.0)
     assert res.recall_at_k == pytest.approx(1.0)
+
+
+def test_compare_retrieval_eval_uses_same_dataset_and_runtime_for_baseline_and_candidate() -> None:
+    ds = _mode_dataset()
+    cfg = _eval_settings()
+    storage = build_eval_storage_port(settings_obj=cfg)
+
+    result = compare_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=storage,
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: DummyEmbedder(),
+        ),
+        baseline=EvalCompareConfig(retrieval_mode="sparse"),
+        candidate=EvalCompareConfig(retrieval_mode="dual", dual_candidate_k=2),
+        k=1,
+        min_delta_ndcg=0.0,
+        min_delta_map=0.0,
+        min_delta_mrr=0.0,
+        max_regression_precision=0.0,
+        max_regression_recall=0.0,
+    )
+
+    assert result.dataset_id == ds.dataset_id
+    assert result.baseline.retrieval_mode == "sparse"
+    assert result.candidate.retrieval_mode == "dual"
+    assert result.baseline.queries == result.candidate.queries == len(ds.queries)
