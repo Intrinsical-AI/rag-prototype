@@ -8,6 +8,7 @@ from local_rag_backend.core.services.evaluation import (
     EvalDataset,
     compare_eval_results,
     eval_compare_result_to_json,
+    format_eval_result,
     load_eval_dataset,
     run_retrieval_eval,
 )
@@ -337,3 +338,45 @@ def test_compare_eval_results_fails_when_precision_or_recall_regress_too_far() -
     assert result.gate.passed is False
     assert any("P@3" in reason for reason in result.gate.reasons)
     assert any("Recall@3" in reason for reason in result.gate.reasons)
+
+
+def _make_eval_result(**overrides) -> EvalResult:
+    defaults = {
+        "dataset_id": "test-ds",
+        "retrieval_mode": "sparse",
+        "reranker_enabled": False,
+        "k": 3,
+        "queries": 10,
+        "ndcg_at_k": 0.8,
+        "map_at_k": 0.75,
+        "mrr_at_k": 0.9,
+        "precision_at_k": 0.6,
+        "recall_at_k": 0.5,
+    }
+    return EvalResult(**{**defaults, **overrides})
+
+
+def test_format_eval_result_contains_all_metrics() -> None:
+    result = _make_eval_result()
+    formatted = format_eval_result(result)
+    assert "dataset=test-ds" in formatted
+    assert "mode=sparse" in formatted
+    assert "reranker=False" in formatted
+    assert "k=3" in formatted
+    assert "queries=10" in formatted
+    assert "nDCG@3=" in formatted
+    assert "MAP@3=" in formatted
+    assert "MRR@3=" in formatted
+    assert "P@3=" in formatted
+    assert "Recall@3=" in formatted
+
+
+def test_format_eval_result_numeric_precision() -> None:
+    result = _make_eval_result(ndcg_at_k=0.123456)
+    formatted = format_eval_result(result)
+    assert "nDCG@3=0.123" in formatted
+
+
+def test_format_eval_result_with_reranker_enabled() -> None:
+    result = _make_eval_result(reranker_enabled=True)
+    assert "reranker=True" in format_eval_result(result)
