@@ -308,6 +308,10 @@ curl -X POST "http://localhost:8000/api/docs/import-canonical" \
   -H "Content-Type: application/json" \
   -d '{"scope":"repogpt:demo","snapshot_id":"snap-1","replace_scope":true,"documents":[{"external_id":"repogpt:demo:1","source_id":"repogpt:demo:file:src/app.py","content":"def hello():\n    return 1\n","metadata":{"path":"src/app.py","unit_type":"function"}}]}'
 
+curl -X POST "http://localhost:8000/api/docs/query" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":50,"offset":0,"filters":[{"field":"scope","values":["repogpt:demo"]},{"field":"metadata.unit_type","values":["function"]}]}'
+
 curl -X POST "http://localhost:8000/api/index/rebuild"
 ```
 
@@ -348,6 +352,7 @@ Notas:
 * En `elasticsearch`, el rebuild re-embebe los documentos del índice de documentos y actualiza los vectores in-place.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
 * `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones.
+* Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
 
 ---
 

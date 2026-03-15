@@ -460,14 +460,15 @@ docker compose up -d
 * `GET /healthz/ollama`
 * `GET /api/config` and `GET /api/templates`
 * `POST /api/ask`
-  * Body: `{ "question": "str", "k": int (1..10, default 3) }`
-  * Response: `{ "answer": "str", "sources": [ { "document": {"id": "doc:...", "content": "str"}, "score": float(0..1) }, ... ] }`
+  * Body: `{ "question": "str", "k": int (1..10, default 3), "filters": [{"field":"scope|snapshot_id|source_id|metadata.<key>","values":["..."]}] }`
+  * Response: `{ "answer": "str", "sources": [ { "document": {"id": "doc:...", "content": "str", "external_id": "str|null", "source_id": "str|null", "metadata": {...}|null}, "score": float(0..1) }, ... ] }`
 * `POST /api/ask_eval` (ephemeral per-request RAG config for retrieval/generator evaluation)
 * `GET /api/history?limit=1..100&offset>=0`
 
-  * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
+* Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
-* `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
+* `POST /api/docs` (ingest texts)
+* `POST /api/docs/query` (list/query documents with structured filters)
 * `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
@@ -493,7 +494,7 @@ Example:
 ```bash
 curl -X POST "http://localhost:8000/api/ask" \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is RAG?", "k": 3}'
+  -d '{"question": "What is RAG?", "k": 3, "filters":[{"field":"metadata.unit_type","values":["function"]}]}'
 ```
 
 ---
