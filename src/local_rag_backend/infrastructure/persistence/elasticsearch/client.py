@@ -50,7 +50,9 @@ class ElasticClient:
     @staticmethod
     def _is_index_already_exists_error(exc: ElasticBackendError) -> bool:
         message = str(exc)
-        return "resource_already_exists_exception" in message or "already_exists_exception" in message
+        return (
+            "resource_already_exists_exception" in message or "already_exists_exception" in message
+        )
 
     def _request(
         self,
