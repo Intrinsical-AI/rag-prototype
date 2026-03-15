@@ -325,6 +325,7 @@ rag-eval --retrieval-mode sparse
 rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
+rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
