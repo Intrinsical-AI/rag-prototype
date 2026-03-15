@@ -14,7 +14,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from openai import OpenAI
 from sqlalchemy import create_engine, text
@@ -22,8 +22,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from local_rag_backend.core.domain.retrieval import (
+    RetrievalFilter,
     RetrievalRequest,
     RetrievalResult,
+    document_matches_filters,
     retrieval_result_from_pairs,
 )
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
@@ -115,9 +117,20 @@ DEFAULT_DENSE_BACKEND_MESSAGE = (
 class _RepoDocsReadPort(DocsReadPort):
     doc_repo_factory: Callable[[], DocumentRepoPort]
 
-    def list_docs_page(self, *, limit: int, offset: int) -> tuple[ListedDocument, ...]:
-        rows = list(self.doc_repo_factory().get_all_documents())
-        page = rows[offset : offset + limit]
+    def query_docs(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        filters: tuple[RetrievalFilter, ...],
+    ) -> tuple[ListedDocument, ...]:
+        rows = sorted(self.doc_repo_factory().get_all_documents(), key=lambda row: str(row.id))
+        filtered = (
+            [row for row in rows if document_matches_filters(row, filters)]
+            if filters
+            else list(rows)
+        )
+        page = filtered[offset : offset + limit]
         return tuple(
             ListedDocument(
                 id=str(row.id),
@@ -458,43 +471,37 @@ class _ElasticLexicalRetriever(RetrieverPort):
         self._vector_repo = vector_repo
         self._doc_repo = doc_repo
 
-    @overload
-    def retrieve(self, query: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
-
-    @overload
-    def retrieve(
-        self, query: str, k: int = 5
-    ) -> tuple[Sequence[DomainDocument], Sequence[float]]: ...
-
-    def retrieve(
-        self, query: str | RetrievalRequest, k: int = 5
-    ) -> tuple[Sequence[DomainDocument], Sequence[float]] | RetrievalResult:
-        if isinstance(query, RetrievalRequest):
-            legacy = self.retrieve(query.query, query.top_k)
-            if isinstance(legacy, RetrievalResult):
-                return legacy
-            docs, scores = legacy
-            return retrieval_result_from_pairs(
-                docs=docs,
-                scores=scores,
-                mode_used="sparse",
-                backend_used="elastic_lexical",
-                stage="sparse",
-            )
-        if k <= 0:
-            return [], []
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        if request.top_k <= 0:
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="elastic_lexical")
         lexical_search = getattr(self._vector_repo, "lexical_search", None)
         if not callable(lexical_search):
             raise RuntimeError("Configured vector backend does not support lexical_search.")
-        id_score_pairs = lexical_search(query, k=k)
+        id_score_pairs = lexical_search(request.query, k=request.top_k)
         if not id_score_pairs:
-            return [], []
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="elastic_lexical")
         doc_ids, _scores = zip(*id_score_pairs, strict=False)
         docs = self._doc_repo.get(list(doc_ids))
         docs_by_id = {doc.id: doc for doc in docs}
-        ordered_docs = [docs_by_id[doc_id] for doc_id in doc_ids if doc_id in docs_by_id]
-        ordered_scores = [score for doc_id, score in id_score_pairs if doc_id in docs_by_id]
-        return ordered_docs, ordered_scores
+        ordered_docs = []
+        ordered_scores = []
+        for doc_id, score in id_score_pairs:
+            doc = docs_by_id.get(doc_id)
+            if doc is None:
+                continue
+            if not document_matches_filters(doc, request.filters):
+                continue
+            ordered_docs.append(doc)
+            ordered_scores.append(score)
+            if len(ordered_docs) >= request.top_k:
+                break
+        return retrieval_result_from_pairs(
+            docs=ordered_docs,
+            scores=ordered_scores,
+            mode_used="sparse",
+            backend_used="elastic_lexical",
+            stage="sparse",
+        )
 
 
 def build_docs_read_port(

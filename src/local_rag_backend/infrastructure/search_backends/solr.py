@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any, overload
+from typing import Any
 
 import httpx
 
@@ -47,7 +47,7 @@ class SolrSearchRetriever:
         self._client = client or httpx.Client(base_url=base_url, timeout=float(request_timeout_s))
 
     def _fq(self, filter_item: RetrievalFilter) -> str:
-        if filter_item.field in {"scope", "source_id", "path", "language", "unit_type"}:
+        if filter_item.field in {"scope", "snapshot_id", "source_id"}:
             field_name = filter_item.field
         else:
             metadata_key = metadata_key_for_filter_field(filter_item.field)
@@ -79,19 +79,7 @@ class SolrSearchRetriever:
             metadata=metadata or None,
         )
 
-    @overload
-    def retrieve(self, request: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
-
-    @overload
-    def retrieve(self, request: str, k: int = 5) -> tuple[list[Document], list[float]]: ...
-
-    def retrieve(
-        self, request: RetrievalRequest | str, k: int = 5
-    ) -> RetrievalResult | tuple[list[Document], list[float]]:
-        if isinstance(request, str):
-            legacy_request = RetrievalRequest(query=request, top_k=k, mode="sparse")
-            result = self.retrieve(legacy_request)
-            return list(result.documents), list(result.scores)
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         if request.mode != "sparse":
             raise ValueError("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
         params: list[tuple[str, str | int | float | bool | None]] = [

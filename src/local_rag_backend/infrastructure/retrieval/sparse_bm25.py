@@ -5,7 +5,7 @@ Sparse retriever using BM25.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -97,44 +97,23 @@ class SparseBM25Retriever(RetrieverPort):
 
         return re.findall(r"\w+", preprocess_text(text))
 
-    @overload
-    def retrieve(self, query: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
-
-    @overload
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
-
-    def retrieve(
-        self, query: str | RetrievalRequest, k: int = 5
-    ) -> tuple[Sequence[Document], Sequence[float]] | RetrievalResult:
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         """Retrieve documents using BM25 scores."""
-        if isinstance(query, RetrievalRequest):
-            request = query
-            legacy = self.retrieve(request.query, request.top_k)
-            if isinstance(legacy, RetrievalResult):
-                return legacy
-            docs, scores = legacy
-            return retrieval_result_from_pairs(
-                docs=docs,
-                scores=scores,
-                mode_used="sparse",
-                backend_used="legacy_sparse",
-                stage="sparse",
-            )
-        if k <= 0:
-            return [], []
-        if not self.bm25 or not query:
-            return [], []
+        if request.top_k <= 0:
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+        if not self.bm25 or not request.query:
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
 
-        query_tokens = self._tokenize(query)
+        query_tokens = self._tokenize(request.query)
         if not query_tokens:
-            return [], []
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
 
         doc_scores = np.asarray(self.bm25.get_scores(query_tokens), dtype=np.float32)
         if doc_scores.size == 0:
-            return [], []
-        k_eff = min(int(k), int(doc_scores.size))
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+        k_eff = min(int(request.top_k), int(doc_scores.size))
         if k_eff <= 0:
-            return [], []
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
         rank_scores = np.nan_to_num(doc_scores, nan=float("-inf"))
         ranked_indices = np.argsort(-rank_scores, kind="stable")
         if k_eff == 1:
@@ -149,7 +128,7 @@ class SparseBM25Retriever(RetrieverPort):
         scores = [float(rank_scores[int(i)]) for i in top_indices]
 
         if not scores:
-            return [], []
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
         min_score, max_score = min(scores), max(scores)
         if max_score == min_score:
             normalized_scores = [1.0] * len(scores)
@@ -165,4 +144,10 @@ class SparseBM25Retriever(RetrieverPort):
         }
         ordered_scores = [score_by_id[d.id] for d in ordered_docs]
 
-        return ordered_docs, ordered_scores
+        return retrieval_result_from_pairs(
+            docs=ordered_docs,
+            scores=ordered_scores,
+            mode_used="sparse",
+            backend_used="legacy_sparse",
+            stage="sparse",
+        )

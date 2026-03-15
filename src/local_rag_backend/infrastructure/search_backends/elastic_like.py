@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import Any, overload
+from typing import Any
 
 import httpx
 
@@ -91,7 +91,7 @@ class ElasticLikeSearchRetriever:
         clauses: list[dict[str, Any]] = []
         for filter_item in filters:
             field_name: str
-            if filter_item.field in {"scope", "source_id"}:
+            if filter_item.field in {"scope", "snapshot_id", "source_id"}:
                 field_name = filter_item.field
             else:
                 metadata_key = metadata_key_for_filter_field(filter_item.field)
@@ -222,19 +222,7 @@ class ElasticLikeSearchRetriever:
             candidate_count=len(candidate_docs),
         )
 
-    @overload
-    def retrieve(self, request: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
-
-    @overload
-    def retrieve(self, request: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
-
-    def retrieve(
-        self, request: RetrievalRequest | str, k: int = 5
-    ) -> RetrievalResult | tuple[Sequence[Document], Sequence[float]]:
-        if isinstance(request, str):
-            legacy_request = RetrievalRequest(query=request, top_k=k, mode="sparse")
-            result = self._search_sparse(legacy_request)
-            return list(result.documents), list(result.scores)
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         if request.mode == "sparse":
             return self._search_sparse(request)
         if request.mode == "dense":
