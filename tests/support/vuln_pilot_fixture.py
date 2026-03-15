@@ -8,9 +8,13 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 SYNERGY_ROOT = WORKSPACE_ROOT / "synergy"
 VULN_PILOT_PREPARED = SYNERGY_ROOT / "vuln_pilot" / "prepared" / "pilot_small_v1.jsonl"
 
+__all__ = ["SYNERGY_ROOT", "VULN_PILOT_PREPARED", "load_vulns_ingest_module"]
+
 
 def load_vulns_ingest_module() -> Any:
     script_path = SYNERGY_ROOT / "scripts" / "vulns_ingest_rag.py"
+    if not script_path.exists():
+        raise FileNotFoundError(f"Cross-repo script not found: {script_path}")
     spec = importlib.util.spec_from_file_location("vulns_ingest_rag", script_path)
     if spec is None or spec.loader is None:
         raise AssertionError(f"Could not load script module: {script_path}")

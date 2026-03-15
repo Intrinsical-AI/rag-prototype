@@ -4,8 +4,15 @@ import copy
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 from support.repogpt_fixture import REPOGPT_FIXTURE_REPO, emit_repogpt_code_units
+
+if not REPOGPT_FIXTURE_REPO.exists():
+    pytest.skip(
+        "cross-repo fixture not available (synergy monorepo layout required)",
+        allow_module_level=True,
+    )
 
 from local_rag_backend.cli import cli
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
