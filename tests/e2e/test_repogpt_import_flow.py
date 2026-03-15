@@ -133,8 +133,8 @@ def test_repogpt_emit_code_units_imports_and_retrieves_by_queryable_metadata(
             top_k=1,
             mode="sparse",
             filters=(
-                RetrievalFilter(field="path", values=("sample.py",)),
-                RetrievalFilter(field="unit_type", values=("function",)),
+                RetrievalFilter(field="metadata.path", values=("sample.py",)),
+                RetrievalFilter(field="metadata.unit_type", values=("function",)),
             ),
         )
     )

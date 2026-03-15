@@ -81,8 +81,8 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
         retriever=retriever,
         query="helper",
         filters=(
-            RetrievalFilter(field="path", values=("sample.py",)),
-            RetrievalFilter(field="unit_type", values=("function",)),
+            RetrievalFilter(field="metadata.path", values=("sample.py",)),
+            RetrievalFilter(field="metadata.unit_type", values=("function",)),
         ),
     )
     assert helper_id == f"repogpt:{repo_key}:sample.py:function:helper"

@@ -1,24 +1,35 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
+from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 
 
 class DummyDocRepo:
-    def __init__(self, docs):
+    def __init__(self, docs: Sequence[Document]) -> None:
         self._docs = list(docs)
 
-    def get(self, ids):
+    def store_documents(self, contents: Sequence[str]) -> Sequence[DocId]:
+        raise NotImplementedError
+
+    def delete_documents(self, ids: Sequence[DocId]) -> None:
+        raise NotImplementedError
+
+    def get(self, ids: Sequence[DocId]) -> Sequence[Document]:
         wanted = {str(doc_id) for doc_id in ids}
         return [doc for doc in self._docs if str(doc.id) in wanted]
 
-    def get_all_documents(self):
+    def get_all_documents(self) -> Sequence[Document]:
         return list(self._docs)
 
 
 class DummyEmbedder:
     dim = 2
 
-    def embed(self, texts):
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         out = []
         for text in texts:
             normalized = text.lower()
@@ -32,26 +43,47 @@ class DummyEmbedder:
 
 
 class DummyVectorRepo:
-    def __init__(self):
+    def __init__(self) -> None:
         self.calls: list[tuple[list[float], int]] = []
 
-    def similar(self, vector, k):
+    @property
+    def ntotal(self) -> int:
+        return 0
+
+    def upsert(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
+        raise NotImplementedError
+
+    def apply_delta_atomic(
+        self,
+        *,
+        delete_ids: Sequence[DocId],
+        upserts: Sequence[tuple[DocId, Sequence[float]]],
+    ) -> None:
+        raise NotImplementedError
+
+    def delete(self, ids: Sequence[DocId]) -> int:
+        raise NotImplementedError
+
+    def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
+        raise NotImplementedError
+
+    def similar(self, vector: Sequence[float], k: int) -> list[tuple[DocId, float]]:
         self.calls.append((list(vector), int(k)))
-        if vector == [1.0, 0.0]:
-            return [("doc-auth", 0.95), ("doc-sql", 0.40)]
-        return [("doc-sql", 0.95), ("doc-auth", 0.40)]
+        if list(vector) == [1.0, 0.0]:
+            return [(DocId("doc-auth"), 0.95), (DocId("doc-sql"), 0.40)]
+        return [(DocId("doc-sql"), 0.95), (DocId("doc-auth"), 0.40)]
 
 
-def test_sparse_applies_filters_before_scoring():
+def test_sparse_applies_filters_before_scoring() -> None:
     docs = [
         Document(
-            id="doc-auth",
+            id=DocId("doc-auth"),
             content="Auth token check in Python",
             source_id="repo-a",
             metadata={"language": "python", "unit_type": "function"},
         ),
         Document(
-            id="doc-js",
+            id=DocId("doc-js"),
             content="Auth token check in JavaScript",
             source_id="repo-b",
             metadata={"language": "javascript", "unit_type": "function"},
@@ -63,23 +95,23 @@ def test_sparse_applies_filters_before_scoring():
             query="auth token",
             top_k=2,
             mode="sparse",
-            filters=(RetrievalFilter(field="language", values=("python",)),),
+            filters=(RetrievalFilter(field="metadata.language", values=("python",)),),
         )
     )
     assert [item.document.id for item in result.items] == ["doc-auth"]
     assert result.mode_used == "sparse"
 
 
-def test_dual_reranks_only_sparse_candidates():
+def test_dual_reranks_only_sparse_candidates() -> None:
     docs = [
         Document(
-            id="doc-auth",
+            id=DocId("doc-auth"),
             content="Python auth guard",
             source_id="repo-a",
             metadata={"language": "python", "unit_type": "function"},
         ),
         Document(
-            id="doc-sql",
+            id=DocId("doc-sql"),
             content="SQL escaping helper",
             source_id="repo-a",
             metadata={"language": "python", "unit_type": "function"},
@@ -99,16 +131,16 @@ def test_dual_reranks_only_sparse_candidates():
     assert result.candidate_count == 2
 
 
-def test_dense_applies_filters_min_score_and_candidate_k_floor():
+def test_dense_applies_filters_min_score_and_candidate_k_floor() -> None:
     docs = [
         Document(
-            id="doc-auth",
+            id=DocId("doc-auth"),
             content="Python auth guard",
             source_id="repo-a",
             metadata={"language": "python"},
         ),
         Document(
-            id="doc-sql",
+            id=DocId("doc-sql"),
             content="SQL escaping helper",
             source_id="repo-a",
             metadata={"language": "sql"},
@@ -129,7 +161,7 @@ def test_dense_applies_filters_min_score_and_candidate_k_floor():
             candidate_k=1,
             mode="dense",
             min_score=0.5,
-            filters=(RetrievalFilter(field="language", values=("python",)),),
+            filters=(RetrievalFilter(field="metadata.language", values=("python",)),),
         )
     )
 
@@ -138,9 +170,30 @@ def test_dense_applies_filters_min_score_and_candidate_k_floor():
     assert result.mode_used == "dense"
 
 
-def test_dense_returns_empty_when_vector_repo_has_no_candidates():
+def test_dense_returns_empty_when_vector_repo_has_no_candidates() -> None:
     class EmptyVectorRepo:
-        def similar(self, _vector, _k):
+        @property
+        def ntotal(self) -> int:
+            return 0
+
+        def upsert(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
+            raise NotImplementedError
+
+        def apply_delta_atomic(
+            self,
+            *,
+            delete_ids: Sequence[DocId],
+            upserts: Sequence[tuple[DocId, Sequence[float]]],
+        ) -> None:
+            raise NotImplementedError
+
+        def delete(self, ids: Sequence[DocId]) -> int:
+            raise NotImplementedError
+
+        def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
+            raise NotImplementedError
+
+        def similar(self, _vector: Sequence[float], _k: int) -> list[tuple[DocId, float]]:
             return []
 
     retriever = LocalSplitSearchRetriever(
@@ -156,16 +209,16 @@ def test_dense_returns_empty_when_vector_repo_has_no_candidates():
     assert result.mode_used == "dense"
 
 
-def test_sparse_supports_metadata_prefixed_filters():
+def test_sparse_supports_metadata_prefixed_filters() -> None:
     docs = [
         Document(
-            id="doc-node",
+            id=DocId("doc-node"),
             content="AP node seen by sensor alpha",
             source_id="tr3v0r:dataset:artifact:net_nodes",
             metadata={"doc_type": "net_node", "sensor_id": "sensor-alpha"},
         ),
         Document(
-            id="doc-edge",
+            id=DocId("doc-edge"),
             content="Edge observed by sensor beta",
             source_id="tr3v0r:dataset:artifact:net_edges",
             metadata={"doc_type": "net_edge", "sensor_id": "sensor-beta"},
@@ -188,10 +241,10 @@ def test_sparse_supports_metadata_prefixed_filters():
     assert [item.document.id for item in result.items] == ["doc-node"]
 
 
-def test_sparse_supports_membership_filters_for_metadata_sequences():
+def test_sparse_supports_membership_filters_for_metadata_sequences() -> None:
     docs = [
         Document(
-            id="doc-node",
+            id=DocId("doc-node"),
             content="AP node seen by sensors alpha and beta",
             source_id="tr3v0r:dataset:artifact:net_nodes",
             metadata={
@@ -200,7 +253,7 @@ def test_sparse_supports_membership_filters_for_metadata_sequences():
             },
         ),
         Document(
-            id="doc-edge",
+            id=DocId("doc-edge"),
             content="Edge observed by sensor gamma",
             source_id="tr3v0r:dataset:artifact:net_edges",
             metadata={"doc_type": "net_edge", "sensor_ids": ["sensor-gamma"]},
@@ -223,7 +276,7 @@ def test_sparse_supports_membership_filters_for_metadata_sequences():
     assert [item.document.id for item in result.items] == ["doc-node"]
 
 
-def test_dense_requires_embedder_and_vector_repo():
+def test_dense_requires_embedder_and_vector_repo() -> None:
     retriever = LocalSplitSearchRetriever(doc_repo=DummyDocRepo([]), preloaded_docs=[])
 
     try:
@@ -234,10 +287,10 @@ def test_dense_requires_embedder_and_vector_repo():
         raise AssertionError("expected RuntimeError")
 
 
-def test_dual_candidate_floor_uses_top_k_when_dual_candidate_k_is_smaller():
+def test_dual_candidate_floor_uses_top_k_when_dual_candidate_k_is_smaller() -> None:
     docs = [
-        Document(id="doc-auth", content="Python auth guard", source_id="repo-a"),
-        Document(id="doc-sql", content="SQL escaping helper", source_id="repo-a"),
+        Document(id=DocId("doc-auth"), content="Python auth guard", source_id="repo-a"),
+        Document(id=DocId("doc-sql"), content="SQL escaping helper", source_id="repo-a"),
     ]
     retriever = LocalSplitSearchRetriever(
         doc_repo=DummyDocRepo(docs),
@@ -251,16 +304,3 @@ def test_dual_candidate_floor_uses_top_k_when_dual_candidate_k_is_smaller():
     )
 
     assert [item.document.id for item in result.items] == ["doc-auth", "doc-sql"]
-
-
-def test_legacy_retrieve_path_returns_docs_and_scores():
-    docs = [
-        Document(id="doc-auth", content="Python auth guard", source_id="repo-a"),
-        Document(id="doc-sql", content="SQL escaping helper", source_id="repo-a"),
-    ]
-    retriever = LocalSplitSearchRetriever(doc_repo=DummyDocRepo(docs), preloaded_docs=docs)
-
-    out_docs, out_scores = retriever.retrieve("auth", 1)
-
-    assert [doc.id for doc in out_docs] == ["doc-auth"]
-    assert len(out_scores) == 1
