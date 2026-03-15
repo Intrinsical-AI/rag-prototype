@@ -12,6 +12,8 @@
 
 > General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, dense vector, hybrid), and swappable LLM connectors (OpenAI, OpenRouter, Ollama). Designed as a solid base to iterate in experimental environments.
 > Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend.
+> The shared `../synergy` workspace may use `elasticsearch` as its default cross-repo profile, but
+> this repo keeps `local_split` as its standalone product default.
 
 ---
 
@@ -328,8 +330,10 @@ rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 
 # Shared cross-repo RepoGPT demo/eval pack lives in synergy root
+../synergy/synergy-up-search
 bash ../synergy/scripts/repogpt_ingest_demo.sh
 bash ../synergy/scripts/repogpt_eval_smoke.sh
+bash ../synergy/scripts/repogpt_ingest_demo.sh --profile local_split
 ```
 
 > Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
@@ -338,6 +342,7 @@ RepoGPT integration pack:
 
 * Shared fixture repo: `../synergy/fixtures/repogpt_eval_repo/`
 * Cross-repo demos/smokes: `../synergy/scripts/repogpt_ingest_demo.sh`, `../synergy/scripts/repogpt_eval_smoke.sh`
+* `../synergy` uses `elasticsearch` as the default workspace profile; this repo does not.
 * Consumer-owned eval dataset: `datasets/repogpt_rag_eval_v1.jsonl`
 * Maintained import/search coverage: `tests/e2e/test_repogpt_ingest_search_eval.py`
 

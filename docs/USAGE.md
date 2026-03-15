@@ -43,7 +43,7 @@ RETRIEVAL_MODE="sparse"
 
 # Topología de persistencia:
 # - local_split: SQLite (+ índice vectorial local en dense/hybrid)
-# - elasticsearch: backend unificado; solo soporta dense/hybrid
+# - elasticsearch: backend unificado; soporta sparse/dense/hybrid
 PERSISTENCE_BACKEND="local_split"
 
 # Ruta de la base de datos para almacenar los documentos
@@ -374,8 +374,10 @@ rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 
 # Pack RepoGPT -> rag-prototype (fixture compartida en synergy root)
+../synergy/synergy-up-search
 bash ../synergy/scripts/repogpt_ingest_demo.sh
 bash ../synergy/scripts/repogpt_eval_smoke.sh
+bash ../synergy/scripts/repogpt_ingest_demo.sh --profile local_split
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
@@ -439,6 +441,7 @@ Notas:
 
 * La fixture repo compartida vive en `../synergy/fixtures/repogpt_eval_repo/`.
 * El wiring cross-repo oficial vive en `../synergy/scripts/repogpt_ingest_demo.sh`.
+* `../synergy` usa `elasticsearch` como profile operativo por defecto para demos/smokes; `rag-prototype` standalone mantiene `local_split` como default.
 * El dataset `datasets/repogpt_rag_eval_v1.jsonl` pertenece a `rag-prototype`, no a `RepoGPT`, porque define la barra de calidad del consumidor.
 
 Dataset específico del piloto de vulnerabilidades:
