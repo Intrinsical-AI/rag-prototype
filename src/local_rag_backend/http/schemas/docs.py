@@ -6,6 +6,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from local_rag_backend.http.schemas.rag_api_models import RetrievalFilterModel
+
 
 class IngestRequest(BaseModel):
     texts: list[Annotated[str, Field(max_length=20000)]] = Field(
@@ -120,6 +122,12 @@ class CanonicalImportResponse(BaseModel):
     deleted_index: int | None = None
     deleted_external_ids: list[str] = Field(default_factory=list)
     results: list[UpsertDocResult] = Field(default_factory=list)
+
+
+class DocsQueryRequest(BaseModel):
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+    filters: list[RetrievalFilterModel] = Field(default_factory=list)
 
 
 class ImportResponse(BaseModel):

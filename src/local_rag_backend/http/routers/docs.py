@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
-from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, UploadFile
 
 from local_rag_backend.composition.adapters import DEFAULT_DENSE_BACKEND_MESSAGE
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
@@ -47,6 +47,7 @@ from local_rag_backend.http.schemas.docs import (
     CanonicalImportResponse,
     DocsMutateRequest,
     DocsMutateResponse,
+    DocsQueryRequest,
     ImportResponse,
     IngestRequest,
     IngestResponse,
@@ -66,6 +67,20 @@ if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
+
+
+def _to_document_in_db(item: Any) -> DocumentInDB:
+    return DocumentInDB(
+        id=str(item.id),
+        content=str(item.content),
+        external_id=(
+            str(item.external_id) if getattr(item, "external_id", None) is not None else None
+        ),
+        source_id=(str(item.source_id) if getattr(item, "source_id", None) is not None else None),
+        metadata=(
+            dict(item.metadata or {}) if getattr(item, "metadata", None) is not None else None
+        ),
+    )
 
 
 def _map_docs_error(
@@ -105,15 +120,18 @@ async def _run_docs_mutation_operation(
     )
 
 
-@router.get("/docs", response_model=list[DocumentInDB])
-async def list_docs(
-    limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
-    offset: int = Query(0, ge=0, description="Offset for pagination"),
+@router.post("/docs/query", response_model=list[DocumentInDB])
+async def query_docs(
+    payload: Annotated[DocsQueryRequest, Body(...)],
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
     docs_reader = container.build_docs_read_port()
-    docs = docs_reader.list_docs_page(limit=limit, offset=offset)
-    return [DocumentInDB(id=item.id, content=item.content) for item in docs]
+    docs = docs_reader.query_docs(
+        limit=payload.limit,
+        offset=payload.offset,
+        filters=tuple(item.to_domain() for item in payload.filters),
+    )
+    return [_to_document_in_db(item) for item in docs]
 
 
 async def _read_upload_with_limit(
