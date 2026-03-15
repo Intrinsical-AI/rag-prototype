@@ -374,8 +374,8 @@ rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 
 # Pack RepoGPT -> rag-prototype (fixture compartida en synergy root)
-bash ../scripts/repogpt_ingest_demo.sh
-bash ../scripts/repogpt_eval_smoke.sh
+bash ../synergy/scripts/repogpt_ingest_demo.sh
+bash ../synergy/scripts/repogpt_eval_smoke.sh
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
@@ -437,9 +437,51 @@ rag-eval-compare \
 
 Notas:
 
-* La fixture repo compartida vive en `../fixtures/repogpt_eval_repo/`.
-* El wiring cross-repo oficial vive en `../scripts/repogpt_ingest_demo.sh`.
+* La fixture repo compartida vive en `../synergy/fixtures/repogpt_eval_repo/`.
+* El wiring cross-repo oficial vive en `../synergy/scripts/repogpt_ingest_demo.sh`.
 * El dataset `datasets/repogpt_rag_eval_v1.jsonl` pertenece a `rag-prototype`, no a `RepoGPT`, porque define la barra de calidad del consumidor.
+
+Dataset específico del piloto de vulnerabilidades:
+
+```bash
+rag-eval \
+  --dataset datasets/vuln_pilot_rag_eval_v1.jsonl \
+  --retrieval-mode sparse \
+  --k 1 \
+  --fail-below-ndcg 0.0 \
+  --fail-below-map 0.0 \
+  --fail-below-mrr 0.0
+
+rag-eval-compare \
+  --dataset datasets/vuln_pilot_rag_eval_v1.jsonl \
+  --k 1 \
+  --candidate-mode sparse \
+  --min-delta-ndcg 0.0 \
+  --min-delta-map 0.0 \
+  --min-delta-mrr 0.0 \
+  --max-regression-precision 0.0 \
+  --max-regression-recall 0.0
+```
+
+Flujo cross-repo relacionado:
+
+```bash
+python ../synergy/scripts/vulns_batch_triage.py \
+  --input ../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl \
+  --profile high_severity_python \
+  --output /tmp/vuln-triage-high.jsonl
+
+python ../synergy/scripts/vulns_ingest_rag.py \
+  --input ../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl \
+  --payload-out /tmp/vuln-pilot.json \
+  --no-import
+```
+
+Notas:
+
+* La fuente preparada compartida vive en `../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl`.
+* El dataset `datasets/vuln_pilot_rag_eval_v1.jsonl` pertenece a `rag-prototype`, no a `structured-research`, porque define la barra de calidad del consumidor.
+* El perfil `cwe_78_focus` vive en `structured-research/config/vuln_triage/cwe_78_focus/`.
 - `gate`
 
 Smoke e2e reproducible:
