@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, overload
-
 from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
     RetrievalResult,
@@ -16,11 +14,6 @@ from local_rag_backend.core.ports import (
     VectorRepoPort,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from local_rag_backend.core.domain.entities import Document
-
 
 class DenseVectorRetriever(RetrieverPort):
     """Dense retriever using vector similarity search."""
@@ -32,35 +25,14 @@ class DenseVectorRetriever(RetrieverPort):
         self.vector_repo = vector_repo
         self.doc_repo = doc_repo
 
-    @overload
-    def retrieve(self, query: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        if request.top_k <= 0:
+            return RetrievalResult(items=(), mode_used="dense", backend_used="legacy_dense")
 
-    @overload
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
-
-    def retrieve(
-        self, query: str | RetrievalRequest, k: int = 5
-    ) -> tuple[Sequence[Document], Sequence[float]] | RetrievalResult:
-        if isinstance(query, RetrievalRequest):
-            request = query
-            legacy = self.retrieve(request.query, request.top_k)
-            if isinstance(legacy, RetrievalResult):
-                return legacy
-            docs, scores = legacy
-            return retrieval_result_from_pairs(
-                docs=docs,
-                scores=scores,
-                mode_used="dense",
-                backend_used="legacy_dense",
-                stage="dense",
-            )
-        if k <= 0:
-            return [], []
-
-        query_embedding = self.embedder.embed([query])[0]
-        id_score_pairs = self.vector_repo.similar(query_embedding, k)
+        query_embedding = self.embedder.embed([request.query])[0]
+        id_score_pairs = self.vector_repo.similar(query_embedding, request.top_k)
         if not id_score_pairs:
-            return [], []
+            return RetrievalResult(items=(), mode_used="dense", backend_used="legacy_dense")
 
         doc_ids, scores = zip(*id_score_pairs, strict=False)
         docs = self.doc_repo.get(list(doc_ids))
@@ -70,4 +42,10 @@ class DenseVectorRetriever(RetrieverPort):
         ordered_docs = [docs_by_id[doc_id] for doc_id, _ in ordered_pairs if doc_id in docs_by_id]
         ordered_scores = [score for doc_id, score in ordered_pairs if doc_id in docs_by_id]
 
-        return ordered_docs, ordered_scores
+        return retrieval_result_from_pairs(
+            docs=ordered_docs,
+            scores=ordered_scores,
+            mode_used="dense",
+            backend_used="legacy_dense",
+            stage="dense",
+        )

@@ -4,54 +4,21 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Any, overload
+from typing import TYPE_CHECKING
 
-from local_rag_backend.core.domain.entities import Document
+if TYPE_CHECKING:
+    from local_rag_backend.core.domain.entities import Document
+    from local_rag_backend.core.domain.retrieval import RetrievalFilter
+
 from local_rag_backend.core.domain.retrieval import (
-    RetrievalFilter,
     RetrievalRequest,
     RetrievalResult,
     RetrievedDoc,
-    metadata_key_for_filter_field,
+    document_matches_filters,
     retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
-
-
-def _normalize_filter_values(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return tuple(str(item) for item in value if item is not None and str(item).strip())
-    rendered = str(value).strip()
-    return (rendered,) if rendered else ()
-
-
-def _doc_field_values(doc: Document, field: str) -> tuple[str, ...]:
-    if field == "source_id":
-        return _normalize_filter_values(doc.source_id)
-    metadata = dict(doc.metadata or {})
-    metadata_key = metadata_key_for_filter_field(field)
-    if metadata_key is None:
-        value = metadata.get(field)
-    else:
-        value = metadata
-        for part in metadata_key.split("."):
-            if not isinstance(value, dict):
-                return ()
-            value = value.get(part)
-    return _normalize_filter_values(value)
-
-
-def _matches_filters(doc: Document, filters: Sequence[RetrievalFilter]) -> bool:
-    if not filters:
-        return True
-    for filter_item in filters:
-        values = _doc_field_values(doc, filter_item.field)
-        if not values or not any(value in filter_item.values for value in values):
-            return False
-    return True
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -88,7 +55,7 @@ class LocalSplitSearchRetriever:
         docs = self._all_docs()
         if not filters:
             return docs
-        return tuple(doc for doc in docs if _matches_filters(doc, filters))
+        return tuple(doc for doc in docs if document_matches_filters(doc, filters))
 
     def _retrieve_sparse(self, request: RetrievalRequest) -> RetrievalResult:
         docs = self._filtered_docs(request.filters)
@@ -100,12 +67,9 @@ class LocalSplitSearchRetriever:
             doc_repo=self._doc_repo,
             preloaded_docs=docs,
         )
-        raw_result = retriever.retrieve(request.query, request.top_k)
-        if isinstance(raw_result, RetrievalResult):
-            legacy_docs = list(raw_result.documents)
-            legacy_scores = list(raw_result.scores)
-        else:
-            legacy_docs, legacy_scores = raw_result
+        raw_result = retriever.retrieve(request)
+        legacy_docs = list(raw_result.documents)
+        legacy_scores = list(raw_result.scores)
         return retrieval_result_from_pairs(
             docs=legacy_docs,
             scores=legacy_scores,
@@ -129,7 +93,7 @@ class LocalSplitSearchRetriever:
         items: list[RetrievedDoc] = []
         for doc_id, score in id_score_pairs:
             doc = docs_by_id.get(doc_id)
-            if doc is None or not _matches_filters(doc, request.filters):
+            if doc is None or not document_matches_filters(doc, request.filters):
                 continue
             if request.min_score is not None and float(score) < float(request.min_score):
                 continue
@@ -182,19 +146,7 @@ class LocalSplitSearchRetriever:
             candidate_count=len(candidate_docs),
         )
 
-    @overload
-    def retrieve(self, request: RetrievalRequest, k: int = 5) -> RetrievalResult: ...
-
-    @overload
-    def retrieve(self, request: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
-
-    def retrieve(
-        self, request: RetrievalRequest | str, k: int = 5
-    ) -> RetrievalResult | tuple[Sequence[Document], Sequence[float]]:
-        if isinstance(request, str):
-            legacy_request = RetrievalRequest(query=request, top_k=k, mode="sparse")
-            result = self._retrieve_sparse(legacy_request)
-            return list(result.documents), list(result.scores)
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         if request.mode == "sparse":
             return self._retrieve_sparse(request)
         if request.mode == "dense":
