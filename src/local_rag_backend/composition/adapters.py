@@ -10,6 +10,8 @@ This module centralizes policy decisions for:
 from __future__ import annotations
 
 import json
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
@@ -48,6 +50,7 @@ from local_rag_backend.core.ports import (
 )
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
+from local_rag_backend.core.services.types import EvalRetrievalConfig
 from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 from local_rag_backend.infrastructure.ingestion.loaders import (
     ChatGPTLoader,
@@ -86,7 +89,7 @@ from local_rag_backend.infrastructure.search_backends import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
+    from collections.abc import Awaitable, Mapping, Sequence
 
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.domain.types import DocId
@@ -284,7 +287,9 @@ class _DefaultRagRuntimeFactory(RagRuntimeFactoryPort):
 
 
 class _SqlEvalStoragePort(EvalStoragePort):
-    def __init__(self) -> None:
+    def __init__(self, *, settings_obj: Settings) -> None:
+        self._temp_dir = tempfile.TemporaryDirectory(prefix="rag-eval-")
+        eval_root = Path(self._temp_dir.name)
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -297,6 +302,16 @@ class _SqlEvalStoragePort(EvalStoragePort):
 
         db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
         self._doc_repo = SqlDocumentStorage(session_factory=session_local)
+        self._eval_settings = settings_obj.model_copy(
+            update={
+                "persistence_backend": "local_split",
+                "search_backend": "local_split",
+                "data_dir": eval_root,
+                "index_path": str(eval_root / "eval.index"),
+                "id_map_path": str(eval_root / "eval_id_map.json"),
+                "sqlite_url": f"sqlite:///{eval_root / 'eval.db'}",
+            }
+        )
 
     def upsert_dataset_docs(
         self,
@@ -322,32 +337,78 @@ class _SqlEvalStoragePort(EvalStoragePort):
     def get_retriever_storage(self) -> Any:
         return self._doc_repo
 
+    def get_eval_settings(self) -> Any:
+        return self._eval_settings
+
 
 @dataclass(frozen=True)
 class _DefaultEvalRetrieverFactoryPort(EvalRetrieverFactoryPort):
-    def build_sparse_retriever(
+    openai_embedder_factory: Callable[[], EmbedderPort]
+    st_embedder_factory: Callable[[str], EmbedderPort]
+    sparse_retriever_factory: Callable[..., RetrieverPort]
+    dense_retriever_factory: Callable[..., RetrieverPort]
+    hybrid_retriever_factory: Callable[..., RetrieverPort]
+    vector_repo_factory: Callable[..., Any]
+    reranker_factory: Callable[..., Any]
+
+    def build_retriever(
         self,
         *,
         storage: EvalStoragePort,
-        reranker_enabled: bool,
-        candidate_k: int,
-        strategy: str,
+        config: EvalRetrievalConfig,
+        reranker_candidate_k: int,
+        reranker_strategy: str,
     ) -> EvalRetrieverPort:
         docs = storage.list_documents()
-        corpus = [d.content for d in docs]
-        doc_ids = [d.id for d in docs]
         doc_repo = storage.get_retriever_storage()
-        base = SparseBM25Retriever(
-            documents=corpus,
-            doc_ids=doc_ids,
-            doc_repo=doc_repo,
-            preloaded_docs=docs,
+        eval_settings = storage.get_eval_settings().model_copy(
+            update={"retrieval_mode": str(config.retrieval_mode)}
         )
-        if reranker_enabled:
-            return cast(
-                "EvalRetrieverPort",
-                RerankingRetriever(base, candidate_k=candidate_k, strategy=strategy),
-            )
+        captured_embedder: dict[str, EmbedderPort] = {}
+        captured_vector_repo: dict[str, Any] = {}
+
+        def _openai_embedder_factory() -> EmbedderPort:
+            embedder = self.openai_embedder_factory()
+            captured_embedder["value"] = embedder
+            return embedder
+
+        def _st_embedder_factory(model_name: str) -> EmbedderPort:
+            embedder = self.st_embedder_factory(model_name)
+            captured_embedder["value"] = embedder
+            return embedder
+
+        def _vector_repo_factory(**kwargs: Any) -> Any:
+            vector_repo = self.vector_repo_factory(**kwargs)
+            captured_vector_repo["value"] = vector_repo
+            return vector_repo
+
+        base = build_retriever_with_default_embedder_from_settings(
+            settings_obj=eval_settings,
+            retrieval_mode=str(config.retrieval_mode),
+            doc_repo=doc_repo,
+            openai_embedder_factory=_openai_embedder_factory,
+            st_embedder_factory=_st_embedder_factory,
+            preloaded_docs=docs,
+            hybrid_alpha=config.hybrid_alpha,
+            enable_reranker=config.reranker_enabled,
+            reranker_candidate_k=reranker_candidate_k,
+            reranker_strategy=reranker_strategy,
+            sparse_retriever_factory=self.sparse_retriever_factory,
+            dense_retriever_factory=self.dense_retriever_factory,
+            hybrid_retriever_factory=self.hybrid_retriever_factory,
+            vector_repo_factory=_vector_repo_factory,
+            reranker_factory=self.reranker_factory,
+        )
+        if str(config.retrieval_mode) in {"dense", "hybrid"}:
+            vector_repo = captured_vector_repo.get("value")
+            embedder = captured_embedder.get("value")
+            if vector_repo is None or embedder is None:
+                raise RuntimeError(
+                    "Eval runtime failed to initialize vector repo/embedder for dense retrieval."
+                )
+            doc_ids = [doc.id for doc in docs]
+            embeddings = embedder.embed([doc.content for doc in docs])
+            vector_repo.rebuild(doc_ids, embeddings)
         return cast("EvalRetrieverPort", base)
 
 
@@ -494,12 +555,32 @@ def build_rag_runtime_factory(
     )
 
 
-def build_eval_storage_port() -> EvalStoragePort:
-    return _SqlEvalStoragePort()
+def build_eval_storage_port(
+    *,
+    settings_obj: Settings,
+) -> EvalStoragePort:
+    return _SqlEvalStoragePort(settings_obj=settings_obj)
 
 
-def build_eval_retriever_factory_port() -> EvalRetrieverFactoryPort:
-    return _DefaultEvalRetrieverFactoryPort()
+def build_eval_retriever_factory_port(
+    *,
+    openai_embedder_factory: Callable[[], EmbedderPort] | None = None,
+    st_embedder_factory: Callable[[str], EmbedderPort] | None = None,
+    sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
+    dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
+    hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
+    vector_repo_factory: Callable[..., Any] = VectorStorage,
+    reranker_factory: Callable[..., Any] = RerankingRetriever,
+) -> EvalRetrieverFactoryPort:
+    return _DefaultEvalRetrieverFactoryPort(
+        openai_embedder_factory=openai_embedder_factory or _build_default_openai_embedder,
+        st_embedder_factory=st_embedder_factory or _build_default_st_embedder,
+        sparse_retriever_factory=sparse_retriever_factory,
+        dense_retriever_factory=dense_retriever_factory,
+        hybrid_retriever_factory=hybrid_retriever_factory,
+        vector_repo_factory=vector_repo_factory,
+        reranker_factory=reranker_factory,
+    )
 
 
 def build_blocking_executor(

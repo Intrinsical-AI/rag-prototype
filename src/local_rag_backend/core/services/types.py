@@ -38,6 +38,16 @@ class EvalDataset:
 
 
 @dataclass(frozen=True)
+class EvalRetrievalConfig:
+    retrieval_mode: str
+    k: int
+    candidate_k: int | None = None
+    dual_candidate_k: int | None = None
+    hybrid_alpha: float | None = None
+    reranker_enabled: bool = False
+
+
+@dataclass(frozen=True)
 class EvalResult:
     dataset_id: str
     retrieval_mode: str

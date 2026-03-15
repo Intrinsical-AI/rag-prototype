@@ -156,10 +156,6 @@ def run_retrieval_eval(
     # Backward-compatible kwargs retained for callers migrating from the previous
     # infra-coupled implementation where reranker wiring happened in this layer.
     _ = (reranker_candidate_k, reranker_strategy)
-    if retrieval_mode != "sparse":
-        raise ValueError(
-            "This offline IR evaluation currently supports retrieval_mode=sparse only."
-        )
     if k <= 0:
         raise ValueError("k must be positive")
 
@@ -169,7 +165,7 @@ def run_retrieval_eval(
     if not qs:
         raise ValueError("No queries to evaluate after max_queries.")
     if retrieve_external_ids is None:
-        raise ValueError("retrieve_external_ids callback is required for sparse evaluation.")
+        raise ValueError("retrieve_external_ids callback is required for offline IR evaluation.")
     known_doc_ids = {
         str(doc.external_id).strip() for doc in dataset.docs if str(doc.external_id).strip()
     }
