@@ -379,10 +379,18 @@ class AppContainer:
         )
 
     def build_eval_storage_port(self) -> EvalStoragePort:
-        return build_eval_storage_port()
+        return build_eval_storage_port(settings_obj=self.settings_obj)
 
     def build_eval_retriever_factory_port(self) -> EvalRetrieverFactoryPort:
-        return build_eval_retriever_factory_port()
+        return build_eval_retriever_factory_port(
+            openai_embedder_factory=self.openai_embedder_factory,
+            st_embedder_factory=self.st_embedder_factory,
+            sparse_retriever_factory=self.sparse_retriever_factory,
+            dense_retriever_factory=self.dense_retriever_factory,
+            hybrid_retriever_factory=self.hybrid_retriever_factory,
+            vector_repo_factory=self.vector_repo_factory,
+            reranker_factory=self.reranker_factory,
+        )
 
     def build_eval_execution_bundle(self) -> EvalExecutionBundle:
         return EvalExecutionBundle(

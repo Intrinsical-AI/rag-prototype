@@ -20,11 +20,29 @@ from local_rag_backend.cli_commands.runtime import get_cli_container
 )
 @click.option(
     "--retrieval-mode",
-    type=click.Choice(["sparse"], case_sensitive=False),
+    type=click.Choice(["sparse", "dense", "dual", "hybrid"], case_sensitive=False),
     default="sparse",
     show_default=True,
 )
 @click.option("--k", type=int, default=3, show_default=True)
+@click.option(
+    "--candidate-k",
+    type=click.IntRange(1),
+    default=None,
+    help="Optional dense candidate count override.",
+)
+@click.option(
+    "--dual-candidate-k",
+    type=click.IntRange(1),
+    default=None,
+    help="Optional sparse candidate pool override for dual retrieval.",
+)
+@click.option(
+    "--hybrid-alpha",
+    type=click.FloatRange(0.0, 1.0),
+    default=None,
+    help="Optional sparse weight override for hybrid retrieval.",
+)
 @click.option("--max-queries", type=int, default=None, help="Evaluate only the first N queries.")
 @click.option("--reranker/--no-reranker", default=False, show_default=True)
 @click.option("--fail-below-ndcg", type=float, default=1.0, show_default=True)
@@ -40,6 +58,9 @@ def eval_cmd(
     dataset: Path | None,
     retrieval_mode: str,
     k: int,
+    candidate_k: int | None,
+    dual_candidate_k: int | None,
+    hybrid_alpha: float | None,
     max_queries: int | None,
     reranker: bool,
     fail_below_ndcg: float,
@@ -65,7 +86,10 @@ def eval_cmd(
             eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
             retrieval_mode=retrieval_mode,
             k=k,
+            candidate_k=candidate_k,
             reranker_enabled=bool(reranker),
+            dual_candidate_k=dual_candidate_k,
+            hybrid_alpha=hybrid_alpha,
             reranker_candidate_k=eval_bundle.reranker_candidate_k,
             reranker_strategy=eval_bundle.reranker_strategy,
             max_queries=max_queries,
