@@ -160,6 +160,7 @@ def run_retrieval_eval(
     reranker_candidate_k: int = 20,
     reranker_strategy: str = "overlap_v1",
     max_queries: int | None = None,
+    run_out: Path | None = None,
 ) -> EvalResult:
     # Backward-compatible kwargs retained for callers migrating from the previous
     # infra-coupled implementation where reranker wiring happened in this layer.
@@ -210,6 +211,28 @@ def run_retrieval_eval(
             if len(ranked_docs) >= int(k):
                 break
         run[query_id] = ranked_docs
+
+    if run_out is not None:
+        run_out.parent.mkdir(parents=True, exist_ok=True)
+        with run_out.open("w", encoding="utf-8") as _f:
+            for idx, q in enumerate(qs, start=1):
+                query_id = f"q{idx:06d}"
+                ranked_list = sorted(run[query_id].items(), key=lambda x: -x[1])
+                _f.write(
+                    json.dumps(
+                        {
+                            "query_id": query_id,
+                            "query_text": q.query,
+                            "retrieval_mode": retrieval_mode,
+                            "k": k,
+                            "ranked_docs": [
+                                {"external_id": ext_id, "rank": rank, "score": score}
+                                for rank, (ext_id, score) in enumerate(ranked_list, start=1)
+                            ],
+                        }
+                    )
+                    + "\n"
+                )
 
     measures = (
         nDCG @ k,

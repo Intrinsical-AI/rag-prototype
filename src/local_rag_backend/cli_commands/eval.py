@@ -54,6 +54,12 @@ from local_rag_backend.cli_commands.runtime import get_cli_container
     default=None,
     help="Optional path to write eval results as JSON.",
 )
+@click.option(
+    "--run-out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Optional path to write the ranked run as JSONL (one line per query). Used for multi-run pooling.",
+)
 def eval_cmd(
     dataset: Path | None,
     retrieval_mode: str,
@@ -67,6 +73,7 @@ def eval_cmd(
     fail_below_map: float,
     fail_below_mrr: float,
     json_out: Path | None,
+    run_out: Path | None,
 ) -> None:
     """Offline IR evaluation with standard retrieval metrics."""
     try:
@@ -93,6 +100,7 @@ def eval_cmd(
             reranker_candidate_k=eval_bundle.reranker_candidate_k,
             reranker_strategy=eval_bundle.reranker_strategy,
             max_queries=max_queries,
+            run_out=run_out,
         )
         if json_out is not None:
             json_out.write_text(json.dumps(eval_result_to_json(res)), encoding="utf-8")
