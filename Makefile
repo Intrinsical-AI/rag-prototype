@@ -13,7 +13,7 @@ IMAGE_TAG ?= latest
 	@touch $@
 
 .venv/.uv-sync-stamp: .venv/.python-stamp pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --extra server --no-default-groups
+	$(UV) sync --frozen --group test --group lint --extra server --extra dense-st --no-default-groups
 	@touch $@
 
 .venv/.uv-sec-stamp: .venv/.python-stamp pyproject.toml uv.lock
