@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from local_rag_backend.core.domain.retrieval import (
@@ -82,6 +83,7 @@ def run_retrieval_eval(
     reranker_candidate_k: int = 20,
     reranker_strategy: str = "overlap_v1",
     max_queries: int | None = None,
+    run_out: Path | None = None,
 ) -> EvalResult:
     if retrieval_mode not in {"sparse", "dense", "dual", "hybrid"}:
         raise ValueError(f"Unsupported retrieval_mode: {retrieval_mode}")
@@ -145,6 +147,7 @@ def run_retrieval_eval(
         k=k,
         reranker_enabled=reranker_enabled,
         max_queries=max_queries,
+        run_out=run_out,
     )
 
 
