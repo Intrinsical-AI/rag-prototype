@@ -305,3 +305,46 @@ def test_cli_import_canonical_reports_invalid_json(tmp_path) -> None:
 
     assert result.exit_code == 1
     assert "[ERROR] Error importing canonical documents:" in result.output
+
+
+def test_cli_import_canonical_rejects_blank_document_without_deleting_scope(
+    in_memory_sqlite, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    first = tmp_path / "snap1.json"
+    first.write_text(
+        json.dumps(
+            {
+                "scope": "repogpt:demo",
+                "snapshot_id": "snap-1",
+                "replace_scope": True,
+                "documents": [
+                    {"external_id": "doc-1", "content": "alpha"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    invalid = tmp_path / "snap2-invalid.json"
+    invalid.write_text(
+        json.dumps(
+            {
+                "scope": "repogpt:demo",
+                "snapshot_id": "snap-2",
+                "replace_scope": True,
+                "documents": [
+                    {"external_id": "doc-1", "content": "   "},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    r1 = CliRunner().invoke(cli, ["import-canonical", "--json", str(first)])
+    assert r1.exit_code == 0, r1.output
+
+    r2 = CliRunner().invoke(cli, ["import-canonical", "--json", str(invalid)])
+    assert r2.exit_code == 1
+    assert "content must not be blank" in r2.output
+    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-1"}
