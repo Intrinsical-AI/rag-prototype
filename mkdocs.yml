@@ -14,6 +14,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Technical Debt: TECH_DEBT.md
   - App Layer: app.md
   - Advanced Usage (Ollama): USAGE.md
   - LangChain Loaders: langchain_loaders.md
