@@ -114,15 +114,22 @@ def _normalize_documents(
 ) -> tuple[MutationUpsertInput, ...]:
     upserts: list[MutationUpsertInput] = []
     seen_external_ids: set[str] = set()
-    for document in documents:
+    validation_errors: list[str] = []
+    duplicate_external_ids: list[str] = []
+
+    for idx, document in enumerate(documents):
         external_id = str(document.external_id).strip()
         content = str(document.content).strip()
+
+        if not external_id:
+            validation_errors.append(f"documents[{idx}].external_id must not be blank")
+        if not content:
+            validation_errors.append(f"documents[{idx}].content must not be blank")
         if not external_id or not content:
             continue
         if external_id in seen_external_ids:
-            raise ValueError(
-                "documents.external_id values must be unique per canonical import: " + external_id
-            )
+            duplicate_external_ids.append(external_id)
+            continue
         seen_external_ids.add(external_id)
         metadata = dict(document.metadata) if document.metadata is not None else {}
         metadata["scope"] = scope
@@ -141,6 +148,14 @@ def _normalize_documents(
                 metadata=metadata,
             )
         )
+
+    if duplicate_external_ids:
+        validation_errors.append(
+            "documents.external_id values must be unique per canonical import: "
+            + ", ".join(sorted(set(duplicate_external_ids))[:10])
+        )
+    if validation_errors:
+        raise ValueError("; ".join(validation_errors))
     return tuple(upserts)
 
 
