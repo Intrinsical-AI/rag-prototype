@@ -108,9 +108,12 @@ def test_check_retrieval_index_handles_count_mismatch_and_id_drift_errors() -> N
             settings_obj=settings_obj,
             diagnostics=_IdDriftDiagnostics(),
         )
-        is True
+        is False
     )
     assert str(checks["retrieval_index_drift"]).startswith("failed: cannot read id map")
+    assert str(checks["retrieval_index"]).startswith(
+        "failed: unable to verify retrieval index drift"
+    )
 
 
 def test_check_mutation_journal_reports_not_applicable_warning_and_failure() -> None:
