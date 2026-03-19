@@ -70,7 +70,12 @@ def _check_retrieval_index_id_set_drift(
         return False
     except Exception as e:
         checks["retrieval_index_drift"] = f"failed: {e!s}"
-        return True
+        checks["retrieval_index"] = (
+            "failed: unable to verify retrieval index drift. "
+            "Hint: inspect the index/id_map and rebuild if needed "
+            "(`rag-rebuild-index` or POST /api/index/rebuild)."
+        )
+        return False
 
 
 def check_retrieval_index(
