@@ -10,8 +10,8 @@
 <!-- [![PyPI](https://img.shields.io/pypi/v/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
 [![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/) -->
 
-> General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, dense vector, hybrid), and swappable LLM connectors (OpenAI, OpenRouter, Ollama). Designed as a solid base to iterate in experimental environments.
-> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend.
+> General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, four retrieval modes (BM25, dense vector, dual, hybrid), and swappable LLM connectors (OpenAI, OpenRouter, Ollama). Designed as a solid base to iterate in experimental environments.
+> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/dual/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend.
 > The shared `../synergy` workspace may use `elasticsearch` as its default cross-repo profile, but
 > this repo keeps `local_split` as its standalone product default.
 
@@ -26,6 +26,7 @@
 * **Retrieval**
 
   * Sparse: BM25 (offline).
+  * Dual: sparse candidate pool with dense rerank.
   * Dense: local vector index (`faiss`/`numpy`) or unified Elasticsearch vector search.
   * Hybrid: local dense+BM25 combination or Elasticsearch lexical+vector fusion.
 * **LLMs**
@@ -288,7 +289,7 @@ rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
 rag-ingest --no-follow-symlinks ./docs
 
 
-# Rebuild retrieval state from the current document store (idempotent; dense/hybrid only)
+# Rebuild retrieval state from the current document store (idempotent; dense/dual/hybrid only)
 rag-rebuild-index
 
 
@@ -328,6 +329,10 @@ rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
+cat > /tmp/rag-eval-batch-specs.json <<'JSON'
+[{"name":"sparse-baseline","retrieval_mode":"sparse","k":3},{"name":"dual-50","retrieval_mode":"dual","k":3,"dual_candidate_k":50}]
+JSON
+rag-eval-batch --specs /tmp/rag-eval-batch-specs.json --fresh-eval-workspace
 
 # Shared cross-repo RepoGPT demo/eval pack lives in synergy root
 ../synergy/synergy-up-search
@@ -472,7 +477,7 @@ docker compose up -d
 * `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
-* `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/hybrid only)
+* `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/dual/hybrid only)
 * `POST /api/openrouter/generate` (enabled if OpenRouter configured)
 
 Notes:
@@ -480,13 +485,13 @@ Notes:
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources (best-effort; retrieval/answer response is not blocked if history persistence fails).
 * For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active configuration.
-* In dense/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
+* In dense/dual/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
 * `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
 * `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
 * v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
-* In `local_split` dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
-* In `elasticsearch` mode, `/api/ready` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
+* In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
+* In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
 * For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
 Example:
