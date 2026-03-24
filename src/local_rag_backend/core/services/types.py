@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+EvalRetrievalMode = Literal["sparse", "dense", "dual", "hybrid"]
+
 
 # --- CHUNKING ---
 @dataclass(frozen=True)
@@ -39,7 +41,7 @@ class EvalDataset:
 
 @dataclass(frozen=True)
 class EvalRetrievalConfig:
-    retrieval_mode: str
+    retrieval_mode: EvalRetrievalMode
     k: int
     candidate_k: int | None = None
     dual_candidate_k: int | None = None
@@ -50,7 +52,7 @@ class EvalRetrievalConfig:
 @dataclass(frozen=True)
 class EvalBatchSpec:
     name: str
-    retrieval_mode: str
+    retrieval_mode: EvalRetrievalMode
     k: int
     candidate_k: int | None = None
     dual_candidate_k: int | None = None
@@ -70,7 +72,7 @@ class EvalBatchResult:
 
 @dataclass(frozen=True)
 class EvalCompareConfig:
-    retrieval_mode: str
+    retrieval_mode: EvalRetrievalMode
     candidate_k: int | None = None
     dual_candidate_k: int | None = None
     hybrid_alpha: float | None = None
@@ -80,7 +82,7 @@ class EvalCompareConfig:
 @dataclass(frozen=True)
 class EvalResult:
     dataset_id: str
-    retrieval_mode: str
+    retrieval_mode: EvalRetrievalMode
     reranker_enabled: bool
     k: int
     queries: int

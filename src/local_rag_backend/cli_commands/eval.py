@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import click
 
 from local_rag_backend.cli_commands.runtime import get_cli_container
+from local_rag_backend.core.services.types import EvalRetrievalMode
 
 
 def _load_batch_specs(path: Path) -> tuple[dict[str, object], ...]:
@@ -41,6 +43,13 @@ def _parse_optional_float_field(value: object, *, field_name: str) -> float | No
     if isinstance(value, str):
         return float(value.strip())
     raise ValueError(f"{field_name} must be numeric.")
+
+
+def _parse_retrieval_mode_field(value: object, *, field_name: str) -> EvalRetrievalMode:
+    normalized = str(value).strip().lower()
+    if normalized not in {"sparse", "dense", "dual", "hybrid"}:
+        raise ValueError(f"{field_name} must be one of sparse, dense, dual, hybrid.")
+    return cast("EvalRetrievalMode", normalized)
 
 
 @click.command("eval")
@@ -212,7 +221,9 @@ def eval_batch_cmd(
         batch_specs = tuple(
             EvalBatchSpec(
                 name=str(item["name"]),
-                retrieval_mode=str(item["retrieval_mode"]),
+                retrieval_mode=_parse_retrieval_mode_field(
+                    item["retrieval_mode"], field_name="retrieval_mode"
+                ),
                 k=_parse_int_field(item["k"], field_name="k"),
                 candidate_k=_parse_optional_int_field(
                     item.get("candidate_k"), field_name="candidate_k"
@@ -350,14 +361,18 @@ def eval_compare_cmd(
             eval_storage_port=eval_bundle.eval_storage_port,
             eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
             baseline=EvalCompareConfig(
-                retrieval_mode=baseline_mode,
+                retrieval_mode=_parse_retrieval_mode_field(
+                    baseline_mode, field_name="baseline-mode"
+                ),
                 candidate_k=baseline_candidate_k,
                 dual_candidate_k=baseline_dual_candidate_k,
                 hybrid_alpha=baseline_hybrid_alpha,
                 reranker_enabled=bool(baseline_reranker),
             ),
             candidate=EvalCompareConfig(
-                retrieval_mode=candidate_mode,
+                retrieval_mode=_parse_retrieval_mode_field(
+                    candidate_mode, field_name="candidate-mode"
+                ),
                 candidate_k=candidate_candidate_k,
                 dual_candidate_k=candidate_dual_candidate_k,
                 hybrid_alpha=candidate_hybrid_alpha,

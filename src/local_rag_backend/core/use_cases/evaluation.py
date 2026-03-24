@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
@@ -30,6 +30,7 @@ from local_rag_backend.core.services.types import (
     EvalBatchSpec,
     EvalCompareConfig,
     EvalRetrievalConfig,
+    EvalRetrievalMode,
 )
 
 
@@ -81,11 +82,18 @@ def _rankings_lookup(rankings: dict[str, list[str]]) -> Callable[[str, int], Seq
     return retrieve_external_ids
 
 
+def _coerce_eval_retrieval_mode(retrieval_mode: str) -> EvalRetrievalMode:
+    normalized = str(retrieval_mode)
+    if normalized not in {"sparse", "dense", "dual", "hybrid"}:
+        raise ValueError(f"Unsupported retrieval_mode: {retrieval_mode}")
+    return cast("EvalRetrievalMode", normalized)
+
+
 def _run_eval_with_retriever(
     *,
     dataset: EvalDataset,
     retriever: EvalRetrieverPort,
-    retrieval_mode: str,
+    retrieval_mode: EvalRetrievalMode,
     k: int,
     reranker_enabled: bool,
     candidate_k: int | None,
@@ -205,6 +213,7 @@ def run_retrieval_eval(
         dual_candidate_k=dual_candidate_k,
         hybrid_alpha=hybrid_alpha,
     )
+    normalized_retrieval_mode = _coerce_eval_retrieval_mode(retrieval_mode)
     workspace = prepare_eval_workspace(
         dataset=dataset,
         eval_storage_port=eval_storage_port,
@@ -213,7 +222,7 @@ def run_retrieval_eval(
     return run_prepared_retrieval_eval(
         workspace=workspace,
         config=EvalRetrievalConfig(
-            retrieval_mode=str(retrieval_mode),
+            retrieval_mode=normalized_retrieval_mode,
             k=int(k),
             candidate_k=(int(candidate_k) if candidate_k is not None else None),
             dual_candidate_k=(int(dual_candidate_k) if dual_candidate_k is not None else None),
@@ -259,7 +268,7 @@ def run_prepared_retrieval_eval(
     return _run_eval_with_retriever(
         dataset=workspace.dataset,
         retriever=retriever,
-        retrieval_mode=str(config.retrieval_mode),
+        retrieval_mode=config.retrieval_mode,
         k=int(config.k),
         reranker_enabled=bool(config.reranker_enabled),
         candidate_k=config.candidate_k,
