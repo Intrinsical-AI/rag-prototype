@@ -34,6 +34,7 @@ from local_rag_backend.core.ports import (
     BlockingTaskType,
     DocsImportLoaderPort,
     DocsReadPort,
+    EmbedderPort,
     EvalDatasetDocInput,
     EvalRetrieverFactoryPort,
     EvalRetrieverPort,
@@ -82,7 +83,10 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
 )
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
-from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
+from local_rag_backend.infrastructure.retrieval.hybrid import (
+    HybridRetriever,
+    combine_hybrid_results,
+)
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.infrastructure.search_backends import (
     ElasticLikeSearchRetriever,
@@ -354,6 +358,179 @@ class _SqlEvalStoragePort(EvalStoragePort):
         return self._eval_settings
 
 
+class _QueryCachingEmbedder(EmbedderPort):
+    """Cache exact single-text query embeddings within a prepared eval workspace."""
+
+    def __init__(self, base: EmbedderPort) -> None:
+        self._base = base
+        self.dim = base.dim
+        self._cache: dict[str, Any] = {}
+
+    def embed(self, texts: Sequence[str]) -> Sequence[Any]:
+        if len(texts) != 1:
+            return self._base.embed(texts)
+        text = str(texts[0])
+        cached = self._cache.get(text)
+        if cached is not None:
+            return [cached]
+        vector = self._base.embed(texts)[0]
+        self._cache[text] = vector
+        return [vector]
+
+
+class _PreparedEvalWorkspace:
+    def __init__(
+        self,
+        *,
+        storage: EvalStoragePort,
+        openai_embedder_factory: Callable[[], EmbedderPort],
+        st_embedder_factory: Callable[[str], EmbedderPort],
+        dense_retriever_factory: Callable[..., RetrieverPort],
+        hybrid_retriever_factory: Callable[..., RetrieverPort],
+        vector_repo_factory: Callable[..., Any],
+        reranker_factory: Callable[..., Any],
+    ) -> None:
+        self._storage = storage
+        self._docs = tuple(storage.list_documents())
+        self._doc_repo = storage.get_retriever_storage()
+        self._eval_settings = storage.get_eval_settings()
+        self._openai_embedder_factory = openai_embedder_factory
+        self._st_embedder_factory = st_embedder_factory
+        self._dense_retriever_factory = dense_retriever_factory
+        self._hybrid_retriever_factory = hybrid_retriever_factory
+        self._vector_repo_factory = vector_repo_factory
+        self._reranker_factory = reranker_factory
+        self._query_embedder: EmbedderPort | None = None
+        self._vector_repo: Any | None = None
+        self._vector_repo_ready = False
+        self._sparse_retriever: RetrieverPort | None = None
+        self._dense_retriever: RetrieverPort | None = None
+
+    def _dense_embedder(self) -> EmbedderPort:
+        if self._query_embedder is not None:
+            return self._query_embedder
+        base = build_dense_embedder_from_settings(
+            settings_obj=self._eval_settings,
+            openai_embedder_factory=self._openai_embedder_factory,
+            st_embedder_factory=self._st_embedder_factory,
+            missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE,
+        )
+        self._query_embedder = _QueryCachingEmbedder(base)
+        return self._query_embedder
+
+    def _dense_vector_repo(self) -> Any:
+        if self._vector_repo is not None:
+            return self._vector_repo
+        embedder = self._dense_embedder()
+        self._vector_repo = self._vector_repo_factory(
+            index_path=self._eval_settings.index_path,
+            id_map_path=self._eval_settings.id_map_path,
+            dim=embedder.dim,
+            backend=getattr(self._eval_settings, "vector_backend", "auto"),
+            settings_obj=self._eval_settings,
+        )
+        return self._vector_repo
+
+    def _ensure_vector_repo_ready(self) -> Any:
+        vector_repo = self._dense_vector_repo()
+        if self._vector_repo_ready:
+            return vector_repo
+        if self._docs:
+            embedder = self._dense_embedder()
+            doc_ids = [doc.id for doc in self._docs]
+            embeddings = embedder.embed([doc.content for doc in self._docs])
+            vector_repo.rebuild(doc_ids, embeddings)
+        self._vector_repo_ready = True
+        return vector_repo
+
+    def _cached_sparse_retriever(self) -> RetrieverPort:
+        if self._sparse_retriever is None:
+            self._sparse_retriever = SparseBM25Retriever(
+                documents=[doc.content for doc in self._docs],
+                doc_ids=[doc.id for doc in self._docs],
+                doc_repo=self._doc_repo,
+                preloaded_docs=self._docs,
+            )
+        return self._sparse_retriever
+
+    def _cached_dense_retriever(self) -> RetrieverPort:
+        if self._dense_retriever is None:
+            self._dense_retriever = self._dense_retriever_factory(
+                embedder=self._dense_embedder(),
+                vector_repo=self._ensure_vector_repo_ready(),
+                doc_repo=self._doc_repo,
+            )
+        return self._dense_retriever
+
+    def build_retriever(
+        self,
+        *,
+        config: EvalRetrievalConfig,
+        reranker_candidate_k: int,
+        reranker_strategy: str,
+    ) -> EvalRetrieverPort:
+        mode = str(config.retrieval_mode)
+        if mode not in {"sparse", "dense", "dual", "hybrid"}:
+            raise ValueError(f"Unsupported retrieval_mode: {mode}")
+
+        if mode in {"sparse", "dense", "dual"}:
+            retriever = LocalSplitSearchRetriever(
+                doc_repo=self._doc_repo,
+                embedder=(self._dense_embedder() if mode in {"dense", "dual"} else None),
+                vector_repo=(self._ensure_vector_repo_ready() if mode == "dense" else None),
+                preloaded_docs=self._docs,
+                cached_sparse_retriever=cast(
+                    "SparseBM25Retriever", self._cached_sparse_retriever()
+                ),
+            )
+        else:
+            dense_retriever = self._cached_dense_retriever()
+            sparse_retriever = self._cached_sparse_retriever()
+            alpha = (
+                config.hybrid_alpha
+                if config.hybrid_alpha is not None
+                else self._eval_settings.hybrid_retrieval_alpha
+            )
+            retriever = self._hybrid_retriever_factory(
+                dense=dense_retriever,
+                sparse=sparse_retriever,
+                alpha=alpha,
+            )
+
+        if config.reranker_enabled:
+            retriever = self._reranker_factory(
+                retriever,
+                candidate_k=int(reranker_candidate_k),
+                strategy=str(reranker_strategy),
+            )
+        return cast("EvalRetrieverPort", retriever)
+
+    def retrieve_hybrid_alpha_group(
+        self,
+        *,
+        query: str,
+        top_k: int,
+        alphas: Sequence[float],
+    ) -> dict[float, RetrievalResult]:
+        if not alphas:
+            return {}
+        dense_result = self._cached_dense_retriever().retrieve(
+            RetrievalRequest(query=query, top_k=top_k, mode="dense")
+        )
+        sparse_result = self._cached_sparse_retriever().retrieve(
+            RetrievalRequest(query=query, top_k=top_k, mode="sparse")
+        )
+        return {
+            float(alpha): combine_hybrid_results(
+                dense_result=dense_result,
+                sparse_result=sparse_result,
+                alpha=float(alpha),
+                top_k=top_k,
+            )
+            for alpha in alphas
+        }
+
+
 @dataclass(frozen=True)
 class _DefaultEvalRetrieverFactoryPort(EvalRetrieverFactoryPort):
     openai_embedder_factory: Callable[[], EmbedderPort]
@@ -372,57 +549,23 @@ class _DefaultEvalRetrieverFactoryPort(EvalRetrieverFactoryPort):
         reranker_candidate_k: int,
         reranker_strategy: str,
     ) -> EvalRetrieverPort:
-        docs = storage.list_documents()
-        doc_repo = storage.get_retriever_storage()
-        eval_settings = storage.get_eval_settings().model_copy(
-            update={"retrieval_mode": str(config.retrieval_mode)}
-        )
-        captured_embedder: dict[str, EmbedderPort] = {}
-        captured_vector_repo: dict[str, Any] = {}
-
-        def _openai_embedder_factory() -> EmbedderPort:
-            embedder = self.openai_embedder_factory()
-            captured_embedder["value"] = embedder
-            return embedder
-
-        def _st_embedder_factory(model_name: str) -> EmbedderPort:
-            embedder = self.st_embedder_factory(model_name)
-            captured_embedder["value"] = embedder
-            return embedder
-
-        def _vector_repo_factory(**kwargs: Any) -> Any:
-            vector_repo = self.vector_repo_factory(**kwargs)
-            captured_vector_repo["value"] = vector_repo
-            return vector_repo
-
-        base = build_retriever_with_default_embedder_from_settings(
-            settings_obj=eval_settings,
-            retrieval_mode=str(config.retrieval_mode),
-            doc_repo=doc_repo,
-            openai_embedder_factory=_openai_embedder_factory,
-            st_embedder_factory=_st_embedder_factory,
-            preloaded_docs=docs,
-            hybrid_alpha=config.hybrid_alpha,
-            enable_reranker=config.reranker_enabled,
+        workspace = self.prepare_workspace(storage=storage)
+        return workspace.build_retriever(
+            config=config,
             reranker_candidate_k=reranker_candidate_k,
             reranker_strategy=reranker_strategy,
-            sparse_retriever_factory=self.sparse_retriever_factory,
+        )
+
+    def prepare_workspace(self, *, storage: EvalStoragePort) -> _PreparedEvalWorkspace:
+        return _PreparedEvalWorkspace(
+            storage=storage,
+            openai_embedder_factory=self.openai_embedder_factory,
+            st_embedder_factory=self.st_embedder_factory,
             dense_retriever_factory=self.dense_retriever_factory,
             hybrid_retriever_factory=self.hybrid_retriever_factory,
-            vector_repo_factory=_vector_repo_factory,
+            vector_repo_factory=self.vector_repo_factory,
             reranker_factory=self.reranker_factory,
         )
-        if str(config.retrieval_mode) in {"dense", "hybrid"}:
-            vector_repo = captured_vector_repo.get("value")
-            embedder = captured_embedder.get("value")
-            if vector_repo is None or embedder is None:
-                raise RuntimeError(
-                    "Eval runtime failed to initialize vector repo/embedder for dense retrieval."
-                )
-            doc_ids = [doc.id for doc in docs]
-            embeddings = embedder.embed([doc.content for doc in docs])
-            vector_repo.rebuild(doc_ids, embeddings)
-        return cast("EvalRetrieverPort", base)
 
 
 @dataclass(frozen=True)

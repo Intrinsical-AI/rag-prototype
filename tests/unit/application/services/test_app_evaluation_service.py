@@ -24,8 +24,16 @@ from local_rag_backend.core.services.evaluation import (
     load_eval_dataset,
     run_retrieval_eval as run_core_eval,
 )
-from local_rag_backend.core.services.types import EvalCompareConfig, EvalRetrievalConfig
-from local_rag_backend.core.use_cases.evaluation import compare_retrieval_eval, run_retrieval_eval
+from local_rag_backend.core.services.types import (
+    EvalBatchSpec,
+    EvalCompareConfig,
+    EvalRetrievalConfig,
+)
+from local_rag_backend.core.use_cases.evaluation import (
+    compare_retrieval_eval,
+    run_retrieval_eval,
+    run_retrieval_eval_batch,
+)
 from local_rag_backend.settings import settings
 
 
@@ -250,3 +258,89 @@ def test_compare_retrieval_eval_uses_same_dataset_and_runtime_for_baseline_and_c
     assert result.baseline.retrieval_mode == "sparse"
     assert result.candidate.retrieval_mode == "dual"
     assert result.baseline.queries == result.candidate.queries == len(ds.queries)
+
+
+def test_compare_retrieval_eval_keeps_prepared_workspaces_independent() -> None:
+    ds = _mode_dataset()
+    cfg = _eval_settings()
+    storage = build_eval_storage_port(settings_obj=cfg)
+    factory_calls = {"count": 0}
+
+    def _st_embedder(_model_name: str):
+        factory_calls["count"] += 1
+        return DummyEmbedder()
+
+    result = compare_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=storage,
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=_st_embedder,
+        ),
+        baseline=EvalCompareConfig(retrieval_mode="dense", candidate_k=1),
+        candidate=EvalCompareConfig(retrieval_mode="hybrid", hybrid_alpha=0.5),
+        k=1,
+    )
+
+    assert result.baseline.retrieval_mode == "dense"
+    assert result.candidate.retrieval_mode == "hybrid"
+    assert factory_calls["count"] == 2
+
+
+def test_run_retrieval_eval_batch_matches_individual_runs_for_exact_hybrid_sweep(
+    tmp_path: Path,
+) -> None:
+    ds = _mode_dataset()
+    cfg = _eval_settings()
+    storage = build_eval_storage_port(settings_obj=cfg)
+    factory = build_eval_retriever_factory_port(
+        st_embedder_factory=lambda _model_name: DummyEmbedder(),
+    )
+    specs = (
+        EvalBatchSpec(
+            name="hybrid-02",
+            retrieval_mode="hybrid",
+            k=1,
+            hybrid_alpha=0.2,
+            reranker_enabled=False,
+            json_out=str(tmp_path / "hybrid-02.json"),
+            run_out=str(tmp_path / "hybrid-02.jsonl"),
+        ),
+        EvalBatchSpec(
+            name="hybrid-08",
+            retrieval_mode="hybrid",
+            k=1,
+            hybrid_alpha=0.8,
+            reranker_enabled=False,
+            json_out=str(tmp_path / "hybrid-08.json"),
+            run_out=str(tmp_path / "hybrid-08.jsonl"),
+        ),
+    )
+
+    batch_results = run_retrieval_eval_batch(
+        dataset=ds,
+        eval_storage_port=storage,
+        eval_retriever_factory_port=factory,
+        specs=specs,
+    )
+    single_02 = run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=factory,
+        retrieval_mode="hybrid",
+        k=1,
+        hybrid_alpha=0.2,
+    )
+    single_08 = run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=factory,
+        retrieval_mode="hybrid",
+        k=1,
+        hybrid_alpha=0.8,
+    )
+
+    assert [item.name for item in batch_results] == ["hybrid-02", "hybrid-08"]
+    assert batch_results[0].result == single_02
+    assert batch_results[1].result == single_08
+    assert Path(specs[0].run_out or "").exists()
+    assert Path(specs[1].run_out or "").exists()

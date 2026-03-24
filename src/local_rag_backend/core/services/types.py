@@ -48,6 +48,27 @@ class EvalRetrievalConfig:
 
 
 @dataclass(frozen=True)
+class EvalBatchSpec:
+    name: str
+    retrieval_mode: str
+    k: int
+    candidate_k: int | None = None
+    dual_candidate_k: int | None = None
+    hybrid_alpha: float | None = None
+    reranker_enabled: bool = False
+    json_out: str | None = None
+    run_out: str | None = None
+
+
+@dataclass(frozen=True)
+class EvalBatchResult:
+    name: str
+    result: EvalResult
+    json_out: str | None = None
+    run_out: str | None = None
+
+
+@dataclass(frozen=True)
 class EvalCompareConfig:
     retrieval_mode: str
     candidate_k: int | None = None

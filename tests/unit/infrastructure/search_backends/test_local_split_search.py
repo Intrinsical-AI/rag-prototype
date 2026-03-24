@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import pytest
+
+import local_rag_backend.infrastructure.search_backends.local_split as local_split
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.core.domain.types import DocId
+from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 
 
@@ -100,6 +104,96 @@ def test_sparse_applies_filters_before_scoring() -> None:
     )
     assert [item.document.id for item in result.items] == ["doc-auth"]
     assert result.mode_used == "sparse"
+
+
+def test_sparse_uses_cached_retriever_when_unfiltered(monkeypatch: pytest.MonkeyPatch) -> None:
+    docs = [
+        Document(id=DocId("doc-auth"), content="Auth token check in Python"),
+        Document(id=DocId("doc-sql"), content="SQL escaping helper"),
+    ]
+
+    class CachedSparse:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def retrieve(self, request: RetrievalRequest):
+            self.calls += 1
+            return SparseBM25Retriever(
+                documents=[doc.content for doc in docs],
+                doc_ids=[doc.id for doc in docs],
+                doc_repo=DummyDocRepo(docs),
+                preloaded_docs=docs,
+            ).retrieve(request)
+
+    cached = CachedSparse()
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("SparseBM25Retriever should not be rebuilt for unfiltered requests")
+
+    monkeypatch.setattr(local_split, "SparseBM25Retriever", _explode, raising=True)
+    retriever = LocalSplitSearchRetriever(
+        doc_repo=DummyDocRepo(docs),
+        preloaded_docs=docs,
+        cached_sparse_retriever=cached,  # type: ignore[arg-type]
+    )
+
+    result = retriever.retrieve(RetrievalRequest(query="auth token", top_k=1, mode="sparse"))
+
+    assert cached.calls == 1
+    assert [item.document.id for item in result.items] == ["doc-auth"]
+
+
+def test_sparse_rebuilds_subset_retriever_when_filters_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs = [
+        Document(
+            id=DocId("doc-auth"),
+            content="Auth token check in Python",
+            metadata={"language": "python"},
+        ),
+        Document(
+            id=DocId("doc-js"),
+            content="Auth token check in JavaScript",
+            metadata={"language": "javascript"},
+        ),
+    ]
+    seen: list[list[str]] = []
+    real_sparse = local_split.SparseBM25Retriever
+
+    class RecordingSparse(real_sparse):
+        def __init__(self, *, documents, doc_ids, doc_repo, preloaded_docs=None):
+            seen.append(list(doc_ids))
+            super().__init__(
+                documents=documents,
+                doc_ids=doc_ids,
+                doc_repo=doc_repo,
+                preloaded_docs=preloaded_docs,
+            )
+
+    monkeypatch.setattr(local_split, "SparseBM25Retriever", RecordingSparse, raising=True)
+    retriever = LocalSplitSearchRetriever(
+        doc_repo=DummyDocRepo(docs),
+        preloaded_docs=docs,
+        cached_sparse_retriever=RecordingSparse(
+            documents=[doc.content for doc in docs],
+            doc_ids=[doc.id for doc in docs],
+            doc_repo=DummyDocRepo(docs),
+            preloaded_docs=docs,
+        ),
+    )
+
+    result = retriever.retrieve(
+        RetrievalRequest(
+            query="auth token",
+            top_k=2,
+            mode="sparse",
+            filters=(RetrievalFilter(field="metadata.language", values=("python",)),),
+        )
+    )
+
+    assert seen[-1] == ["doc-auth"]
+    assert [item.document.id for item in result.items] == ["doc-auth"]
 
 
 def test_dual_reranks_only_sparse_candidates() -> None:
