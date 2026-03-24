@@ -37,13 +37,13 @@ La librería se configura mediante variables de entorno o un archivo `.env`. Par
 OLLAMA_ENABLED=True
 OLLAMA_MODEL="lfm2.5-thinking" # O el modelo que prefieras
 
-# Configurar el modo de recuperación (sparse, dense, o hybrid)
+# Configurar el modo de recuperación (sparse, dense, dual, o hybrid)
 # Para empezar, 'sparse' es el más sencillo ya que no requiere embeddings.
 RETRIEVAL_MODE="sparse"
 
 # Topología de persistencia:
-# - local_split: SQLite (+ índice vectorial local en dense/hybrid)
-# - elasticsearch: backend unificado; soporta sparse/dense/hybrid
+# - local_split: SQLite (+ soporte local para dense/dual/hybrid)
+# - elasticsearch: backend unificado; soporta sparse/dense/dual/hybrid
 PERSISTENCE_BACKEND="local_split"
 
 # Ruta de la base de datos para almacenar los documentos
@@ -59,6 +59,11 @@ SQLITE_URL="sqlite:///./data/custom_app.db"
 # Opcional: ajusta los parámetros de logging
 LOG_LEVEL="INFO"
 ```
+
+Nota de topología: `SEARCH_BACKEND` controla el motor de consulta independientemente de `PERSISTENCE_BACKEND`.
+Los combos soportados hoy son `local_split/local_split`, `elasticsearch/elasticsearch`,
+`local_split/opensearch` y `local_split/solr`; consulta la matriz del README si necesitas
+validar `dense`, `dual` o `hybrid` antes de cambiar variables.
 
 ## Paso 2: Implementación de un `Loader` Personalizado
 
@@ -231,7 +236,7 @@ Notas:
 
 ---
 
-## Mantenimiento (dense/hybrid): mutación canónica + repair explícito
+## Mantenimiento (dense/dual/hybrid): mutación canónica + repair explícito
 
 `MutationCoordinator` es el write-path canónico en ambos backends:
 
@@ -377,6 +382,7 @@ rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
+rag-eval-batch --specs /tmp/rag-eval-batch-specs.json
 
 # Pack RepoGPT -> rag-prototype (fixture compartida en synergy root)
 ../synergy/synergy-up-search

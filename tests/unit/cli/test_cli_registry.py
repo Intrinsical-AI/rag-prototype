@@ -14,6 +14,7 @@ def test_cli_registers_all_expected_commands() -> None:
         "bootstrap",
         "status",
         "eval",
+        "eval-batch",
         "ingest",
     }
     assert expected <= set(cli_module.cli.commands.keys())
@@ -26,6 +27,7 @@ def test_cli_registers_all_expected_commands() -> None:
         ("rag_bootstrap", ["bootstrap", "--flag"]),
         ("rag_status", ["status", "--flag"]),
         ("rag_eval", ["eval", "--flag"]),
+        ("rag_eval_batch", ["eval-batch", "--flag"]),
         ("rag_rebuild_index", ["rebuild-index", "--flag"]),
         ("rag_mutate_docs", ["mutate-docs", "--flag"]),
         ("rag_import_canonical", ["import-canonical", "--flag"]),

@@ -40,11 +40,13 @@ class LocalSplitSearchRetriever:
         embedder: EmbedderPort | None = None,
         vector_repo: VectorRepoPort | None = None,
         preloaded_docs: Sequence[Document] | None = None,
+        cached_sparse_retriever: SparseBM25Retriever | None = None,
     ) -> None:
         self._doc_repo = doc_repo
         self._embedder = embedder
         self._vector_repo = vector_repo
         self._preloaded_docs = tuple(preloaded_docs) if preloaded_docs is not None else None
+        self._cached_sparse_retriever = cached_sparse_retriever
 
     def _all_docs(self) -> tuple[Document, ...]:
         if self._preloaded_docs is not None:
@@ -61,12 +63,16 @@ class LocalSplitSearchRetriever:
         docs = self._filtered_docs(request.filters)
         if not docs:
             return RetrievalResult(items=(), mode_used="sparse", backend_used="local_split")
-        retriever = SparseBM25Retriever(
-            documents=[doc.content for doc in docs],
-            doc_ids=[doc.id for doc in docs],
-            doc_repo=self._doc_repo,
-            preloaded_docs=docs,
-        )
+        retriever: SparseBM25Retriever
+        if not request.filters and self._cached_sparse_retriever is not None:
+            retriever = self._cached_sparse_retriever
+        else:
+            retriever = SparseBM25Retriever(
+                documents=[doc.content for doc in docs],
+                doc_ids=[doc.id for doc in docs],
+                doc_repo=self._doc_repo,
+                preloaded_docs=docs,
+            )
         raw_result = retriever.retrieve(request)
         legacy_docs = list(raw_result.documents)
         legacy_scores = list(raw_result.scores)

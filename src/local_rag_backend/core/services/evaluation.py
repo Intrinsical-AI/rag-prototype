@@ -26,6 +26,7 @@ from local_rag_backend.core.services.types import (
     EvalDoc,
     EvalQuery,
     EvalResult,
+    EvalRetrievalMode,
 )
 
 _EVAL_DATASET_ENV = "RAG_EVAL_DATASET_PATH"
@@ -154,7 +155,7 @@ def run_retrieval_eval(
     *,
     dataset: EvalDataset,
     retrieve_external_ids: Callable[[str, int], Sequence[str]] | None = None,
-    retrieval_mode: str = "sparse",
+    retrieval_mode: EvalRetrievalMode = "sparse",
     k: int = 3,
     reranker_enabled: bool = False,
     reranker_candidate_k: int = 20,
@@ -245,7 +246,7 @@ def run_retrieval_eval(
     n = len(qs)
     return EvalResult(
         dataset_id=dataset.dataset_id,
-        retrieval_mode=str(retrieval_mode),
+        retrieval_mode=retrieval_mode,
         reranker_enabled=bool(reranker_enabled),
         k=int(k),
         queries=n,

@@ -149,6 +149,7 @@ rag-mutate-docs = "local_rag_backend.cli:rag_mutate_docs"
 rag-server      = "local_rag_backend.cli:rag_server"
 rag-status      = "local_rag_backend.cli:rag_status"
 rag-eval        = "local_rag_backend.cli:rag_eval"
+rag-eval-batch  = "local_rag_backend.cli:rag_eval_batch"
 rag-eval-compare = "local_rag_backend.cli:rag_eval_compare"
 
 [build-system]

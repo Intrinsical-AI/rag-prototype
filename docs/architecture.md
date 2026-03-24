@@ -57,7 +57,7 @@
 | Attribute    | Target | Measured by |
 | ------------ | -----: | ----------- |
 | Latency p95 (`POST /api/ask`, sparse, local sample dataset) | <= 2000ms | `rag_query_duration_seconds` metric + e2e smoke |
-| Availability (single instance) | >= 99.0% in controlled environment | `/api/health` + `/api/ready` checks |
+| Availability (single instance) | >= 99.0% in controlled environment | `/healthz` + `/readyz` checks |
 | Consistency | capability-driven (`DURABLE_SAGA` or `ATOMIC`) | mutation/recovery tests + integration tests |
 | Cost | single-node local runtime (no mandatory external SaaS except optional LLM provider) | Docker/local runtime footprint |
 
@@ -97,7 +97,7 @@
 | Retrieval Query | Retrieve docs + generate answer | No | LLM adapters, retrievers | `/api/ask`, `/api/ask_eval`, `RagService.ask` |
 | Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs`, `/api/docs/import`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
 | Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag-rebuild-index` |
-| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, ES mappings | `/api/health`, `/api/ready`, `rag-status` |
+| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, ES mappings | `/healthz`, `/readyz`, `rag-status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
 | Composition Runtime | Dependency wiring + runtime cache invalidation | No | settings + adapters | DI factory/container |
 
