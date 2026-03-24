@@ -105,7 +105,7 @@ def _run_eval_with_retriever(
         request = RetrievalRequest(
             query=query,
             top_k=top_k,
-            mode=str(retrieval_mode),
+            mode=retrieval_mode,
             candidate_k=(int(candidate_k) if candidate_k is not None else None),
             dual_candidate_k=(int(dual_candidate_k) if dual_candidate_k is not None else None),
         )
