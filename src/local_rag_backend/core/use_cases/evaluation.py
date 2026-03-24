@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,13 @@ def _external_ids_from_retrieval(retrieval: RetrievalResult) -> list[str]:
     ]
 
 
+def _rankings_lookup(rankings: dict[str, list[str]]) -> Callable[[str, int], Sequence[str]]:
+    def retrieve_external_ids(query: str, _top_k: int) -> list[str]:
+        return rankings.get(query, [])
+
+    return retrieve_external_ids
+
+
 def _run_eval_with_retriever(
     *,
     dataset: EvalDataset,
@@ -89,7 +97,7 @@ def _run_eval_with_retriever(
         request = RetrievalRequest(
             query=query,
             top_k=top_k,
-            mode=str(retrieval_mode),  # type: ignore[arg-type]
+            mode=str(retrieval_mode),
             candidate_k=(int(candidate_k) if candidate_k is not None else None),
             dual_candidate_k=(int(dual_candidate_k) if dual_candidate_k is not None else None),
         )
@@ -329,11 +337,10 @@ def _run_exact_hybrid_alpha_group(
     for spec in specs:
         run_out_path = Path(spec.run_out) if spec.run_out is not None else None
         rankings = ranking_by_name[spec.name]
+
         result = run_retrieval_eval_core(
             dataset=workspace.dataset,
-            retrieve_external_ids=lambda query, _top_k, _rankings=rankings: _rankings.get(
-                query, []
-            ),
+            retrieve_external_ids=_rankings_lookup(rankings),
             retrieval_mode="hybrid",
             k=k,
             reranker_enabled=False,

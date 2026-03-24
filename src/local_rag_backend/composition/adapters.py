@@ -473,6 +473,7 @@ class _PreparedEvalWorkspace:
         if mode not in {"sparse", "dense", "dual", "hybrid"}:
             raise ValueError(f"Unsupported retrieval_mode: {mode}")
 
+        retriever: EvalRetrieverPort
         if mode in {"sparse", "dense", "dual"}:
             retriever = LocalSplitSearchRetriever(
                 doc_repo=self._doc_repo,

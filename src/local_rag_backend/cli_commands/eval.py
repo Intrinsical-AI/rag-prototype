@@ -15,6 +15,34 @@ def _load_batch_specs(path: Path) -> tuple[dict[str, object], ...]:
     return tuple(payload)
 
 
+def _parse_int_field(value: object, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer, got boolean.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value.strip())
+    raise ValueError(f"{field_name} must be an integer.")
+
+
+def _parse_optional_int_field(value: object, *, field_name: str) -> int | None:
+    if value is None:
+        return None
+    return _parse_int_field(value, field_name=field_name)
+
+
+def _parse_optional_float_field(value: object, *, field_name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be numeric, got boolean.")
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        return float(value.strip())
+    raise ValueError(f"{field_name} must be numeric.")
+
+
 @click.command("eval")
 @click.option(
     "--dataset",
@@ -185,17 +213,15 @@ def eval_batch_cmd(
             EvalBatchSpec(
                 name=str(item["name"]),
                 retrieval_mode=str(item["retrieval_mode"]),
-                k=int(item["k"]),
-                candidate_k=(
-                    int(item["candidate_k"]) if item.get("candidate_k") is not None else None
+                k=_parse_int_field(item["k"], field_name="k"),
+                candidate_k=_parse_optional_int_field(
+                    item.get("candidate_k"), field_name="candidate_k"
                 ),
-                dual_candidate_k=(
-                    int(item["dual_candidate_k"])
-                    if item.get("dual_candidate_k") is not None
-                    else None
+                dual_candidate_k=_parse_optional_int_field(
+                    item.get("dual_candidate_k"), field_name="dual_candidate_k"
                 ),
-                hybrid_alpha=(
-                    float(item["hybrid_alpha"]) if item.get("hybrid_alpha") is not None else None
+                hybrid_alpha=_parse_optional_float_field(
+                    item.get("hybrid_alpha"), field_name="hybrid_alpha"
                 ),
                 reranker_enabled=bool(item.get("reranker_enabled", False)),
                 json_out=(
