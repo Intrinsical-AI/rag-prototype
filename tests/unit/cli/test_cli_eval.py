@@ -360,3 +360,92 @@ def test_rag_eval_compare_reports_invalid_candidate_mode_config_with_exit_code_t
 
     assert r.exit_code == 2
     assert "[ERROR] Error comparing eval runs:" in r.output
+
+
+def test_rag_eval_batch_runs_multiple_specs_and_writes_json(tmp_path: Path, monkeypatch) -> None:
+    ds = tmp_path / "batch.jsonl"
+    specs = tmp_path / "specs.json"
+    sparse_json = tmp_path / "sparse.json"
+    hybrid_json = tmp_path / "hybrid.json"
+    sparse_run = tmp_path / "sparse.jsonl"
+    hybrid_run = tmp_path / "hybrid.jsonl"
+    ds.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"x","schema_version":1}',
+                '{"type":"doc","external_id":"doc-auth","source_id":"eval","content":"auth auth"}',
+                '{"type":"doc","external_id":"doc-sql","source_id":"eval","content":"sql sql"}',
+                '{"type":"query","query":"auth","relevant_external_ids":["doc-auth"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    specs.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "sparse-a",
+                    "retrieval_mode": "sparse",
+                    "k": 1,
+                    "json_out": str(sparse_json),
+                    "run_out": str(sparse_run),
+                },
+                {
+                    "name": "hybrid-a",
+                    "retrieval_mode": "hybrid",
+                    "k": 1,
+                    "hybrid_alpha": 0.5,
+                    "json_out": str(hybrid_json),
+                    "run_out": str(hybrid_run),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "vector_backend", "numpy", raising=False)
+    monkeypatch.setattr(
+        factory,
+        "SentenceTransformerEmbedder",
+        lambda model_name=None: DummyEmbedder(),
+        raising=True,
+    )
+    factory.reset_app_context()
+
+    r = CliRunner().invoke(
+        cli,
+        ["eval-batch", "--dataset", str(ds), "--specs", str(specs)],
+    )
+
+    assert r.exit_code == 0, r.output
+    assert "sparse-a:" in r.output
+    assert "hybrid-a:" in r.output
+    assert json.loads(sparse_json.read_text(encoding="utf-8"))["retrieval_mode"] == "sparse"
+    assert json.loads(hybrid_json.read_text(encoding="utf-8"))["retrieval_mode"] == "hybrid"
+    assert sparse_run.exists()
+    assert hybrid_run.exists()
+    factory.reset_app_context()
+
+
+def test_rag_eval_batch_rejects_invalid_specs_shape(tmp_path: Path) -> None:
+    ds = tmp_path / "batch.jsonl"
+    specs = tmp_path / "specs.json"
+    ds.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"x","schema_version":1}',
+                '{"type":"doc","external_id":"doc-auth","source_id":"eval","content":"auth auth"}',
+                '{"type":"query","query":"auth","relevant_external_ids":["doc-auth"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    specs.write_text(json.dumps({"name": "bad"}), encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["eval-batch", "--dataset", str(ds), "--specs", str(specs)])
+
+    assert r.exit_code == 1
+    assert "Batch specs file must be a JSON array of objects" in r.output

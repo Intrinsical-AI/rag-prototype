@@ -9,6 +9,7 @@ import click
 from local_rag_backend import __version__
 from local_rag_backend.cli_commands import (
     bootstrap_cmd,
+    eval_batch_cmd,
     eval_cmd,
     eval_compare_cmd,
     import_canonical_cmd,
@@ -34,6 +35,7 @@ cli.add_command(import_canonical_cmd)
 cli.add_command(bootstrap_cmd)
 cli.add_command(status_cmd)
 cli.add_command(eval_cmd)
+cli.add_command(eval_batch_cmd)
 cli.add_command(eval_compare_cmd)
 cli.add_command(ingest_cmd)
 
@@ -63,6 +65,11 @@ def rag_status() -> None:
 def rag_eval() -> None:
     """Entry point for rag-eval command."""
     _dispatch_entrypoint(command="eval", include_argv=True)
+
+
+def rag_eval_batch() -> None:
+    """Entry point for rag-eval-batch command."""
+    _dispatch_entrypoint(command="eval-batch", include_argv=True)
 
 
 def rag_eval_compare() -> None:

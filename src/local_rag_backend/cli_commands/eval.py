@@ -8,6 +8,13 @@ import click
 from local_rag_backend.cli_commands.runtime import get_cli_container
 
 
+def _load_batch_specs(path: Path) -> tuple[dict[str, object], ...]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+        raise ValueError("Batch specs file must be a JSON array of objects.")
+    return tuple(payload)
+
+
 @click.command("eval")
 @click.option(
     "--dataset",
@@ -124,6 +131,107 @@ def eval_cmd(
         raise
     except Exception as e:
         click.echo(f"[ERROR] Error evaluating dataset: {e}", err=True)
+        raise SystemExit(1)
+
+
+@click.command("eval-batch")
+@click.option(
+    "--dataset",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Path to a JSONL eval dataset. If omitted, uses datasets/rag_eval_v1.jsonl "
+        "(or RAG_EVAL_DATASET_PATH)."
+    ),
+)
+@click.option(
+    "--specs",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Path to a JSON file with a list of batch eval specs.",
+)
+@click.option("--max-queries", type=int, default=None, help="Evaluate only the first N queries.")
+@click.option(
+    "--fresh-eval-workspace/--no-fresh-eval-workspace",
+    default=False,
+    show_default=True,
+)
+def eval_batch_cmd(
+    dataset: Path | None,
+    specs: Path,
+    max_queries: int | None,
+    fresh_eval_workspace: bool,
+) -> None:
+    """Offline IR evaluation for multiple specs over the same dataset."""
+    try:
+        from local_rag_backend.core.services.evaluation import (
+            eval_result_to_json,
+            format_eval_result,
+            load_eval_dataset,
+        )
+        from local_rag_backend.core.services.types import EvalBatchSpec
+        from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval_batch
+
+        raw_specs = _load_batch_specs(specs)
+        _required_fields = ("name", "retrieval_mode", "k")
+        for _idx, _item in enumerate(raw_specs):
+            for _field in _required_fields:
+                if _field not in _item:
+                    raise click.BadParameter(
+                        f"Spec at index {_idx} is missing required field {_field!r}.",
+                        param_hint="--specs",
+                    )
+        batch_specs = tuple(
+            EvalBatchSpec(
+                name=str(item["name"]),
+                retrieval_mode=str(item["retrieval_mode"]),
+                k=int(item["k"]),
+                candidate_k=(
+                    int(item["candidate_k"]) if item.get("candidate_k") is not None else None
+                ),
+                dual_candidate_k=(
+                    int(item["dual_candidate_k"])
+                    if item.get("dual_candidate_k") is not None
+                    else None
+                ),
+                hybrid_alpha=(
+                    float(item["hybrid_alpha"]) if item.get("hybrid_alpha") is not None else None
+                ),
+                reranker_enabled=bool(item.get("reranker_enabled", False)),
+                json_out=(
+                    str(item["json_out"]).strip() if item.get("json_out") is not None else None
+                ),
+                run_out=(str(item["run_out"]).strip() if item.get("run_out") is not None else None),
+            )
+            for item in raw_specs
+        )
+
+        container = get_cli_container()
+        eval_bundle = container.build_eval_execution_bundle()
+        ds = load_eval_dataset(dataset)
+        results = run_retrieval_eval_batch(
+            dataset=ds,
+            eval_storage_port=eval_bundle.eval_storage_port,
+            eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
+            specs=batch_specs,
+            fresh_workspace=bool(fresh_eval_workspace),
+            reranker_candidate_k=eval_bundle.reranker_candidate_k,
+            reranker_strategy=eval_bundle.reranker_strategy,
+            max_queries=max_queries,
+        )
+        for batch_result in results:
+            if batch_result.json_out is not None:
+                json_out = Path(batch_result.json_out)
+                json_out.parent.mkdir(parents=True, exist_ok=True)
+                json_out.write_text(
+                    json.dumps(eval_result_to_json(batch_result.result)),
+                    encoding="utf-8",
+                )
+            click.echo(f"{batch_result.name}: {format_eval_result(batch_result.result)}")
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.echo(f"[ERROR] Error evaluating batch dataset: {e}", err=True)
         raise SystemExit(1)
 
 
