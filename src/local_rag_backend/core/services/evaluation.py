@@ -25,8 +25,8 @@ from local_rag_backend.core.services.types import (
     EvalDataset,
     EvalDoc,
     EvalQuery,
-    EvalRetrievalMode,
     EvalResult,
+    EvalRetrievalMode,
 )
 
 _EVAL_DATASET_ENV = "RAG_EVAL_DATASET_PATH"
