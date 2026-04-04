@@ -16,30 +16,30 @@ def _reset_blocking_state() -> None:
     blocking._EXECUTOR_STATES.clear()
 
 
-def test_default_workers_uses_valid_positive_env(monkeypatch):
-    monkeypatch.setenv("RAG_BLOCKING_WORKERS", "12")
+def test_default_workers_uses_valid_positive_config(monkeypatch):
+    monkeypatch.setattr(blocking.settings, "blocking_workers", 12, raising=False)
     assert blocking._default_workers() == 12
 
 
-def test_default_workers_falls_back_on_invalid_or_non_positive_env(monkeypatch):
-    monkeypatch.setenv("RAG_BLOCKING_WORKERS", "abc")
+def test_default_workers_falls_back_on_invalid_or_non_positive_config(monkeypatch):
+    monkeypatch.setattr(blocking.settings, "blocking_workers", "abc", raising=False)
     assert blocking._default_workers() == 8
 
-    monkeypatch.setenv("RAG_BLOCKING_WORKERS", "0")
+    monkeypatch.setattr(blocking.settings, "blocking_workers", "0", raising=False)
     assert blocking._default_workers() == 8
 
-    monkeypatch.setenv("RAG_BLOCKING_WORKERS", "-3")
+    monkeypatch.setattr(blocking.settings, "blocking_workers", "-3", raising=False)
     assert blocking._default_workers() == 8
 
 
-def test_workers_for_task_prefers_task_specific_env(monkeypatch):
-    monkeypatch.setenv("RAG_BLOCKING_WORKERS_MUTATION", "5")
+def test_workers_for_task_prefers_task_specific_config(monkeypatch):
+    monkeypatch.setattr(blocking.settings, "blocking_workers_mutation", 5, raising=False)
     assert blocking._workers_for_task("mutation") == 5
 
 
 def test_executor_state_uses_workers_and_queue_limits(monkeypatch):
-    monkeypatch.setenv("RAG_BLOCKING_WORKERS_MUTATION", "3")
-    monkeypatch.setenv("RAG_BLOCKING_QUEUE_MUTATION", "9")
+    monkeypatch.setattr(blocking.settings, "blocking_workers_mutation", 3, raising=False)
+    monkeypatch.setattr(blocking.settings, "blocking_queue_mutation", 9, raising=False)
 
     state = blocking._get_executor_state("mutation")
     assert state.max_pending == 12

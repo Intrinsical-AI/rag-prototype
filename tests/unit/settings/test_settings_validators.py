@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from local_rag_backend.settings import Settings
+from local_rag_backend.settings import Settings, load_settings_from_yaml
 
 
 def test_sqlite_url_validator():
@@ -12,7 +12,7 @@ def test_sqlite_url_validator():
 
 
 def test_elasticsearch_backend_requires_es_base_url():
-    with pytest.raises(ValueError, match="ES_BASE_URL is required"):
+    with pytest.raises(ValueError, match="es_base_url is required"):
         Settings(
             persistence_backend="elasticsearch",
             retrieval_mode="dense",
@@ -40,7 +40,7 @@ def test_elasticsearch_backend_accepts_sparse_with_elasticsearch_search_backend(
 
 
 def test_opensearch_search_backend_requires_url():
-    with pytest.raises(ValueError, match="OS_BASE_URL is required"):
+    with pytest.raises(ValueError, match="os_base_url is required"):
         Settings(search_backend="opensearch", retrieval_mode="dense")
 
 
@@ -99,15 +99,13 @@ def test_log_level_is_normalized_to_uppercase():
     assert s.log_level == "DEBUG"
 
 
-def test_debug_accepts_release_alias_from_env(monkeypatch):
-    monkeypatch.setenv("DEBUG", "release")
-    s = Settings()
+def test_debug_accepts_release_alias_from_string():
+    s = Settings(debug="release")
     assert s.debug is False
 
 
-def test_debug_accepts_development_alias_from_env(monkeypatch):
-    monkeypatch.setenv("DEBUG", "development")
-    s = Settings()
+def test_debug_accepts_development_alias_from_string():
+    s = Settings(debug="development")
     assert s.debug is True
 
 
@@ -151,3 +149,44 @@ def test_coordination_dir_uses_absolute_sqlite_parent_when_data_dir_is_relative(
 def test_coordination_dir_uses_absolute_sqlite_parent_when_data_dir_is_default(tmp_path):
     s = Settings(data_dir=Path("data"), sqlite_url=f"sqlite:///{tmp_path / 'app.db'}")
     assert s.get_coordination_dir() == tmp_path.resolve()
+
+
+def test_load_settings_from_yaml_resolves_relative_paths(tmp_path):
+    config_dir = tmp_path / "config-root"
+    config_dir.mkdir()
+    config_file = config_dir / "config.yaml"
+    config_file.write_text(
+        "\n".join(
+            [
+                "data_dir: data",
+                "index_path: data/index.faiss",
+                "id_map_path: data/id_map.json",
+                "sqlite_url: sqlite:///./data/app.db",
+                "faq_csv: data/faq.csv",
+                "eval_dataset_path: datasets/rag_eval_v1.jsonl",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings_from_yaml(config_file)
+
+    assert settings.data_dir == (config_dir / "data").resolve()
+    assert settings.index_path == str((config_dir / "data/index.faiss").resolve())
+    assert settings.id_map_path == str((config_dir / "data/id_map.json").resolve())
+    assert settings.sqlite_url == f"sqlite:///{(config_dir / 'data/app.db').resolve()}"
+    assert settings.faq_csv == str((config_dir / "data/faq.csv").resolve())
+    assert settings.eval_dataset_path == str((config_dir / "datasets/rag_eval_v1.jsonl").resolve())
+
+
+def test_load_settings_from_yaml_rejects_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Configuration file not found"):
+        load_settings_from_yaml(tmp_path / "missing.yaml")
+
+
+def test_load_settings_from_yaml_rejects_non_mapping(tmp_path):
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("- not-a-mapping\n- still-not-a-mapping\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="top level"):
+        load_settings_from_yaml(config_file)

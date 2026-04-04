@@ -64,4 +64,4 @@ def test_rebuild_index_cli_rejects_non_dense_modes(monkeypatch) -> None:
     result = CliRunner().invoke(index_cmd_module.rebuild_index_cmd)
 
     assert result.exit_code == 1
-    assert "RETRIEVAL_MODE=dense|dual|hybrid" in result.output
+    assert "retrieval_mode=dense|dual|hybrid" in result.output
