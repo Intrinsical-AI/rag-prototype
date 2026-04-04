@@ -21,7 +21,7 @@ def rebuild_index_cmd() -> None:
 
         container = get_cli_container()
         if container.settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
-            raise RuntimeError("rebuild-index requires RETRIEVAL_MODE=dense|dual|hybrid")
+            raise RuntimeError("rebuild-index requires retrieval_mode=dense|dual|hybrid")
         ports = container.index_mutation_ports(
             build_embedder=build_dense_embedder,
         )

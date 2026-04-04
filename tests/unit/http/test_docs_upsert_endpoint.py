@@ -55,7 +55,7 @@ async def test_mutate_upsert_rejects_duplicate_external_ids(
 
 
 async def test_mutate_upsert_dense_updates_only_changed_content(
-    asgi_client, in_memory_sqlite, monkeypatch
+    asgi_client, in_memory_sqlite, monkeypatch, tmp_path
 ):
     class DummyEmbedder:
         dim = 4
@@ -81,6 +81,12 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
+    monkeypatch.setattr(
+        settings,
+        "embedding_cache_db_path",
+        str(tmp_path / "embedding-cache.sqlite3"),
+        raising=False,
+    )
 
     dummy_embedder = DummyEmbedder()
     dummy_vec = DummyVec()

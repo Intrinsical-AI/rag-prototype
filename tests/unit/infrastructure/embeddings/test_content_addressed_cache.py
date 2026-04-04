@@ -13,6 +13,7 @@ from local_rag_backend.infrastructure.observability.perf import (
     reset_perf_metrics,
     snapshot_perf_metrics,
 )
+from local_rag_backend.settings import settings
 
 
 class _Embedder:
@@ -54,7 +55,7 @@ def test_perf_metrics_dump_aggregates_process_payloads(monkeypatch, tmp_path: Pa
     cached.embed(["alpha", "alpha"])
 
     out = tmp_path / "perf.json"
-    monkeypatch.setenv("RAG_PERF_METRICS_OUT", str(out))
+    monkeypatch.setattr(settings, "perf_metrics_out_path", str(out), raising=False)
     dump_perf_metrics_if_configured()
 
     payload = json.loads(out.read_text(encoding="utf-8"))
@@ -76,7 +77,12 @@ def test_resolve_embedding_model_key_detects_openai_like_embedder() -> None:
     assert resolve_embedding_model_key(_OpenAIEmbedder()) == "openai:text-embedding-3-small:3"
 
 
-def test_resolve_embedding_cache_db_path_honors_override(monkeypatch, tmp_path: Path) -> None:
+def test_resolve_embedding_cache_db_path_honors_override(tmp_path: Path) -> None:
     override = tmp_path / "custom-cache.sqlite3"
-    monkeypatch.setenv("RAG_EMBEDDING_CACHE_DB", str(override))
-    assert resolve_embedding_cache_db_path(data_dir=tmp_path / "data") == override
+    assert (
+        resolve_embedding_cache_db_path(
+            data_dir=tmp_path / "data",
+            configured_path=override,
+        )
+        == override
+    )

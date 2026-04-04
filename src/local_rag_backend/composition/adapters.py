@@ -116,7 +116,7 @@ T = TypeVar("T")
 
 DEFAULT_DENSE_BACKEND_MESSAGE = (
     "Dense/hybrid retrieval requires an embeddings backend. "
-    "Either set OPENAI_API_KEY to use OpenAI embeddings, or install the "
+    "Configure openai_api_key in config.yaml to use OpenAI embeddings, or install the "
     "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
 )
 
@@ -820,8 +820,10 @@ def build_dense_embedder_from_settings(
     return ContentAddressedCachingEmbedder(
         base=base,
         cache_db_path=resolve_embedding_cache_db_path(
-            data_dir=Path(getattr(settings_obj, "data_dir", "data"))
+            data_dir=Path(getattr(settings_obj, "data_dir", "data")),
+            configured_path=getattr(settings_obj, "embedding_cache_db_path", None),
         ),
+        disabled=bool(getattr(settings_obj, "disable_embedding_cache", False)),
     )
 
 
@@ -880,8 +882,8 @@ def resolve_preferred_llm_provider(*, settings_obj: Settings) -> str:
     ):
         return "openrouter"
     raise LLMConfigurationError(
-        "No LLM configured. Set OPENAI_API_KEY, enable OLLAMA_ENABLED, "
-        "or set OPENROUTER_ENABLED=true with OPENROUTER_API_KEY."
+        "No LLM configured. Set openai_api_key in config.yaml, enable ollama_enabled, "
+        "or enable openrouter_enabled with openrouter_api_key."
     )
 
 
@@ -913,14 +915,14 @@ def build_retriever_from_settings(
         and search_backend != "elasticsearch"
     ):
         raise ValueError(
-            "PERSISTENCE_BACKEND=elasticsearch supports retrieval_mode=sparse only when "
-            "SEARCH_BACKEND=elasticsearch"
+            "persistence_backend=elasticsearch supports retrieval_mode=sparse only when "
+            "search_backend=elasticsearch"
         )
     if search_backend == "solr" and mode in {"dense", "dual"}:
-        raise ValueError("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
+        raise ValueError("search_backend=solr supports only retrieval_mode=sparse in v1")
     if mode == "hybrid" and search_backend not in {"local_split", "elasticsearch"}:
         raise ValueError(
-            "retrieval_mode=hybrid is supported only with SEARCH_BACKEND=local_split|elasticsearch"
+            "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
         )
     if (
         mode == "hybrid"
@@ -928,8 +930,8 @@ def build_retriever_from_settings(
         and persistence_backend != "elasticsearch"
     ):
         raise ValueError(
-            "retrieval_mode=hybrid with SEARCH_BACKEND=elasticsearch requires "
-            "PERSISTENCE_BACKEND=elasticsearch"
+            "retrieval_mode=hybrid with search_backend=elasticsearch requires "
+            "persistence_backend=elasticsearch"
         )
 
     retriever: RetrieverPort

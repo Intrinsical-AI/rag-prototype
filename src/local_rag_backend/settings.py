@@ -2,14 +2,9 @@
 """
 Configuration management for Intrinsical RAG Prototype.
 
-This module provides centralized configuration using Pydantic Settings with
-environment variable support and validation. All settings can be overridden
-via environment variables or .env file.
-
-Example:
-    export OPENAI_API_KEY=\"your-key-here\"
-    export RETRIEVAL_MODE=\"hybrid\"
-    python -m local_rag_backend.http.main
+This module provides centralized configuration using a YAML file as the single
+runtime source of truth. The YAML payload is loaded at startup and validated
+through a Pydantic model.
 """
 
 from __future__ import annotations
@@ -19,11 +14,68 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+
+DEFAULT_CONFIG_PATH = Path("config.yaml")
 
 
-class Settings(BaseSettings):
+def _resolve_relative_path_value(value: Any, *, base_dir: Path) -> str | None:
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    path = (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
+    return str(path)
+
+
+def _resolve_sqlite_url_value(value: Any, *, base_dir: Path) -> str | None:
+    if value is None:
+        return None
+    rendered = str(value).strip()
+    prefix = "sqlite:///"
+    if not rendered.startswith(prefix):
+        return rendered
+    raw_path = rendered[len(prefix) :]
+    if not raw_path:
+        return rendered
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return f"{prefix}{path}"
+    resolved = (base_dir / path).resolve()
+    return f"{prefix}{resolved}"
+
+
+def load_settings_from_yaml(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if raw is None:
+        data: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        data = dict(raw)
+    else:
+        raise ValueError("Configuration file must contain a YAML mapping at the top level.")
+
+    base_dir = path.resolve().parent
+    for key in (
+        "data_dir",
+        "index_path",
+        "id_map_path",
+        "faq_csv",
+        "embedding_cache_db_path",
+        "eval_dataset_path",
+        "perf_metrics_out_path",
+        "lock_metrics_path",
+    ):
+        if key in data:
+            data[key] = _resolve_relative_path_value(data.get(key), base_dir=base_dir)
+    if "sqlite_url" in data:
+        data["sqlite_url"] = _resolve_sqlite_url_value(data.get("sqlite_url"), base_dir=base_dir)
+    return Settings(**data)
+
+
+class Settings(BaseModel):
     """Centralized application configuration.
 
     All fields have default values, so the class can be instantiated without arguments.
@@ -159,6 +211,91 @@ class Settings(BaseSettings):
             "and vector backend."
         ),
     )
+    eval_dataset_path: str = Field(
+        "datasets/rag_eval_v1.jsonl",
+        description="Default JSONL dataset path for offline retrieval evaluation.",
+    )
+    embedding_cache_db_path: str = Field(
+        "data/embedding_cache.sqlite3",
+        description="Persistent embedding cache DB path.",
+    )
+    disable_embedding_cache: bool = Field(
+        False,
+        description="Disable the content-addressed embedding cache wrapper.",
+    )
+    synthetic_embeddings: bool = Field(
+        False,
+        description="Enable synthetic SentenceTransformer embeddings for local stress testing.",
+    )
+    synthetic_embedding_fail_rate: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Probability of synthetic embedding failure when synthetic_embeddings=true.",
+    )
+    synthetic_embedding_jitter_min_ms: float = Field(
+        0.0,
+        ge=0.0,
+        description="Minimum synthetic embedding jitter in milliseconds.",
+    )
+    synthetic_embedding_jitter_max_ms: float = Field(
+        0.0,
+        ge=0.0,
+        description="Maximum synthetic embedding jitter in milliseconds.",
+    )
+    synthetic_embedding_dim: int = Field(
+        384,
+        ge=1,
+        description="Embedding dimensionality used when synthetic embeddings are enabled.",
+    )
+    perf_metrics_out_path: str | None = Field(
+        None,
+        description="Optional JSON output file for process-local perf metrics.",
+    )
+    lock_metrics_path: str | None = Field(
+        None,
+        description="Optional NDJSON output file for write-lock metrics.",
+    )
+    blocking_workers: int = Field(
+        8,
+        ge=1,
+        description="Default worker count for blocking tasks.",
+    )
+    blocking_workers_mutation: int = Field(
+        2,
+        ge=1,
+        description="Worker count for blocking mutation tasks.",
+    )
+    blocking_workers_network: int = Field(
+        4,
+        ge=1,
+        description="Worker count for blocking network tasks.",
+    )
+    blocking_workers_eval: int = Field(
+        2,
+        ge=1,
+        description="Worker count for blocking eval tasks.",
+    )
+    blocking_queue_default: int = Field(
+        64,
+        ge=1,
+        description="Queue depth for default blocking tasks beyond worker count.",
+    )
+    blocking_queue_mutation: int = Field(
+        32,
+        ge=1,
+        description="Queue depth for mutation blocking tasks beyond worker count.",
+    )
+    blocking_queue_network: int = Field(
+        64,
+        ge=1,
+        description="Queue depth for network blocking tasks beyond worker count.",
+    )
+    blocking_queue_eval: int = Field(
+        32,
+        ge=1,
+        description="Queue depth for eval blocking tasks beyond worker count.",
+    )
     write_lock_timeout_s: float = Field(
         30.0,
         ge=0.1,
@@ -287,14 +424,7 @@ class Settings(BaseSettings):
         "Based on the context, answer the question.\nIf the context is not enough, say so.\n\nCONTEXT:\n{context}\n\nQUESTION:\n{question}"
     )
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-        # Allow non-JSON env vars for complex fields (e.g., comma-separated CORS origins).
-        enable_decoding=False,
-    )
+    model_config = ConfigDict(extra="forbid")
 
     @field_validator("debug", mode="before")
     @classmethod
@@ -310,7 +440,7 @@ class Settings(BaseSettings):
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: Any) -> Any:
-        # Make env/config more forgiving while keeping a strict Literal type.
+        # Keep the YAML config forgiving while retaining a strict Literal type.
         if isinstance(v, str):
             return v.upper()
         return v
@@ -319,8 +449,8 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_cors_allow_origins(cls, v: Any) -> Any:
         """
-        Allow `CORS_ALLOW_ORIGINS` to be set as:
-        - JSON list (recommended): ["http://localhost:5173", ...]
+        Allow `cors_allow_origins` to be set as:
+        - YAML list (recommended): ["http://localhost:5173", ...]
         - Comma-separated string: http://localhost:5173,http://127.0.0.1:5173
         - Empty string: (disable CORS)
         """
@@ -330,7 +460,7 @@ class Settings(BaseSettings):
             s = v.strip()
             if not s:
                 return []
-            # JSON list string (common in docker-compose env)
+            # JSON list string (useful when the YAML loader gets a quoted scalar).
             if s.startswith("["):
                 try:
                     parsed = json.loads(s)
@@ -400,29 +530,29 @@ class Settings(BaseSettings):
         if self.persistence_backend == "elasticsearch":
             if self.retrieval_mode == "sparse" and self.search_backend != "elasticsearch":
                 raise ValueError(
-                    "PERSISTENCE_BACKEND=elasticsearch supports retrieval_mode=sparse only when "
-                    "SEARCH_BACKEND=elasticsearch"
+                    "persistence_backend=elasticsearch supports retrieval_mode=sparse only when "
+                    "search_backend=elasticsearch"
                 )
             if not self.es_base_url:
-                raise ValueError("ES_BASE_URL is required when PERSISTENCE_BACKEND=elasticsearch")
+                raise ValueError("es_base_url is required when persistence_backend=elasticsearch")
         else:
             if not self.sqlite_url.startswith("sqlite:///"):
                 raise ValueError("SQLite URL must start with 'sqlite:///'")
 
         if self.search_backend == "elasticsearch" and not self.es_base_url:
-            raise ValueError("ES_BASE_URL is required when SEARCH_BACKEND=elasticsearch")
+            raise ValueError("es_base_url is required when search_backend=elasticsearch")
         if self.search_backend == "opensearch" and not self.os_base_url:
-            raise ValueError("OS_BASE_URL is required when SEARCH_BACKEND=opensearch")
+            raise ValueError("os_base_url is required when search_backend=opensearch")
         if self.search_backend == "solr" and not self.solr_base_url:
-            raise ValueError("SOLR_BASE_URL is required when SEARCH_BACKEND=solr")
+            raise ValueError("solr_base_url is required when search_backend=solr")
         if self.search_backend == "solr" and self.retrieval_mode in {"dense", "dual"}:
-            raise ValueError("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
+            raise ValueError("search_backend=solr supports only retrieval_mode=sparse in v1")
         if self.retrieval_mode == "hybrid" and self.search_backend not in {
             "local_split",
             "elasticsearch",
         }:
             raise ValueError(
-                "retrieval_mode=hybrid is supported only with SEARCH_BACKEND=local_split|elasticsearch"
+                "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
             )
         if (
             self.retrieval_mode == "hybrid"
@@ -430,8 +560,8 @@ class Settings(BaseSettings):
             and self.persistence_backend != "elasticsearch"
         ):
             raise ValueError(
-                "retrieval_mode=hybrid with SEARCH_BACKEND=elasticsearch requires "
-                "PERSISTENCE_BACKEND=elasticsearch"
+                "retrieval_mode=hybrid with search_backend=elasticsearch requires "
+                "persistence_backend=elasticsearch"
             )
         return self
 
@@ -467,4 +597,4 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-settings: Settings = Settings()
+settings: Settings = load_settings_from_yaml()

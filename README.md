@@ -92,7 +92,7 @@ rag-server
 ```
 
 > `rag-server` does not accept CLI flags (`--host`, `--port`, etc.). Host and port are controlled
-> exclusively via `APP_HOST` / `APP_PORT` environment variables (or `.env`).
+> exclusively via `config.yaml` (`app_host`, `app_port`).
 
 > Alternative startup (without `rag-server` wrapper):
 > `uvicorn local_rag_backend.http.main:app --reload`.
@@ -102,113 +102,16 @@ rag-server
 
 ## Configuration
 
-Default `src/local_rag_backend/settings.py` (Pydantic Settings). Overridden with environment variables or a `.env` file (case-insensitive).
+Runtime configuration lives in the repository-root `config.yaml`.
+It is the only runtime source of truth; the process fails fast if the file is missing or invalid.
+See [`config.example.yaml`](./config.example.yaml) for the canonical template.
 
-> **Security note:** when exposing this service behind a reverse proxy, keep `API_KEY` enabled and ensure the proxy sanitizes forwarding headers.
-Runtime auth guards evaluate client origin using `X-Forwarded-For` and RFC 7239 `Forwarded`; untrusted/unsanitized header chains can weaken source attribution. When `API_KEY` is unset and `PUBLIC_BIND_REQUIRES_API_KEY=true`, ambiguous forwarding chains (e.g. empty/unknown-only proxy headers) are rejected fail-closed.
-
-> `DEBUG` also tolerates common external build-style values such as `release`/`prod` and `debug`/`dev`, to avoid import-time failures when those variables leak into the shell environment.
-
-
-Key variables (non-exhaustive):
-
-| Variable                         | Default                   | Scope        | Description                                            |
-| -------------------------------- | ------------------------- | ------------ | ------------------------------------------------------ |
-| `APP_HOST`                       | `127.0.0.1`               | server       | Service host                                           |
-| `APP_PORT`                       | `8000`                    | server       | Service port                                           |
-| `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
-| `LOG_LEVEL`                      | `INFO`                    | server       | Logging level                                          |
-| `API_KEY`                        | —                         | security     | If set, require `X-API-Key: <API_KEY>` for `/api/*` and `/metrics` |
-| `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse unsafe public startup and reject non-local `/api/*` + `/metrics` requests when `API_KEY` is unset |
-| `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
-| `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `dual` \| `hybrid`              |
-| `PERSISTENCE_BACKEND`            | `local_split`             | storage      | `local_split` \| `elasticsearch`                       |
-| `SEARCH_BACKEND`                 | `local_split`             | retrieval    | `local_split` \| `elasticsearch` \| `opensearch` \| `solr` — controls query execution backend independently of persistence |
-| `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
-| `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
-| `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | Bootstrap CSV path (must exist; no fallback)          |
-| `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
-| `INGEST_CHUNK_STRATEGY`          | `chars_v1`                | ingestion    | Chunking strategy identifier (deterministic)           |
-| `INGEST_CHUNKER_VERSION`         | `chars_v1`                | ingestion    | Version token included in chunk dedup hashes           |
-| `INGEST_CHUNK_CHARS`             | `1200`                    | ingestion    | Chunk size in characters (`200..8000`)                 |
-| `INGEST_CHUNK_OVERLAP`           | `200`                     | ingestion    | Chunk overlap in characters (`0..4000`, `< CHUNK_CHARS`) |
-| `INGEST_BATCH_SIZE`              | `64`                      | ingestion    | File-plans per ingestion batch (`1..512`)              |
-| `INGEST_CLEAN_LOWERCASE`         | `true`                    | ingestion    | Lowercase during ingestion preprocessing               |
-| `INGEST_CLEAN_REMOVE_HTML`       | `true`                    | ingestion    | Remove HTML tags during ingestion preprocessing        |
-| `INGEST_CLEAN_COLLAPSE_WHITESPACE` | `true`                 | ingestion    | Collapse consecutive whitespace                         |
-| `INGEST_CLEAN_STRIP`             | `true`                    | ingestion    | Strip leading/trailing whitespace                       |
-| `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
-| `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
-| `RAG_EMBEDDING_CACHE_DB`         | `DATA_DIR/embedding_cache.sqlite3` | dense/hybrid | Optional persistent embedding-cache SQLite path        |
-| `RAG_DISABLE_EMBEDDING_CACHE`    | `false`                   | dense/hybrid | Disable the content-addressed embedding cache wrapper  |
-| `VECTOR_BACKEND`                 | `auto`                    | local_split  | Vector backend selector: `auto` \| `faiss` \| `numpy` |
-| `STORAGE_PROFILE`                | _(auto)_                  | consistency  | Optional explicit storage profile (`sql_only_local`, `sql_faiss_local`, `sql_numpy_local`, `es_unified_dense`, `es_unified_hybrid`) |
-| `WRITE_LOCK_TIMEOUT_S`           | `30.0`                    | consistency  | Timeout (seconds) for multi-store write lock           |
-| `WRITE_LOCK_POLL_S`              | `0.05`                    | consistency  | Poll interval (seconds) while waiting for lock         |
-| `MUTATION_BATCH_MAX_SIZE`        | `32`                      | consistency  | Max queued mutation requests coalesced per batch cycle (`1..512`) |
-| `MUTATION_BATCH_MAX_WAIT_MS`     | `50`                      | consistency  | Coalescing wait time before draining a mutation batch (`0..5000`) |
-| `MUTATION_RECOVERY_ENABLED`      | `true`                    | consistency  | Enable startup/background replay of incomplete mutations |
-| `MUTATION_RECOVERY_INTERVAL_S`   | `30.0`                    | consistency  | Background recovery interval (seconds)                 |
-| `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
-| `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
-| (derived) `index_manifest.json`  | `data/index_manifest.json`| dense/hybrid | Index manifest (model/dim/chunker) for drift detection |
-| `ES_BASE_URL`                    | —                         | elasticsearch| Elasticsearch base URL                                 |
-| `ES_API_KEY`                     | —                         | elasticsearch| Elasticsearch API key                                  |
-| `ES_USERNAME`                    | —                         | elasticsearch| Elasticsearch username                                 |
-| `ES_PASSWORD`                    | —                         | elasticsearch| Elasticsearch password                                 |
-| `ES_VERIFY_TLS`                  | `true`                    | elasticsearch| Verify TLS certificates                                |
-| `ES_REQUEST_TIMEOUT_S`           | `30.0`                    | elasticsearch| HTTP timeout for Elasticsearch                          |
-| `ES_DOCS_INDEX`                  | `rag-docs`                | elasticsearch| Documents index                                         |
-| `ES_HISTORY_INDEX`               | `rag-history`             | elasticsearch| History index                                           |
-| `ES_SYSTEM_INDEX`                | `rag-system`              | elasticsearch| System state / cache invalidation index                |
-| `ES_TOMBSTONES_INDEX`            | `rag-tombstones`          | elasticsearch| Tombstones index                                        |
-| `ES_CONTENT_FIELD`               | `content`                 | elasticsearch| Text field used for lexical retrieval                   |
-| `ES_EMBEDDING_FIELD`             | `embedding`               | elasticsearch| Dense vector field                                      |
-| `ES_HYBRID_LEXICAL_K`            | `50`                      | elasticsearch| Lexical candidate pool for hybrid                       |
-| `ES_HYBRID_VECTOR_K`             | `50`                      | elasticsearch| Vector candidate pool for hybrid                        |
-| `ENABLE_RERANKER`                | `false`                   | retrieval    | Wrap selected retriever with reranking layer           |
-| `RERANKER_CANDIDATE_K`           | `20`                      | retrieval    | Candidate set size fetched before reranking (`3..200`) |
-| `RERANKER_STRATEGY`              | `overlap_v1`              | retrieval    | Reranker strategy identifier                            |
-| `ENABLE_MONITORING`              | `false`                   | monitoring   | Enable metrics middleware and `/metrics` endpoint      |
-| `OPENAI_TOP_P`                   | `1.0`                     | OpenAI       | top-p parameter                                        |
-| `OPENROUTER_ENABLED`             | `false`                  | OpenRouter   | Enable OpenRouter proxy                                |
-| `OPENROUTER_API_KEY`             | —                        | OpenRouter   | API key                                                |
-| `OPENROUTER_BASE_URL`            | `https://openrouter.ai/api/v1` | OpenRouter | Base URL                                          |
-| `OPENROUTER_MODEL`               | `openai/gpt-4o-mini`     | OpenRouter   | Default model                                         |
-| `OPENROUTER_SITE_URL`            | —                        | OpenRouter   | Optional Referer header                                |
-| `OPENROUTER_APP_TITLE`           | —                        | OpenRouter   | Optional X-Title header                                |
-| `HYBRID_RETRIEVAL_ALPHA`         | `0.5`                     | hybrid       | Weight of the **sparse** component (0=dense, 1=sparse) |
-| `DUAL_CANDIDATE_K`               | `50`                      | dual         | Sparse candidate count fetched before dense rerank in `dual` mode (`1..1000`) |
-| `OS_BASE_URL`                    | —                         | opensearch   | OpenSearch base URL (required when `SEARCH_BACKEND=opensearch`) |
-| `OS_API_KEY`                     | —                         | opensearch   | OpenSearch API key |
-| `OS_USERNAME`                    | —                         | opensearch   | OpenSearch username |
-| `OS_PASSWORD`                    | —                         | opensearch   | OpenSearch password |
-| `OS_VERIFY_TLS`                  | `true`                    | opensearch   | Verify TLS certificates |
-| `OS_REQUEST_TIMEOUT_S`           | `30.0`                    | opensearch   | HTTP timeout (seconds) |
-| `OS_DOCS_INDEX`                  | `rag-docs`                | opensearch   | Documents index |
-| `OS_CONTENT_FIELD`               | `content`                 | opensearch   | Lexical retrieval field |
-| `OS_EMBEDDING_FIELD`             | `embedding`               | opensearch   | Dense vector field |
-| `OS_DENSE_CANDIDATE_K`           | `50`                      | opensearch   | Vector candidate pool for dense retrieval (`1..1000`) |
-| `SOLR_BASE_URL`                  | —                         | solr         | Solr base URL (required when `SEARCH_BACKEND=solr`) |
-| `SOLR_CORE`                      | `rag-docs`                | solr         | Solr core/collection for documents |
-| `SOLR_CONTENT_FIELD`             | `content`                 | solr         | Content field name |
-| `SOLR_REQUEST_TIMEOUT_S`         | `30.0`                    | solr         | HTTP timeout (seconds). Only `sparse` retrieval is supported in v1 |
-| `OPENAI_API_KEY`                 | —                         | OpenAI       | API key                                                |
-| `OPENAI_MODEL`                   | `gpt-4o-mini`             | OpenAI       | Chat model                                             |
-| `OPENAI_REQUEST_TIMEOUT`         | `60`                      | OpenAI       | Timeout (s) for OpenAI-compatible HTTP requests        |
-| `OPENAI_TEMPERATURE`             | `0.2`                     | OpenAI       | Temperature                                            |
-| `OPENAI_MAX_TOKENS`              | `256`                     | OpenAI       | Max tokens                                             |
-| `OPENAI_PROMPT_TEMPLATE`         | _(builtin template)_      | prompting    | Prompt template for OpenAI/OpenRouter generators       |
-| `OLLAMA_ENABLED`                 | `false`                   | Ollama       | Enable Ollama                                          |
-| `OLLAMA_MODEL`                   | `lfm2.5-thinking`               | Ollama       | Model served by Ollama                                 |
-| `OLLAMA_BASE_URL`                | `http://localhost:11434`  | Ollama       | Server URL                                             |
-| `OLLAMA_REQUEST_TIMEOUT`         | `180`                     | Ollama       | Timeout (s)                                            |
-| `OLLAMA_PROMPT_TEMPLATE`         | _(builtin template)_      | prompting    | Prompt template for Ollama generator                   |
+All runtime keys are shown in `snake_case` and map 1:1 to the fields in `config.yaml`.
 
 
 ### Backend matrix
 
-| `PERSISTENCE_BACKEND` | `SEARCH_BACKEND` | Retrieval modes | Canonical write model | Notes |
+| `persistence_backend` | `search_backend` | `retrieval_mode` | Canonical write model | Notes |
 | --- | --- | --- | --- | --- |
 | `local_split` | `local_split` (default) | `sparse`, `dense`, `dual`, `hybrid` | `DURABLE_SAGA` | Default standalone topology. Sparse/dual are SQLite-backed; dense/hybrid add local vector state. |
 | `local_split` | `elasticsearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote Elasticsearch query execution over local SQL persistence. `hybrid` is rejected. |
@@ -217,13 +120,13 @@ Key variables (non-exhaustive):
 | `elasticsearch` | `elasticsearch` | `sparse`, `dense`, `dual`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch. |
 | `elasticsearch` | `local_split` | `dense`, `dual`, `hybrid` | `ATOMIC` | ES-backed persistence with local_split query orchestration. Sparse is rejected. |
 | `elasticsearch` | `opensearch` | `dense`, `dual` | `ATOMIC` | ES-backed persistence with OpenSearch query execution. Sparse/hybrid are rejected. |
-| `elasticsearch` | `solr` | none | `ATOMIC` | Rejected at startup. Solr is sparse-only, but sparse is disallowed with ES persistence unless `SEARCH_BACKEND=elasticsearch`. |
+| `elasticsearch` | `solr` | none | `ATOMIC` | Rejected at startup. Solr is sparse-only, but sparse is disallowed with ES persistence unless `search_backend=elasticsearch`. |
 
 The selector in `Settings` plus `composition/adapters.py` enforce this matrix at startup.
 
 ### Index manifest (`local_split` dense/hybrid only)
 
-When `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
+When `persistence_backend=local_split` and `retrieval_mode=dense|hybrid`, the system writes an `index_manifest.json` next to `index_path`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
 If you change any of these settings, `/readyz` and `rag-status` will report drift and instruct you to rebuild:
@@ -251,7 +154,7 @@ The backend matrix above is authoritative. The common runtime routes are:
   `LocalSplitSearchRetriever`-style orchestration over ES-backed persistence for `dense`/`dual`/`hybrid`.
 * `elasticsearch` + `opensearch`:
   `ElasticLikeSearchRetriever` for `dense`/`dual`.
-* If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
+* If `enable_reranker: true`, the selected retriever is wrapped as:
   `RerankingRetriever(base=<selected>)`
 
 This boundary is enforced in `composition/adapters.py` and consumed by `AppContainer`.
@@ -272,8 +175,8 @@ The ingestion process is orchestrated by `IngestionPipeline`:
 * **Sparse**: stores directly in SQLite (no embeddings required).
 * **Dense / Hybrid on `local_split`**:
   1. Save chunks in SQLite
-  2. Generate embeddings with OpenAI (if `OPENAI_API_KEY`) or SentenceTransformers (`ST_EMBEDDING_MODEL`)
-  3. Upsert into the vector index (`INDEX_PATH`, `ID_MAP_PATH`)
+  2. Generate embeddings with OpenAI (if `openai_api_key`) or SentenceTransformers (`st_embedding_model`)
+  3. Upsert into the vector index (`index_path`, `id_map_path`)
 * **Dense / Hybrid on `elasticsearch`**:
   1. Generate embeddings for changed chunks
   2. Upsert documents and embeddings atomically by `external_id`
@@ -352,7 +255,7 @@ bash ../synergy/scripts/repogpt_eval_smoke.sh
 bash ../synergy/scripts/repogpt_ingest_demo.sh --profile local_split
 ```
 
-> Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
+> Retrieval mode is selected via `retrieval_mode` in `config.yaml` (there is no `--mode` flag).
 
 RepoGPT integration pack:
 
@@ -383,8 +286,7 @@ Optional: Prometheus metrics (`/metrics`) and structured-ish domain metrics:
 
 ```bash
 uv sync --frozen --extra monitoring
-# then:
-export ENABLE_MONITORING=true
+# then set `enable_monitoring: true` in config.yaml
 rag-server
 ```
 
@@ -400,8 +302,9 @@ These extras are included in `all` but are **not required** for sparse or dense 
 Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 
 ```bash
-export ENABLE_RERANKER=true
-export RERANKER_CANDIDATE_K=20
+# set these in config.yaml:
+# enable_reranker: true
+# reranker_candidate_k: 20
 ```
 
 
@@ -422,9 +325,9 @@ curl http://localhost:8000/healthz/ollama
 
 Notes:
 - Backend listens on `8000`, Ollama on `11434`.
-- Configure providers via `.env` or environment variables (see `.env.example`).
-- In `docker-compose.yml`, `OLLAMA_ENABLED=true` and `OLLAMA_BASE_URL=http://ollama:11434` are set.
-- `docker-compose.yml` defaults to `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=sparse` for a lightweight image.
+- Configure providers via `config.yaml`.
+- In `docker-compose.yml`, `ollama_enabled: true` and `ollama_base_url: http://ollama:11434` are set.
+- `docker-compose.yml` defaults to `persistence_backend: local_split` and `retrieval_mode: sparse` for a lightweight image.
 - For `local_split` dense/hybrid in compose, build backend with extras, for example:
 
 ```bash
@@ -504,7 +407,7 @@ Notes:
 * `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
 * In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
-* For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
+* For public/proxy deployments, set `api_key` in `config.yaml` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
 Example:
 
@@ -616,15 +519,15 @@ sequenceDiagram
 
 * Synchronous LLM clients (httpx/OpenAI SDK); migration to async is straightforward but not included.
 * Minimal UI without front-end tests.
-* Minimal API-key auth is available (`API_KEY`), but there is no user/role authZ or rate limiting.
+* Minimal API-key auth is available via `api_key` in `config.yaml`, but there is no user/role authZ or rate limiting.
 * When using the FAISS backend, the index type is `IndexFlatL2` (simple). For large volumes, consider IVF/HNSW or other backends.
 
 ## Runtime considerations
 
 * **Singleton per process**: `RagService` is initialized as a singleton in `composition/factory`. With `uvicorn --workers N`, each process loads its own instance (and its retrieval/index adapters). Align deployment and warm-up as needed.
 * **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit `DATA_DIR`; when `DATA_DIR` is default and `SQLITE_URL` is absolute, it uses the DB parent directory to keep workers/CLI aligned.
-* **Metrics**: if `ENABLE_MONITORING=true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
-* **Dense/Hybrid**: must use the same embedding model for indexing and querying (`ST_EMBEDDING_MODEL`).
+* **Metrics**: if `enable_monitoring: true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
+* **Dense/Hybrid**: must use the same embedding model for indexing and querying (`st_embedding_model`).
 
 ## Tests
 

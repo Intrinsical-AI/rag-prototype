@@ -358,7 +358,9 @@ def test_build_retriever_hybrid_uses_elasticsearch_lexical_path_for_local_split_
 
     def _hybrid_retriever_factory(**kwargs):
         seen["hybrid_kwargs"] = kwargs
-        sparse_result = kwargs["sparse"].retrieve(RetrievalRequest(query="hello", top_k=2, mode="sparse"))
+        sparse_result = kwargs["sparse"].retrieve(
+            RetrievalRequest(query="hello", top_k=2, mode="sparse")
+        )
         seen["sparse_result"] = sparse_result
         return "hybrid-retriever"
 
@@ -387,7 +389,10 @@ def test_build_retriever_hybrid_uses_elasticsearch_lexical_path_for_local_split_
     }
     assert seen["lexical_k"] == 2
     assert seen["sparse_result"].backend_used == "elastic_lexical"
-    assert tuple(doc.id for doc in seen["sparse_result"].documents) == (DocId("doc-1"), DocId("doc-2"))
+    assert tuple(doc.id for doc in seen["sparse_result"].documents) == (
+        DocId("doc-1"),
+        DocId("doc-2"),
+    )
     assert seen["dense_kwargs"]["doc_repo"] is not None
     assert seen["hybrid_kwargs"]["alpha"] == 0.4
 

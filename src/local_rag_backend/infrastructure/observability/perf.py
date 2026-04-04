@@ -11,6 +11,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from local_rag_backend.settings import settings
+
 _LOCK = threading.Lock()
 _STATE: dict[str, Any] = {
     "embedding_cache": {
@@ -80,10 +82,14 @@ def snapshot_perf_metrics() -> dict[str, Any]:
     embed_seconds = float(cache["embed_seconds"])
     cache["hit_rate"] = round((hits / lookups), 6) if lookups else 0.0
     cache["avg_embed_seconds"] = round((embed_seconds / embedded), 6) if embedded else 0.0
-    cache["estimated_saved_embed_seconds"] = round(
-        (embed_seconds / embedded) * hits,
-        6,
-    ) if embedded and hits else 0.0
+    cache["estimated_saved_embed_seconds"] = (
+        round(
+            (embed_seconds / embedded) * hits,
+            6,
+        )
+        if embedded and hits
+        else 0.0
+    )
     return payload
 
 
@@ -139,7 +145,7 @@ def _merge_process_metrics(path: Path, payload: dict[str, Any]) -> None:
 
 
 def dump_perf_metrics_if_configured() -> None:
-    output = str(os.getenv("RAG_PERF_METRICS_OUT", "")).strip()
+    output = str(getattr(settings, "perf_metrics_out_path", "") or "").strip()
     if not output:
         return
     payload = {

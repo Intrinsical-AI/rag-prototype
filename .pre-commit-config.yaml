@@ -29,7 +29,8 @@ repos:
     hooks:
       - id: mypy
         name: "Type check Python code (MyPy)"
-        additional_dependencies: [types-requests, types-setuptools, pydantic, pydantic-settings]
+        additional_dependencies:
+          [types-requests, types-setuptools, types-PyYAML, pydantic, pydantic-settings]
         exclude: "^tests/"
 
   # Essential File Quality Checks

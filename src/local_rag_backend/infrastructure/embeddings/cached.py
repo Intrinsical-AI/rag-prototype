@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 import time
 from collections.abc import Mapping, Sequence
@@ -30,10 +29,11 @@ def resolve_embedding_model_key(embedder: EmbedderPort) -> str:
     return f"{backend}:{model}:{int(embedder.dim)}"
 
 
-def resolve_embedding_cache_db_path(*, data_dir: Path) -> Path:
-    override = str(os.getenv("RAG_EMBEDDING_CACHE_DB", "")).strip()
-    if override:
-        return Path(override)
+def resolve_embedding_cache_db_path(
+    *, data_dir: Path, configured_path: str | Path | None = None
+) -> Path:
+    if configured_path is not None and str(configured_path).strip():
+        return Path(configured_path)
     return data_dir / "embedding_cache.sqlite3"
 
 
@@ -74,7 +74,9 @@ class _SqliteEmbeddingCache:
                 """,
                 [model_key, json.dumps(hashes)],
             ).fetchall()
-        return {str(content_sha): list(json.loads(vector_json)) for content_sha, vector_json in rows}
+        return {
+            str(content_sha): list(json.loads(vector_json)) for content_sha, vector_json in rows
+        }
 
     def put_many(self, *, model_key: str, vectors_by_hash: Mapping[str, Sequence[float]]) -> None:
         rows = [
@@ -99,15 +101,16 @@ class ContentAddressedCachingEmbedder(EmbedderPort):
 
     dim: int
 
-    def __init__(self, *, base: EmbedderPort, cache_db_path: Path) -> None:
+    def __init__(
+        self,
+        *,
+        base: EmbedderPort,
+        cache_db_path: Path,
+        disabled: bool = False,
+    ) -> None:
         self._base = base
         self._cache = _SqliteEmbeddingCache(cache_db_path)
-        self._disabled = str(os.getenv("RAG_DISABLE_EMBEDDING_CACHE", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        self._disabled = bool(disabled)
         self.dim = base.dim
         self.model_key = resolve_embedding_model_key(base)
 
@@ -158,7 +161,10 @@ class ContentAddressedCachingEmbedder(EmbedderPort):
                 )
                 cached.update(miss_vectors)
 
-            return cast("Sequence[Embedding]", [list(cached[content_sha]) for content_sha in hashes_in_order])
+            return cast(
+                "Sequence[Embedding]",
+                [list(cached[content_sha]) for content_sha in hashes_in_order],
+            )
         except Exception:
             record_embedding_cache_error()
             return self._base.embed(texts_list)
