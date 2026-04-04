@@ -10,9 +10,12 @@ from local_rag_backend.composition.adapters import (
     build_retriever_with_default_embedder_from_settings,
     resolve_preferred_llm_provider,
 )
+from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
+from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
 from local_rag_backend.infrastructure.embeddings.cached import ContentAddressedCachingEmbedder
+from local_rag_backend.infrastructure.search_backends.elastic_like import ElasticLikeSearchRetriever
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 
 
@@ -151,6 +154,84 @@ def test_build_retriever_passes_vector_backend_to_repo_factory():
     }
 
 
+def test_build_retriever_allows_sparse_with_elasticsearch_search_backend():
+    cfg = SimpleNamespace(
+        persistence_backend="local_split",
+        search_backend="elasticsearch",
+        retrieval_mode="sparse",
+        es_base_url="http://localhost:9200",
+        es_docs_index="rag-docs",
+        es_content_field="content",
+        es_embedding_field="embedding",
+        es_request_timeout_s=5.0,
+        es_verify_tls=False,
+        es_api_key=None,
+        es_username=None,
+        es_password=None,
+        es_hybrid_vector_k=50,
+        openai_api_key="k",
+        st_embedding_model="all-MiniLM-L6-v2",
+        hybrid_retrieval_alpha=0.5,
+        enable_reranker=False,
+        reranker_candidate_k=20,
+        reranker_strategy="overlap_v1",
+        index_path="index.faiss",
+        id_map_path="id_map.json",
+        vector_backend="auto",
+    )
+
+    out = build_retriever_with_default_embedder_from_settings(
+        settings_obj=cfg,
+        retrieval_mode="sparse",
+        doc_repo=SimpleNamespace(get_all_documents=lambda: []),
+        openai_embedder_factory=lambda: object(),
+        st_embedder_factory=lambda _model_name: object(),
+    )
+
+    assert isinstance(out, ElasticLikeSearchRetriever)
+
+
+def test_build_retriever_allows_opensearch_dual_mode():
+    cfg = SimpleNamespace(
+        persistence_backend="local_split",
+        search_backend="opensearch",
+        retrieval_mode="dual",
+        os_base_url="http://localhost:9200",
+        os_docs_index="rag-docs",
+        os_content_field="content",
+        os_embedding_field="embedding",
+        os_request_timeout_s=5.0,
+        os_verify_tls=False,
+        os_api_key=None,
+        os_username=None,
+        os_password=None,
+        os_dense_candidate_k=50,
+        openai_api_key="k",
+        st_embedding_model="all-MiniLM-L6-v2",
+        hybrid_retrieval_alpha=0.5,
+        enable_reranker=False,
+        reranker_candidate_k=20,
+        reranker_strategy="overlap_v1",
+        index_path="index.faiss",
+        id_map_path="id_map.json",
+        vector_backend="auto",
+    )
+
+    class DummyEmbedder:
+        dim = 4
+
+    out = build_retriever_with_default_embedder_from_settings(
+        settings_obj=cfg,
+        retrieval_mode="dual",
+        doc_repo=SimpleNamespace(get_all_documents=lambda: []),
+        openai_embedder_factory=lambda: DummyEmbedder(),
+        st_embedder_factory=lambda _model_name: DummyEmbedder(),
+    )
+
+    assert isinstance(out, ElasticLikeSearchRetriever)
+    assert out._backend_name == "opensearch"
+
+
 def test_build_retriever_rejects_sparse_for_elasticsearch_backend():
     cfg = SimpleNamespace(
         persistence_backend="elasticsearch",
@@ -231,6 +312,84 @@ def test_build_retriever_hybrid_uses_elasticsearch_lexical_path():
     assert seen["lexical_k"] == 3
     assert seen["dense_kwargs"]["doc_repo"] is not None
     assert seen["hybrid_kwargs"]["alpha"] == 0.25
+
+
+def test_build_retriever_hybrid_uses_elasticsearch_lexical_path_for_local_split_search_backend():
+    docs = [
+        Document(id=DocId("doc-1"), content="capital france paris", external_id="doc-1"),
+        Document(id=DocId("doc-2"), content="sql escaping helper", external_id="doc-2"),
+    ]
+    cfg = SimpleNamespace(
+        persistence_backend="elasticsearch",
+        search_backend="local_split",
+        es_base_url="http://localhost:9200",
+        openai_api_key="k",
+        st_embedding_model="all-MiniLM-L6-v2",
+        hybrid_retrieval_alpha=0.4,
+        enable_reranker=False,
+        reranker_candidate_k=20,
+        reranker_strategy="overlap_v1",
+        index_path="index.faiss",
+        id_map_path="id_map.json",
+        vector_backend="auto",
+    )
+    seen: dict[str, object] = {}
+
+    class DummyEmbedder:
+        dim = 4
+
+    class DummyVectorRepo:
+        def lexical_search(self, _query, *, k):
+            seen["lexical_k"] = k
+            return [(DocId("doc-1"), 0.91), (DocId("doc-2"), 0.12)]
+
+    def _dense_retriever_factory(**kwargs):
+        seen["dense_kwargs"] = kwargs
+        return SimpleNamespace(
+            retrieve=lambda _req: RetrievalResult(items=(), mode_used="dense", backend_used="dense")
+        )
+
+    def _sparse_retriever_factory(**_kwargs):
+        raise AssertionError("sparse_retriever_factory must not be used for ES-backed hybrid")
+
+    def _vector_repo_factory(**kwargs):
+        seen["vector_kwargs"] = kwargs
+        return DummyVectorRepo()
+
+    def _hybrid_retriever_factory(**kwargs):
+        seen["hybrid_kwargs"] = kwargs
+        sparse_result = kwargs["sparse"].retrieve(RetrievalRequest(query="hello", top_k=2, mode="sparse"))
+        seen["sparse_result"] = sparse_result
+        return "hybrid-retriever"
+
+    out = build_retriever_with_default_embedder_from_settings(
+        settings_obj=cfg,
+        retrieval_mode="hybrid",
+        doc_repo=SimpleNamespace(
+            get_all_documents=lambda: docs,
+            get=lambda ids: [doc for doc in docs if doc.id in set(ids)],
+        ),
+        openai_embedder_factory=lambda: DummyEmbedder(),
+        st_embedder_factory=lambda _model_name: DummyEmbedder(),
+        sparse_retriever_factory=_sparse_retriever_factory,
+        vector_repo_factory=_vector_repo_factory,
+        dense_retriever_factory=_dense_retriever_factory,
+        hybrid_retriever_factory=_hybrid_retriever_factory,
+    )
+
+    assert out == "hybrid-retriever"
+    assert seen["vector_kwargs"] == {
+        "index_path": "index.faiss",
+        "id_map_path": "id_map.json",
+        "dim": 4,
+        "backend": "auto",
+        "settings_obj": cfg,
+    }
+    assert seen["lexical_k"] == 2
+    assert seen["sparse_result"].backend_used == "elastic_lexical"
+    assert tuple(doc.id for doc in seen["sparse_result"].documents) == (DocId("doc-1"), DocId("doc-2"))
+    assert seen["dense_kwargs"]["doc_repo"] is not None
+    assert seen["hybrid_kwargs"]["alpha"] == 0.4
 
 
 @pytest.mark.parametrize(

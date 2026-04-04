@@ -210,12 +210,16 @@ Key variables (non-exhaustive):
 
 | `PERSISTENCE_BACKEND` | `SEARCH_BACKEND` | Retrieval modes | Canonical write model | Notes |
 | --- | --- | --- | --- | --- |
-| `local_split` | `local_split` (default) | `sparse`, `dense`, `dual`, `hybrid` | `DURABLE_SAGA` | `sparse`/`dual` are SQLite-only; dense/hybrid add local vector state |
-| `elasticsearch` | `elasticsearch` | `sparse`, `dense`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch |
-| `local_split` | `opensearch` | `sparse`, `dense` | `DURABLE_SAGA` | SQL persistence + OpenSearch for query execution; `hybrid` not supported |
-| `local_split` | `solr` | `sparse` | `DURABLE_SAGA` | SQL persistence + Solr for lexical retrieval only; dense/dual not supported in v1 |
+| `local_split` | `local_split` (default) | `sparse`, `dense`, `dual`, `hybrid` | `DURABLE_SAGA` | Default standalone topology. Sparse/dual are SQLite-backed; dense/hybrid add local vector state. |
+| `local_split` | `elasticsearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote Elasticsearch query execution over local SQL persistence. `hybrid` is rejected. |
+| `local_split` | `opensearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote OpenSearch query execution over local SQL persistence. `hybrid` is rejected. |
+| `local_split` | `solr` | `sparse` | `DURABLE_SAGA` | Lexical-only backend. Dense/dual/hybrid are rejected. |
+| `elasticsearch` | `elasticsearch` | `sparse`, `dense`, `dual`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch. |
+| `elasticsearch` | `local_split` | `dense`, `dual`, `hybrid` | `ATOMIC` | ES-backed persistence with local_split query orchestration. Sparse is rejected. |
+| `elasticsearch` | `opensearch` | `dense`, `dual` | `ATOMIC` | ES-backed persistence with OpenSearch query execution. Sparse/hybrid are rejected. |
+| `elasticsearch` | `solr` | none | `ATOMIC` | Rejected at startup. Solr is sparse-only, but sparse is disallowed with ES persistence unless `SEARCH_BACKEND=elasticsearch`. |
 
-`PERSISTENCE_BACKEND=elasticsearch` with `RETRIEVAL_MODE=sparse` is only valid when `SEARCH_BACKEND=elasticsearch`; otherwise rejected at startup.
+The selector in `Settings` plus `composition/adapters.py` enforce this matrix at startup.
 
 ### Index manifest (`local_split` dense/hybrid only)
 
@@ -231,20 +235,24 @@ If you change any of these settings, `/readyz` and `rag-status` will report drif
 * vector `id_map.json` stores `list[str]`
 * no runtime migration/fallback for legacy schemas or legacy id maps
 
-### Retrieval adapter resolution (strict)
+### Retrieval Adapter Resolution
 
-* `RETRIEVAL_MODE=sparse`:
-  `RetrieverPort := SparseBM25Retriever` (BM25 corpus + SQL doc repo)
-* `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=dense`:
-  `RetrieverPort := DenseVectorRetriever` (embedder + local vector index + SQL doc repo)
-* `PERSISTENCE_BACKEND=local_split` and `RETRIEVAL_MODE=hybrid`:
-  `RetrieverPort := HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`
-* `PERSISTENCE_BACKEND=elasticsearch` and `RETRIEVAL_MODE=dense`:
-  `RetrieverPort := DenseVectorRetriever` (embedder + Elasticsearch vector repo + ES doc repo)
-* `PERSISTENCE_BACKEND=elasticsearch` and `RETRIEVAL_MODE=hybrid`:
-  `RetrieverPort := HybridRetriever(DenseVectorRetriever, Elastic lexical retriever, alpha)`
+The backend matrix above is authoritative. The common runtime routes are:
+
+* `local_split` + `local_split`:
+  `SparseBM25Retriever`, `DenseVectorRetriever`, or `HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`.
+* `local_split` + `elasticsearch` or `opensearch`:
+  `ElasticLikeSearchRetriever` for `sparse`, `dense`, or `dual`.
+* `local_split` + `solr`:
+  `SolrSearchRetriever` for `sparse` only.
+* `elasticsearch` + `elasticsearch`:
+  `ElasticLikeSearchRetriever` for `sparse`/`dense`, and `HybridRetriever(DenseVectorRetriever, Elastic lexical retriever, alpha)` for `hybrid`.
+* `elasticsearch` + `local_split`:
+  `LocalSplitSearchRetriever`-style orchestration over ES-backed persistence for `dense`/`dual`/`hybrid`.
+* `elasticsearch` + `opensearch`:
+  `ElasticLikeSearchRetriever` for `dense`/`dual`.
 * If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
-  `RetrieverPort := RerankingRetriever(base=<selected>)`
+  `RerankingRetriever(base=<selected>)`
 
 This boundary is enforced in `composition/adapters.py` and consumed by `AppContainer`.
 
