@@ -12,6 +12,7 @@ from local_rag_backend.composition.adapters import (
 )
 from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
+from local_rag_backend.infrastructure.embeddings.cached import ContentAddressedCachingEmbedder
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 
 
@@ -32,6 +33,31 @@ def test_build_dense_embedder_uses_default_missing_backend_message():
         )
 
     assert "dense-st" in DEFAULT_DENSE_BACKEND_MESSAGE
+
+
+def test_build_dense_embedder_wraps_provider_with_persistent_cache(tmp_path):
+    cfg = SimpleNamespace(
+        openai_api_key="k",
+        st_embedding_model="all-MiniLM-L6-v2",
+        data_dir=tmp_path,
+    )
+
+    class DummyEmbedder:
+        dim = 7
+        model = "text-embedding-3-small"
+        client = object()
+
+        def embed(self, texts):
+            return [[0.0] * self.dim for _ in texts]
+
+    out = build_dense_embedder_from_settings(
+        settings_obj=cfg,
+        openai_embedder_factory=lambda: DummyEmbedder(),
+        st_embedder_factory=lambda _model_name: DummyEmbedder(),
+    )
+
+    assert isinstance(out, ContentAddressedCachingEmbedder)
+    assert out.model_key == "openai:text-embedding-3-small:7"
 
 
 def test_build_retriever_with_default_embedder_uses_openai_factory_when_key_present():

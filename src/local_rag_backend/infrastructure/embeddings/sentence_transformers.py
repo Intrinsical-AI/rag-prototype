@@ -22,6 +22,7 @@ class SentenceTransformerEmbedder(EmbedderPort):
     """Embedder using the sentence-transformers library."""
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        self.model_name = model_name
         self._synthetic = str(os.getenv("RAG_SYNTHETIC_EMBEDDINGS", "")).strip().lower() in {
             "1",
             "true",

@@ -55,6 +55,10 @@ from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.core.services.types import EvalRetrievalConfig
 from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
+from local_rag_backend.infrastructure.embeddings.cached import (
+    ContentAddressedCachingEmbedder,
+    resolve_embedding_cache_db_path,
+)
 from local_rag_backend.infrastructure.ingestion.loaders import (
     ChatGPTLoader,
     GeminiLoader,
@@ -807,11 +811,18 @@ def build_dense_embedder_from_settings(
     resolved_st_factory = st_embedder_factory or _build_default_st_embedder
     backend_message = missing_backend_message or DEFAULT_DENSE_BACKEND_MESSAGE
     if settings_obj.openai_api_key:
-        return resolved_openai_factory()
-    try:
-        return resolved_st_factory(str(settings_obj.st_embedding_model))
-    except RuntimeError as e:
-        raise EmbeddingsBackendUnavailableError(backend_message) from e
+        base = resolved_openai_factory()
+    else:
+        try:
+            base = resolved_st_factory(str(settings_obj.st_embedding_model))
+        except RuntimeError as e:
+            raise EmbeddingsBackendUnavailableError(backend_message) from e
+    return ContentAddressedCachingEmbedder(
+        base=base,
+        cache_db_path=resolve_embedding_cache_db_path(
+            data_dir=Path(getattr(settings_obj, "data_dir", "data"))
+        ),
+    )
 
 
 def build_retriever_with_default_embedder_from_settings(
