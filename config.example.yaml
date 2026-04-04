@@ -1,0 +1,143 @@
+# Canonical example runtime configuration for rag-prototype.
+# Copy this file to `config.yaml` and edit the values for your deployment.
+# Paths below are resolved relative to this file at startup.
+
+# --- Core ---
+persistence_backend: local_split
+app_host: 127.0.0.1
+app_port: 8000
+debug: false
+log_level: INFO
+enable_monitoring: false
+enable_reranker: false
+
+# --- Security / HTTP ---
+api_key: null
+public_bind_requires_api_key: true
+cors_allow_origins: []
+
+# --- Retrieval ---
+search_backend: local_split
+retrieval_mode: sparse
+vector_backend: auto
+hybrid_retrieval_alpha: 0.5
+dual_candidate_k: 50
+st_embedding_model: all-MiniLM-L6-v2
+
+# --- LLM Providers ---
+openai_api_key: null
+openai_model: gpt-4o-mini
+openai_embedding_model: text-embedding-3-small
+openai_request_timeout: 60
+openai_temperature: 0.2
+openai_top_p: 1.0
+openai_max_tokens: 256
+openrouter_enabled: false
+openrouter_api_key: null
+openrouter_base_url: https://openrouter.ai/api/v1
+openrouter_site_url: null
+openrouter_app_title: null
+ollama_enabled: false
+ollama_model: lfm2.5-thinking
+ollama_base_url: http://localhost:11434
+ollama_request_timeout: 180
+
+# --- File Paths ---
+data_dir: data
+index_path: data/index.faiss
+id_map_path: data/id_map.json
+sqlite_url: sqlite:///./data/app.db
+faq_csv: data/faq.csv
+storage_profile: ""
+eval_dataset_path: datasets/rag_eval_v1.jsonl
+embedding_cache_db_path: data/embedding_cache.sqlite3
+disable_embedding_cache: false
+synthetic_embeddings: false
+synthetic_embedding_fail_rate: 0.0
+synthetic_embedding_jitter_min_ms: 0.0
+synthetic_embedding_jitter_max_ms: 0.0
+synthetic_embedding_dim: 384
+perf_metrics_out_path: null
+lock_metrics_path: null
+blocking_workers: 8
+blocking_workers_mutation: 2
+blocking_workers_network: 4
+blocking_workers_eval: 2
+blocking_queue_default: 64
+blocking_queue_mutation: 32
+blocking_queue_network: 64
+blocking_queue_eval: 32
+write_lock_timeout_s: 30.0
+write_lock_poll_s: 0.05
+mutation_batch_max_size: 32
+mutation_batch_max_wait_ms: 50
+mutation_recovery_enabled: true
+mutation_recovery_interval_s: 30.0
+
+# --- Elasticsearch ---
+es_base_url: null
+es_api_key: null
+es_username: null
+es_password: null
+es_verify_tls: true
+es_request_timeout_s: 30.0
+es_docs_index: rag-docs
+es_history_index: rag-history
+es_system_index: rag-system
+es_tombstones_index: rag-tombstones
+es_content_field: content
+es_embedding_field: embedding
+es_hybrid_lexical_k: 50
+es_hybrid_vector_k: 50
+
+# --- OpenSearch ---
+os_base_url: null
+os_api_key: null
+os_username: null
+os_password: null
+os_verify_tls: true
+os_request_timeout_s: 30.0
+os_docs_index: rag-docs
+os_content_field: content
+os_embedding_field: embedding
+os_dense_candidate_k: 50
+
+# --- Solr ---
+solr_base_url: null
+solr_core: rag-docs
+solr_content_field: content
+solr_request_timeout_s: 30.0
+
+# --- Ingestion ---
+ingest_chunk_strategy: chars_v1
+ingest_chunker_version: chars_v1
+ingest_chunk_chars: 1200
+ingest_chunk_overlap: 200
+csv_has_header: true
+ingest_batch_size: 64
+ingest_clean_lowercase: true
+ingest_clean_remove_html: true
+ingest_clean_collapse_whitespace: true
+ingest_clean_strip: true
+
+# --- Retrieval quality ---
+reranker_strategy: overlap_v1
+reranker_candidate_k: 20
+
+# --- Prompt templates ---
+openai_prompt_template: |
+  Answer using ONLY the context provided.
+
+  CONTEXT:
+  {context}
+
+  QUESTION: {question}
+ollama_prompt_template: |
+  Based on the context, answer the question.
+  If the context is not enough, say so.
+
+  CONTEXT:
+  {context}
+
+  QUESTION:
+  {question}

@@ -1110,6 +1110,7 @@ wheels = [
 name = "griffelib"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/06/eccbd311c9e2b3ca45dbc063b93134c57a1ccc7607c5e545264ad092c4a9/griffelib-2.0.0.tar.gz", hash = "sha256:e504d637a089f5cab9b5daf18f7645970509bf4f53eda8d79ed71cce8bd97934", size = 166312, upload-time = "2026-03-23T21:06:55.954Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/51/c936033e16d12b627ea334aaaaf42229c37620d0f15593456ab69ab48161/griffelib-2.0.0-py3-none-any.whl", hash = "sha256:01284878c966508b6d6f1dbff9b6fa607bc062d8261c5c7253cb285b06422a7f", size = 142004, upload-time = "2026-02-09T19:09:40.561Z" },
 ]
@@ -3840,8 +3841,7 @@ dependencies = [
     { name = "numpy", marker = "python_full_version < '3.13'" },
     { name = "openai", marker = "python_full_version < '3.13'" },
     { name = "pydantic", marker = "python_full_version < '3.13'" },
-    { name = "pydantic-settings", marker = "python_full_version < '3.13'" },
-    { name = "python-dotenv", marker = "python_full_version < '3.13'" },
+    { name = "pyyaml", marker = "python_full_version < '3.13'" },
     { name = "rank-bm25", marker = "python_full_version < '3.13'" },
     { name = "rich", marker = "python_full_version < '3.13'" },
     { name = "sqlalchemy", marker = "python_full_version < '3.13'" },
@@ -3946,10 +3946,9 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'performance-cpu'", specifier = ">=3.10,<4.0" },
     { name = "prometheus-client", marker = "extra == 'monitoring'", specifier = ">=0.19,<1.0" },
     { name = "pydantic", specifier = ">=2.0,<3.0" },
-    { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
-    { name = "python-dotenv", specifier = ">=1.0,<2.0" },
     { name = "python-magic", marker = "extra == 'magic'", specifier = ">=0.4,<1.0" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9,<1.0" },
+    { name = "pyyaml", specifier = ">=6.0,<7.0" },
     { name = "rag-prototype", extras = ["server", "dense", "dense-st", "loaders", "magic", "performance", "monitoring"], marker = "extra == 'all'" },
     { name = "rank-bm25", specifier = ">=0.2,<1.0" },
     { name = "rich", specifier = ">=13.0,<14.0" },
