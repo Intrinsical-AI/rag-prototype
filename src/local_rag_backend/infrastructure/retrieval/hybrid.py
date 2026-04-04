@@ -11,6 +11,7 @@ from local_rag_backend.core.domain.retrieval import (
     retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import RetrieverPort
+from local_rag_backend.infrastructure.retrieval.scoring import validate_normalized_scores
 
 
 def combine_hybrid_results(
@@ -20,11 +21,20 @@ def combine_hybrid_results(
     alpha: float,
     top_k: int,
 ) -> RetrievalResult:
-    """Combine dense and sparse results with the same semantics as HybridRetriever."""
+    """Combine dense and sparse results using already-normalized scores."""
     dense_docs = list(dense_result.documents)
     dense_scores = list(dense_result.scores)
     sparse_docs = list(sparse_result.documents)
     sparse_scores = list(sparse_result.scores)
+
+    validate_normalized_scores(
+        dense_scores,
+        source=f"dense result ({dense_result.backend_used})",
+    )
+    validate_normalized_scores(
+        sparse_scores,
+        source=f"sparse result ({sparse_result.backend_used})",
+    )
 
     dense_score_map = {doc.id: score for doc, score in zip(dense_docs, dense_scores, strict=False)}
     sparse_score_map = {
@@ -57,7 +67,10 @@ def combine_hybrid_results(
 
 
 class HybridRetriever(RetrieverPort):
-    """Combines dense and sparse retrieval methods using a weighted average."""
+    """Combines dense and sparse retrieval methods using a weighted average.
+
+    Inputs must already expose higher-is-better normalized scores in [0, 1].
+    """
 
     def __init__(self, dense: RetrieverPort, sparse: RetrieverPort, alpha: float = 0.5):
         if not 0.0 <= alpha <= 1.0:

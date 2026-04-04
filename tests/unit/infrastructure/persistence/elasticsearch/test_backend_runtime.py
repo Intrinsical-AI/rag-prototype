@@ -575,6 +575,32 @@ def test_vector_history_system_and_diagnostics_roundtrip() -> None:
     assert purge_index_artifacts_noop(index_path="x", id_map_path="y") is None
 
 
+def test_vector_backend_falls_back_to_zero_for_flat_scores() -> None:
+    backend = _build_backend()
+    backend.docs.upsert_documents_by_external_id(
+        [
+            ElasticDocsRepository.UpsertDoc(external_id="flat-1", content="alpha alpha"),
+            ElasticDocsRepository.UpsertDoc(external_id="flat-2", content="alpha alpha"),
+        ]
+    )
+    backend.vector.upsert(
+        [DocId("flat-1"), DocId("flat-2")],
+        [
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ],
+    )
+
+    assert [score for _doc_id, score in backend.vector.similar([1.0, 0.0, 0.0], 2)] == [
+        0.0,
+        0.0,
+    ]
+    assert [score for _doc_id, score in backend.vector.lexical_search("alpha", k=2)] == [
+        0.0,
+        0.0,
+    ]
+
+
 def test_atomic_mutation_executor_handles_unified_elastic_mutation_flow() -> None:
     backend = _build_backend()
     repo = backend.docs

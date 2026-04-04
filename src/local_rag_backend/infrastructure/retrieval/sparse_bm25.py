@@ -15,6 +15,7 @@ from local_rag_backend.core.domain.retrieval import (
     retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import DocumentRepoPort, RetrieverPort
+from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -129,11 +130,7 @@ class SparseBM25Retriever(RetrieverPort):
 
         if not scores:
             return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
-        min_score, max_score = min(scores), max(scores)
-        if max_score == min_score:
-            normalized_scores = [1.0] * len(scores)
-        else:
-            normalized_scores = [(s - min_score) / (max_score - min_score) for s in scores]
+        normalized_scores = normalize_min_max_scores(scores, flat_value=0.0, singleton_value=1.0)
 
         docs_by_id = self._ensure_docs_cache()
         ordered_docs = [docs_by_id[doc_id] for doc_id in retrieved_ids if doc_id in docs_by_id]

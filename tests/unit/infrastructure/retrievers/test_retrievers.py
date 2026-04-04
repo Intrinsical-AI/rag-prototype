@@ -103,6 +103,28 @@ def test_sparse_bm25_retriever_basic():
     assert scores[0] == 1.0
 
 
+def test_sparse_bm25_retriever_flat_scores_fall_back_to_zero():
+    class DummyBM25:
+        def get_scores(self, query):
+            return [4.0, 4.0]
+
+    class DummySparse(SparseBM25Retriever):
+        def __init__(self, documents, doc_ids, doc_repo):
+            self.doc_ids = doc_ids
+            self.doc_repo = doc_repo
+            self.bm25 = DummyBM25()
+            self.corpus_is_empty = False
+
+        @staticmethod
+        def _tok(text):
+            return list(text.lower())
+
+    repo = DummyDocRepo()
+    retriever = DummySparse(documents=["Doc A", "Doc B"], doc_ids=[1, 2], doc_repo=repo)
+    result = retriever.retrieve(RetrievalRequest(query="flat", top_k=2, mode="sparse"))
+    assert result.scores == (0.0, 0.0)
+
+
 def test_hybrid_retriever_merges_and_ranks():
     # Dense and sparse retrievers produce 1 doc each, they are merged, both must appear in top-2
     class DummyRetriever:

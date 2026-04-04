@@ -31,6 +31,26 @@ def test_similar_normalizes_and_maps_ids(monkeypatch):
     assert sims[0] > sims[1] > sims[2]
 
 
+def test_similar_falls_back_to_zero_for_flat_scores(monkeypatch):
+    class DummyFlatIndex:
+        def __init__(self):
+            self.id_map = [101, 102]
+
+        def search(self, q, k):
+            return np.array([0, 1]), np.array([0.0, 0.0])
+
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
+        lambda *a, **k: None,
+        raising=True,
+    )
+    storage = VectorStorage(index_path=":mem:", id_map_path=":mem:", dim=3)
+    storage.vector_index = DummyFlatIndex()
+
+    pairs = storage.similar([0.0, 0.0, 0.0], k=2)
+    assert pairs == [(101, 0.0), (102, 0.0)]
+
+
 def test_similar_is_fail_safe_on_id_map_mismatch(monkeypatch):
     class DummyMismatchIndex:
         id_map: list[int] = []  # mismatch: search returns indices not present in id_map

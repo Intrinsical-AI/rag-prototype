@@ -18,6 +18,7 @@ from local_rag_backend.core.domain.retrieval import (
 )
 from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.ports import EmbedderPort
+from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
 
 
 def _resolve_auth(
@@ -28,16 +29,6 @@ def _resolve_auth(
     if username and password:
         return (str(username), str(password))
     return None
-
-
-def _normalize_scores(scores: Sequence[float]) -> list[float]:
-    if not scores:
-        return []
-    min_score = min(scores)
-    max_score = max(scores)
-    if max_score == min_score:
-        return [1.0] * len(scores)
-    return [(float(score) - min_score) / (max_score - min_score) for score in scores]
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -124,7 +115,11 @@ class ElasticLikeSearchRetriever:
         response.raise_for_status()
         hits = ((response.json().get("hits") or {}).get("hits")) or []
         raw_scores = [float(hit.get("_score") or 0.0) for hit in hits]
-        normalized_scores = _normalize_scores(raw_scores)
+        normalized_scores = normalize_min_max_scores(
+            raw_scores,
+            flat_value=0.0,
+            singleton_value=1.0,
+        )
         return [
             RetrievedDoc(
                 document=self._to_document(hit),

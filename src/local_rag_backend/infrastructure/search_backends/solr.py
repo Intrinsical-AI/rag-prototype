@@ -17,16 +17,7 @@ from local_rag_backend.core.domain.retrieval import (
     metadata_key_for_filter_field,
 )
 from local_rag_backend.core.domain.types import DocId
-
-
-def _normalize_scores(scores: list[float]) -> list[float]:
-    if not scores:
-        return []
-    min_score = min(scores)
-    max_score = max(scores)
-    if max_score == min_score:
-        return [1.0] * len(scores)
-    return [(float(score) - min_score) / (max_score - min_score) for score in scores]
+from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
 
 
 class SolrSearchRetriever:
@@ -93,7 +84,11 @@ class SolrSearchRetriever:
         response.raise_for_status()
         docs = ((response.json().get("response") or {}).get("docs")) or []
         raw_scores = [float(doc.get("score") or 0.0) for doc in docs]
-        normalized_scores = _normalize_scores(raw_scores)
+        normalized_scores = normalize_min_max_scores(
+            raw_scores,
+            flat_value=0.0,
+            singleton_value=1.0,
+        )
         items = [
             RetrievedDoc(document=self._to_document(doc), score=float(score), stage="sparse")
             for doc, score in zip(docs, normalized_scores, strict=False)

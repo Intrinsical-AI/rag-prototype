@@ -201,6 +201,44 @@ def test_elastic_like_dense_builds_knn_query_and_applies_min_score() -> None:
     assert result.mode_used == "dense"
 
 
+def test_elastic_like_dense_falls_back_to_zero_for_flat_scores() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "hits": {
+                    "hits": [
+                        {
+                            "_id": "doc-1",
+                            "_score": 4.0,
+                            "_source": {"external_id": "doc-1", "content": "auth code"},
+                        },
+                        {
+                            "_id": "doc-2",
+                            "_score": 4.0,
+                            "_source": {"external_id": "doc-2", "content": "sql code"},
+                        },
+                    ]
+                }
+            },
+        )
+
+    retriever = ElasticLikeSearchRetriever(
+        backend_name="opensearch",
+        base_url="http://example.test",
+        docs_index="rag-docs",
+        content_field="content",
+        embedding_field="embedding",
+        request_timeout_s=5.0,
+        verify_tls=False,
+        embedder=DummyEmbedder(),
+        client=httpx.Client(transport=httpx.MockTransport(handler), base_url="http://example.test"),
+    )
+
+    result = retriever.retrieve(RetrievalRequest(query="auth", top_k=2, mode="dense"))
+    assert [item.score for item in result.items] == [0.0, 0.0]
+
+
 def test_elastic_like_dual_uses_dual_candidate_floor_and_reranks() -> None:
     requests: list[dict[str, object]] = []
 
@@ -363,6 +401,32 @@ def test_solr_builds_filter_queries_and_parses_metadata_json() -> None:
 
     assert captured["filters"] == ['scope:"repo"', 'metadata.language:("python" OR "rust")']
     assert result.items[0].document.metadata == {"language": "python", "scope": "repo"}
+
+
+def test_solr_falls_back_to_zero_for_flat_scores() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "response": {
+                    "docs": [
+                        {"id": "doc-1", "content": "auth code", "score": 7.0},
+                        {"id": "doc-2", "content": "sql code", "score": 7.0},
+                    ]
+                }
+            },
+        )
+
+    retriever = SolrSearchRetriever(
+        base_url="http://example.test",
+        core="rag-docs",
+        content_field="content",
+        request_timeout_s=5.0,
+        client=httpx.Client(transport=httpx.MockTransport(handler), base_url="http://example.test"),
+    )
+
+    result = retriever.retrieve(RetrievalRequest(query="auth", top_k=2, mode="sparse"))
+    assert [item.score for item in result.items] == [0.0, 0.0]
 
 
 def test_solr_supports_metadata_prefixed_filter_fields() -> None:

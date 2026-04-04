@@ -75,7 +75,7 @@ class VectorRepoPort(Protocol):
         ...
 
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[DocId, float]]:
-        """Find similar vectors, returning (ID, normalized_similarity_score)."""
+        """Find similar vectors, returning (ID, normalized higher-is-better score in [0, 1])."""
         ...
 
 

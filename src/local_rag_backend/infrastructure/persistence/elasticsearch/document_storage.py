@@ -15,6 +15,7 @@ from local_rag_backend.infrastructure.persistence.elasticsearch.client import (
     ElasticBackendError,
     ElasticClient,
 )
+from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
 from local_rag_backend.settings import Settings, settings as global_settings
 
 
@@ -557,12 +558,7 @@ class ElasticVectorRepo(VectorRepoPort):
         if not hits:
             return []
         scores = [float(hit.get("_score") or 0.0) for hit in hits]
-        min_s = min(scores)
-        max_s = max(scores)
-        if max_s == min_s:
-            normalized = [1.0] * len(scores)
-        else:
-            normalized = [(score - min_s) / (max_s - min_s) for score in scores]
+        normalized = normalize_min_max_scores(scores, flat_value=0.0, singleton_value=1.0)
         return [
             (DocId(str(hit.get("_id"))), score)
             for hit, score in zip(hits, normalized, strict=False)
@@ -585,12 +581,7 @@ class ElasticVectorRepo(VectorRepoPort):
         if not hits:
             return []
         scores = [float(hit.get("_score") or 0.0) for hit in hits]
-        min_s = min(scores)
-        max_s = max(scores)
-        if max_s == min_s:
-            normalized = [1.0] * len(scores)
-        else:
-            normalized = [(score - min_s) / (max_s - min_s) for score in scores]
+        normalized = normalize_min_max_scores(scores, flat_value=0.0, singleton_value=1.0)
         return [
             (DocId(str(hit.get("_id"))), score)
             for hit, score in zip(hits, normalized, strict=False)
