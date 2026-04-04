@@ -57,7 +57,9 @@ def _parse_positive_int(raw: str | None, *, fallback: int) -> int:
 
 def _default_workers() -> int:
     # Keep conservative by default; these tasks can involve network I/O and CPU.
-    return _parse_positive_int(str(getattr(settings, "blocking_workers", "")), fallback=_DEFAULT_WORKERS_BY_TASK["default"])
+    return _parse_positive_int(
+        str(getattr(settings, "blocking_workers", "")), fallback=_DEFAULT_WORKERS_BY_TASK["default"]
+    )
 
 
 def _workers_for_task(task_type: BlockingTaskType) -> int:

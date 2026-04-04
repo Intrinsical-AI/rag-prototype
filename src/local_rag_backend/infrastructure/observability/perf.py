@@ -82,10 +82,14 @@ def snapshot_perf_metrics() -> dict[str, Any]:
     embed_seconds = float(cache["embed_seconds"])
     cache["hit_rate"] = round((hits / lookups), 6) if lookups else 0.0
     cache["avg_embed_seconds"] = round((embed_seconds / embedded), 6) if embedded else 0.0
-    cache["estimated_saved_embed_seconds"] = round(
-        (embed_seconds / embedded) * hits,
-        6,
-    ) if embedded and hits else 0.0
+    cache["estimated_saved_embed_seconds"] = (
+        round(
+            (embed_seconds / embedded) * hits,
+            6,
+        )
+        if embedded and hits
+        else 0.0
+    )
     return payload
 
 

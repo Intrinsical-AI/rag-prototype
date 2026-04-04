@@ -74,7 +74,9 @@ class _SqliteEmbeddingCache:
                 """,
                 [model_key, json.dumps(hashes)],
             ).fetchall()
-        return {str(content_sha): list(json.loads(vector_json)) for content_sha, vector_json in rows}
+        return {
+            str(content_sha): list(json.loads(vector_json)) for content_sha, vector_json in rows
+        }
 
     def put_many(self, *, model_key: str, vectors_by_hash: Mapping[str, Sequence[float]]) -> None:
         rows = [
@@ -159,7 +161,10 @@ class ContentAddressedCachingEmbedder(EmbedderPort):
                 )
                 cached.update(miss_vectors)
 
-            return cast("Sequence[Embedding]", [list(cached[content_sha]) for content_sha in hashes_in_order])
+            return cast(
+                "Sequence[Embedding]",
+                [list(cached[content_sha]) for content_sha in hashes_in_order],
+            )
         except Exception:
             record_embedding_cache_error()
             return self._base.embed(texts_list)

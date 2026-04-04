@@ -28,4 +28,3 @@ def test_validate_normalized_scores_rejects_invalid_values(bad_score: float) -> 
 
 def test_validate_normalized_scores_accepts_valid_values() -> None:
     validate_normalized_scores([0.0, 0.25, 1.0], source="test")
-
