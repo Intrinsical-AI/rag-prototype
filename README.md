@@ -1,4 +1,4 @@
-# Intrinsical RAG Prototype
+# RAG Framework: A Port & Adapters Modular Approach
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
@@ -57,8 +57,8 @@ git clone https://github.com/Intrinsical-AI/rag-prototype.git
 cd rag-prototype
 
 # Recommended: uv-managed local venv + lockfile installs
-# If your environment has a non-writable home directory, keep uv cache local:
-# export UV_CACHE_DIR=.uv_cache
+# Keep uv cache local to the repo for sandboxed/devcontainer setups.
+export UV_CACHE_DIR=.uv_cache
 uv venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
@@ -107,6 +107,7 @@ Default `src/local_rag_backend/settings.py` (Pydantic Settings). Overridden with
 > **Security note:** when exposing this service behind a reverse proxy, keep `API_KEY` enabled and ensure the proxy sanitizes forwarding headers.
 Runtime auth guards evaluate client origin using `X-Forwarded-For` and RFC 7239 `Forwarded`; untrusted/unsanitized header chains can weaken source attribution. When `API_KEY` is unset and `PUBLIC_BIND_REQUIRES_API_KEY=true`, ambiguous forwarding chains (e.g. empty/unknown-only proxy headers) are rejected fail-closed.
 
+> `DEBUG` also tolerates common external build-style values such as `release`/`prod` and `debug`/`dev`, to avoid import-time failures when those variables leak into the shell environment.
 
 
 Key variables (non-exhaustive):
@@ -138,6 +139,8 @@ Key variables (non-exhaustive):
 | `INGEST_CLEAN_STRIP`             | `true`                    | ingestion    | Strip leading/trailing whitespace                       |
 | `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
 | `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
+| `RAG_EMBEDDING_CACHE_DB`         | `DATA_DIR/embedding_cache.sqlite3` | dense/hybrid | Optional persistent embedding-cache SQLite path        |
+| `RAG_DISABLE_EMBEDDING_CACHE`    | `false`                   | dense/hybrid | Disable the content-addressed embedding cache wrapper  |
 | `VECTOR_BACKEND`                 | `auto`                    | local_split  | Vector backend selector: `auto` \| `faiss` \| `numpy` |
 | `STORAGE_PROFILE`                | _(auto)_                  | consistency  | Optional explicit storage profile (`sql_only_local`, `sql_faiss_local`, `sql_numpy_local`, `es_unified_dense`, `es_unified_hybrid`) |
 | `WRITE_LOCK_TIMEOUT_S`           | `30.0`                    | consistency  | Timeout (seconds) for multi-store write lock           |
@@ -490,6 +493,7 @@ Notes:
 * `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
 * v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
+* `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
 * In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
 * For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.

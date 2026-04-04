@@ -296,6 +296,17 @@ class Settings(BaseSettings):
         enable_decoding=False,
     )
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def _normalize_debug_bool(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            normalized = v.strip().lower()
+            if normalized in {"debug", "development", "dev"}:
+                return True
+            if normalized in {"release", "production", "prod"}:
+                return False
+        return v
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: Any) -> Any:

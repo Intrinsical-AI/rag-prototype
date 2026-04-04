@@ -10,6 +10,10 @@ from local_rag_backend.cli_commands.runtime import get_cli_container
 from local_rag_backend.core.services.types import EvalRetrievalMode
 
 
+def _is_contract_error(exc: Exception) -> bool:
+    return isinstance(exc, (AssertionError, ValueError, TypeError))
+
+
 def _load_batch_specs(path: Path) -> tuple[dict[str, object], ...]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
@@ -404,4 +408,4 @@ def eval_compare_cmd(
         raise
     except Exception as e:
         click.echo(f"[ERROR] Error comparing eval runs: {e}", err=True)
-        raise SystemExit(2)
+        raise SystemExit(2 if _is_contract_error(e) else 1)

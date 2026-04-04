@@ -8,6 +8,7 @@ Este documento describe cómo utilizar `rag-prototype` como una librería de Pyt
 2.  **Proyecto instalado**: Instala el proyecto en modo editable para facilitar el desarrollo:
 
     ```bash
+    export UV_CACHE_DIR=.uv_cache
     uv venv .venv
     source .venv/bin/activate
     # Windows: .venv\Scripts\activate
@@ -299,6 +300,10 @@ Probes operacionales (públicas):
 curl -s http://localhost:8000/healthz
 curl -s http://localhost:8000/readyz
 ```
+
+`/healthz` solo valida disponibilidad básica del servicio. `/readyz` es más estricto y puede devolver
+`503` si no hay proveedor LLM configurado (`OPENAI_API_KEY`, `OLLAMA_ENABLED=true` u OpenRouter), aunque
+la app y SQLite estén sanos.
 
 ```bash
 curl -X POST "http://localhost:8000/api/docs/mutate" \
