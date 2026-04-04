@@ -6,7 +6,6 @@ SentenceTransformer embedder (CPU-friendly).
 from __future__ import annotations
 
 import hashlib
-import os
 import random
 import time
 from collections.abc import Sequence
@@ -14,6 +13,7 @@ from typing import cast
 
 from local_rag_backend.core.errors import LLMResponseError, LLMTimeoutError
 from local_rag_backend.core.ports import EmbedderPort
+from local_rag_backend.settings import settings
 
 Embedding = Sequence[float]
 
@@ -23,25 +23,16 @@ class SentenceTransformerEmbedder(EmbedderPort):
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model_name = model_name
-        self._synthetic = str(os.getenv("RAG_SYNTHETIC_EMBEDDINGS", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        self._synthetic = bool(settings.synthetic_embeddings)
         # nosec S311: intentional non-cryptographic RNG for synthetic stress-mode jitter/failures.
         self._rng = random.Random()  # noqa: S311
-        self._fail_rate = max(
-            0.0, min(1.0, float(os.getenv("RAG_SYNTHETIC_EMBEDDING_FAIL_RATE", "0.0")))
-        )
-        self._jitter_min_ms = max(
-            0.0, float(os.getenv("RAG_SYNTHETIC_EMBEDDING_JITTER_MIN_MS", "0.0"))
-        )
+        self._fail_rate = max(0.0, min(1.0, float(settings.synthetic_embedding_fail_rate)))
+        self._jitter_min_ms = max(0.0, float(settings.synthetic_embedding_jitter_min_ms))
         self._jitter_max_ms = max(
             self._jitter_min_ms,
-            float(os.getenv("RAG_SYNTHETIC_EMBEDDING_JITTER_MAX_MS", str(self._jitter_min_ms))),
+            float(settings.synthetic_embedding_jitter_max_ms),
         )
-        self.dim = int(os.getenv("RAG_SYNTHETIC_EMBEDDING_DIM", "384"))
+        self.dim = int(settings.synthetic_embedding_dim)
         self.model = None
 
         if self._synthetic:
@@ -52,7 +43,7 @@ class SentenceTransformerEmbedder(EmbedderPort):
         except ImportError as e:  # pragma: no cover
             raise RuntimeError(
                 "sentence-transformers is not installed. Install the 'dense-st' extra "
-                "(e.g. `uv sync --extra dense-st`) or switch RETRIEVAL_MODE=sparse."
+                "(e.g. `uv sync --extra dense-st`) or switch retrieval_mode=sparse."
             ) from e
 
         self.model = SentenceTransformer(model_name)

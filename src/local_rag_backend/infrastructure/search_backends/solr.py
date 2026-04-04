@@ -72,7 +72,7 @@ class SolrSearchRetriever:
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         if request.mode != "sparse":
-            raise ValueError("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
+            raise ValueError("search_backend=solr supports only retrieval_mode=sparse in v1")
         params: list[tuple[str, str | int | float | bool | None]] = [
             ("q", request.query),
             ("df", self._content_field),

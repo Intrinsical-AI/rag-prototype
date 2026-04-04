@@ -8,6 +8,7 @@ import click
 
 from local_rag_backend.cli_commands.runtime import get_cli_container
 from local_rag_backend.core.services.types import EvalRetrievalMode
+from local_rag_backend.settings import settings
 
 
 def _is_contract_error(exc: Exception) -> bool:
@@ -63,7 +64,7 @@ def _parse_retrieval_mode_field(value: object, *, field_name: str) -> EvalRetrie
     default=None,
     help=(
         "Path to a JSONL eval dataset. If omitted, uses datasets/rag_eval_v1.jsonl "
-        "(or RAG_EVAL_DATASET_PATH)."
+        "(or eval_dataset_path in config.yaml)."
     ),
 )
 @click.option(
@@ -134,7 +135,7 @@ def eval_cmd(
 
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
-        ds = load_eval_dataset(dataset)
+        ds = load_eval_dataset(dataset if dataset is not None else settings.eval_dataset_path)
         res = run_retrieval_eval(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,
@@ -182,7 +183,7 @@ def eval_cmd(
     default=None,
     help=(
         "Path to a JSONL eval dataset. If omitted, uses datasets/rag_eval_v1.jsonl "
-        "(or RAG_EVAL_DATASET_PATH)."
+        "(or eval_dataset_path in config.yaml)."
     ),
 )
 @click.option(
@@ -249,7 +250,7 @@ def eval_batch_cmd(
 
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
-        ds = load_eval_dataset(dataset)
+        ds = load_eval_dataset(dataset if dataset is not None else settings.eval_dataset_path)
         results = run_retrieval_eval_batch(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,
@@ -283,7 +284,7 @@ def eval_batch_cmd(
     default=None,
     help=(
         "Path to a JSONL eval dataset. If omitted, uses datasets/rag_eval_v1.jsonl "
-        "(or RAG_EVAL_DATASET_PATH)."
+        "(or eval_dataset_path in config.yaml)."
     ),
 )
 @click.option("--k", type=int, default=3, show_default=True)
@@ -359,7 +360,7 @@ def eval_compare_cmd(
 
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
-        ds = load_eval_dataset(dataset)
+        ds = load_eval_dataset(dataset if dataset is not None else settings.eval_dataset_path)
         result = compare_retrieval_eval(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,

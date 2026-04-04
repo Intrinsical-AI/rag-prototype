@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import atexit
 import functools
-import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from local_rag_backend.infrastructure.observability.telemetry import get_telemetry
+from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,26 +57,21 @@ def _parse_positive_int(raw: str | None, *, fallback: int) -> int:
 
 def _default_workers() -> int:
     # Keep conservative by default; these tasks can involve network I/O and CPU.
-    return _parse_positive_int(
-        os.getenv("RAG_BLOCKING_WORKERS"), fallback=_DEFAULT_WORKERS_BY_TASK["default"]
-    )
+    return _parse_positive_int(str(getattr(settings, "blocking_workers", "")), fallback=_DEFAULT_WORKERS_BY_TASK["default"])
 
 
 def _workers_for_task(task_type: BlockingTaskType) -> int:
-    env_name = f"RAG_BLOCKING_WORKERS_{task_type.upper()}"
-    raw = os.getenv(env_name)
-    if raw is not None:
-        return _parse_positive_int(raw, fallback=_DEFAULT_WORKERS_BY_TASK[task_type])
     if task_type == "default":
         return _default_workers()
+    configured = getattr(settings, f"blocking_workers_{task_type}", None)
+    if configured is not None:
+        return _parse_positive_int(str(configured), fallback=_DEFAULT_WORKERS_BY_TASK[task_type])
     return _DEFAULT_WORKERS_BY_TASK[task_type]
 
 
 def _queue_limit_for_task(task_type: BlockingTaskType) -> int:
-    env_name = f"RAG_BLOCKING_QUEUE_{task_type.upper()}"
-    return _parse_positive_int(
-        os.getenv(env_name), fallback=_DEFAULT_QUEUE_LIMIT_BY_TASK[task_type]
-    )
+    configured = getattr(settings, f"blocking_queue_{task_type}", None)
+    return _parse_positive_int(str(configured), fallback=_DEFAULT_QUEUE_LIMIT_BY_TASK[task_type])
 
 
 def _parse_task_type(task_type: str) -> BlockingTaskType:

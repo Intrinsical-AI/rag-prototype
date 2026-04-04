@@ -270,13 +270,13 @@ class AppContainer:
             "dense",
             "dual",
         }:
-            errors.append("SEARCH_BACKEND=solr supports only retrieval_mode=sparse in v1")
+            errors.append("search_backend=solr supports only retrieval_mode=sparse in v1")
         if config.retrieval_mode == "hybrid" and self.settings_obj.search_backend not in {
             "local_split",
             "elasticsearch",
         }:
             errors.append(
-                "retrieval_mode=hybrid is supported only with SEARCH_BACKEND=local_split|elasticsearch"
+                "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
             )
         if (
             config.retrieval_mode == "hybrid"
@@ -284,8 +284,8 @@ class AppContainer:
             and self.settings_obj.persistence_backend != "elasticsearch"
         ):
             errors.append(
-                "retrieval_mode=hybrid with SEARCH_BACKEND=elasticsearch requires "
-                "PERSISTENCE_BACKEND=elasticsearch"
+                "retrieval_mode=hybrid with search_backend=elasticsearch requires "
+                "persistence_backend=elasticsearch"
             )
         if config.prompt_template is not None:
             try:
