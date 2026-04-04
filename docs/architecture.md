@@ -7,7 +7,7 @@
 
 ## 0) TL;DR (90 seconds)
 
-- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it supports split-store persistence (`local_split`: SQLite + local vector index), unified persistence (`elasticsearch`), and external search adapters (`opensearch`, `solr`) controlled via `SEARCH_BACKEND`, while keeping application contracts backend-agnostic.
+- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it supports split-store persistence (`local_split`: SQLite + local vector index), unified persistence (`elasticsearch`), and external search adapters (`opensearch`, `solr`) controlled via `search_backend` in `config.yaml`, while keeping application contracts backend-agnostic.
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
@@ -49,7 +49,7 @@
 - Legal / regulatory: no special regulated-domain requirement declared for D1.
 - Budget / latency / throughput: local-first single-node operation, optional Docker; avoid infra-heavy dependencies by default.
 - Team: small maintainer set; changes must be reviewable in small increments.
-- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current supported persistence backends are `local_split` (SQLite + local vector index) and `elasticsearch`. Active search adapters: `local_split`, `elasticsearch`, `opensearch`, `solr` (controlled via `SEARCH_BACKEND`). Architecture keeps room for future unified engines (pgvector, Qdrant) through ports.
+- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current supported persistence backends are `local_split` (SQLite + local vector index) and `elasticsearch`. Active search adapters: `local_split`, `elasticsearch`, `opensearch`, `solr` (controlled via `search_backend` in `config.yaml`). Architecture keeps room for future unified engines (pgvector, Qdrant) through ports.
 - Product constraint: breaking changes explicitly allowed for this deliverable.
 
 ### 1.4 Quality attributes
@@ -88,7 +88,7 @@
 - **MutationRecord:** Durable journal state for multi-store writes.
 - **StorageProfile:** Capability profile (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`) for allowed operations.
 - **Retriever mode:** `sparse`, `dense`, `dual`, `hybrid` retrieval strategy.
-- **Search backend:** `SEARCH_BACKEND` setting decouples query execution engine from persistence topology (`local_split`, `elasticsearch`, `opensearch`, `solr`).
+- **Search backend:** `search_backend` setting decouples query execution engine from persistence topology (`local_split`, `elasticsearch`, `opensearch`, `solr`).
 
 ### 2.2 Bounded contexts
 
@@ -144,9 +144,9 @@
 - Current supported backends:
   - `local_split`: relational persistence via SQLite + SQLAlchemy plus vector index via FAISS/numpy adapters on local disk.
   - `elasticsearch`: unified document/vector/history/system-state/tombstone persistence via HTTP adapter.
-  - `opensearch` (`SEARCH_BACKEND=opensearch`): OpenSearch adapter for query execution; persistence still handled by `local_split` SQL layer.
-  - `solr` (`SEARCH_BACKEND=solr`): Solr adapter for sparse (lexical) retrieval; only `RETRIEVAL_MODE=sparse` is supported in v1.
-- `SEARCH_BACKEND` decouples the query-execution engine from `PERSISTENCE_BACKEND`. When both are set to the same system (e.g. `elasticsearch`/`elasticsearch`), writes and reads are colocated; mixed configurations (e.g. `local_split` + `opensearch`) split SQL writes from remote retrieval.
+  - `opensearch` (`search_backend=opensearch`): OpenSearch adapter for query execution; persistence still handled by `local_split` SQL layer.
+  - `solr` (`search_backend=solr`): Solr adapter for sparse (lexical) retrieval; only `retrieval_mode=sparse` is supported in v1.
+- `search_backend` decouples the query-execution engine from `persistence_backend`. When both are set to the same system (e.g. `elasticsearch`/`elasticsearch`), writes and reads are colocated; mixed configurations (e.g. `local_split` + `opensearch`) split SQL writes from remote retrieval.
 - Target abstraction:
   - application uses persistence ports and capability profile, not concrete store topology;
   - supported topologies:
@@ -155,7 +155,7 @@
 - Cache: in-process runtime cache (`RagService` cache versioned via `system_state`, stored in SQLite or Elasticsearch depending on backend).
 - Files / blobs: local filesystem (`data/`, index artifacts, mutation journal).
 - Concurrency locks: OS-level file/write lock adapters in `infrastructure/concurrency/locks/{file_lock.py,write_lock.py}`.
-- Evaluation fixtures: repository-level datasets under `datasets/` (for example `datasets/rag_eval_v1.jsonl`), optionally overridden by `RAG_EVAL_DATASET_PATH`.
+- Evaluation fixtures: repository-level datasets under `datasets/` (for example `datasets/rag_eval_v1.jsonl`), optionally overridden by `eval_dataset_path` in `config.yaml`.
 
 ### 3.2 Schemas
 - SQL models: `src/local_rag_backend/infrastructure/persistence/sql/models.py`
@@ -358,7 +358,7 @@ Fase B closure (2026-03-01):
 
 ### 7.1 Public API
 - Protocol: REST + CLI + Python library usage.
-- Auth: `X-API-Key` is optional for localhost-only setups; with `PUBLIC_BIND_REQUIRES_API_KEY=true` (default), non-local requests are rejected when `API_KEY` is unset, and public bind startup without key is refused fail-closed.
+- Auth: `X-API-Key` is optional for localhost-only setups; with `public_bind_requires_api_key=true` (default), non-local requests are rejected when `api_key` is unset in `config.yaml`, and public bind startup without key is refused fail-closed.
 - Rate limiting: no explicit built-in limiter currently (must be handled by deployment edge if needed).
 - HTTP endpoints (current):
   - `/api/ask`, `/api/ask_eval`, `/api/history`
@@ -380,7 +380,7 @@ Fase B closure (2026-03-01):
 ## 8) Security, privacy, compliance
 
 - Threat model: accidental public exposure of costly/mutating endpoints.
-- Secrets management: environment variables (`.env` for local dev), never hardcoded.
+- Secrets management: `config.yaml` for runtime config, never hardcoded.
 - PII handling: avoid raw question logging; logs use hashed question fingerprint (`q_sha256`, `q_len`).
 - Log redaction: structured logs avoid full payloads by default.
 - Supply-chain:
@@ -454,7 +454,7 @@ Key mutation/UoW characterization tests:
 ## 12) Deployment & environments
 
 - Environments: local dev, CI, containerized runtime.
-- Config strategy: 12-factor with `pydantic-settings` + env vars.
+- Config strategy: single-file `config.yaml` loaded at startup, validated by Pydantic, and used as the sole runtime source of truth.
 - Migrations/compatibility:
   - SQLite compatibility ensured at startup/CLI bootstrap.
   - D1 allows breaking schema/contracts if required for decoupling.

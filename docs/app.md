@@ -129,4 +129,4 @@ La mutación write-enabled se hace solo por la superficie unificada (`/api/docs/
 
 ## Artefactos de evaluación
 
-El dataset de evaluación por defecto vive en `datasets/rag_eval_v1.jsonl` (raíz del repositorio), no dentro de `src/`. Puede sobreescribirse con `RAG_EVAL_DATASET_PATH`.
+El dataset de evaluación por defecto vive en `datasets/rag_eval_v1.jsonl` (raíz del repositorio), no dentro de `src/`. Puede sobreescribirse con `eval_dataset_path` en `config.yaml`.

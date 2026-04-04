@@ -29,42 +29,43 @@ Este documento describe cómo utilizar `rag-prototype` como una librería de Pyt
 
 ## Paso 1: Configuración del Entorno
 
-La librería se configura mediante variables de entorno o un archivo `.env`. Para este caso de uso, crea un archivo `.env` en la raíz de tu proyecto con la siguiente configuración:
+La librería se configura mediante un único archivo `config.yaml` en la raíz del proyecto.
+Las rutas se resuelven relativas a ese archivo, no al directorio actual.
+Toma como base `config.example.yaml` y copia el archivo a `config.yaml` antes de editarlo.
 
-```dotenv
-# .env
+```yaml
+# config.yaml
+persistence_backend: local_split
+app_host: 127.0.0.1
+app_port: 8000
+debug: false
+log_level: INFO
+enable_monitoring: false
+enable_reranker: false
 
-# Habilitar el generador de Ollama
-OLLAMA_ENABLED=True
-OLLAMA_MODEL="lfm2.5-thinking" # O el modelo que prefieras
+api_key: null
+public_bind_requires_api_key: true
+cors_allow_origins: []
 
-# Configurar el modo de recuperación (sparse, dense, dual, o hybrid)
-# Para empezar, 'sparse' es el más sencillo ya que no requiere embeddings.
-RETRIEVAL_MODE="sparse"
+search_backend: local_split
+retrieval_mode: sparse
+vector_backend: auto
+hybrid_retrieval_alpha: 0.5
+dual_candidate_k: 50
+st_embedding_model: all-MiniLM-L6-v2
 
-# Topología de persistencia:
-# - local_split: SQLite (+ soporte local para dense/dual/hybrid)
-# - elasticsearch: backend unificado; soporta sparse/dense/dual/hybrid
-PERSISTENCE_BACKEND="local_split"
-
-# Ruta de la base de datos para almacenar los documentos
-SQLITE_URL="sqlite:///./data/custom_app.db"
-
-# Si usas PERSISTENCE_BACKEND=elasticsearch:
-# ES_BASE_URL="http://localhost:9200"
-# ES_DOCS_INDEX="rag-docs"
-# ES_HISTORY_INDEX="rag-history"
-# ES_SYSTEM_INDEX="rag-system"
-# ES_TOMBSTONES_INDEX="rag-tombstones"
-
-# Opcional: ajusta los parámetros de logging
-LOG_LEVEL="INFO"
+openai_api_key: null
+ollama_enabled: true
+ollama_model: lfm2.5-thinking
+sqlite_url: sqlite:///./data/custom_app.db
+data_dir: data
+faq_csv: data/faq.csv
+eval_dataset_path: datasets/rag_eval_v1.jsonl
 ```
 
-Nota de topología: `SEARCH_BACKEND` controla el motor de consulta independientemente de `PERSISTENCE_BACKEND`.
-Los combos soportados hoy son `local_split/local_split`, `elasticsearch/elasticsearch`,
-`local_split/opensearch` y `local_split/solr`; consulta la matriz del README si necesitas
-validar `dense`, `dual` o `hybrid` antes de cambiar variables.
+Nota de topología: `search_backend` controla el motor de consulta independientemente de
+`persistence_backend`. Consulta la matriz del README para validar `dense`, `dual` o `hybrid`
+antes de cambiar valores.
 
 ## Paso 2: Implementación de un `Loader` Personalizado
 
@@ -302,8 +303,8 @@ curl -s http://localhost:8000/readyz
 ```
 
 `/healthz` solo valida disponibilidad básica del servicio. `/readyz` es más estricto y puede devolver
-`503` si no hay proveedor LLM configurado (`OPENAI_API_KEY`, `OLLAMA_ENABLED=true` u OpenRouter), aunque
-la app y SQLite estén sanos.
+`503` si no hay proveedor LLM configurado (`openai_api_key`, `ollama_enabled: true` u OpenRouter),
+aunque la app y SQLite estén sanos.
 
 ```bash
 curl -X POST "http://localhost:8000/api/docs/mutate" \
@@ -325,7 +326,7 @@ curl -X POST "http://localhost:8000/api/docs/query" \
 curl -X POST "http://localhost:8000/api/index/rebuild"
 ```
 
-Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"`. Además, por defecto las peticiones no-locales requieren API key.
+Si has configurado `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"`. Además, por defecto las peticiones no-locales requieren API key.
 
 ### 3) Como librería (flujo programático recomendado)
 
@@ -372,12 +373,12 @@ Monitoring mínimo (Prometheus):
 
 ```bash
 uv sync --frozen --extra server --extra monitoring
-export ENABLE_MONITORING=true
+# set `enable_monitoring: true` in config.yaml
 rag-server
 curl -s http://localhost:8000/metrics | head
 ```
 
-Si tienes `API_KEY`, añade `-H "X-API-Key: <API_KEY>"` al `curl`.
+Si tienes `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"` al `curl`.
 
 Evaluación offline reproducible (gate):
 
@@ -396,7 +397,7 @@ bash ../synergy/scripts/repogpt_eval_smoke.sh
 bash ../synergy/scripts/repogpt_ingest_demo.sh --profile local_split
 ```
 
-Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
+Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `eval_dataset_path` en `config.yaml`).
 El comando reporta métricas estándar de IR a `@k` (`nDCG`, `MAP`, `MRR`, `P`, `Recall`).
 La evaluación usa un runtime local aislado y efímero; no reutiliza ni muta el índice principal.
 El dataset se valida de forma estricta: IDs duplicados, relevantes vacíos o relevantes fuera del corpus fallan al cargar.
@@ -512,6 +513,7 @@ bash scripts/test_rag_eval_compare_e2e.sh
 Reranker opcional (mejora de calidad medible con `rag-eval`):
 
 ```bash
-export ENABLE_RERANKER=true
-export RERANKER_CANDIDATE_K=20
+# set these in config.yaml:
+# enable_reranker: true
+# reranker_candidate_k: 20
 ```
