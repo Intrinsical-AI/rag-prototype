@@ -1,29 +1,23 @@
-# Guía de Uso Avanzado: Orquestación de RAG Local con Ollama
+# RAG Stateful: mutación canónica y evaluación
 
-Este documento describe cómo utilizar `rag-prototype` como una librería de Python para construir flujos de trabajo de RAG (Retrieval-Augmented Generation) personalizados. Aprenderás a implementar tu propio cargador de datos (`Loader`) y a orquestar el proceso de ingesta y consulta utilizando un modelo local de Ollama.
+Este documento describe el uso avanzado de `rag-prototype` como librería de Python para construir flujos de trabajo de RAG (Retrieval-Augmented Generation) personalizados. El quick start vive en `README.md`; aquí se documentan la configuración, la ingesta canónica, la consulta y la evaluación.
+
+## Por qué existe esta complejidad
+
+Este proyecto no está optimizado para "subir documentos y preguntar". Está diseñado como una plataforma RAG stateful donde el estado canónico, la proyección de búsqueda y la evaluación viven separados por contrato.
+
+Por eso existen tres piezas que no conviene saltarse:
+
+* `MutationCoordinator`: garantiza que toda mutación pase por un write-path canónico, con saga durable o path atómico según el backend.
+* `rag-rebuild-index` / `POST /api/index/rebuild`: el índice de lectura es reparable y derivado; el rebuild explícito evita que el estado corrupto se oculte como si fuera normal.
+* `rag-eval` y `rag-eval-compare`: cualquier cambio de chunking, retrieval o reranking debe pasar por un gate reproducible para evitar regresiones silenciosas.
+
+Si tu caso de uso no necesita este nivel de control, probablemente te baste una topología más simple. Si sí lo necesitas, esta complejidad es intencional.
 
 ## Requisitos Previos
 
 1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull lfm2.5-thinking`).
-2.  **Proyecto instalado**: Instala el proyecto en modo editable para facilitar el desarrollo:
-
-    ```bash
-    export UV_CACHE_DIR=.uv_cache
-    uv venv .venv
-    source .venv/bin/activate
-    # Windows: .venv\Scripts\activate
-    uv sync --frozen
-    ```
-
-3.  **Extras según el flujo** (opcionales):
-
-    ```bash
-    # Si vas a usar API HTTP / rag-server
-    uv sync --frozen --extra server
-
-    # Si además quieres endpoint /metrics (Prometheus)
-    uv sync --frozen --extra server --extra monitoring
-    ```
+2.  **Entorno listo**: Este documento asume que el proyecto ya está instalado y configurado. Los pasos de instalación viven en el `README.md`.
 
 ---
 
@@ -104,75 +98,78 @@ class DictListLoader(LoaderPort):
 
 ```
 
-## Paso 3: Script de Ingesta de Datos
+## Paso 3: Ingesta canónica con `AppContainer` + `MutationCoordinator`
 
-Necesitamos un script para orquestar el proceso de ingesta. Este script inicializará los componentes necesarios, usará el nuevo `Loader` personalizado y ejecutará el pipeline.
+Para persistir datos usa siempre el write-path canónico. El script siguiente convierte los items del `Loader` en `MutationIntent` y delega en `MutationCoordinator`; no abre SQLite ni escribe a mano en repositorios concretos.
 
 ```python
 # run_ingestion.py
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-# 1. Importar componentes de la librería
+from local_rag_backend.composition.container import AppContainer
+from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
+from local_rag_backend.core.use_cases.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
+)
 from local_rag_backend.settings import settings
-from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
-# 2. Importar Loader (custom)
+# 1. Importar Loader (custom)
 from my_custom_loader import DictListLoader
 
-# 3. Datos de ejemplo
+# 2. Datos de ejemplo
 my_data = [
     {"title": "Inteligencia Artificial", "content": "La IA es la simulación de procesos de inteligencia humana.", "metadata": {"category": "Tech"}},
     {"title": "Hexagonal Architecture", "content": "Es un patrón de diseño de software que desacopla el núcleo de la aplicación.", "metadata": {"category": "Software"}}
 ]
 
 def main():
-    print("--- Iniciando script de ingesta ---")
+    print("--- Iniciando ingesta canónica ---")
 
-    # 4. Configurar la base de datos
-    # Este ejemplo es para local_split/sparse. En elasticsearch no necesitas abrir SQLite.
-    # Asegurarse de que el directorio de datos exista
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(settings.sqlite_url)
-    db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
-    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-    # 5. Instanciar los componentes
-    doc_storage = SqlDocumentStorage(session_factory=session_factory)
+    # 3. Instanciar el contenedor y el coordinador canónico
+    container = AppContainer.from_settings(settings)
+    coordinator = MutationCoordinator(
+        settings_obj=settings,
+        ports=container.docs_mutation_ports(
+            build_embedder=lambda: build_dense_embedder_from_settings(settings_obj=settings),
+        ),
+    )
     custom_loader = DictListLoader(data=my_data)
 
-    # El ETLService es necesario solo para modos 'dense' o 'hybrid'.
-    # Para 'sparse', podemos interactuar directamente con el repositorio.
-    # Ejemplo de cómo hacerlo de forma simple para 'sparse'.
-    from local_rag_backend.core.services.ingestion import default_preprocess, default_chunker, default_formatter
+    # 4. Convertir cada LoadedItem a MutationUpsertInput
+    upserts: list[MutationUpsertInput] = []
+    for i, item in enumerate(custom_loader.load()):
+        upserts.append(
+            MutationUpsertInput(
+                external_id=f"dict_item_{i}",
+                content=item.text,
+                source_id=item.lineage.source_uri,
+                metadata=item.metadata,
+            )
+        )
 
-    print(f"Cargando {len(my_data)} documentos...")
-    all_chunks = []
-    for item in custom_loader.load():
-        clean_text = default_preprocess(item.text, item.metadata)
-        chunks = default_chunker()(clean_text, item.metadata)
-        for chunk in chunks:
-            formatted_chunk = default_formatter(chunk, item.metadata)
-            all_chunks.append(formatted_chunk)
-
-    # 6. Almacenar los documentos procesados
-    stored_ids = list(doc_storage.store_documents(all_chunks))
-    print(f"\n[OK] Ingesta completada. {len(stored_ids)} chunks almacenados en la base de datos.")
+    # 5. Ejecutar la mutación canónica
+    summary = coordinator.execute(
+        MutationIntent(
+            op_id="script-op-1",
+            upserts=tuple(upserts),
+            source="script:custom_loader",
+        )
+    )
+    print(f"\n[OK] Ingesta completada: {summary}")
 
 if __name__ == "__main__":
     main()
 
 ```
 
-Ejecuta el script para poblar tu base de datos:
+Ejecuta el script para poblar tu backend canónico:
 
 ```bash
 python run_ingestion.py
 ```
 
-Nota: este ejemplo escribe directo en SQLite para mantener el flujo simple (útil en `sparse`). Para el write-path canónico y consistente entre `sparse`/`dense`/`hybrid`, usa `MutationCoordinator` (sección de mutaciones más abajo).
+Nota: el ejemplo evita escrituras directas a SQLite. El mismo flujo funciona en `sparse`, `dense` y `hybrid`; el coordinador decide la estrategia adecuada según la configuración.
 
 ## Paso 4: Script de Consulta con Ollama
 
@@ -370,13 +367,8 @@ Notas:
 ## Operabilidad: métricas, evaluación y reranker
 
 Monitoring mínimo (Prometheus):
-
-```bash
-uv sync --frozen --extra server --extra monitoring
-# set `enable_monitoring: true` in config.yaml
-rag-server
-curl -s http://localhost:8000/metrics | head
-```
+Si activas `enable_monitoring: true` en `config.yaml`, `rag-server` expone `/metrics` cuando la
+dependencia opcional está instalada.
 
 Si tienes `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"` al `curl`.
 
@@ -389,12 +381,6 @@ rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
 rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
 rag-eval-batch --specs /tmp/rag-eval-batch-specs.json
-
-# Pack RepoGPT -> rag-prototype (fixture compartida en synergy root)
-../synergy/synergy-up-search
-bash ../synergy/scripts/repogpt_ingest_demo.sh
-bash ../synergy/scripts/repogpt_eval_smoke.sh
-bash ../synergy/scripts/repogpt_ingest_demo.sh --profile local_split
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `eval_dataset_path` en `config.yaml`).
@@ -432,78 +418,6 @@ El JSON de salida incluye:
 - `candidate`
 - `delta`
 
-Dataset específico de RepoGPT:
-
-```bash
-rag-eval \
-  --dataset datasets/repogpt_rag_eval_v1.jsonl \
-  --retrieval-mode sparse \
-  --k 1 \
-  --fail-below-ndcg 0.0 \
-  --fail-below-map 0.0 \
-  --fail-below-mrr 0.0
-
-rag-eval-compare \
-  --dataset datasets/repogpt_rag_eval_v1.jsonl \
-  --k 1 \
-  --candidate-mode sparse \
-  --min-delta-ndcg 0.0 \
-  --min-delta-map 0.0 \
-  --min-delta-mrr 0.0 \
-  --max-regression-precision 0.0 \
-  --max-regression-recall 0.0
-```
-
-Notas:
-
-* La fixture repo compartida vive en `../synergy/fixtures/repogpt_eval_repo/`.
-* El wiring cross-repo oficial vive en `../synergy/scripts/repogpt_ingest_demo.sh`.
-* `../synergy` usa `elasticsearch` como profile operativo por defecto para demos/smokes; `rag-prototype` standalone mantiene `local_split` como default.
-* El dataset `datasets/repogpt_rag_eval_v1.jsonl` pertenece a `rag-prototype`, no a `RepoGPT`, porque define la barra de calidad del consumidor.
-
-Dataset específico del piloto de vulnerabilidades:
-
-```bash
-rag-eval \
-  --dataset datasets/vuln_pilot_rag_eval_v1.jsonl \
-  --retrieval-mode sparse \
-  --k 1 \
-  --fail-below-ndcg 0.0 \
-  --fail-below-map 0.0 \
-  --fail-below-mrr 0.0
-
-rag-eval-compare \
-  --dataset datasets/vuln_pilot_rag_eval_v1.jsonl \
-  --k 1 \
-  --candidate-mode sparse \
-  --min-delta-ndcg 0.0 \
-  --min-delta-map 0.0 \
-  --min-delta-mrr 0.0 \
-  --max-regression-precision 0.0 \
-  --max-regression-recall 0.0
-```
-
-Flujo cross-repo relacionado:
-
-```bash
-python ../synergy/scripts/vulns_batch_triage.py \
-  --input ../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl \
-  --profile high_severity_python \
-  --output /tmp/vuln-triage-high.jsonl
-
-python ../synergy/scripts/vulns_ingest_rag.py \
-  --input ../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl \
-  --payload-out /tmp/vuln-pilot.json \
-  --no-import
-```
-
-Notas:
-
-* La fuente preparada compartida vive en `../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl`.
-* El dataset `datasets/vuln_pilot_rag_eval_v1.jsonl` pertenece a `rag-prototype`, no a `structured-research`, porque define la barra de calidad del consumidor.
-* El perfil `cwe_78_focus` vive en `structured-research/config/vuln_triage/cwe_78_focus/`.
-- `gate`
-
 Smoke e2e reproducible:
 
 ```bash
@@ -517,3 +431,7 @@ Reranker opcional (mejora de calidad medible con `rag-eval`):
 # enable_reranker: true
 # reranker_candidate_k: 20
 ```
+
+Las notas internas de `synergy` y los packs de demo/evaluación específicos de ese workspace
+se movieron a [`docs/internal-synergy.md`](./internal-synergy.md) para mantener esta guía
+centrada en el flujo de uso avanzado del proyecto.

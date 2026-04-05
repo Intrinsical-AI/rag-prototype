@@ -15,6 +15,8 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Technical Debt: TECH_DEBT.md
+  - General Roadmap: ROADMAP.md
+  - UX / DX Roadmap: ROADMAP_UX_DX.md
   - App Layer: app.md
   - Advanced Usage (Ollama): USAGE.md
   - LangChain Loaders: langchain_loaders.md

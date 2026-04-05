@@ -1,4 +1,4 @@
-# RAG Framework: A Port & Adapters Modular Approach
+# Stateful RAG Platform: A Port & Adapters Modular Approach
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
@@ -10,10 +10,8 @@
 <!-- [![PyPI](https://img.shields.io/pypi/v/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
 [![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/) -->
 
-> General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, four retrieval modes (BM25, dense vector, dual, hybrid), and swappable LLM connectors (OpenAI, OpenRouter, Ollama). Designed as a solid base to iterate in experimental environments.
-> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/dual/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend.
-> The shared `../synergy` workspace may use `elasticsearch` as its default cross-repo profile, but
-> this repo keeps `local_split` as its standalone product default.
+> Stateful RAG platform with a hexagonal architecture (Ports & Adapters), FastAPI, canonical mutation flows, and offline evaluation gates. It supports four retrieval modes (BM25, dense vector, dual, hybrid) plus swappable LLM connectors (OpenAI, OpenRouter, Ollama).
+> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/dual/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend. The write-path is intentionally stateful: canonical mutations, rebuilds, and recovery are first-class.
 
 ---
 
@@ -50,7 +48,7 @@
 
 ---
 
-## Installation and startup (from source)
+## Quick start
 
 ```bash
 git clone https://github.com/Intrinsical-AI/rag-prototype.git
@@ -162,115 +160,18 @@ This boundary is enforced in `composition/adapters.py` and consumed by `AppConta
 
 ---
 
-## Ingestion and indexing flow
+## Advanced usage
 
-The ingestion process is orchestrated by `IngestionPipeline`:
+The detailed ingestion, canonical mutation, and evaluation flows are documented in
+[`docs/USAGE.md`](./docs/USAGE.md).
 
-1. Load items from a `LoaderPort` (e.g., `CSVLoader`) returning `LoadedItem(text, lineage, metadata)`.
-2. Preprocess (`preprocess_text`) and chunk (`default_chunker`) with overlap.
-3. Format chunks (metadata header) and batch-ingest via `ETLService.ingest()`.
+Use these entrypoints for the main workflows:
 
-### CLI support
-
-* **Sparse**: stores directly in SQLite (no embeddings required).
-* **Dense / Hybrid on `local_split`**:
-  1. Save chunks in SQLite
-  2. Generate embeddings with OpenAI (if `openai_api_key`) or SentenceTransformers (`st_embedding_model`)
-  3. Upsert into the vector index (`index_path`, `id_map_path`)
-* **Dense / Hybrid on `elasticsearch`**:
-  1. Generate embeddings for changed chunks
-  2. Upsert documents and embeddings atomically by `external_id`
-  3. Use native Elasticsearch lexical/vector retrieval for runtime queries
-
-Chunking parameters (in settings):
-
-* `INGEST_CHUNK_CHARS` (default 1200)
-* `INGEST_CHUNK_OVERLAP` (default 200)
-* `INGEST_CHUNKER_VERSION` (default `chars_v1`): changes the dedup key used by `/api/docs` to force re-chunk/re-embed.
-* `INGEST_BATCH_SIZE` (default `64`, valid range `1..512`): file-plans processed per ingestion batch.
-
-Available scripts:
-
-```bash
-# Ingest from CSV and build vector index if applicable
-rag-bootstrap
-
-
-# Ingest .txt/.md/.csv from file(s) or directory(ies)
-rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
-
-# Keep symlink targets out of scope (also skips symlink paths passed as root inputs)
-rag-ingest --no-follow-symlinks ./docs
-
-
-# Rebuild retrieval state from the current document store (idempotent; dense/dual/hybrid only)
-rag-rebuild-index
-
-
-# Unified docs mutation (canonical write path)
-cat > /tmp/mutate_upsert.json <<'JSON'
-{"op_id":"op-upsert-1","upserts":[{"external_id":"doc-1","content":"hello"}]}
-JSON
-rag-mutate-docs --json /tmp/mutate_upsert.json
-
-# Canonical external import/sync (e.g. RepoGPT code-units)
-cat > /tmp/canonical_import.json <<'JSON'
-{"scope":"repogpt:demo","snapshot_id":"snap-1","documents":[{"external_id":"repogpt:demo:1","source_id":"repogpt:demo:file:src/app.py","content":"def hello():\n    return 1\n","metadata":{"path":"src/app.py","unit_type":"function"}}]}
-JSON
-rag-import-canonical --json /tmp/canonical_import.json
-
-# Delete by SQL doc IDs
-cat > /tmp/mutate_delete_ids.json <<'JSON'
-{"op_id":"op-del-ids-1","delete_ids":["doc:...","doc:..."]}
-JSON
-rag-mutate-docs --json /tmp/mutate_delete_ids.json
-
-# Delete by external IDs (creates tombstones)
-cat > /tmp/mutate_delete_external_ids.json <<'JSON'
-{"op_id":"op-del-ext-1","delete_external_ids":["chunk:abcd...","file:/path:part=file:chunk=0"]}
-JSON
-rag-mutate-docs --json /tmp/mutate_delete_external_ids.json
-
-
-# Summarized system and files status
-rag-status
-
-
-# Offline IR evaluation with standard metrics via `ir_measures`
-# Uses an isolated local eval runtime; does not touch the main doc store or index.
-rag-eval --retrieval-mode sparse
-rag-eval --retrieval-mode dense --candidate-k 20
-rag-eval --retrieval-mode dual --dual-candidate-k 50
-rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
-rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
-cat > /tmp/rag-eval-batch-specs.json <<'JSON'
-[{"name":"sparse-baseline","retrieval_mode":"sparse","k":3},{"name":"dual-50","retrieval_mode":"dual","k":3,"dual_candidate_k":50}]
-JSON
-rag-eval-batch --specs /tmp/rag-eval-batch-specs.json --fresh-eval-workspace
-
-# Shared cross-repo RepoGPT demo/eval pack lives in synergy root
-../synergy/synergy-up-search
-bash ../synergy/scripts/repogpt_ingest_demo.sh
-bash ../synergy/scripts/repogpt_eval_smoke.sh
-bash ../synergy/scripts/repogpt_ingest_demo.sh --profile local_split
-```
-
-> Retrieval mode is selected via `retrieval_mode` in `config.yaml` (there is no `--mode` flag).
-
-RepoGPT integration pack:
-
-* Shared fixture repo: `../synergy/fixtures/repogpt_eval_repo/`
-* Cross-repo demos/smokes: `../synergy/scripts/repogpt_ingest_demo.sh`, `../synergy/scripts/repogpt_eval_smoke.sh`
-* `../synergy` uses `elasticsearch` as the default workspace profile; this repo does not.
-* Consumer-owned eval dataset: `datasets/repogpt_rag_eval_v1.jsonl`
-* Maintained import/search coverage: `tests/e2e/test_repogpt_ingest_search_eval.py`
-
-Vulnerability pilot pack:
-
-* Shared prepared snapshot: `../synergy/vuln_pilot/prepared/pilot_small_v1.jsonl`
-* Cross-repo batch/import scripts: `../synergy/scripts/vulns_batch_triage.py`, `../synergy/scripts/vulns_ingest_rag.py`
-* Consumer-owned eval dataset: `datasets/vuln_pilot_rag_eval_v1.jsonl`
-* Maintained import/search coverage: `tests/e2e/test_vuln_pilot_ingest_search_eval.py`
+* `rag-ingest` for file/directory ingestion.
+* `rag-mutate-docs` for canonical writes via `MutationCoordinator`.
+* `rag-import-canonical` for scope/snapshot import and sync.
+* `rag-rebuild-index` for explicit repair of dense/dual/hybrid state.
+* `rag-eval` and `rag-eval-compare` for offline evaluation gates.
 
 Optional: better file type detection (best-effort) using `python-magic`:
 
