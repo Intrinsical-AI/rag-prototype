@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from local_rag_backend.composition import adapters as adapters_module
 from local_rag_backend.composition.adapters import (
     build_eval_retriever_factory_port,
@@ -392,7 +393,10 @@ def test_run_retrieval_eval_batch_matches_individual_runs_for_exact_hybrid_sweep
     assert Path(specs[1].run_out or "").exists()
 
 
-def test_run_retrieval_eval_reuses_persisted_dense_eval_index(tmp_path: Path) -> None:
+def test_run_retrieval_eval_reuses_persisted_dense_eval_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ds = _mode_dataset()
     cfg = settings.model_copy(
         update={
@@ -403,49 +407,66 @@ def test_run_retrieval_eval_reuses_persisted_dense_eval_index(tmp_path: Path) ->
             "openai_api_key": None,
         }
     )
-    batch_sizes: list[tuple[str, int]] = []
+    storage = build_eval_storage_port(settings_obj=cfg)
+    storage.upsert_dataset_docs(
+        dataset_id=ds.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": ds.dataset_id},
+            )
+            for d in ds.docs
+        ),
+    )
 
-    class CountingEmbedder(DummyEmbedder):
-        def __init__(self, label: str) -> None:
-            self._label = label
+    embed_calls: list[int] = []
+    class FakeEmbedder(DummyEmbedder):
+        dim = 2
 
         def embed(self, texts):
-            batch_sizes.append((self._label, len(texts)))
+            embed_calls.append(len(texts))
             return super().embed(texts)
 
-    run_retrieval_eval(
-        dataset=ds,
-        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(
-            st_embedder_factory=lambda _model_name: CountingEmbedder("first"),
-        ),
-        retrieval_mode="dense",
-        k=1,
-        candidate_k=1,
-        reranker_enabled=False,
-    )
-    run_retrieval_eval(
-        dataset=ds,
-        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(
-            st_embedder_factory=lambda _model_name: CountingEmbedder("second"),
-        ),
-        retrieval_mode="dense",
-        k=1,
-        candidate_k=1,
-        reranker_enabled=False,
+    monkeypatch.setattr(
+        adapters_module,
+        "build_dense_embedder_from_settings",
+        lambda **_kwargs: FakeEmbedder(),
     )
 
-    first_sizes = [size for label, size in batch_sizes if label == "first"]
-    second_sizes = [size for label, size in batch_sizes if label == "second"]
+    workspace = adapters_module._PreparedEvalWorkspace(
+        storage=storage,
+        openai_embedder_factory=lambda: FakeEmbedder(),
+        st_embedder_factory=lambda _model_name: FakeEmbedder(),
+        dense_retriever_factory=lambda **_kwargs: None,
+        hybrid_retriever_factory=lambda **_kwargs: None,
+        vector_repo_factory=adapters_module.VectorStorage,
+        reranker_factory=lambda *_args, **_kwargs: None,
+    )
 
-    assert len(ds.docs) in first_sizes
-    assert len(ds.docs) not in second_sizes
-    assert all(size == 1 for size in second_sizes)
+    workspace._ensure_vector_repo_ready()
+
+    assert embed_calls == [len(ds.docs)]
+
+    embed_calls.clear()
+    second_workspace = adapters_module._PreparedEvalWorkspace(
+        storage=storage,
+        openai_embedder_factory=lambda: FakeEmbedder(),
+        st_embedder_factory=lambda _model_name: FakeEmbedder(),
+        dense_retriever_factory=lambda **_kwargs: None,
+        hybrid_retriever_factory=lambda **_kwargs: None,
+        vector_repo_factory=adapters_module.VectorStorage,
+        reranker_factory=lambda *_args, **_kwargs: None,
+    )
+    second_workspace._ensure_vector_repo_ready()
+
+    assert embed_calls == []
 
 
 def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_changes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ds = _mode_dataset()
     base_cfg = {
@@ -457,42 +478,72 @@ def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_change
     }
     cfg_a = settings.model_copy(update={**base_cfg, "st_embedding_model": "model-a"})
     cfg_b = settings.model_copy(update={**base_cfg, "st_embedding_model": "model-b"})
-    batch_sizes: list[tuple[str, int]] = []
+    storage_a = build_eval_storage_port(settings_obj=cfg_a)
+    storage_a.upsert_dataset_docs(
+        dataset_id=ds.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": ds.dataset_id},
+            )
+            for d in ds.docs
+        ),
+    )
+    storage_b = build_eval_storage_port(settings_obj=cfg_b)
+    storage_b.upsert_dataset_docs(
+        dataset_id=ds.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": ds.dataset_id},
+            )
+            for d in ds.docs
+        ),
+    )
 
-    class CountingEmbedder(DummyEmbedder):
-        def __init__(self, label: str) -> None:
-            self._label = label
+    embed_calls: list[int] = []
+    class FakeEmbedder(DummyEmbedder):
+        dim = 2
 
         def embed(self, texts):
-            batch_sizes.append((self._label, len(texts)))
+            embed_calls.append(len(texts))
             return super().embed(texts)
 
-    run_retrieval_eval(
-        dataset=ds,
-        eval_storage_port=build_eval_storage_port(settings_obj=cfg_a),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(
-            st_embedder_factory=lambda _model_name: CountingEmbedder("first"),
-        ),
-        retrieval_mode="dense",
-        k=1,
-        candidate_k=1,
-        reranker_enabled=False,
-    )
-    run_retrieval_eval(
-        dataset=ds,
-        eval_storage_port=build_eval_storage_port(settings_obj=cfg_b),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(
-            st_embedder_factory=lambda _model_name: CountingEmbedder("second"),
-        ),
-        retrieval_mode="dense",
-        k=1,
-        candidate_k=1,
-        reranker_enabled=False,
+    monkeypatch.setattr(
+        adapters_module,
+        "build_dense_embedder_from_settings",
+        lambda **_kwargs: FakeEmbedder(),
     )
 
-    second_sizes = [size for label, size in batch_sizes if label == "second"]
+    first_workspace = adapters_module._PreparedEvalWorkspace(
+        storage=storage_a,
+        openai_embedder_factory=lambda: FakeEmbedder(),
+        st_embedder_factory=lambda _model_name: FakeEmbedder(),
+        dense_retriever_factory=lambda **_kwargs: None,
+        hybrid_retriever_factory=lambda **_kwargs: None,
+        vector_repo_factory=adapters_module.VectorStorage,
+        reranker_factory=lambda *_args, **_kwargs: None,
+    )
+    first_workspace._ensure_vector_repo_ready()
+    assert embed_calls == [len(ds.docs)]
 
-    assert len(ds.docs) in second_sizes
+    embed_calls.clear()
+    second_workspace = adapters_module._PreparedEvalWorkspace(
+        storage=storage_b,
+        openai_embedder_factory=lambda: FakeEmbedder(),
+        st_embedder_factory=lambda _model_name: FakeEmbedder(),
+        dense_retriever_factory=lambda **_kwargs: None,
+        hybrid_retriever_factory=lambda **_kwargs: None,
+        vector_repo_factory=adapters_module.VectorStorage,
+        reranker_factory=lambda *_args, **_kwargs: None,
+    )
+    second_workspace._ensure_vector_repo_ready()
+
+    assert embed_calls == [len(ds.docs)]
 
 
 def test_run_retrieval_eval_builds_dense_eval_index_in_chunks(
@@ -516,26 +567,44 @@ def test_run_retrieval_eval_builds_dense_eval_index_in_chunks(
             "openai_api_key": None,
         }
     )
+    storage = build_eval_storage_port(settings_obj=cfg)
+    storage.upsert_dataset_docs(
+        dataset_id=ds.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": ds.dataset_id},
+            )
+            for d in ds.docs
+        ),
+    )
     batch_sizes: list[int] = []
 
-    class CountingEmbedder(DummyEmbedder):
+    class FakeEmbedder(DummyEmbedder):
+        dim = 2
+
         def embed(self, texts):
             batch_sizes.append(len(texts))
             return super().embed(texts)
 
     monkeypatch.setattr(adapters_module, "EVAL_DENSE_REBUILD_BATCH_SIZE", 2)
-
-    run_retrieval_eval(
-        dataset=ds,
-        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
-        eval_retriever_factory_port=build_eval_retriever_factory_port(
-            st_embedder_factory=lambda _model_name: CountingEmbedder(),
-        ),
-        retrieval_mode="dense",
-        k=1,
-        candidate_k=1,
-        reranker_enabled=False,
+    monkeypatch.setattr(
+        adapters_module,
+        "build_dense_embedder_from_settings",
+        lambda **_kwargs: FakeEmbedder(),
     )
 
-    assert 2 in batch_sizes
-    assert 1 in batch_sizes
+    workspace = adapters_module._PreparedEvalWorkspace(
+        storage=storage,
+        openai_embedder_factory=lambda: FakeEmbedder(),
+        st_embedder_factory=lambda _model_name: FakeEmbedder(),
+        dense_retriever_factory=lambda **_kwargs: None,
+        hybrid_retriever_factory=lambda **_kwargs: None,
+        vector_repo_factory=adapters_module.VectorStorage,
+        reranker_factory=lambda *_args, **_kwargs: None,
+    )
+    workspace._ensure_vector_repo_ready()
+
+    assert batch_sizes == [2, 2, 1]
