@@ -2,7 +2,7 @@
 
 > Scope: prioritized delivery roadmap derived from the current technical-debt register and the current codebase
 >
-> Status: current as of 2026-04-05
+> Status: current as of 2026-04-08
 
 This roadmap is execution-oriented and intentionally atomic. Each item should be implementable and reviewable on its own, without bundling large architectural rewrites into one change.
 
