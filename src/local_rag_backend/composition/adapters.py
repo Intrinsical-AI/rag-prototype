@@ -9,8 +9,8 @@ This module centralizes policy decisions for:
 
 from __future__ import annotations
 
+import hashlib
 import json
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,8 +119,6 @@ DEFAULT_DENSE_BACKEND_MESSAGE = (
     "Configure openai_api_key in config.yaml to use OpenAI embeddings, or install the "
     "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
 )
-
-
 @dataclass(frozen=True)
 class _RepoDocsReadPort(DocsReadPort):
     doc_repo_factory: Callable[[], DocumentRepoPort]
@@ -309,8 +307,15 @@ class _DefaultRagRuntimeFactory(RagRuntimeFactoryPort):
 
 class _SqlEvalStoragePort(EvalStoragePort):
     def __init__(self, *, settings_obj: Settings) -> None:
-        self._temp_dir = tempfile.TemporaryDirectory(prefix="rag-eval-")
-        eval_root = Path(self._temp_dir.name)
+        self._base_settings = settings_obj
+        self._workspace_root = Path(settings_obj.data_dir).resolve() / "_eval_workspaces"
+        self._active_dataset_signature: str | None = None
+        self._active_dataset_id: str | None = None
+        self._active_external_ids: tuple[str, ...] = ()
+        self._eval_settings = self._settings_for_eval_root(self._workspace_root / "_pending")
+        self._doc_repo = self._new_doc_repo()
+
+    def _new_doc_repo(self) -> SqlDocumentStorage:
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -322,8 +327,10 @@ class _SqlEvalStoragePort(EvalStoragePort):
         from local_rag_backend.infrastructure.persistence.sql import models as _models  # noqa: F401
 
         db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
-        self._doc_repo = SqlDocumentStorage(session_factory=session_local)
-        self._eval_settings = settings_obj.model_copy(
+        return SqlDocumentStorage(session_factory=session_local)
+
+    def _settings_for_eval_root(self, eval_root: Path) -> Settings:
+        return self._base_settings.model_copy(
             update={
                 "persistence_backend": "local_split",
                 "search_backend": "local_split",
@@ -334,12 +341,54 @@ class _SqlEvalStoragePort(EvalStoragePort):
             }
         )
 
+    def _dataset_signature(
+        self,
+        *,
+        dataset_id: str,
+        docs: tuple[EvalDatasetDocInput, ...],
+    ) -> str:
+        digest = hashlib.sha256()
+        digest.update(str(dataset_id).encode("utf-8"))
+        for doc in docs:
+            digest.update(b"\0")
+            digest.update(str(doc.external_id).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(str(doc.source_id or "").encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(hashlib.sha256(str(doc.content).encode("utf-8")).hexdigest().encode("ascii"))
+        return digest.hexdigest()
+
+    def _workspace_slug(self, dataset_id: str) -> str:
+        collapsed = "".join(ch if ch.isalnum() else "-" for ch in str(dataset_id).strip().lower())
+        normalized = "-".join(part for part in collapsed.split("-") if part)
+        return normalized[:48] or "dataset"
+
+    def _workspace_root_for_dataset(self, *, dataset_id: str, signature: str) -> Path:
+        slug = self._workspace_slug(dataset_id)
+        return self._workspace_root / f"{slug}-{signature[:16]}"
+
+    def get_dataset_signature(self) -> str | None:
+        return self._active_dataset_signature
+
     def upsert_dataset_docs(
         self,
         *,
         dataset_id: str,
         docs: tuple[EvalDatasetDocInput, ...],
     ) -> tuple[str, ...]:
+        signature = self._dataset_signature(dataset_id=dataset_id, docs=docs)
+        external_ids = tuple(str(doc.external_id) for doc in docs)
+        if (
+            self._active_dataset_id == str(dataset_id)
+            and self._active_dataset_signature == signature
+            and self._active_external_ids == external_ids
+        ):
+            return external_ids
+
+        eval_root = self._workspace_root_for_dataset(dataset_id=str(dataset_id), signature=signature)
+        eval_root.mkdir(parents=True, exist_ok=True)
+        self._eval_settings = self._settings_for_eval_root(eval_root)
+        self._doc_repo = self._new_doc_repo()
         items = [
             SqlDocumentStorage.UpsertDoc(
                 external_id=d.external_id,
@@ -350,6 +399,9 @@ class _SqlEvalStoragePort(EvalStoragePort):
             for d in docs
         ]
         results, _changed, _updated = self._doc_repo.upsert_documents_by_external_id(items)
+        self._active_dataset_id = str(dataset_id)
+        self._active_dataset_signature = signature
+        self._active_external_ids = external_ids
         return tuple(str(r.external_id) for r in results if r.external_id is not None)
 
     def list_documents(self) -> tuple[Any, ...]:
@@ -398,6 +450,11 @@ class _PreparedEvalWorkspace:
         self._docs = tuple(storage.list_documents())
         self._doc_repo = storage.get_retriever_storage()
         self._eval_settings = storage.get_eval_settings()
+        self._dataset_signature = (
+            getattr(storage, "get_dataset_signature", lambda: None)()
+            if callable(getattr(storage, "get_dataset_signature", None))
+            else None
+        )
         self._openai_embedder_factory = openai_embedder_factory
         self._st_embedder_factory = st_embedder_factory
         self._dense_retriever_factory = dense_retriever_factory
@@ -409,6 +466,49 @@ class _PreparedEvalWorkspace:
         self._vector_repo_ready = False
         self._sparse_retriever: RetrieverPort | None = None
         self._dense_retriever: RetrieverPort | None = None
+
+    def _workspace_manifest_path(self) -> Path:
+        return Path(self._eval_settings.data_dir) / "eval_workspace_manifest.json"
+
+    def _doc_ids_signature(self) -> str:
+        digest = hashlib.sha256()
+        for doc in self._docs:
+            digest.update(str(doc.id).encode("utf-8"))
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    def _expected_workspace_manifest(self) -> dict[str, object]:
+        return {
+            "dataset_signature": self._dataset_signature,
+            "doc_ids_signature": self._doc_ids_signature(),
+            "doc_count": len(self._docs),
+            "index_path": str(self._eval_settings.index_path),
+            "id_map_path": str(self._eval_settings.id_map_path),
+            "vector_backend": str(getattr(self._eval_settings, "vector_backend", "auto")),
+            "vector_manifest_config": expected_manifest_config_from_settings(self._eval_settings),
+        }
+
+    def _workspace_manifest_matches(self) -> bool:
+        path = self._workspace_manifest_path()
+        if not path.exists():
+            return False
+        if not Path(self._eval_settings.index_path).exists():
+            return False
+        if not Path(self._eval_settings.id_map_path).exists():
+            return False
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError):
+            return False
+        return isinstance(payload, dict) and payload == self._expected_workspace_manifest()
+
+    def _write_workspace_manifest(self) -> None:
+        path = self._workspace_manifest_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self._expected_workspace_manifest(), indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _dense_embedder(self) -> EmbedderPort:
         if self._query_embedder is not None:
@@ -439,11 +539,15 @@ class _PreparedEvalWorkspace:
         vector_repo = self._dense_vector_repo()
         if self._vector_repo_ready:
             return vector_repo
+        if self._workspace_manifest_matches():
+            self._vector_repo_ready = True
+            return vector_repo
         if self._docs:
             embedder = self._dense_embedder()
             doc_ids = [doc.id for doc in self._docs]
             embeddings = embedder.embed([doc.content for doc in self._docs])
             vector_repo.rebuild(doc_ids, embeddings)
+            self._write_workspace_manifest()
         self._vector_repo_ready = True
         return vector_repo
 

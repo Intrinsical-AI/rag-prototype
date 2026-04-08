@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from local_rag_backend.composition.adapters import (
     build_eval_retriever_factory_port,
     build_eval_storage_port,
@@ -198,6 +197,52 @@ def test_build_eval_storage_port_uses_isolated_local_paths(tmp_path: Path) -> No
     assert eval_settings.sqlite_url != base.sqlite_url
 
 
+def test_build_eval_storage_port_uses_deterministic_dataset_workspace(tmp_path: Path) -> None:
+    cfg = settings.model_copy(
+        update={
+            "data_dir": tmp_path / "main-data",
+            "vector_backend": "numpy",
+            "openai_api_key": None,
+        }
+    )
+    ds = _mode_dataset()
+
+    storage_a = build_eval_storage_port(settings_obj=cfg)
+    storage_a.upsert_dataset_docs(
+        dataset_id=ds.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": ds.dataset_id},
+            )
+            for d in ds.docs
+        ),
+    )
+    settings_a = storage_a.get_eval_settings()
+
+    storage_b = build_eval_storage_port(settings_obj=cfg)
+    storage_b.upsert_dataset_docs(
+        dataset_id=ds.dataset_id,
+        docs=tuple(
+            EvalDatasetDocInput(
+                external_id=d.external_id,
+                content=d.content,
+                source_id=d.source_id,
+                metadata={"dataset_id": ds.dataset_id},
+            )
+            for d in ds.docs
+        ),
+    )
+    settings_b = storage_b.get_eval_settings()
+
+    assert Path(settings_a.data_dir) == Path(settings_b.data_dir)
+    assert Path(settings_a.data_dir).parent.name == "_eval_workspaces"
+    assert Path(settings_a.index_path).parent == Path(settings_a.data_dir)
+    assert Path(settings_a.id_map_path).parent == Path(settings_a.data_dir)
+
+
 @pytest.mark.parametrize(
     ("retrieval_mode", "extra_kwargs"),
     [
@@ -344,3 +389,106 @@ def test_run_retrieval_eval_batch_matches_individual_runs_for_exact_hybrid_sweep
     assert batch_results[1].result == single_08
     assert Path(specs[0].run_out or "").exists()
     assert Path(specs[1].run_out or "").exists()
+
+
+def test_run_retrieval_eval_reuses_persisted_dense_eval_index(tmp_path: Path) -> None:
+    ds = _mode_dataset()
+    cfg = settings.model_copy(
+        update={
+            "data_dir": tmp_path / "eval-cache",
+            "persistence_backend": "local_split",
+            "search_backend": "local_split",
+            "vector_backend": "numpy",
+            "openai_api_key": None,
+        }
+    )
+    batch_sizes: list[tuple[str, int]] = []
+
+    class CountingEmbedder(DummyEmbedder):
+        def __init__(self, label: str) -> None:
+            self._label = label
+
+        def embed(self, texts):
+            batch_sizes.append((self._label, len(texts)))
+            return super().embed(texts)
+
+    run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: CountingEmbedder("first"),
+        ),
+        retrieval_mode="dense",
+        k=1,
+        candidate_k=1,
+        reranker_enabled=False,
+    )
+    run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: CountingEmbedder("second"),
+        ),
+        retrieval_mode="dense",
+        k=1,
+        candidate_k=1,
+        reranker_enabled=False,
+    )
+
+    first_sizes = [size for label, size in batch_sizes if label == "first"]
+    second_sizes = [size for label, size in batch_sizes if label == "second"]
+
+    assert len(ds.docs) in first_sizes
+    assert len(ds.docs) not in second_sizes
+    assert all(size == 1 for size in second_sizes)
+
+
+def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_changes(
+    tmp_path: Path,
+) -> None:
+    ds = _mode_dataset()
+    base_cfg = {
+        "data_dir": tmp_path / "eval-cache",
+        "persistence_backend": "local_split",
+        "search_backend": "local_split",
+        "vector_backend": "numpy",
+        "openai_api_key": None,
+    }
+    cfg_a = settings.model_copy(update={**base_cfg, "st_embedding_model": "model-a"})
+    cfg_b = settings.model_copy(update={**base_cfg, "st_embedding_model": "model-b"})
+    batch_sizes: list[tuple[str, int]] = []
+
+    class CountingEmbedder(DummyEmbedder):
+        def __init__(self, label: str) -> None:
+            self._label = label
+
+        def embed(self, texts):
+            batch_sizes.append((self._label, len(texts)))
+            return super().embed(texts)
+
+    run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg_a),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: CountingEmbedder("first"),
+        ),
+        retrieval_mode="dense",
+        k=1,
+        candidate_k=1,
+        reranker_enabled=False,
+    )
+    run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg_b),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: CountingEmbedder("second"),
+        ),
+        retrieval_mode="dense",
+        k=1,
+        candidate_k=1,
+        reranker_enabled=False,
+    )
+
+    second_sizes = [size for label, size in batch_sizes if label == "second"]
+
+    assert len(ds.docs) in second_sizes
