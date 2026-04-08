@@ -119,6 +119,9 @@ DEFAULT_DENSE_BACKEND_MESSAGE = (
     "Configure openai_api_key in config.yaml to use OpenAI embeddings, or install the "
     "'dense-st' extra for SentenceTransformers (e.g. `uv sync --extra dense-st`)."
 )
+# Keep eval rebuild batches bounded so large offline datasets do not materialize every
+# document embedding in memory at once.
+EVAL_DENSE_REBUILD_BATCH_SIZE = 64
 @dataclass(frozen=True)
 class _RepoDocsReadPort(DocsReadPort):
     doc_repo_factory: Callable[[], DocumentRepoPort]
@@ -539,14 +542,27 @@ class _PreparedEvalWorkspace:
         vector_repo = self._dense_vector_repo()
         if self._vector_repo_ready:
             return vector_repo
+        # Offline eval reuses a dataset-scoped workspace only when both the stored dense
+        # index files and the manifest agree on corpus identity plus vector backend/model
+        # expectations. Any drift forces a rebuild in the isolated eval workspace.
         if self._workspace_manifest_matches():
             self._vector_repo_ready = True
             return vector_repo
         if self._docs:
             embedder = self._dense_embedder()
-            doc_ids = [doc.id for doc in self._docs]
-            embeddings = embedder.embed([doc.content for doc in self._docs])
-            vector_repo.rebuild(doc_ids, embeddings)
+            rebuild_batches: list[tuple[list[Any], Sequence[Any]]] = []
+            for start in range(0, len(self._docs), EVAL_DENSE_REBUILD_BATCH_SIZE):
+                chunk = self._docs[start : start + EVAL_DENSE_REBUILD_BATCH_SIZE]
+                chunk_ids = [doc.id for doc in chunk]
+                chunk_embeddings = embedder.embed([doc.content for doc in chunk])
+                rebuild_batches.append((chunk_ids, chunk_embeddings))
+            rebuild_from_batches = getattr(vector_repo, "rebuild_from_batches", None)
+            if callable(rebuild_from_batches):
+                rebuild_from_batches(rebuild_batches)
+            else:  # pragma: no cover
+                doc_ids = [doc.id for doc in self._docs]
+                embeddings = [vector for _ids, vectors in rebuild_batches for vector in vectors]
+                vector_repo.rebuild(doc_ids, embeddings)
             self._write_workspace_manifest()
         self._vector_repo_ready = True
         return vector_repo

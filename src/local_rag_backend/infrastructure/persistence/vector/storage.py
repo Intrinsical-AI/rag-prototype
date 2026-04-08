@@ -128,6 +128,13 @@ class VectorStorage(VectorRepoPort):
         self.vector_index.rebuild(ids, vectors)
         self._ensure_manifest(overwrite=True)
 
+    def rebuild_from_batches(
+        self,
+        batches: Sequence[tuple[Sequence[DocId], Sequence[Sequence[float]]]],
+    ) -> None:
+        self.vector_index.rebuild_from_batches(batches)
+        self._ensure_manifest(overwrite=True)
+
     def search(
         self, query_vector: Sequence[float], k: int
     ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:

@@ -191,6 +191,37 @@ class VectorIndex:
             self.id_map = [DocId(str(x)) for x in ids]
             self._save_locked()
 
+    def rebuild_from_batches(
+        self,
+        batches: Sequence[tuple[Sequence[DocId], Sequence[Sequence[float]]]],
+    ) -> None:
+        normalized_batches: list[tuple[list[DocId], np.ndarray]] = []
+        for ids, vectors in batches:
+            batch_ids = [DocId(str(x)) for x in ids]
+            if not batch_ids:
+                continue
+            vecs = np.asarray(list(vectors), dtype="float32")
+            if vecs.ndim != 2:
+                raise ValueError("Vectors must be a 2D array-like (n, dim)")
+            if vecs.shape[0] != len(batch_ids):
+                raise ValueError(
+                    f"ids/vectors length mismatch in batch: {len(batch_ids)} != {vecs.shape[0]}"
+                )
+            if vecs.shape[1] != self.dim:
+                raise ValueError(
+                    f"Dim mismatch: vectors have dim {vecs.shape[1]} but index dim is {self.dim}"
+                )
+            normalized_batches.append((batch_ids, vecs))
+
+        with self._locked_write():
+            self.engine.load_or_initialize(self.index_path, int(self.dim))
+            self.engine.rebuild(np.empty((0, self.dim), dtype="float32"))
+            self.id_map = []
+            for batch_ids, vecs in normalized_batches:
+                self.engine.add(vecs)
+                self.id_map.extend(batch_ids)
+            self._save_locked()
+
     def search(
         self, query_vector: Sequence[float], k: int
     ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:

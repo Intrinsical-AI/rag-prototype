@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from local_rag_backend.composition import adapters as adapters_module
 from local_rag_backend.composition.adapters import (
     build_eval_retriever_factory_port,
     build_eval_storage_port,
@@ -492,3 +493,49 @@ def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_change
     second_sizes = [size for label, size in batch_sizes if label == "second"]
 
     assert len(ds.docs) in second_sizes
+
+
+def test_run_retrieval_eval_builds_dense_eval_index_in_chunks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs = tuple(EvalDoc(external_id=f"doc-{idx}", content=f"topic {idx}") for idx in range(5))
+    queries = (EvalQuery(query="topic 0", relevant_external_ids=("doc-0",)),)
+    ds = EvalDataset(
+        dataset_id="chunked-dense",
+        schema_version=1,
+        docs=docs,
+        queries=queries,
+    )
+    cfg = settings.model_copy(
+        update={
+            "data_dir": tmp_path / "chunked-cache",
+            "persistence_backend": "local_split",
+            "search_backend": "local_split",
+            "vector_backend": "numpy",
+            "openai_api_key": None,
+        }
+    )
+    batch_sizes: list[int] = []
+
+    class CountingEmbedder(DummyEmbedder):
+        def embed(self, texts):
+            batch_sizes.append(len(texts))
+            return super().embed(texts)
+
+    monkeypatch.setattr(adapters_module, "EVAL_DENSE_REBUILD_BATCH_SIZE", 2)
+
+    run_retrieval_eval(
+        dataset=ds,
+        eval_storage_port=build_eval_storage_port(settings_obj=cfg),
+        eval_retriever_factory_port=build_eval_retriever_factory_port(
+            st_embedder_factory=lambda _model_name: CountingEmbedder(),
+        ),
+        retrieval_mode="dense",
+        k=1,
+        candidate_k=1,
+        reranker_enabled=False,
+    )
+
+    assert 2 in batch_sizes
+    assert 1 in batch_sizes
