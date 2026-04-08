@@ -244,10 +244,10 @@ curl http://localhost:8000/healthz/ollama
 ```
 
 Notes:
- - Backend listens on `8000`, Ollama on `11434`.
- - Configure providers via `config.yaml`.
- - `docker-compose.yml` sets container environment defaults for convenience, but the app still reads `config.yaml` as the runtime source of truth. If you want compose-driven config, mount or generate a `config.yaml` inside the container.
- - `docker-compose.yml` defaults the container runtime to `persistence_backend: local_split` and `retrieval_mode: sparse`, but those values do not override `config.yaml` by themselves.
+- Backend listens on `8000`, Ollama on `11434`.
+- Configure providers via `config.yaml`.
+- `docker-compose.yml` sets container environment defaults for convenience, but the app still reads `config.yaml` as the runtime source of truth. If you want compose-driven config, mount or generate a `config.yaml` inside the container.
+- `docker-compose.yml` defaults the container runtime to `persistence_backend: local_split` and `retrieval_mode: sparse`, but those values do not override `config.yaml` by themselves.
 - For `local_split` dense/hybrid in compose, build backend with extras, for example:
 
 ```bash

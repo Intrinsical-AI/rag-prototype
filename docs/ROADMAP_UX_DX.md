@@ -2,7 +2,7 @@
 
 > Scope: operator and developer ergonomics for CLI and adjacent transport contracts
 >
-> Status: current as of 2026-04-05
+> Status: current as of 2026-04-08
 
 This roadmap isolates the UX / DX work so it can move independently from mutation-engine and evaluation-core refactors.
 
