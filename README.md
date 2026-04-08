@@ -175,6 +175,14 @@ Use these entrypoints for the main workflows:
 
 `rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
 
+Offline evaluation uses dataset-scoped workspaces under `<data_dir>/_eval_workspaces/`.
+That runtime stays isolated from the main index, but it is no longer purely ephemeral:
+
+* dense eval workspaces reuse the persisted local index when the dataset signature and vector manifest still match
+* changing the dense backend, embedding model, or other vector manifest inputs invalidates the cached eval workspace and rebuilds it
+* dense rebuilds happen in bounded batches to reduce memory spikes on larger evaluation corpora
+* `RAG_PERF_METRICS_OUT=/abs/path.json` can override `perf_metrics_out_path` for benchmark wrappers without editing `config.yaml`
+
 Optional: better file type detection (best-effort) using `python-magic`:
 
 ```bash

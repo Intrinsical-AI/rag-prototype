@@ -400,12 +400,28 @@ rag-eval-batch --specs /tmp/rag-eval-batch-specs.json
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `eval_dataset_path` en `config.yaml`).
 El comando reporta métricas estándar de IR a `@k` (`nDCG`, `MAP`, `MRR`, `P`, `Recall`).
-La evaluación usa un runtime local aislado y efímero; no reutiliza ni muta el índice principal.
+La evaluación usa un runtime local aislado bajo `<data_dir>/_eval_workspaces/`; no reutiliza ni muta el índice principal.
+Ese runtime sí puede reutilizar un índice denso de evaluación ya persistido cuando coinciden:
+
+* la firma del dataset (`dataset_id` + documentos)
+* el conjunto de `doc_ids` cargados en el workspace
+* el backend vectorial y el manifest esperado del índice
+
+Si cambias el modelo de embeddings, el backend vectorial o cualquier input del manifest denso, la evaluación invalida ese workspace y reconstruye el índice aislado.
+El rebuild denso se hace en batches acotados para reducir picos de memoria en corpora grandes, pero sigue siendo un rebuild completo del workspace de evaluación cuando hay drift.
 El dataset se valida de forma estricta: IDs duplicados, relevantes vacíos o relevantes fuera del corpus fallan al cargar.
 Los overrides de modo son explícitos:
 - `--candidate-k` sólo para `dense`
 - `--dual-candidate-k` sólo para `dual`
 - `--hybrid-alpha` sólo para `hybrid`
+
+Override útil para wrappers/benchmarks:
+
+```bash
+RAG_PERF_METRICS_OUT=/tmp/rag-perf.json rag-eval --retrieval-mode dense
+```
+
+Ese env var sobrescribe `perf_metrics_out_path` en tiempo de carga de settings sin editar `config.yaml`.
 
 Comparación baseline-vs-candidate (“Detector de Placebo RAG”):
 
