@@ -8,9 +8,9 @@ from local_rag_backend.cli_commands.runtime import (
     build_dense_embedder,
     ensure_sqlite_schema_for_cli,
     get_cli_container,
+    get_cli_runtime_snapshot,
     run_cli_mutation,
 )
-from local_rag_backend.settings import settings
 
 
 @click.command("rebuild-index")
@@ -20,7 +20,8 @@ def rebuild_index_cmd() -> None:
         from local_rag_backend.core.use_cases import index as index_service
 
         container = get_cli_container()
-        if container.settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
+        runtime = get_cli_runtime_snapshot()
+        if runtime.retrieval_mode not in ("dense", "dual", "hybrid"):
             raise RuntimeError("rebuild-index requires retrieval_mode=dense|dual|hybrid")
         ports = container.index_mutation_ports(
             build_embedder=build_dense_embedder,
@@ -43,6 +44,7 @@ def rebuild_index_cmd() -> None:
 def status_cmd() -> None:
     """Display system status and configuration."""
     container = get_cli_container()
+    runtime = get_cli_runtime_snapshot()
     ensure_sqlite_schema_for_cli()
     readiness_bundle = container.build_health_readiness_bundle()
     diagnostics = readiness_bundle.diagnostics
@@ -55,50 +57,65 @@ def status_cmd() -> None:
 
     click.secho("📋 Core Configuration", fg=title_fg, bold=True)
     click.echo(
-        f"  {click.style('Host:', fg=key_fg, bold=True)} {settings.app_host}:{settings.app_port}"
+        f"  {click.style('Host:', fg=key_fg, bold=True)} {runtime.host}:{runtime.port}"
     )
     click.echo(
-        f"  {click.style('Retrieval Mode:', fg=key_fg, bold=True)} {settings.retrieval_mode}"
+        f"  {click.style('Retrieval Mode:', fg=key_fg, bold=True)} {runtime.retrieval_mode}"
     )
     click.echo(
-        f"  {click.style('Persistence Backend:', fg=key_fg, bold=True)} {settings.persistence_backend}"
+        f"  {click.style('Persistence Backend:', fg=key_fg, bold=True)} {runtime.persistence_backend}"
     )
     click.echo(
-        f"  {click.style('Debug Mode:', fg=key_fg, bold=True)} {'✅' if settings.debug else '❌'}"
+        f"  {click.style('Debug Mode:', fg=key_fg, bold=True)} {'✅' if runtime.debug else '❌'}"
+    )
+    click.echo(
+        f"  {click.style('Vector Backend:', fg=key_fg, bold=True)} {runtime.vector_backend}"
+    )
+    click.echo(
+        f"  {click.style('API Key Configured:', fg=key_fg, bold=True)} {'✅' if runtime.api_key_configured else '❌'}"
+    )
+    click.echo(
+        f"  {click.style('Public Bind Requires API Key:', fg=key_fg, bold=True)} {'✅' if runtime.public_bind_requires_api_key else '❌'}"
     )
     click.echo()
 
     click.secho("🤖 LLM Configuration", fg=title_fg, bold=True)
     click.echo(
-        f"  {click.style('Ollama Enabled:', fg=key_fg, bold=True)} {'✅' if settings.ollama_enabled else '❌'}"
+        f"  {click.style('Ollama Enabled:', fg=key_fg, bold=True)} {'✅' if runtime.ollama_enabled else '❌'}"
     )
-    if settings.ollama_enabled:
-        click.echo(f"    {click.style('URL:', fg=key_fg, bold=True)} {settings.ollama_base_url}")
-        click.echo(f"    {click.style('Model:', fg=key_fg, bold=True)} {settings.ollama_model}")
+    if runtime.ollama_enabled:
+        click.echo(
+            f"    {click.style('URL:', fg=key_fg, bold=True)} {container.settings_obj.ollama_base_url}"
+        )
+        click.echo(
+            f"    {click.style('Model:', fg=key_fg, bold=True)} {container.settings_obj.ollama_model}"
+        )
     click.echo(
-        f"  {click.style('OpenAI Enabled:', fg=key_fg, bold=True)} {'✅' if bool(settings.openai_api_key) else '❌'}"
+        f"  {click.style('OpenAI Enabled:', fg=key_fg, bold=True)} {'✅' if runtime.openai_enabled else '❌'}"
     )
-    if settings.openai_api_key:
-        click.echo(f"    {click.style('Model:', fg=key_fg, bold=True)} {settings.openai_model}")
+    if runtime.openai_enabled:
+        click.echo(
+            f"    {click.style('Model:', fg=key_fg, bold=True)} {container.settings_obj.openai_model}"
+        )
     click.echo()
 
     click.secho("📁 Storage Status", fg=title_fg, bold=True)
-    if settings.persistence_backend == "elasticsearch":
+    if runtime.persistence_backend == "elasticsearch":
         click.echo(
-            f"  {click.style('Elasticsearch:', fg=key_fg, bold=True)} {settings.es_base_url or '[MISSING]'}"
+            f"  {click.style('Elasticsearch:', fg=key_fg, bold=True)} {container.settings_obj.es_base_url or '[MISSING]'}"
         )
         for name, value in [
-            ("Docs index", settings.es_docs_index),
-            ("History index", settings.es_history_index),
-            ("System index", settings.es_system_index),
-            ("Tombstones index", settings.es_tombstones_index),
+            ("Docs index", container.settings_obj.es_docs_index),
+            ("History index", container.settings_obj.es_history_index),
+            ("System index", container.settings_obj.es_system_index),
+            ("Tombstones index", container.settings_obj.es_tombstones_index),
         ]:
             click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {value}")
     else:
         for name, path_str in [
-            ("Database", settings.sqlite_url.replace("sqlite:///", "")),
-            ("FAISS index", settings.index_path),
-            ("Sample data", settings.faq_csv),
+            ("Database", container.settings_obj.sqlite_url.replace("sqlite:///", "")),
+            ("FAISS index", runtime.index_path),
+            ("Sample data", container.settings_obj.faq_csv),
         ]:
             path = Path(path_str)
             status_icon = "✅ YES" if path.exists() else "❌ NO"
@@ -121,12 +138,12 @@ def status_cmd() -> None:
     except Exception as e:
         click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
 
-    if settings.retrieval_mode in ("dense", "dual", "hybrid"):
+    if runtime.retrieval_mode in ("dense", "dual", "hybrid"):
         try:
             stats = diagnostics.get_retrieval_index_stats(
-                index_path=settings.index_path,
-                id_map_path=settings.id_map_path,
-                vector_backend=settings.vector_backend,
+                index_path=runtime.index_path,
+                id_map_path=runtime.id_map_path,
+                vector_backend=runtime.vector_backend,
                 dim=None,
                 expected_manifest=readiness_bundle.expected_manifest,
             )
@@ -140,7 +157,7 @@ def status_cmd() -> None:
                 f"{stats.get('vectors')} vectors "
                 f"(dim={stats.get('dim')}, backend={stats.get('backend')})"
             )
-            if settings.persistence_backend != "elasticsearch":
+            if runtime.persistence_backend != "elasticsearch":
                 click.echo(
                     f"  {click.style('Manifest:', fg=key_fg, bold=True)} OK "
                     f"(path={stats.get('manifest_path')})"
@@ -165,7 +182,7 @@ def status_cmd() -> None:
                 f"[ERROR] {status_txt} "
                 f"(hint: {stats.get('hint')})"
             )
-            if status_txt == "drift" and settings.persistence_backend != "elasticsearch":
+            if status_txt == "drift" and runtime.persistence_backend != "elasticsearch":
                 mm = stats.get("manifest_mismatches") or []
                 if isinstance(mm, list) and mm:
                     sample = ", ".join(

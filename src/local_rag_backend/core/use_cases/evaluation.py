@@ -161,7 +161,7 @@ def _coerce_retrieval_result(
             docs=docs,
             scores=scores,
             mode_used=request.mode,
-            backend_used="legacy_eval",
+            backend_used="eval",
         )
     raise RuntimeError(f"Unsupported eval retriever response type: {type(raw_result)!r}")
 

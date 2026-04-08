@@ -55,62 +55,6 @@ class UpsertDocResult(BaseModel):
     content_changed: bool
 
 
-class CanonicalImportDocItem(BaseModel):
-    external_id: str = Field(..., min_length=1, max_length=512)
-    content: str = Field(..., min_length=1, max_length=20000)
-    source_id: str | None = Field(default=None, max_length=1024)
-    metadata: dict[str, Any] | None = None
-
-    @field_validator("external_id")
-    @classmethod
-    def _canonical_external_id_not_blank(cls, v: str) -> str:
-        v2 = v.strip()
-        if not v2:
-            raise ValueError("external_id must not be blank")
-        return v2
-
-    @field_validator("content")
-    @classmethod
-    def _canonical_content_not_blank(cls, v: str) -> str:
-        v2 = v.strip()
-        if not v2:
-            raise ValueError("content must not be blank")
-        return v2
-
-
-class CanonicalImportRequest(BaseModel):
-    scope: str = Field(..., min_length=1, max_length=512)
-    snapshot_id: str = Field(..., min_length=1, max_length=512)
-    replace_scope: bool = False
-    documents: list[CanonicalImportDocItem] = Field(
-        default_factory=list, min_length=1, max_length=5000
-    )
-
-    @field_validator("scope", "snapshot_id")
-    @classmethod
-    def _not_blank(cls, v: str) -> str:
-        v2 = v.strip()
-        if not v2:
-            raise ValueError("value must not be blank")
-        return v2
-
-    @model_validator(mode="after")
-    def _validate_unique_external_ids(self) -> CanonicalImportRequest:
-        seen: set[str] = set()
-        duplicates: list[str] = []
-        for document in self.documents:
-            external_id = str(document.external_id).strip()
-            if external_id in seen:
-                duplicates.append(external_id)
-            seen.add(external_id)
-        if duplicates:
-            raise ValueError(
-                "documents.external_id values must be unique per canonical import: "
-                + ", ".join(sorted(set(duplicates))[:10])
-            )
-        return self
-
-
 class CanonicalImportResponse(BaseModel):
     scope: str
     snapshot_id: str

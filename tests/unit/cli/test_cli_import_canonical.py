@@ -79,6 +79,83 @@ def test_read_payload_rejects_non_object_json(tmp_path) -> None:
         raise AssertionError("expected ValueError")
 
 
+def test_read_payload_accepts_repogpt_code_units_v4(tmp_path) -> None:
+    payload = tmp_path / "payload.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "schema_version": "4",
+                "kind": "code-units",
+                "repo_key": "demo",
+                "scope": "repogpt:demo",
+                "snapshot_id": "demo-snap",
+                "replace_scope": True,
+                "documents": [
+                    {
+                        "external_id": "repogpt:demo:src/app.py:function:helper",
+                        "source_id": "repogpt:demo:file:src/app.py",
+                        "scope": "repogpt:demo",
+                        "snapshot_id": "demo-snap",
+                        "path": "src/app.py",
+                        "unit_type": "function",
+                        "repo_key": "demo",
+                        "content_hash": "abc123",
+                        "content": "def helper():\n    return 1\n",
+                        "metadata": {
+                            "scope": "repogpt:demo",
+                            "snapshot_id": "demo-snap",
+                            "path": "src/app.py",
+                            "unit_type": "function",
+                            "repo_key": "demo",
+                            "content_hash": "abc123",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = import_cmd_module._read_payload(payload)
+    assert loaded["schema_version"] == "4"
+    assert loaded["kind"] == "code-units"
+
+
+def test_read_payload_rejects_repogpt_code_units_v3(tmp_path) -> None:
+    payload = tmp_path / "payload.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "schema_version": "3",
+                "kind": "code-units",
+                "repo_key": "demo",
+                "scope": "repogpt:demo",
+                "snapshot_id": "demo-snap",
+                "documents": [
+                    {
+                        "external_id": "repogpt:demo:1",
+                        "content": "def helper():\n    return 1\n",
+                        "metadata": {
+                            "path": "src/app.py",
+                            "unit_type": "function",
+                            "repo_key": "demo",
+                            "content_hash": "abc123",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        import_cmd_module._read_payload(payload)
+    except ValueError as exc:
+        assert "schema_version='4'" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_build_request_rejects_non_list_documents() -> None:
     try:
         import_cmd_module._build_request(

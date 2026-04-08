@@ -12,6 +12,8 @@ What changed since the previous revision:
 
 1. Some earlier structural debt is now materially reduced:
    - runtime config is YAML-only and validated centrally in `Settings`
+   - agent-facing status now uses a typed runtime snapshot instead of raw settings reads
+   - canonical import transport now shares one typed validation/assembly path across CLI, HTTP, and MCP
    - `core/use_cases -> infrastructure|composition` import debt is frozen at an explicit zero baseline
    - advanced docs now teach canonical mutation instead of direct storage writes
 2. The evaluation stack should no longer be treated as "bounded cleanup only".
@@ -52,9 +54,9 @@ Interpretation:
 | --- | --- | --- | --- | --- |
 | Mutation saga | One module still owns profile validation, journal lifecycle, before-image, SQL apply, vector apply, rollback, recovery, and reconcile | [`src/local_rag_backend/core/use_cases/_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) | High blast radius for write-path changes | High |
 | Mutation coordinator | Strategy selection, profile resolution, batching, and settings-derived behavior remain concentrated in one coordinator | [`src/local_rag_backend/core/use_cases/docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) | Coordination logic still spreads across layers | High |
-| Canonical import path | Scope-sync still relies on dynamic repo capabilities outside the coordinator; transport defaults still diverge | [`src/local_rag_backend/core/use_cases/docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py), [`src/local_rag_backend/http/schemas/docs.py`](../src/local_rag_backend/http/schemas/docs.py) | Same business action can behave differently by transport and adapter capability | High |
+| Canonical import path | Scope-sync still relies on dynamic repo capabilities outside the coordinator; transport validation is now shared, but the write semantics still depend on repo-specific delete hooks | [`src/local_rag_backend/core/use_cases/docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py) | Same business action can still depend on repo capabilities outside the core coordinator | High |
 | Evaluation methodology | Unknown retrieved IDs are silently filtered; original retriever scores are discarded; compare gate uses aggregate deltas only | [`src/local_rag_backend/core/services/evaluation.py`](../src/local_rag_backend/core/services/evaluation.py), [`src/local_rag_backend/core/use_cases/evaluation.py`](../src/local_rag_backend/core/use_cases/evaluation.py) | Retrieval defects can be masked; candidate quality can be overstated | High |
-| CLI / DX contract consistency | CLI payload validation is duplicated and manual; defaults diverge across transports; evaluation flags are powerful but cognitively expensive | [`src/local_rag_backend/cli_commands/docs/docs_mutate.py`](../src/local_rag_backend/cli_commands/docs/docs_mutate.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/eval.py`](../src/local_rag_backend/cli_commands/eval.py), [`src/local_rag_backend/http/schemas/docs.py`](../src/local_rag_backend/http/schemas/docs.py) | Users learn inconsistent contracts; changes can drift silently between CLI, HTTP, and use cases | High |
+| CLI / DX contract consistency | Evaluation flags are still powerful and cognitively expensive; some command surfaces remain manually shaped rather than spec-driven | [`src/local_rag_backend/cli_commands/docs/docs_mutate.py`](../src/local_rag_backend/cli_commands/docs/docs_mutate.py), [`src/local_rag_backend/cli_commands/eval.py`](../src/local_rag_backend/cli_commands/eval.py) | Users still have to learn a wide CLI surface | Medium |
 | Maintenance | Two multi-store delete flows are still near-mirror implementations | [`src/local_rag_backend/core/services/maintenance.py`](../src/local_rag_backend/core/services/maintenance.py) | Partial fixes and telemetry drift | Medium |
 | Ingestion planner | Planning, stale detection, batching, mutation execution, and terminal output still live in one module; `items` remains `Any` | [`src/local_rag_backend/cli_commands/docs/_ingestion_planner.py`](../src/local_rag_backend/cli_commands/docs/_ingestion_planner.py) | Reuse is limited; contracts remain implicit | Medium |
 | Elasticsearch system state | `bump_version()` is still read-modify-write without an atomic compare-and-swap or conflict retry loop | [`src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py`](../src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py) | Cross-worker cache invalidation can lose increments under contention | Medium |
@@ -84,8 +86,7 @@ Recommended direction:
 
 Validated points:
 
-- CLI still defaults `replace_scope` to `True` when omitted in [`docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py).
-- HTTP still defaults `replace_scope` to `False` in [`http/schemas/docs.py`](../src/local_rag_backend/http/schemas/docs.py).
+- CLI and HTTP now default `replace_scope` to `True` when omitted in canonical import.
 - Scope replacement in [`docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py) still depends on dynamic repo methods such as `list_external_ids_by_scope`, `snapshot_by_external_ids`, and `hard_delete_by_external_ids`.
 
 Why this matters:
@@ -96,7 +97,7 @@ Why this matters:
 
 Recommended direction:
 
-- Align `replace_scope` defaults first.
+- Keep the shared `replace_scope=true` default stable across transports.
 - Introduce shared typed validation for CLI payloads instead of hand-built dict parsing.
 - Decide whether scope replacement belongs inside canonical mutation or deserves a separate explicit use case.
 
@@ -134,7 +135,7 @@ Recommended direction:
 Validated points:
 
 - CLI mutation and canonical-import commands still parse JSON manually instead of reusing shared typed validation.
-- `replace_scope` still defaults differently between CLI and HTTP.
+- `replace_scope` semantics are aligned and the typed validation path is now shared across CLI, HTTP, and MCP.
 - `rag-eval`, `rag-eval-batch`, and `rag-eval-compare` expose powerful workflows, but the option surface is large and uneven:
   flags such as `--candidate-candidate-k`, `--baseline-dual-candidate-k`, and JSON batch specs create a high cognitive load.
 - `_ingestion_planner.py` still emits terminal output directly, which keeps planning logic coupled to CLI behavior.
@@ -215,7 +216,7 @@ Interpretation:
 
 ### P0
 
-- Align `replace_scope` defaults between CLI and HTTP.
+- Reuse one shared typed validation path between CLI and HTTP.
 - Introduce shared typed validation for CLI canonical-import and mutation payloads.
 - Fix evaluation blind spots:
   - stop silently filtering unknown IDs

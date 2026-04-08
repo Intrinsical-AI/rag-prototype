@@ -57,7 +57,7 @@ class RagService:
                 docs=docs,
                 scores=scores,
                 mode_used=request.mode,
-                backend_used="legacy",
+                backend_used="tuple_adapter",
             )
         raise RuntimeError(f"Unsupported retriever response type: {type(raw_result)!r}")
 

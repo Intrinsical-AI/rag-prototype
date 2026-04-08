@@ -7,10 +7,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
-from fastapi import APIRouter, Body, Depends, File, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from local_rag_backend.composition.adapters import DEFAULT_DENSE_BACKEND_MESSAGE
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
+from local_rag_backend.core.services.canonical_import_transport import (
+    build_canonical_import_request_input,
+    validate_canonical_import_payload,
+)
 from local_rag_backend.core.use_cases.docs_import import (
     DEFAULT_IMPORT_MAX_BYTES,
     ImportDocsOutcome,
@@ -21,8 +26,6 @@ from local_rag_backend.core.use_cases.docs_import import (
     execute_import_docs_sync,
 )
 from local_rag_backend.core.use_cases.docs_import_canonical import (
-    CanonicalImportDocumentInput,
-    CanonicalImportRequestInput,
     execute_import_canonical_sync,
 )
 from local_rag_backend.core.use_cases.docs_ingest import ingest_docs_sync
@@ -43,7 +46,6 @@ from local_rag_backend.http.dependencies import (
     reset_rag_service,
 )
 from local_rag_backend.http.schemas.docs import (
-    CanonicalImportRequest,
     CanonicalImportResponse,
     DocsMutateRequest,
     DocsMutateResponse,
@@ -221,29 +223,23 @@ async def mutate_docs(
 
 @router.post("/docs/import-canonical", response_model=CanonicalImportResponse)
 async def import_canonical_docs(
-    payload: Annotated[CanonicalImportRequest, Body(...)],
+    payload_raw: Annotated[dict[str, Any], Body(...)],
     container: AppContainer = Depends(get_app_container_dependency),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> CanonicalImportResponse:
+    try:
+        payload = validate_canonical_import_payload(payload_raw)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     mutation_bundle = container.build_docs_mutation_bundle(
         missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
     )
 
     def _import_operation() -> CanonicalImportResponse:
         summary = execute_import_canonical_sync(
-            request=CanonicalImportRequestInput(
-                scope=payload.scope,
-                snapshot_id=payload.snapshot_id,
-                replace_scope=payload.replace_scope,
-                documents=tuple(
-                    CanonicalImportDocumentInput(
-                        external_id=item.external_id,
-                        content=item.content,
-                        source_id=item.source_id,
-                        metadata=item.metadata,
-                    )
-                    for item in payload.documents
-                ),
+            request=build_canonical_import_request_input(
+                payload,
                 source="api:/docs/import-canonical",
             ),
             settings_obj=settings_obj,

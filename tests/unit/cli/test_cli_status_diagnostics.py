@@ -57,6 +57,8 @@ def test_status_keeps_exit_code_zero_when_diagnostics_counts_fail(monkeypatch) -
             raise RuntimeError("history backend offline")
 
     class _Container:
+        settings_obj = settings
+
         def build_health_readiness_bundle(self):
             return SimpleNamespace(diagnostics=_Diagnostics(), expected_manifest=None)
 
@@ -86,6 +88,8 @@ def test_status_keeps_exit_code_zero_when_retrieval_stats_fail(monkeypatch) -> N
             raise RuntimeError("remote backend offline")
 
     class _Container:
+        settings_obj = settings
+
         def build_health_readiness_bundle(self):
             return SimpleNamespace(diagnostics=_Diagnostics(), expected_manifest=None)
 

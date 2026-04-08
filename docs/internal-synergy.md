@@ -21,6 +21,9 @@ Notas:
 * `../synergy` uses `elasticsearch` as the default workspace profile; this repo does not.
 * Consumer-owned eval dataset: `datasets/repogpt_rag_eval_v1.jsonl`
 * Maintained import/search coverage: `tests/e2e/test_repogpt_ingest_search_eval.py`
+* Supported producer contract: `RepoGPT code-units` schema `4`
+* Agent-facing status now exposes a structured runtime snapshot instead of raw config fields.
+* Canonical import transport is shared across CLI, HTTP, and MCP; RepoGPT-specific checks live at the border.
 
 ## Vulnerability pilot pack
 

@@ -56,7 +56,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     payload_path = tmp_path / "repogpt_eval_code_units.json"
     payload = emit_repogpt_code_units(payload_path=payload_path, repo_path=REPOGPT_FIXTURE_REPO)
 
-    assert payload["schema_version"] == "3"
+    assert payload["schema_version"] == "4"
     assert payload["replace_scope"] is True
     repo_key = str(payload["repo_key"])
 

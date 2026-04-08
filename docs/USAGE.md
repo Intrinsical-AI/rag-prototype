@@ -268,6 +268,7 @@ cat > /tmp/canonical_import.json <<'JSON'
 {
   "scope":"repogpt:demo",
   "snapshot_id":"snap-1",
+  "replace_scope": true,
   "documents":[
     {
       "external_id":"repogpt:demo:1",
@@ -359,8 +360,21 @@ Notas:
 * En `local_split`, el rebuild recompone el índice vectorial local desde el store canónico.
 * En `elasticsearch`, el rebuild re-embebe los documentos del índice de documentos y actualiza los vectores in-place.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
-* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones.
+* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI y HTTP ahora usan el mismo default: `true`.
+* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v4` se normaliza en el borde de transporte, no en el core del importador.
 * Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
+* `rag_status` devuelve un `runtime` estructurado con topología, seguridad, backends y rutas, además de `health` e `index` cuando aplican.
+
+### RepoGPT contract
+
+`RepoGPT code-units v4` es el contrato soportado para la integración canónica de código:
+
+* `kind = "code-units"`
+* `schema_version = "4"`
+* `scope`, `snapshot_id`, `replace_scope`
+* `documents[]` con `external_id`, `content`, `metadata`
+
+El import canónico sigue siendo genérico; no se especializa el use case al dominio RepoGPT. La validación específica vive en el borde de transporte para detectar payloads `code-units` desalineados antes de tocar el write-path canónico.
 
 ---
 

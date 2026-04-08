@@ -151,6 +151,7 @@ rag-status      = "local_rag_backend.cli:rag_status"
 rag-eval        = "local_rag_backend.cli:rag_eval"
 rag-eval-batch  = "local_rag_backend.cli:rag_eval_batch"
 rag-eval-compare = "local_rag_backend.cli:rag_eval_compare"
+rag-mcp         = "local_rag_backend.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

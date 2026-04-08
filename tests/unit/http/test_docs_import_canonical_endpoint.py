@@ -48,6 +48,35 @@ async def test_import_canonical_upsert_only_and_reimport_is_unchanged(
     }
 
 
+async def test_import_canonical_defaults_replace_scope_true(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    first = {
+        "scope": "repogpt:demo",
+        "snapshot_id": "snap-1",
+        "documents": [
+            {"external_id": "doc-1", "content": "alpha", "metadata": {"path": "a.py"}},
+            {"external_id": "doc-2", "content": "beta", "metadata": {"path": "b.py"}},
+        ],
+    }
+    second = {
+        "scope": "repogpt:demo",
+        "snapshot_id": "snap-2",
+        "documents": [{"external_id": "doc-2", "content": "beta-v2", "metadata": {"path": "b.py"}}],
+    }
+
+    r1 = await asgi_client.post("/api/docs/import-canonical", json=first)
+    assert r1.status_code == 200
+    r2 = await asgi_client.post("/api/docs/import-canonical", json=second)
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert body2["replace_scope"] is True
+    assert body2["deleted_sql"] == 1
+    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-2"}
+
+
 async def test_import_canonical_replace_scope_hard_deletes_stale_docs(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
@@ -137,3 +166,43 @@ async def test_import_canonical_rejects_duplicate_external_ids(
 
     response = await asgi_client.post("/api/docs/import-canonical", json=payload)
     assert response.status_code == 422
+
+
+async def test_import_canonical_rejects_repogpt_schema_v3_payload(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+
+    payload = {
+        "schema_version": "3",
+        "kind": "code-units",
+        "repo_key": "demo",
+        "scope": "repogpt:demo",
+        "snapshot_id": "snap-1",
+        "replace_scope": True,
+        "documents": [
+            {
+                "external_id": "repogpt:demo:src/app.py:function:helper",
+                "source_id": "repogpt:demo:file:src/app.py",
+                "scope": "repogpt:demo",
+                "snapshot_id": "snap-1",
+                "path": "src/app.py",
+                "unit_type": "function",
+                "repo_key": "demo",
+                "content_hash": "abc123",
+                "content": "def helper():\n    return 1\n",
+                "metadata": {
+                    "scope": "repogpt:demo",
+                    "snapshot_id": "snap-1",
+                    "path": "src/app.py",
+                    "unit_type": "function",
+                    "repo_key": "demo",
+                    "content_hash": "abc123",
+                },
+            }
+        ],
+    }
+
+    response = await asgi_client.post("/api/docs/import-canonical", json=payload)
+    assert response.status_code == 422
+    assert "schema_version='4'" in response.text

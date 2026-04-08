@@ -5,10 +5,15 @@ from pathlib import Path
 from typing import Any, cast
 
 import click
+from pydantic import ValidationError
 
 from local_rag_backend.cli_commands.runtime import get_cli_container, run_cli_mutation
+from local_rag_backend.core.services.canonical_import_transport import (
+    build_canonical_import_request_input_from_raw,
+    validate_canonical_import_payload,
+)
+from local_rag_backend.core.services.external_canonical import normalize_external_canonical_payload
 from local_rag_backend.core.use_cases.docs_import_canonical import (
-    CanonicalImportDocumentInput,
     CanonicalImportRequestInput,
     execute_import_canonical_sync,
 )
@@ -20,7 +25,9 @@ def _read_payload(payload_json: Path) -> dict[str, Any]:
     payload = json.loads(payload_json.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("--json must contain a JSON object payload")
-    return cast("dict[str, Any]", payload)
+    normalized = normalize_external_canonical_payload(cast("dict[str, Any]", payload))
+    validate_canonical_import_payload(normalized)
+    return normalized
 
 
 def _build_request(
@@ -31,30 +38,17 @@ def _build_request(
     documents_raw = payload.get("documents") or []
     if not isinstance(documents_raw, list):
         raise ValueError("payload.documents must be a list")
-
-    documents: list[CanonicalImportDocumentInput] = []
     for item in documents_raw:
         if not isinstance(item, dict):
             raise ValueError("each payload.documents item must be an object")
-        metadata = item.get("metadata")
-        documents.append(
-            CanonicalImportDocumentInput(
-                external_id=str(item.get("external_id") or "").strip(),
-                content=str(item.get("content") or "").strip(),
-                source_id=(
-                    str(item.get("source_id")) if item.get("source_id") is not None else None
-                ),
-                metadata=(cast("dict[str, Any]", metadata) if isinstance(metadata, dict) else None),
-            )
+    try:
+        return build_canonical_import_request_input_from_raw(
+            cast("dict[str, Any]", payload),
+            source="cli:docs:import-canonical",
+            replace_scope_override=replace_scope,
         )
-
-    return CanonicalImportRequestInput(
-        scope=str(payload.get("scope") or "").strip(),
-        snapshot_id=str(payload.get("snapshot_id") or "").strip(),
-        replace_scope=replace_scope,
-        documents=tuple(documents),
-        source="cli:docs:import-canonical",
-    )
+    except (ValidationError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _resolve_replace_scope(
@@ -67,9 +61,9 @@ def _resolve_replace_scope(
     payload_value = payload.get("replace_scope")
     if payload_value is None:
         return True
-    if isinstance(payload_value, bool):
-        return payload_value
-    raise ValueError("payload.replace_scope must be a boolean when provided")
+    if not isinstance(payload_value, bool):
+        raise ValueError("payload.replace_scope must be a boolean when provided")
+    return bool(payload_value)
 
 
 @click.command("import-canonical")

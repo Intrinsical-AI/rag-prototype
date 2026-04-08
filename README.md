@@ -134,7 +134,7 @@ If you change any of these settings, `/readyz` and `rag-status` will report drif
 * canonical document IDs are opaque strings (`doc:<uuid7>`)
 * SQL documents use `doc_id` as the primary key
 * vector `id_map.json` stores `list[str]`
-* no runtime migration/fallback for legacy schemas or legacy id maps
+* no runtime migration/fallback for older schemas or id maps
 
 ### Retrieval Adapter Resolution
 
@@ -173,6 +173,8 @@ Use these entrypoints for the main workflows:
 * `rag-rebuild-index` for explicit repair of dense/dual/hybrid state.
 * `rag-eval` and `rag-eval-compare` for offline evaluation gates.
 
+`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
+
 Optional: better file type detection (best-effort) using `python-magic`:
 
 ```bash
@@ -208,6 +210,23 @@ Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 # reranker_candidate_k: 20
 ```
 
+Optional: MCP server for agent-facing operational workflows:
+
+```bash
+rag-mcp
+# or: python -m local_rag_backend.mcp_server
+```
+
+Tools:
+
+* `rag_import_canonical`
+* `rag_rebuild_index`
+* `rag_eval`
+* `rag_status`
+
+`rag_status` now returns a structured runtime snapshot plus health/index diagnostics, so agents
+do not need to infer topology from raw config fields.
+
 
 
 ### Run with Docker Compose (including Ollama)
@@ -225,10 +244,10 @@ curl http://localhost:8000/healthz/ollama
 ```
 
 Notes:
-- Backend listens on `8000`, Ollama on `11434`.
-- Configure providers via `config.yaml`.
-- In `docker-compose.yml`, `ollama_enabled: true` and `ollama_base_url: http://ollama:11434` are set.
-- `docker-compose.yml` defaults to `persistence_backend: local_split` and `retrieval_mode: sparse` for a lightweight image.
+ - Backend listens on `8000`, Ollama on `11434`.
+ - Configure providers via `config.yaml`.
+ - `docker-compose.yml` sets container environment defaults for convenience, but the app still reads `config.yaml` as the runtime source of truth. If you want compose-driven config, mount or generate a `config.yaml` inside the container.
+ - `docker-compose.yml` defaults the container runtime to `persistence_backend: local_split` and `retrieval_mode: sparse`, but those values do not override `config.yaml` by themselves.
 - For `local_split` dense/hybrid in compose, build backend with extras, for example:
 
 ```bash
@@ -304,7 +323,7 @@ Notes:
 * `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
 * `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
-* v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
+* v1.0 removed old write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
 * `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
 * In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
