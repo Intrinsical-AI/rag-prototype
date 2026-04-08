@@ -10,6 +10,7 @@ through a Pydantic model.
 from __future__ import annotations
 
 import json
+import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
@@ -58,6 +59,11 @@ def load_settings_from_yaml(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Se
         raise ValueError("Configuration file must contain a YAML mapping at the top level.")
 
     base_dir = path.resolve().parent
+    # Benchmark/orchestration runners can redirect perf metrics without editing the
+    # repository config.yaml that remains the main runtime source of truth.
+    perf_metrics_override = str(os.getenv("RAG_PERF_METRICS_OUT", "") or "").strip()
+    if perf_metrics_override:
+        data["perf_metrics_out_path"] = perf_metrics_override
     for key in (
         "data_dir",
         "index_path",
