@@ -26,6 +26,7 @@ Si tu caso de uso no necesita este nivel de control, probablemente te baste una 
 La librería se configura mediante un único archivo `config.yaml` en la raíz del proyecto.
 Las rutas se resuelven relativas a ese archivo, no al directorio actual.
 Toma como base `config.example.yaml` y copia el archivo a `config.yaml` antes de editarlo.
+Importante: `docker-compose.yml` puede definir variables de entorno para el contenedor, pero el runtime no las usa como fuente de configuración hoy. Si despliegas con Compose, mantén `config.yaml` sincronizado o móntalo explícitamente.
 
 ```yaml
 # config.yaml

@@ -7,7 +7,7 @@ from local_rag_backend.settings import settings
 
 @click.command("server")
 def server_cmd() -> None:
-    """Start the RAG FastAPI server using settings from config file or environment."""
+    """Start the RAG FastAPI server using settings from config.yaml."""
     import uvicorn
 
     click.echo(f"🚀 Starting server on {settings.app_host}:{settings.app_port}...")
