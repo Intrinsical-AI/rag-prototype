@@ -50,11 +50,14 @@ Composition root y lifecycle runtime (transport-neutral):
 
 Adaptadores HTTP por bounded context:
 
-- `docs.py`: `GET /docs`, `POST /docs`, `POST /docs/import`, `POST /docs/mutate`, `POST /docs/import-canonical`
+- `docs.py`: `POST /docs`, `POST /docs/import`, `POST /docs/mutate`, `POST /docs/import-canonical`
 - `rag_router.py`: `POST /ask`, `POST /ask_eval`, `GET /history`
 - `index.py`: `POST /index/rebuild`
 - `health.py`: `GET /healthz`, `GET /readyz`, `GET /healthz/ollama`
 - `openrouter.py`, `meta.py`
+
+Swagger UI (`GET /docs`) and OpenAPI JSON (`GET /openapi.json`) are app-level FastAPI routes exposed by
+`http/main.py`, not part of `http/routers/docs.py`.
 
 ---
 
@@ -116,16 +119,12 @@ Los locks de escritura/archivo están en `infrastructure/concurrency/locks/{file
 
 ## Superficie v1.0 (breaking)
 
-Se eliminaron endpoints/commands legacy de mutación:
+La única superficie de mutación write-enabled es la unificada:
 
-- `/api/docs/upsert`
-- `/api/docs/delete`
-- `/api/docs/delete_by_external_id`
-- `rag-upsert-docs`
-- `rag-delete-docs`
-- `rag-delete-external-ids`
+- HTTP: `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- CLI: `rag-mutate-docs`, `rag-import-canonical`
 
-La mutación write-enabled se hace solo por la superficie unificada (`/api/docs/mutate`, `rag-mutate-docs`).
+Las rutas y comandos legacy de mutación ya no forman parte del contrato v1.
 
 ## Artefactos de evaluación
 

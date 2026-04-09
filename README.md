@@ -171,7 +171,10 @@ Use these entrypoints for the main workflows:
 * `rag-mutate-docs` for canonical writes via `MutationCoordinator`.
 * `rag-import-canonical` for scope/snapshot import and sync.
 * `rag-rebuild-index` for explicit repair of dense/dual/hybrid state.
-* `rag-eval` and `rag-eval-compare` for offline evaluation gates.
+* `rag-eval`, `rag-eval-batch`, and `rag-eval-compare` for offline evaluation gates.
+
+See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
+for batch-spec examples and compare-mode usage.
 
 `rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
 
@@ -320,18 +323,20 @@ docker compose up -d
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
 * `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/dual/hybrid only)
-* `POST /api/openrouter/generate` (enabled if OpenRouter configured)
+* `POST /api/openrouter/generate` (enabled only when `openrouter_enabled=true` and `openrouter_api_key`
+  are both set)
 
 Notes:
 
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources (best-effort; retrieval/answer response is not blocked if history persistence fails).
-* For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active configuration.
+* For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active
+  configuration. OpenRouter is only considered available when `openrouter_enabled=true` and
+  `openrouter_api_key` is set.
 * In dense/dual/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
 * `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
 * `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
-* v1.0 removed old write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
 * `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
 * In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.

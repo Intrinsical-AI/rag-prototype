@@ -20,3 +20,4 @@ nav:
   - App Layer: app.md
   - Advanced Usage (Ollama): USAGE.md
   - LangChain Loaders: langchain_loaders.md
+  - Framework Analysis: analysis_rag_frameworks.md

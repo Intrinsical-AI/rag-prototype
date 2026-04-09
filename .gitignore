@@ -218,4 +218,8 @@ figures/
 medium-blog/
 curso/
 
+config.yaml
 openai**
+.codex
+/artifacts
+data/_eval_workspaces/

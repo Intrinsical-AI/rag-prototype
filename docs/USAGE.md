@@ -302,8 +302,8 @@ curl -s http://localhost:8000/readyz
 ```
 
 `/healthz` solo valida disponibilidad básica del servicio. `/readyz` es más estricto y puede devolver
-`503` si no hay proveedor LLM configurado (`openai_api_key`, `ollama_enabled: true` u OpenRouter),
-aunque la app y SQLite estén sanos.
+`503` si no hay proveedor LLM configurado (`openai_api_key`, `ollama_enabled: true`, u OpenRouter con
+`openrouter_enabled: true` + `openrouter_api_key`), aunque la app y SQLite estén sanos.
 
 ```bash
 curl -X POST "http://localhost:8000/api/docs/mutate" \
