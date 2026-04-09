@@ -101,3 +101,12 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
     assert payload["deleted_index"] == 1
     assert payload["index_rebuilt"] is False
     assert embedder_calls == 0
+
+
+@pytest.mark.unit
+async def test_legacy_delete_endpoint_is_removed(asgi_client, in_memory_sqlite) -> None:
+    r = await asgi_client.post(
+        "/api/docs/delete",
+        json={"ids": ["doc-legacy"]},
+    )
+    assert r.status_code == 404

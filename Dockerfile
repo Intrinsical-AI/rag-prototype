@@ -83,7 +83,7 @@ WORKDIR /app
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"
 
 USER appuser
 EXPOSE 8000

@@ -18,6 +18,18 @@ def test_cli_registers_all_expected_commands() -> None:
         "ingest",
     }
     assert expected <= set(cli_module.cli.commands.keys())
+    assert "upsert-docs" not in cli_module.cli.commands
+    assert "delete-docs" not in cli_module.cli.commands
+    assert "delete-external-ids" not in cli_module.cli.commands
+
+
+def test_cli_does_not_register_legacy_mutation_commands() -> None:
+    legacy = {
+        "upsert-docs",
+        "delete-docs",
+        "delete-external-ids",
+    }
+    assert legacy.isdisjoint(cli_module.cli.commands.keys())
 
 
 @pytest.mark.parametrize(
