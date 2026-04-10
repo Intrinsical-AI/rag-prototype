@@ -5,17 +5,17 @@ from pathlib import Path
 from typing import Any, cast
 
 import click
+from pydantic import ValidationError
 
 from local_rag_backend.cli_commands.runtime import (
     build_dense_embedder,
     get_cli_container,
     run_cli_mutation,
 )
-from local_rag_backend.core.use_cases.docs_mutation import (
-    MutationCoordinator,
-    MutationIntent,
-    MutationUpsertInput,
+from local_rag_backend.core.services.docs_mutation_transport import (
+    build_docs_mutation_intent_from_raw,
 )
+from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator, MutationIntent
 from local_rag_backend.core.use_cases.results import MutationSummary
 from local_rag_backend.settings import settings
 
@@ -26,46 +26,11 @@ def _read_payload(payload_json: Path) -> dict[str, Any]:
         raise ValueError("--json must contain a JSON object payload")
     return cast("dict[str, Any]", payload)
 
-
 def _build_intent(payload: dict[str, Any]) -> MutationIntent:
-    upserts_raw = payload.get("upserts") or []
-    delete_ids_raw = payload.get("delete_ids") or []
-    delete_external_ids_raw = payload.get("delete_external_ids") or []
-
-    if not isinstance(upserts_raw, list):
-        raise ValueError("payload.upserts must be a list")
-    if not isinstance(delete_ids_raw, list):
-        raise ValueError("payload.delete_ids must be a list")
-    if not isinstance(delete_external_ids_raw, list):
-        raise ValueError("payload.delete_external_ids must be a list")
-
-    upserts: list[MutationUpsertInput] = []
-    for item in upserts_raw:
-        if not isinstance(item, dict):
-            raise ValueError("each payload.upserts item must be an object")
-        md = item.get("metadata")
-        upserts.append(
-            MutationUpsertInput(
-                external_id=str(item.get("external_id") or "").strip(),
-                content=str(item.get("content") or "").strip(),
-                source_id=(
-                    str(item.get("source_id")) if item.get("source_id") is not None else None
-                ),
-                scope=(str(item.get("scope")) if item.get("scope") is not None else None),
-                snapshot_id=(
-                    str(item.get("snapshot_id")) if item.get("snapshot_id") is not None else None
-                ),
-                metadata=(cast("dict[str, Any]", md) if isinstance(md, dict) else None),
-            )
-        )
-
-    return MutationIntent(
-        op_id=str(payload.get("op_id") or "").strip(),
-        upserts=tuple(upserts),
-        delete_ids=tuple(str(v) for v in delete_ids_raw),
-        delete_external_ids=tuple(str(v) for v in delete_external_ids_raw),
-        source="cli:docs:mutate",
-    )
+    try:
+        return build_docs_mutation_intent_from_raw(payload, source="cli:docs:mutate")
+    except (ValidationError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
 
 
 @click.command("mutate-docs")

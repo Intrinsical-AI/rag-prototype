@@ -16,6 +16,7 @@ from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input,
     validate_canonical_import_payload,
 )
+from local_rag_backend.core.services.docs_mutation_transport import build_docs_mutation_intent
 from local_rag_backend.core.use_cases.docs_import import (
     DEFAULT_IMPORT_MAX_BYTES,
     ImportDocsOutcome,
@@ -29,11 +30,7 @@ from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
 )
 from local_rag_backend.core.use_cases.docs_ingest import ingest_docs_sync
-from local_rag_backend.core.use_cases.docs_mutation import (
-    MutationCoordinator,
-    MutationIntent,
-    MutationUpsertInput,
-)
+from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
 from local_rag_backend.core.use_cases.errors import (
     BadRequestError,
     PayloadTooLargeError,
@@ -171,21 +168,8 @@ async def mutate_docs(
     def _mutate_operation() -> MutationSummary:
         coordinator = MutationCoordinator(settings_obj=settings_obj, ports=mutation_bundle.ports)
         return coordinator.execute(
-            MutationIntent(
-                op_id=str(payload.op_id or "").strip(),
-                upserts=tuple(
-                    MutationUpsertInput(
-                        external_id=item.external_id,
-                        content=item.content,
-                        source_id=item.source_id,
-                        scope=item.scope,
-                        snapshot_id=item.snapshot_id,
-                        metadata=item.metadata,
-                    )
-                    for item in payload.upserts
-                ),
-                delete_ids=tuple(payload.delete_ids),
-                delete_external_ids=tuple(payload.delete_external_ids),
+            build_docs_mutation_intent(
+                payload,
                 source="api:/docs/mutate",
             )
         )

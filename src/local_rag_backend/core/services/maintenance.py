@@ -52,6 +52,30 @@ _REBUILD_FAIL_MSG = (
 )
 
 
+def _preflight_vector_store_or_resolve_embedder(
+    *,
+    vec_repo: VectorRepoPort | None,
+    rebuild_on_index_failure: bool,
+    embedder: EmbedderPort | None,
+    embedder_factory: Callable[[], EmbedderPort] | None,
+) -> EmbedderPort | None:
+    """Ensure vector preflight is safe before SQL mutation; resolve fallback embedder when needed."""
+    resolved_embedder = embedder
+    if vec_repo is None or not rebuild_on_index_failure or resolved_embedder is not None:
+        return resolved_embedder
+
+    try:
+        _ = vec_repo.ntotal
+    except Exception as preflight_err:
+        resolved_embedder = _resolve_embedder_or_raise(
+            current=resolved_embedder,
+            factory=embedder_factory,
+            cause=preflight_err,
+            message=_PREFLIGHT_MSG,
+        )
+    return resolved_embedder
+
+
 def _resolve_embedder_or_raise(
     *,
     current: EmbedderPort | None,
@@ -66,6 +90,35 @@ def _resolve_embedder_or_raise(
     if current is None:
         raise RuntimeError(message) from cause
     return current
+
+
+def _delete_vector_rows_or_rebuild(
+    *,
+    ids: Sequence[DocId],
+    doc_repo: DocumentRepoPort,
+    vec_repo: VectorRepoPort,
+    embedder: EmbedderPort | None,
+    embedder_factory: Callable[[], EmbedderPort] | None,
+    rebuild_on_index_failure: bool,
+) -> tuple[int | None, bool]:
+    """Delete vectors by id; optionally rebuild from SQL state when deletion fails."""
+    try:
+        deleted_index = vec_repo.delete(ids)
+        return deleted_index, False
+    except Exception as delete_err:
+        if not rebuild_on_index_failure:
+            raise
+        resolved_embedder = _resolve_embedder_or_raise(
+            current=embedder,
+            factory=embedder_factory,
+            cause=delete_err,
+            message=_CONSISTENCY_MSG,
+        )
+        try:
+            rebuild_index_from_db(doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder)
+            return None, True
+        except Exception as rebuild_err:
+            raise RuntimeError(_REBUILD_FAIL_MSG) from rebuild_err
 
 
 def rebuild_index_from_db(
@@ -111,18 +164,12 @@ def delete_documents_multi_store(
             deleted_sql=0, deleted_index=0 if vec_repo else None, rebuilt=False
         )
 
-    resolved_embedder = embedder
-
-    if vec_repo is not None and rebuild_on_index_failure and resolved_embedder is None:
-        try:
-            _ = vec_repo.ntotal
-        except Exception as preflight_err:
-            resolved_embedder = _resolve_embedder_or_raise(
-                current=resolved_embedder,
-                factory=embedder_factory,
-                cause=preflight_err,
-                message=_PREFLIGHT_MSG,
-            )
+    resolved_embedder = _preflight_vector_store_or_resolve_embedder(
+        vec_repo=vec_repo,
+        rebuild_on_index_failure=rebuild_on_index_failure,
+        embedder=embedder,
+        embedder_factory=embedder_factory,
+    )
 
     before = len(list(doc_repo.get(ids_list)))
     doc_repo.delete_documents(ids_list)
@@ -131,29 +178,19 @@ def delete_documents_multi_store(
     if vec_repo is None:
         return MultiStoreDeleteResult(deleted_sql=deleted_sql, deleted_index=None, rebuilt=False)
 
-    try:
-        deleted_index = vec_repo.delete(ids_list)
-        return MultiStoreDeleteResult(
-            deleted_sql=deleted_sql, deleted_index=deleted_index, rebuilt=False
-        )
-    except Exception as delete_err:
-        if not rebuild_on_index_failure:
-            raise
-        resolved_embedder = _resolve_embedder_or_raise(
-            current=resolved_embedder,
-            factory=embedder_factory,
-            cause=delete_err,
-            message=_CONSISTENCY_MSG,
-        )
-        try:
-            rebuilt = rebuild_index_from_db(
-                doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder
-            )
-            return MultiStoreDeleteResult(
-                deleted_sql=deleted_sql, deleted_index=None, rebuilt=rebuilt >= 0
-            )
-        except Exception as rebuild_err:
-            raise RuntimeError(_REBUILD_FAIL_MSG) from rebuild_err
+    deleted_index, rebuilt = _delete_vector_rows_or_rebuild(
+        ids=ids_list,
+        doc_repo=doc_repo,
+        vec_repo=vec_repo,
+        embedder=resolved_embedder,
+        embedder_factory=embedder_factory,
+        rebuild_on_index_failure=rebuild_on_index_failure,
+    )
+    return MultiStoreDeleteResult(
+        deleted_sql=deleted_sql,
+        deleted_index=deleted_index,
+        rebuilt=rebuilt,
+    )
 
 
 def delete_external_ids_multi_store(
@@ -176,18 +213,12 @@ def delete_external_ids_multi_store(
             rebuilt=False,
         )
 
-    resolved_embedder = embedder
-
-    if vec_repo is not None and rebuild_on_index_failure and resolved_embedder is None:
-        try:
-            _ = vec_repo.ntotal
-        except Exception as preflight_err:
-            resolved_embedder = _resolve_embedder_or_raise(
-                current=resolved_embedder,
-                factory=embedder_factory,
-                cause=preflight_err,
-                message=_PREFLIGHT_MSG,
-            )
+    resolved_embedder = _preflight_vector_store_or_resolve_embedder(
+        vec_repo=vec_repo,
+        rebuild_on_index_failure=rebuild_on_index_failure,
+        embedder=embedder,
+        embedder_factory=embedder_factory,
+    )
 
     deleted_sql, deleted_ids, missing_external_ids, tombstoned = doc_repo.delete_by_external_ids(
         ext_ids
@@ -202,34 +233,18 @@ def delete_external_ids_multi_store(
             rebuilt=False,
         )
 
-    try:
-        deleted_index = vec_repo.delete(deleted_ids)
-        return MultiStoreExternalIdDeleteResult(
-            deleted_sql=deleted_sql,
-            deleted_index=deleted_index,
-            missing_external_ids=missing_external_ids,
-            tombstoned=tombstoned,
-            rebuilt=False,
-        )
-    except Exception as delete_err:
-        if not rebuild_on_index_failure:
-            raise
-        resolved_embedder = _resolve_embedder_or_raise(
-            current=resolved_embedder,
-            factory=embedder_factory,
-            cause=delete_err,
-            message=_CONSISTENCY_MSG,
-        )
-        try:
-            rebuilt = rebuild_index_from_db(
-                doc_repo=doc_repo, vec_repo=vec_repo, embedder=resolved_embedder
-            )
-            return MultiStoreExternalIdDeleteResult(
-                deleted_sql=deleted_sql,
-                deleted_index=None,
-                missing_external_ids=missing_external_ids,
-                tombstoned=tombstoned,
-                rebuilt=rebuilt >= 0,
-            )
-        except Exception as rebuild_err:
-            raise RuntimeError(_REBUILD_FAIL_MSG) from rebuild_err
+    deleted_index, rebuilt = _delete_vector_rows_or_rebuild(
+        ids=deleted_ids,
+        doc_repo=doc_repo,
+        vec_repo=vec_repo,
+        embedder=resolved_embedder,
+        embedder_factory=embedder_factory,
+        rebuild_on_index_failure=rebuild_on_index_failure,
+    )
+    return MultiStoreExternalIdDeleteResult(
+        deleted_sql=deleted_sql,
+        deleted_index=deleted_index,
+        missing_external_ids=missing_external_ids,
+        tombstoned=tombstoned,
+        rebuilt=rebuilt,
+    )

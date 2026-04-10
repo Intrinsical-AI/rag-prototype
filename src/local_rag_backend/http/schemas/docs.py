@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field
 
+from local_rag_backend.core.services.docs_mutation_transport import (
+    DocsMutationPayload,
+    MutationUpsertPayload,
+)
 from local_rag_backend.http.schemas.rag_api_models import RetrievalFilterModel
 
 
@@ -23,29 +27,8 @@ class IngestResponse(BaseModel):
     ids: list[str]
 
 
-class UpsertDocItem(BaseModel):
-    external_id: str = Field(..., min_length=1, max_length=512)
-    content: str = Field(..., min_length=1, max_length=20000)
-    source_id: str | None = Field(default=None, max_length=1024)
-    scope: str | None = Field(default=None, min_length=1, max_length=512)
-    snapshot_id: str | None = Field(default=None, min_length=1, max_length=512)
-    metadata: dict[str, Any] | None = None
-
-    @field_validator("external_id")
-    @classmethod
-    def _external_id_not_blank(cls, v: str) -> str:
-        v2 = v.strip()
-        if not v2:
-            raise ValueError("external_id must not be blank")
-        return v2
-
-    @field_validator("content")
-    @classmethod
-    def _content_not_blank(cls, v: str) -> str:
-        v2 = v.strip()
-        if not v2:
-            raise ValueError("content must not be blank")
-        return v2
+class UpsertDocItem(MutationUpsertPayload):
+    """Transport alias for docs mutation upsert items."""
 
 
 class UpsertDocResult(BaseModel):
@@ -84,62 +67,8 @@ class ImportResponse(BaseModel):
     )
 
 
-class DocsMutateRequest(BaseModel):
-    op_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=128,
-        description="Optional idempotency key for mutation replay safety.",
-    )
-    upserts: list[UpsertDocItem] = Field(default_factory=list, max_length=256)
-    delete_ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
-        default_factory=list,
-        max_length=2048,
-    )
-    delete_external_ids: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
-        default_factory=list,
-        max_length=2048,
-    )
-
-    @field_validator("delete_ids")
-    @classmethod
-    def _normalize_delete_ids(cls, v: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for doc_id in v:
-            doc_id_s = doc_id.strip()
-            if not doc_id_s or doc_id_s in seen:
-                continue
-            seen.add(doc_id_s)
-            normalized.append(doc_id_s)
-        return normalized
-
-    @field_validator("delete_external_ids")
-    @classmethod
-    def _normalize_delete_external_ids(cls, v: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for ext in v:
-            ext_s = ext.strip()
-            if not ext_s or ext_s in seen:
-                continue
-            seen.add(ext_s)
-            normalized.append(ext_s)
-        return normalized
-
-    @model_validator(mode="after")
-    def _validate_payload(self) -> DocsMutateRequest:
-        if not self.upserts and not self.delete_ids and not self.delete_external_ids:
-            raise ValueError(
-                "docs/mutate requires at least one operation: upserts, delete_ids, or delete_external_ids"
-            )
-        upsert_ext_ids = {str(doc.external_id).strip() for doc in self.upserts}
-        conflict = upsert_ext_ids & set(self.delete_external_ids)
-        if conflict:
-            raise ValueError(
-                "upserts and delete_external_ids cannot target the same external_id values"
-            )
-        return self
+class DocsMutateRequest(DocsMutationPayload):
+    """HTTP request alias using the shared transport validation contract."""
 
 
 class DocsMutateResponse(BaseModel):

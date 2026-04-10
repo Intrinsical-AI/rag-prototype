@@ -258,6 +258,63 @@ Interpretation:
 
 The hotspots above were checked against current code and targeted tests.
 
+## Quick Wins (next 2-4 weeks)
+
+This section prioritizes low-risk, high-impact improvements for the three
+highest-impact active debts.
+
+### A) Mutation saga monolítica
+
+1. **Extract phase helpers without changing orchestration order**
+   - Create private functions for: preflight/profile checks, SQL apply, vector
+     apply, rollback/recovery.
+   - **Why:** Reduces cognitive load and blast radius while preserving current
+     write semantics.
+2. **Introduce a small typed runtime config object**
+   - Resolve toggles from `Settings` once and pass a typed object through the
+     mutation path.
+   - **Why:** Removes repeated dynamic branching and makes behavior easier to
+     reason about and test.
+3. **Add phase-scoped structured telemetry**
+   - Emit consistent phase markers (`phase`, `doc_count`, `strategy`) around saga
+     steps.
+   - **Why:** Makes production debugging faster before deeper refactors.
+
+### B) Evaluación con sesgos metodológicos
+
+1. **Preserve retrieval scores in the callback contract**
+   - Move from `Sequence[str]` to a scored shape (`external_id`, `score`).
+   - **Why:** Avoids lossy rank-only evaluation and unlocks better diagnostics.
+2. **Stop silently dropping unknown IDs**
+   - Treat unknown IDs as explicit anomalies (counter + optional report) or as
+     non-relevant retrieved docs.
+   - **Why:** Prevents false confidence by surfacing corpus/index drift.
+3. **Emit per-query breakdown in compare mode**
+   - Add query-level metrics output alongside aggregate deltas.
+   - **Why:** Quick visibility into regressions hidden by averages.
+
+### C) Fragilidad de contratos CLI/HTTP
+
+1. **Single DTO validation path for CLI + HTTP + MCP**
+   - Reuse the same typed input models in all transports.
+   - **Why:** Eliminates semantic drift and duplicated parsing logic.
+2. **Unify visible defaults and error shape**
+   - Align default values and error payload contract across entrypoints.
+   - **Why:** Reduces user confusion and makes integration tests more stable.
+3. **Add transport parity tests for critical commands**
+   - Golden tests asserting same payload => same behavior in CLI and HTTP.
+   - **Why:** Catches drift early with low implementation cost.
+
+## Suggested execution order
+
+1. **Week 1-2:** transport parity + shared DTO validation (fast risk reduction).
+2. **Week 2-3:** evaluator unknown-ID handling + scored callback contract.
+3. **Week 3-4:** mutation saga phase extraction (behavior-preserving slice).
+
+This order is recommended because it first reduces outward-facing contract
+fragility, then improves quality signals, and finally tackles internal
+orchestration complexity with lower operational risk.
+
 Targeted test command used during this review:
 
 ```bash
