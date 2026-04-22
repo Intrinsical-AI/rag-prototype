@@ -7,7 +7,7 @@ from typing import cast
 import click
 
 from local_rag_backend.cli_commands.runtime import get_cli_container
-from local_rag_backend.core.services.types import EvalRetrievalMode
+from local_rag_backend.core.services.types import EvalResult, EvalRetrievalMode
 from local_rag_backend.settings import settings
 
 
@@ -15,11 +15,36 @@ def _is_contract_error(exc: Exception) -> bool:
     return isinstance(exc, (AssertionError, ValueError, TypeError))
 
 
+def _resolve_eval_dataset_path(dataset: Path | None) -> Path | str:
+    return dataset if dataset is not None else settings.eval_dataset_path
+
+
+def _write_json_output(path: Path | None, payload: object) -> None:
+    if path is not None:
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _raise_cli_error(*, prefix: str, exc: Exception, exit_code: int) -> None:
+    click.echo(f"[ERROR] {prefix}: {exc}", err=True)
+    raise SystemExit(exit_code)
+
+
 def _load_batch_specs(path: Path) -> tuple[dict[str, object], ...]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
         raise ValueError("Batch specs file must be a JSON array of objects.")
     return tuple(payload)
+
+
+def _validate_required_batch_fields(raw_specs: tuple[dict[str, object], ...]) -> None:
+    required_fields = ("name", "retrieval_mode", "k")
+    for index, item in enumerate(raw_specs):
+        for field_name in required_fields:
+            if field_name not in item:
+                raise click.BadParameter(
+                    f"Spec at index {index} is missing required field {field_name!r}.",
+                    param_hint="--specs",
+                )
 
 
 def _parse_int_field(value: object, *, field_name: str) -> int:
@@ -55,6 +80,24 @@ def _parse_retrieval_mode_field(value: object, *, field_name: str) -> EvalRetrie
     if normalized not in {"sparse", "dense", "dual", "hybrid"}:
         raise ValueError(f"{field_name} must be one of sparse, dense, dual, hybrid.")
     return cast("EvalRetrievalMode", normalized)
+
+
+def _collect_eval_threshold_failures(
+    *,
+    result: EvalResult,
+    k: int,
+    fail_below_ndcg: float,
+    fail_below_map: float,
+    fail_below_mrr: float,
+) -> list[str]:
+    failures: list[str] = []
+    if result.ndcg_at_k < float(fail_below_ndcg):
+        failures.append(f"nDCG@{k}={result.ndcg_at_k:.3f} (min {fail_below_ndcg})")
+    if result.map_at_k < float(fail_below_map):
+        failures.append(f"MAP@{k}={result.map_at_k:.3f} (min {fail_below_map})")
+    if result.mrr_at_k < float(fail_below_mrr):
+        failures.append(f"MRR@{k}={result.mrr_at_k:.3f} (min {fail_below_mrr})")
+    return failures
 
 
 @click.command("eval")
@@ -135,7 +178,7 @@ def eval_cmd(
 
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
-        ds = load_eval_dataset(dataset if dataset is not None else settings.eval_dataset_path)
+        ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
         res = run_retrieval_eval(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,
@@ -151,16 +194,15 @@ def eval_cmd(
             max_queries=max_queries,
             run_out=run_out,
         )
-        if json_out is not None:
-            json_out.write_text(json.dumps(eval_result_to_json(res)), encoding="utf-8")
+        _write_json_output(json_out, eval_result_to_json(res))
 
-        failures: list[str] = []
-        if res.ndcg_at_k < float(fail_below_ndcg):
-            failures.append(f"nDCG@{k}={res.ndcg_at_k:.3f} (min {fail_below_ndcg})")
-        if res.map_at_k < float(fail_below_map):
-            failures.append(f"MAP@{k}={res.map_at_k:.3f} (min {fail_below_map})")
-        if res.mrr_at_k < float(fail_below_mrr):
-            failures.append(f"MRR@{k}={res.mrr_at_k:.3f} (min {fail_below_mrr})")
+        failures = _collect_eval_threshold_failures(
+            result=res,
+            k=k,
+            fail_below_ndcg=fail_below_ndcg,
+            fail_below_map=fail_below_map,
+            fail_below_mrr=fail_below_mrr,
+        )
 
         if failures:
             click.echo(
@@ -172,8 +214,7 @@ def eval_cmd(
     except SystemExit:
         raise
     except Exception as e:
-        click.echo(f"[ERROR] Error evaluating dataset: {e}", err=True)
-        raise SystemExit(1)
+        _raise_cli_error(prefix="Error evaluating dataset", exc=e, exit_code=1)
 
 
 @click.command("eval-batch")
@@ -215,14 +256,7 @@ def eval_batch_cmd(
         from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval_batch
 
         raw_specs = _load_batch_specs(specs)
-        _required_fields = ("name", "retrieval_mode", "k")
-        for _idx, _item in enumerate(raw_specs):
-            for _field in _required_fields:
-                if _field not in _item:
-                    raise click.BadParameter(
-                        f"Spec at index {_idx} is missing required field {_field!r}.",
-                        param_hint="--specs",
-                    )
+        _validate_required_batch_fields(raw_specs)
         batch_specs = tuple(
             EvalBatchSpec(
                 name=str(item["name"]),
@@ -250,7 +284,7 @@ def eval_batch_cmd(
 
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
-        ds = load_eval_dataset(dataset if dataset is not None else settings.eval_dataset_path)
+        ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
         results = run_retrieval_eval_batch(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,
@@ -265,16 +299,12 @@ def eval_batch_cmd(
             if batch_result.json_out is not None:
                 json_out = Path(batch_result.json_out)
                 json_out.parent.mkdir(parents=True, exist_ok=True)
-                json_out.write_text(
-                    json.dumps(eval_result_to_json(batch_result.result)),
-                    encoding="utf-8",
-                )
+                _write_json_output(json_out, eval_result_to_json(batch_result.result))
             click.echo(f"{batch_result.name}: {format_eval_result(batch_result.result)}")
     except SystemExit:
         raise
     except Exception as e:
-        click.echo(f"[ERROR] Error evaluating batch dataset: {e}", err=True)
-        raise SystemExit(1)
+        _raise_cli_error(prefix="Error evaluating batch dataset", exc=e, exit_code=1)
 
 
 @click.command("eval-compare")
@@ -360,7 +390,7 @@ def eval_compare_cmd(
 
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
-        ds = load_eval_dataset(dataset if dataset is not None else settings.eval_dataset_path)
+        ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
         result = compare_retrieval_eval(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,
@@ -393,8 +423,7 @@ def eval_compare_cmd(
             max_regression_precision=max_regression_precision,
             max_regression_recall=max_regression_recall,
         )
-        if json_out is not None:
-            json_out.write_text(json.dumps(eval_compare_result_to_json(result)), encoding="utf-8")
+        _write_json_output(json_out, eval_compare_result_to_json(result))
 
         baseline_line, candidate_line, delta_line, gate_line = format_eval_compare_result(result)
         click.echo(baseline_line)
@@ -408,5 +437,8 @@ def eval_compare_cmd(
     except SystemExit:
         raise
     except Exception as e:
-        click.echo(f"[ERROR] Error comparing eval runs: {e}", err=True)
-        raise SystemExit(2 if _is_contract_error(e) else 1)
+        _raise_cli_error(
+            prefix="Error comparing eval runs",
+            exc=e,
+            exit_code=(2 if _is_contract_error(e) else 1),
+        )
