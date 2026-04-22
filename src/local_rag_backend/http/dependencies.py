@@ -15,6 +15,7 @@ from local_rag_backend.infrastructure.persistence.sql.base import get_db
 if TYPE_CHECKING:
     from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.composition.context import AppContext
+    from local_rag_backend.composition.runtime import RuntimeSnapshot
     from local_rag_backend.settings import Settings
 
 
@@ -32,7 +33,7 @@ async def get_settings_dependency() -> Settings:
     return get_app_context().settings
 
 
-async def get_runtime_snapshot_dependency():
+async def get_runtime_snapshot_dependency() -> RuntimeSnapshot:
     """Async DI shim for agent-facing runtime status consumers."""
     return _get_runtime_snapshot()
 
