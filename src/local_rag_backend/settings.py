@@ -2,9 +2,10 @@
 """
 Configuration management for Intrinsical RAG Prototype.
 
-This module provides centralized configuration using a YAML file as the single
-runtime source of truth. The YAML payload is loaded at startup and validated
-through a Pydantic model.
+This module is the single source of truth for runtime configuration.
+The YAML payload is loaded at startup and validated through a Pydantic model.
+The module keeps path/url normalization intentionally explicit to avoid cross-process
+and deployment-drift surprises.
 """
 
 from __future__ import annotations
@@ -22,6 +23,12 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 
 
 def _resolve_relative_path_value(value: Any, *, base_dir: Path) -> str | None:
+    """Resolve a potentially relative path against the config file directory.
+
+    Inputs can be YAML strings, ``Path`` objects, or ``None``.
+    Absolute paths are left untouched, relative paths are resolved against the
+    location of the settings file.
+    """
     if value is None:
         return None
     path = Path(value).expanduser()
@@ -30,6 +37,12 @@ def _resolve_relative_path_value(value: Any, *, base_dir: Path) -> str | None:
 
 
 def _resolve_sqlite_url_value(value: Any, *, base_dir: Path) -> str | None:
+    """Normalize ``sqlite:///`` URLs.
+
+    A bare relative path in a sqlite URL is interpreted relative to the loaded
+    settings file directory so local runs and containerized runs keep consistent
+    behavior.
+    """
     if value is None:
         return None
     rendered = str(value).strip()
@@ -47,6 +60,13 @@ def _resolve_sqlite_url_value(value: Any, *, base_dir: Path) -> str | None:
 
 
 def load_settings_from_yaml(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
+    """Load settings from YAML and apply path/url normalization in one place.
+
+    Side effects:
+    - Validates file exists and is a top-level mapping.
+    - Resolves known relative paths into absolute paths rooted at the config file.
+    - Applies runtime override for ``perf_metrics_out_path`` when env variable is set.
+    """
     path = Path(config_path)
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file not found: {path}")
@@ -435,6 +455,7 @@ class Settings(BaseModel):
     @field_validator("debug", mode="before")
     @classmethod
     def _normalize_debug_bool(cls, v: Any) -> Any:
+        """Allow friendlier debug aliases from legacy deploy-time sources."""
         if isinstance(v, str):
             normalized = v.strip().lower()
             if normalized in {"debug", "development", "dev"}:
@@ -446,7 +467,7 @@ class Settings(BaseModel):
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: Any) -> Any:
-        # Keep the YAML config forgiving while retaining a strict Literal type.
+        """Keep YAML input forgiving while preserving strict runtime literals."""
         if isinstance(v, str):
             return v.upper()
         return v
@@ -481,7 +502,7 @@ class Settings(BaseModel):
     @field_validator("data_dir", mode="before")
     @classmethod
     def _normalize_data_dir(cls, v: Any) -> Path:
-        # Keep Settings side-effect free; callers are responsible for creating directories.
+        """Normalize path-like input eagerly; side-effects remain in callers."""
         return Path(v)
 
     @field_validator("sqlite_url")
@@ -530,7 +551,12 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _validate_chunking(self) -> Settings:
-        """Ensure chunk overlap is strictly less than chunk size."""
+        """Cross-field validation for retrieval/storage compatibility.
+
+        - Chunking constraints are validated for ingestion safety.
+        - Backend-specific URL requirements are enforced before runtime wiring.
+        - Hybrid/search/persistence combinations are constrained to known-safe modes.
+        """
         if self.ingest_chunk_overlap >= self.ingest_chunk_chars:
             raise ValueError("ingest_chunk_overlap must be strictly less than ingest_chunk_chars")
         if self.persistence_backend == "elasticsearch":

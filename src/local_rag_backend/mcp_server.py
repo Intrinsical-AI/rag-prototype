@@ -18,6 +18,7 @@ from local_rag_backend.cli_commands.runtime import (
     get_cli_runtime_snapshot,
     run_cli_mutation,
 )
+from local_rag_backend.core.domain.entities import Document as DomainDocument
 from local_rag_backend.core.domain.retrieval import (
     RetrievalFilter,
     RetrievalRequest,
@@ -80,7 +81,7 @@ def _coerce_retrieval_result(
     ):
         docs, scores = raw_result
         return retrieval_result_from_pairs(
-            docs=cast("Sequence[object]", docs),
+            docs=cast("Sequence[DomainDocument]", docs),
             scores=cast("Sequence[float]", scores),
             mode_used=request.mode,
             backend_used="eval",
@@ -185,7 +186,7 @@ def tool_import_canonical(
             "unchanged": summary.unchanged,
             "deleted_sql": summary.deleted_sql,
             "deleted_index": summary.deleted_index,
-            "deleted_external_ids": list(summary.deleted_external_ids),
+            "deleted_external_ids": list(summary.deleted_external_ids or []),
         }
 
     return run_cli_mutation(_run_sync, use_lock=True)
