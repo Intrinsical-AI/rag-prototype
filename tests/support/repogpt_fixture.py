@@ -8,7 +8,8 @@ from pathlib import Path
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 SYNERGY_ROOT = WORKSPACE_ROOT / "synergy"
-REPOGPT_ROOT = WORKSPACE_ROOT / "RepoGPT"
+REPOGPT_ROOT = Path(os.environ.get("REPOGPT_ROOT", WORKSPACE_ROOT / "RepoGPT"))
+REPOGPT_CLI_AVAILABLE = REPOGPT_ROOT.is_dir()
 REPOGPT_FIXTURE_REPO = SYNERGY_ROOT / "fixtures" / "repogpt_eval_repo"
 
 

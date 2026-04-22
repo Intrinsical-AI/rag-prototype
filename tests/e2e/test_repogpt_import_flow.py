@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
-from support.repogpt_fixture import emit_repogpt_code_units
+from support.repogpt_fixture import REPOGPT_CLI_AVAILABLE, emit_repogpt_code_units
+
+if not REPOGPT_CLI_AVAILABLE:
+    pytest.skip(
+        "cross-repo RepoGPT checkout not available",
+        allow_module_level=True,
+    )
 
 from local_rag_backend.cli import cli
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
