@@ -16,7 +16,7 @@ Si tu caso de uso no necesita este nivel de control, probablemente te baste una 
 
 ## Requisitos Previos
 
-1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull lfm2.5-thinking`).
+1.  **Proveedor LLM habilitado**: Configura `openai_api_key`, `openrouter_enabled` + `openrouter_api_key` o `ollama_enabled: true` en `config.yaml`, y verifica que el proveedor elegido esté operativo.
 2.  **Entorno listo**: Este documento asume que el proyecto ya está instalado y configurado. Los pasos de instalación viven en el `README.md`.
 
 ---
@@ -50,7 +50,9 @@ dual_candidate_k: 50
 st_embedding_model: all-MiniLM-L6-v2
 
 openai_api_key: null
-ollama_enabled: true
+openrouter_enabled: false
+openrouter_api_key: null
+ollama_enabled: false
 ollama_model: lfm2.5-thinking
 sqlite_url: sqlite:///./data/custom_app.db
 data_dir: data
@@ -167,14 +169,14 @@ if __name__ == "__main__":
 Ejecuta el script para poblar tu backend canónico:
 
 ```bash
-python run_ingestion.py
+uv run python run_ingestion.py
 ```
 
 Nota: el ejemplo evita escrituras directas a SQLite. El mismo flujo funciona en `sparse`, `dense` y `hybrid`; el coordinador decide la estrategia adecuada según la configuración.
 
-## Paso 4: Script de Consulta con Ollama
+## Paso 4: Script de Consulta con un proveedor LLM
 
-Script para hacer preguntas a los datos utilizando el `RagService` y Ollama.
+Script para hacer preguntas a los datos utilizando `RagService` y el proveedor LLM configurado.
 
 ```python
 # run_query.py
@@ -194,7 +196,7 @@ def main():
     # Realizar la consulta
     response = rag_service.ask(question)
 
-    print(f"\nRespuesta de Ollama:\n{response['answer']}")
+    print(f"\nRespuesta del LLM:\n{response['answer']}")
 
     print("\n--- Fuentes utilizadas ---")
     for doc, score in zip(response["docs"], response["scores"], strict=False):
@@ -208,10 +210,10 @@ if __name__ == "__main__":
 Ejecuta este script para obtener una respuesta:
 
 ```bash
-python run_query.py
+uv run python run_query.py
 ```
 
-> Siguiendo estos pasos, puedes adaptar este proyecto para entender cómo construir un sistema RAG, con soporte para modelos locales con Ollama.
+> Siguiendo estos pasos, puedes adaptar este proyecto para construir un sistema RAG con el proveedor LLM que te convenga (OpenAI, OpenRouter u Ollama).
 
 ---
 

@@ -94,4 +94,3 @@ def test_validate_canonical_import_payload_rejects_non_boolean_replace_scope() -
         assert "replace_scope" in str(exc)
     else:
         raise AssertionError("expected ValidationError")
-

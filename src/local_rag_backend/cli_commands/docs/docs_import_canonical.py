@@ -43,7 +43,7 @@ def _build_request(
             raise ValueError("each payload.documents item must be an object")
     try:
         return build_canonical_import_request_input_from_raw(
-            cast("dict[str, Any]", payload),
+            payload,
             source="cli:docs:import-canonical",
             replace_scope_override=replace_scope,
         )

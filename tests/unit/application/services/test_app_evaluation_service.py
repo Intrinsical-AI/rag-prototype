@@ -422,6 +422,7 @@ def test_run_retrieval_eval_reuses_persisted_dense_eval_index(
     )
 
     embed_calls: list[int] = []
+
     class FakeEmbedder(DummyEmbedder):
         dim = 2
 
@@ -506,6 +507,7 @@ def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_change
     )
 
     embed_calls: list[int] = []
+
     class FakeEmbedder(DummyEmbedder):
         dim = 2
 
