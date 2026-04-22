@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-from support.repogpt_fixture import REPOGPT_CLI_AVAILABLE, REPOGPT_FIXTURE_REPO, emit_repogpt_code_units
+from support.repogpt_fixture import (
+    REPOGPT_CLI_AVAILABLE,
+    REPOGPT_FIXTURE_REPO,
+    emit_repogpt_code_units,
+)
 
 if not REPOGPT_CLI_AVAILABLE or not REPOGPT_FIXTURE_REPO.exists():
     pytest.skip(
