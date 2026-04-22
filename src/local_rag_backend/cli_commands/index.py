@@ -13,6 +13,26 @@ from local_rag_backend.cli_commands.runtime import (
 )
 
 
+def _echo_status_value(*, label: str, value: object, key_fg: str) -> None:
+    click.echo(f"  {click.style(label + ':', fg=key_fg, bold=True)} {value}")
+
+
+def _echo_nested_status_value(*, label: str, value: object, key_fg: str) -> None:
+    click.echo(f"    {click.style(label + ':', fg=key_fg, bold=True)} {value}")
+
+
+def _echo_path_status(*, label: str, path_str: str, key_fg: str) -> None:
+    path = Path(path_str)
+    status_icon = "✅ YES" if path.exists() else "❌ NO"
+    _echo_status_value(label=label, value=status_icon, key_fg=key_fg)
+    click.echo(f"    Path: {path}")
+
+
+def _require_rebuild_runtime(retrieval_mode: str) -> None:
+    if retrieval_mode not in ("dense", "dual", "hybrid"):
+        raise RuntimeError("rebuild-index requires retrieval_mode=dense|dual|hybrid")
+
+
 @click.command("rebuild-index")
 def rebuild_index_cmd() -> None:
     """Rebuild retrieval index from the current document store (idempotent)."""
@@ -21,8 +41,7 @@ def rebuild_index_cmd() -> None:
 
         container = get_cli_container()
         runtime = get_cli_runtime_snapshot()
-        if runtime.retrieval_mode not in ("dense", "dual", "hybrid"):
-            raise RuntimeError("rebuild-index requires retrieval_mode=dense|dual|hybrid")
+        _require_rebuild_runtime(runtime.retrieval_mode)
         ports = container.index_mutation_ports(
             build_embedder=build_dense_embedder,
         )
@@ -56,53 +75,67 @@ def status_cmd() -> None:
     click.echo()
 
     click.secho("📋 Core Configuration", fg=title_fg, bold=True)
-    click.echo(
-        f"  {click.style('Host:', fg=key_fg, bold=True)} {runtime.host}:{runtime.port}"
+    _echo_status_value(label="Host", value=f"{runtime.host}:{runtime.port}", key_fg=key_fg)
+    _echo_status_value(label="Retrieval Mode", value=runtime.retrieval_mode, key_fg=key_fg)
+    _echo_status_value(
+        label="Persistence Backend",
+        value=runtime.persistence_backend,
+        key_fg=key_fg,
     )
-    click.echo(
-        f"  {click.style('Retrieval Mode:', fg=key_fg, bold=True)} {runtime.retrieval_mode}"
+    _echo_status_value(
+        label="Debug Mode",
+        value=("✅" if runtime.debug else "❌"),
+        key_fg=key_fg,
     )
-    click.echo(
-        f"  {click.style('Persistence Backend:', fg=key_fg, bold=True)} {runtime.persistence_backend}"
+    _echo_status_value(label="Vector Backend", value=runtime.vector_backend, key_fg=key_fg)
+    _echo_status_value(
+        label="API Key Configured",
+        value=("✅" if runtime.api_key_configured else "❌"),
+        key_fg=key_fg,
     )
-    click.echo(
-        f"  {click.style('Debug Mode:', fg=key_fg, bold=True)} {'✅' if runtime.debug else '❌'}"
-    )
-    click.echo(
-        f"  {click.style('Vector Backend:', fg=key_fg, bold=True)} {runtime.vector_backend}"
-    )
-    click.echo(
-        f"  {click.style('API Key Configured:', fg=key_fg, bold=True)} {'✅' if runtime.api_key_configured else '❌'}"
-    )
-    click.echo(
-        f"  {click.style('Public Bind Requires API Key:', fg=key_fg, bold=True)} {'✅' if runtime.public_bind_requires_api_key else '❌'}"
+    _echo_status_value(
+        label="Public Bind Requires API Key",
+        value=("✅" if runtime.public_bind_requires_api_key else "❌"),
+        key_fg=key_fg,
     )
     click.echo()
 
     click.secho("🤖 LLM Configuration", fg=title_fg, bold=True)
-    click.echo(
-        f"  {click.style('Ollama Enabled:', fg=key_fg, bold=True)} {'✅' if runtime.ollama_enabled else '❌'}"
+    _echo_status_value(
+        label="Ollama Enabled",
+        value=("✅" if runtime.ollama_enabled else "❌"),
+        key_fg=key_fg,
     )
     if runtime.ollama_enabled:
-        click.echo(
-            f"    {click.style('URL:', fg=key_fg, bold=True)} {container.settings_obj.ollama_base_url}"
+        _echo_nested_status_value(
+            label="URL",
+            value=container.settings_obj.ollama_base_url,
+            key_fg=key_fg,
         )
-        click.echo(
-            f"    {click.style('Model:', fg=key_fg, bold=True)} {container.settings_obj.ollama_model}"
+        _echo_nested_status_value(
+            label="Model",
+            value=container.settings_obj.ollama_model,
+            key_fg=key_fg,
         )
-    click.echo(
-        f"  {click.style('OpenAI Enabled:', fg=key_fg, bold=True)} {'✅' if runtime.openai_enabled else '❌'}"
+    _echo_status_value(
+        label="OpenAI Enabled",
+        value=("✅" if runtime.openai_enabled else "❌"),
+        key_fg=key_fg,
     )
     if runtime.openai_enabled:
-        click.echo(
-            f"    {click.style('Model:', fg=key_fg, bold=True)} {container.settings_obj.openai_model}"
+        _echo_nested_status_value(
+            label="Model",
+            value=container.settings_obj.openai_model,
+            key_fg=key_fg,
         )
     click.echo()
 
     click.secho("📁 Storage Status", fg=title_fg, bold=True)
     if runtime.persistence_backend == "elasticsearch":
-        click.echo(
-            f"  {click.style('Elasticsearch:', fg=key_fg, bold=True)} {container.settings_obj.es_base_url or '[MISSING]'}"
+        _echo_status_value(
+            label="Elasticsearch",
+            value=(container.settings_obj.es_base_url or "[MISSING]"),
+            key_fg=key_fg,
         )
         for name, value in [
             ("Docs index", container.settings_obj.es_docs_index),
@@ -110,17 +143,14 @@ def status_cmd() -> None:
             ("System index", container.settings_obj.es_system_index),
             ("Tombstones index", container.settings_obj.es_tombstones_index),
         ]:
-            click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {value}")
+            _echo_status_value(label=name, value=value, key_fg=key_fg)
     else:
         for name, path_str in [
             ("Database", container.settings_obj.sqlite_url.replace("sqlite:///", "")),
             ("FAISS index", runtime.index_path),
             ("Sample data", container.settings_obj.faq_csv),
         ]:
-            path = Path(path_str)
-            status_icon = "✅ YES" if path.exists() else "❌ NO"
-            click.echo(f"  {click.style(name + ':', fg=key_fg, bold=True)} {status_icon}")
-            click.echo(f"    Path: {path}")
+            _echo_path_status(label=name, path_str=path_str, key_fg=key_fg)
 
     click.echo()
     click.secho("📊 Data & Index Diagnostics", fg=title_fg, bold=True)
@@ -128,15 +158,15 @@ def status_cmd() -> None:
     docs_count: int | None = None
     try:
         docs_count = diagnostics.get_documents_count()
-        click.echo(f"  {click.style('Documents:', fg=key_fg, bold=True)} {docs_count}")
+        _echo_status_value(label="Documents", value=docs_count, key_fg=key_fg)
     except Exception as e:
-        click.echo(f"  {click.style('Documents:', fg=key_fg, bold=True)} [ERROR] {e!s}")
+        _echo_status_value(label="Documents", value=f"[ERROR] {e!s}", key_fg=key_fg)
 
     try:
         hist = diagnostics.get_history_count()
-        click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} {hist}")
+        _echo_status_value(label="History", value=hist, key_fg=key_fg)
     except Exception as e:
-        click.echo(f"  {click.style('History:', fg=key_fg, bold=True)} [WARN] {e!s}")
+        _echo_status_value(label="History", value=f"[WARN] {e!s}", key_fg=key_fg)
 
     if runtime.retrieval_mode in ("dense", "dual", "hybrid"):
         try:

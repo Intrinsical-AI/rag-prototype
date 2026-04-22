@@ -110,10 +110,29 @@ class EvalExecutionBundle:
     reranker_strategy: str
 
 
+@dataclass(frozen=True)
+class _StorageBackendBundle:
+    doc_repo_factory: Callable[[], DocumentRepoPort]
+    build_upsert_doc: Any
+    history_repo_factory: Callable[[], QAHistoryPort]
+    system_state_factory: Callable[[], SystemStateStorage]
+
+
+@dataclass(frozen=True)
+class _RetrieverBackendBundle:
+    vector_repo_factory: Callable[..., VectorRepoPort]
+    purge_index_artifacts_fn: Callable[..., None]
+
+
 class AppContainer:
     """Centralized composition for adapters/use-cases in the app layer."""
 
     RAG_SERVICE_STATE_KEY = "rag_service"
+
+    @classmethod
+    def _compute_default_components(cls) -> dict[str, Any]:
+        """Return the canonical default wiring map for runtime composition."""
+        return cls.runtime_wiring_defaults()
 
     @classmethod
     def runtime_wiring_defaults(cls) -> dict[str, Any]:
@@ -137,6 +156,113 @@ class AppContainer:
             "rag_service_factory": RagService,
             "system_state_factory": SystemStateStorage,
         }
+
+    def _uses_elasticsearch_backend(self) -> bool:
+        return self.settings_obj.persistence_backend == "elasticsearch"
+
+    def _build_storage_backend(
+        self,
+        *,
+        defaults: dict[str, Any],
+        doc_repo_factory: Callable[[], DocumentRepoPort] | None,
+        build_upsert_doc: Any | None,
+        history_repo_factory: Callable[[], QAHistoryPort] | None,
+        system_state_factory: Callable[[], SystemStateStorage] | None,
+    ) -> _StorageBackendBundle:
+        use_elasticsearch = self._uses_elasticsearch_backend()
+        default_doc_repo_factory = cast(
+            "Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"]
+        )
+        resolved_doc_repo_factory = doc_repo_factory or default_doc_repo_factory
+        if use_elasticsearch and resolved_doc_repo_factory == default_doc_repo_factory:
+
+            def _elastic_doc_repo_factory() -> DocumentRepoPort:
+                return ElasticDocsRepository(settings_obj=self.settings_obj)
+
+            _elastic_doc_repo_factory.__name__ = "<lambda>"
+            resolved_doc_repo_factory = _elastic_doc_repo_factory
+
+        default_build_upsert_doc = defaults["build_upsert_doc"]
+        resolved_build_upsert_doc = build_upsert_doc or default_build_upsert_doc
+        if use_elasticsearch and resolved_build_upsert_doc == default_build_upsert_doc:
+            resolved_build_upsert_doc = ElasticDocsRepository.UpsertDoc
+
+        default_history_repo_factory = cast(
+            "Callable[[], QAHistoryPort]", defaults["history_repo_factory"]
+        )
+        resolved_history_repo_factory = history_repo_factory or default_history_repo_factory
+        if use_elasticsearch and resolved_history_repo_factory == default_history_repo_factory:
+
+            def _elastic_history_repo_factory() -> QAHistoryPort:
+                return ElasticHistoryStorage(settings_obj=self.settings_obj)
+
+            _elastic_history_repo_factory.__name__ = "<lambda>"
+            resolved_history_repo_factory = _elastic_history_repo_factory
+
+        default_system_state_factory = cast(
+            "Callable[[], SystemStateStorage]", defaults["system_state_factory"]
+        )
+        resolved_system_state_factory = system_state_factory or default_system_state_factory
+        if use_elasticsearch and resolved_system_state_factory == default_system_state_factory:
+
+            def _elastic_system_state_factory() -> SystemStateStorage:
+                return cast(
+                    "SystemStateStorage",
+                    ElasticSystemStateStorage(settings_obj=self.settings_obj),
+                )
+
+            _elastic_system_state_factory.__name__ = "<lambda>"
+            resolved_system_state_factory = _elastic_system_state_factory
+
+        return _StorageBackendBundle(
+            doc_repo_factory=resolved_doc_repo_factory,
+            build_upsert_doc=resolved_build_upsert_doc,
+            history_repo_factory=resolved_history_repo_factory,
+            system_state_factory=resolved_system_state_factory,
+        )
+
+    def _build_retriever_backend(
+        self,
+        *,
+        defaults: dict[str, Any],
+        vector_repo_factory: Callable[..., VectorRepoPort] | None,
+        purge_index_artifacts_fn: Callable[..., None] | None,
+    ) -> _RetrieverBackendBundle:
+        use_elasticsearch = self._uses_elasticsearch_backend()
+        default_vector_repo_factory = cast(
+            "Callable[..., VectorRepoPort]", defaults["vector_repo_factory"]
+        )
+        resolved_vector_repo_factory = vector_repo_factory or default_vector_repo_factory
+        if use_elasticsearch and resolved_vector_repo_factory == default_vector_repo_factory:
+
+            def _elastic_vector_repo_factory(**kwargs: Any) -> VectorRepoPort:
+                return cast(
+                    "VectorRepoPort",
+                    ElasticVectorRepo(
+                        settings_obj=kwargs.pop("settings_obj", self.settings_obj),
+                        **kwargs,
+                    ),
+                )
+
+            _elastic_vector_repo_factory.__name__ = "<lambda>"
+            resolved_vector_repo_factory = _elastic_vector_repo_factory
+
+        default_purge_index_artifacts_fn = cast(
+            "Callable[..., None]", defaults["purge_index_artifacts_fn"]
+        )
+        resolved_purge_index_artifacts_fn = (
+            purge_index_artifacts_fn or default_purge_index_artifacts_fn
+        )
+        if (
+            use_elasticsearch
+            and resolved_purge_index_artifacts_fn == default_purge_index_artifacts_fn
+        ):
+            resolved_purge_index_artifacts_fn = purge_index_artifacts_noop
+
+        return _RetrieverBackendBundle(
+            vector_repo_factory=resolved_vector_repo_factory,
+            purge_index_artifacts_fn=resolved_purge_index_artifacts_fn,
+        )
 
     def __init__(
         self,
@@ -163,8 +289,7 @@ class AppContainer:
         rag_service_factory: Callable[..., RagService] | None = None,
         system_state_factory: Callable[[], SystemStateStorage] | None = None,
     ) -> None:
-        defaults = self.runtime_wiring_defaults()
-        use_elasticsearch = settings_obj.persistence_backend == "elasticsearch"
+        defaults = self._compute_default_components()
         self.settings_obj = settings_obj
         self.openai_embedder_factory = openai_embedder_factory or cast(
             "Callable[[], EmbedderPort]", defaults["openai_embedder_factory"]
@@ -178,26 +303,16 @@ class AppContainer:
         self.ollama_generator_factory = ollama_generator_factory or cast(
             "Callable[..., GeneratorPort]", defaults["ollama_generator_factory"]
         )
-        default_doc_repo_factory = cast(
-            "Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"]
+        storage_backend = self._build_storage_backend(
+            defaults=defaults,
+            doc_repo_factory=doc_repo_factory,
+            build_upsert_doc=build_upsert_doc,
+            history_repo_factory=history_repo_factory,
+            system_state_factory=system_state_factory,
         )
-        self.doc_repo_factory = doc_repo_factory or default_doc_repo_factory
-        if use_elasticsearch and self.doc_repo_factory == default_doc_repo_factory:
-            self.doc_repo_factory = lambda: ElasticDocsRepository(settings_obj=self.settings_obj)
-
-        default_build_upsert_doc = defaults["build_upsert_doc"]
-        self.build_upsert_doc = build_upsert_doc or default_build_upsert_doc
-        if use_elasticsearch and self.build_upsert_doc == default_build_upsert_doc:
-            self.build_upsert_doc = ElasticDocsRepository.UpsertDoc
-
-        default_history_repo_factory = cast(
-            "Callable[[], QAHistoryPort]", defaults["history_repo_factory"]
-        )
-        self.history_repo_factory = history_repo_factory or default_history_repo_factory
-        if use_elasticsearch and self.history_repo_factory == default_history_repo_factory:
-            self.history_repo_factory = lambda: ElasticHistoryStorage(
-                settings_obj=self.settings_obj
-            )
+        self.doc_repo_factory = storage_backend.doc_repo_factory
+        self.build_upsert_doc = storage_backend.build_upsert_doc
+        self.history_repo_factory = storage_backend.history_repo_factory
         self.sparse_retriever_factory = sparse_retriever_factory or cast(
             "Callable[..., RetrieverPort]", defaults["sparse_retriever_factory"]
         )
@@ -207,25 +322,17 @@ class AppContainer:
         self.hybrid_retriever_factory = hybrid_retriever_factory or cast(
             "Callable[..., RetrieverPort]", defaults["hybrid_retriever_factory"]
         )
-        default_vector_repo_factory = cast(
-            "Callable[..., VectorRepoPort]", defaults["vector_repo_factory"]
+        retriever_backend = self._build_retriever_backend(
+            defaults=defaults,
+            vector_repo_factory=vector_repo_factory,
+            purge_index_artifacts_fn=purge_index_artifacts_fn,
         )
-        self.vector_repo_factory = vector_repo_factory or default_vector_repo_factory
-        if use_elasticsearch and self.vector_repo_factory == default_vector_repo_factory:
-            self.vector_repo_factory = lambda **kwargs: ElasticVectorRepo(
-                settings_obj=kwargs.pop("settings_obj", self.settings_obj),
-                **kwargs,
-            )
+        self.vector_repo_factory = retriever_backend.vector_repo_factory
         self.reranker_factory = reranker_factory or cast(
             "Callable[..., RetrieverPort]", defaults["reranker_factory"]
         )
         self.rebuild_fn = rebuild_fn or cast("Callable[..., int]", defaults["rebuild_fn"])
-        default_purge_index_artifacts_fn = cast(
-            "Callable[..., None]", defaults["purge_index_artifacts_fn"]
-        )
-        self.purge_index_artifacts_fn = purge_index_artifacts_fn or default_purge_index_artifacts_fn
-        if use_elasticsearch and self.purge_index_artifacts_fn == default_purge_index_artifacts_fn:
-            self.purge_index_artifacts_fn = purge_index_artifacts_noop
+        self.purge_index_artifacts_fn = retriever_backend.purge_index_artifacts_fn
         self.write_lock = write_lock or cast("Callable[..., Any]", defaults["write_lock"])
         self.mutation_journal_factory = mutation_journal_factory or (
             lambda: FileMutationJournal(
@@ -237,16 +344,7 @@ class AppContainer:
         self.rag_service_factory = rag_service_factory or cast(
             "Callable[..., RagService]", defaults["rag_service_factory"]
         )
-        default_system_state_factory = cast(
-            "Callable[[], SystemStateStorage]", defaults["system_state_factory"]
-        )
-        resolved_system_state_factory = system_state_factory or default_system_state_factory
-        if use_elasticsearch and resolved_system_state_factory == default_system_state_factory:
-            resolved_system_state_factory = cast(
-                "Callable[[], SystemStateStorage]",
-                lambda: ElasticSystemStateStorage(settings_obj=self.settings_obj),
-            )
-        self._system_state = resolved_system_state_factory()
+        self._system_state = storage_backend.system_state_factory()
         self._rag_service_cache_lock = Lock()
         self._rag_service_cache: RagService | None = None
         self._rag_service_cache_version: int | None = None

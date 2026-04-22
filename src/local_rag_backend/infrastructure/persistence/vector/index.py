@@ -195,7 +195,7 @@ class VectorIndex:
         self,
         batches: Sequence[tuple[Sequence[DocId], Sequence[Sequence[float]]]],
     ) -> None:
-        normalized_batches: list[tuple[list[DocId], np.ndarray]] = []
+        normalized_batches: list[tuple[list[DocId], NDArray[np.float32]]] = []
         for ids, vectors in batches:
             batch_ids = [DocId(str(x)) for x in ids]
             if not batch_ids:
