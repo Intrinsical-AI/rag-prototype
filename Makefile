@@ -1,6 +1,6 @@
 # Simple developer helpers (uv-first).
 
-.PHONY: help venv sync sync-sec lint lint-imports type test test-architecture sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
+.PHONY: help venv sync sync-dense-st sync-sec lint lint-imports type test test-architecture sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
 UV_CACHE_DIR ?= .uv_cache
@@ -13,6 +13,10 @@ IMAGE_TAG ?= latest
 	@touch $@
 
 .venv/.uv-sync-stamp: .venv/.python-stamp pyproject.toml uv.lock
+	$(UV) sync --frozen --group test --group lint --extra server --no-default-groups
+	@touch $@
+
+.venv/.uv-sync-dense-st-stamp: .venv/.python-stamp pyproject.toml uv.lock
 	$(UV) sync --frozen --group test --group lint --extra server --extra dense-st --no-default-groups
 	@touch $@
 
@@ -27,6 +31,8 @@ help: ## Show available targets
 venv: .venv/.python-stamp ## Create local virtual environment
 
 sync: .venv/.uv-sync-stamp ## Sync locked test and lint dependencies
+
+sync-dense-st: .venv/.uv-sync-dense-st-stamp ## Sync test/lint plus heavy SentenceTransformers dependencies
 
 sync-sec: .venv/.uv-sec-stamp ## Sync locked security tooling dependencies
 

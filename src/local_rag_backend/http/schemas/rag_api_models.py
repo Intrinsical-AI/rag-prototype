@@ -78,7 +78,8 @@ class AskEvalConfig(BaseModel):
     )
 
     llm_provider: str | None = Field(
-        default=None, description="Optional override for generator provider: 'openai'|'ollama'"
+        default=None,
+        description="Optional override for generator provider: 'openai'|'ollama'|'openrouter'",
     )
     model: str | None = Field(default=None, max_length=256)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)

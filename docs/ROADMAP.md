@@ -36,6 +36,11 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - `ingest`: remove `click.echo` from planner internals so planning stays transport-neutral
 - `state`: make `ElasticSystemStateStorage.bump_version()` atomic
   - add a contention-focused test, not only a sequential monotonic test
+- `release`: reconcile tags, GitHub Releases, package version, and default branch
+  - current mismatch: GitHub latest release is `2.0.1`, package metadata is `1.3.0`
+  - choose one tag convention: `vX.Y.Z` or `X.Y.Z`
+  - decide whether `master` or `develop` is the canonical release/default branch
+  - prune stale remote-tracking refs locally after the branch policy is clear
 - `ux/dx`: homogenize CLI exit codes and success/error output shape
 
 ## P3
@@ -43,6 +48,7 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - [x] `eval`: extend dataset schema to support optional graded relevance
 - `eval`: add paired significance testing for compare mode once per-query outputs exist
 - `canonical import`: decide whether scope replacement belongs inside canonical mutation or a dedicated use case
+- `release`: add a pre-release consistency check for tag, branch, GitHub Release target, and `pyproject.toml` version
 - `ux/dx`: review evaluation help texts and flag naming for consistency and scanability
 
 ## Guardrails
@@ -51,3 +57,4 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - Treat defaults alignment as behavior change and cover it with tests.
 - Preserve journal and recovery semantics while extracting mutation helpers.
 - Do not present aggregate-delta compare gates as statistical significance.
+- Do not move or delete public release tags without an explicit consumer-impact check.

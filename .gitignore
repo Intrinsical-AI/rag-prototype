@@ -218,7 +218,6 @@ figures/
 medium-blog/
 curso/
 
-config.yaml
 openai**
 .codex
 /artifacts

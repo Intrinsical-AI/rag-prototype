@@ -28,6 +28,7 @@ Highest-value active targets:
 4. CLI / DX contract consistency.
 5. Multi-store maintenance duplication.
 6. Ingestion planner typing and CLI coupling.
+7. Repository release hygiene, which is lower runtime risk but high operator and consumer confusion.
 
 ## Resolved Or Materially Reduced Debt
 
@@ -60,6 +61,7 @@ Interpretation:
 | Maintenance | Two multi-store delete flows are still near-mirror implementations | [`src/local_rag_backend/core/services/maintenance.py`](../src/local_rag_backend/core/services/maintenance.py) | Partial fixes and telemetry drift | Medium |
 | Ingestion planner | Planning, stale detection, batching, mutation execution, and terminal output still live in one module; `items` remains `Any` | [`src/local_rag_backend/cli_commands/docs/_ingestion_planner.py`](../src/local_rag_backend/cli_commands/docs/_ingestion_planner.py) | Reuse is limited; contracts remain implicit | Medium |
 | Elasticsearch system state | `bump_version()` is still read-modify-write without an atomic compare-and-swap or conflict retry loop | [`src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py`](../src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py) | Cross-worker cache invalidation can lose increments under contention | Medium |
+| Release hygiene | Remote tags, GitHub release metadata, package version, and default branch do not describe one coherent release line | Git refs and GitHub release metadata checked on 2026-04-27 | Consumers and maintainers can pick the wrong artifact or branch | Medium |
 
 ## Detailed Findings
 
@@ -174,7 +176,7 @@ Recommended direction:
 - Move terminal output back to [`docs_ingest.py`](../src/local_rag_backend/cli_commands/docs/docs_ingest.py).
 - Replace `Any` with a small Protocol or DTO.
 
-### 6. Elasticsearch system state is a real concurrency blind spot
+### 7. Elasticsearch system state is a real concurrency blind spot
 
 Validated points:
 
@@ -190,6 +192,69 @@ Recommended direction:
 
 - Replace read-modify-write with an atomic Elasticsearch update strategy.
 - Add a contention-focused test, not only a monotonic sequential test.
+
+### 8. Release and tag state is inconsistent
+
+Review date: 2026-04-27.
+
+Current state:
+
+- Remote heads published by GitHub are only `master` and `develop`.
+- `origin/HEAD` points to `master`.
+- `master` is at `fd29690` (`release(02-2026): stable, functional, local RAG (#38)`).
+- `develop` is at `908d6fe` and contains `master`; it is 63 commits ahead of `master`.
+- Remote tags are:
+  - `2.0.1` -> `fd29690`, lightweight tag, no `v` prefix.
+  - `v1.3.0` -> annotated tag object `cf65e1d`, peeled commit `fc5cd50`.
+- GitHub Releases contains one published release:
+  - tag `2.0.1`
+  - name `centralize(DX): Config + Harness + Stabilization + feats!`
+  - target `master`
+  - published at `2026-04-04T23:42:18Z`
+  - not draft, not prerelease
+- There is no GitHub Release for `v1.3.0`.
+- `pyproject.toml` declares `version = "1.3.0"` on `master`, `develop`, and `v1.3.0`.
+- The local checkout knew only `v1.3.0` before fetching; `git fetch --prune --dry-run origin` reported `2.0.1` as a new local tag and 14 stale remote-tracking refs to prune.
+- `v1.3.0` and `master` are divergent:
+  - `v1.3.0` has 111 commits not in `master`.
+  - `master` has 1 commit not in `v1.3.0`.
+  - their merge base is `803ced1`.
+- `v1.3.0` and `develop` are also divergent:
+  - `v1.3.0` has 111 commits not in `develop`.
+  - `develop` has 64 commits not in `v1.3.0`.
+
+Why this matters:
+
+- The latest GitHub Release says `2.0.1`, but the package metadata still says `1.3.0`.
+- Tag naming is inconsistent (`2.0.1` vs `v1.3.0`).
+- The default branch is `master`, while active local work is on `develop`.
+- Stale local `origin/*` refs make the repository graph look noisier than the remote actually is.
+- Consumers can reasonably pick the wrong version, branch, or archive.
+
+Nuance:
+
+- The `2.0.1` commit is not lost; it is an ancestor of `develop`.
+- The `v1.3.0` tag is annotated and may represent a deliberate release snapshot, but it is not represented as a GitHub Release.
+- Do not move or delete public tags without an explicit decision about external consumers.
+
+Options:
+
+- Conservative cleanup:
+  - prune stale remote-tracking refs locally with `git fetch --prune --tags origin`.
+  - document `2.0.1` as an accidental or metadata-only GitHub Release if that is what happened.
+  - leave public tags untouched until consumers are checked.
+- Normalize on `vX.Y.Z`:
+  - create a proper GitHub Release for `v1.3.0`, if `fc5cd50` is the intended published artifact.
+  - delete or mark `2.0.1` as superseded only after confirming it is not consumed.
+- Normalize on `2.0.1`:
+  - bump package metadata and docs to `2.0.1`.
+  - create a consistent replacement tag, preferably following the selected convention (`v2.0.1` or `2.0.1`).
+  - publish the release from the chosen canonical branch.
+- Branch policy cleanup:
+  - decide whether `develop` or `master` is the canonical release/default branch.
+  - update GitHub default branch and release instructions accordingly.
+- Prevent recurrence:
+  - add a pre-release check that asserts tag name, package version, GitHub release target, and branch policy match.
 
 ## What Is Not The Problem
 
@@ -236,6 +301,11 @@ Interpretation:
 - Refactor `maintenance.py` with a shared helper.
 - Decouple `_ingestion_planner.py` from terminal output and replace `Any` item contracts.
 - Harden `ElasticSystemStateStorage.bump_version()` with atomic update semantics.
+- Resolve release/tag hygiene:
+  - decide canonical release branch
+  - choose tag convention (`vX.Y.Z` or `X.Y.Z`)
+  - reconcile GitHub Releases with `pyproject.toml`
+  - prune stale remote-tracking refs locally
 - Review evaluation help texts and flag naming for consistency.
 
 ### P3
@@ -250,6 +320,7 @@ Interpretation:
 - Treat transport-alignment work as explicit behavior change with tests.
 - Keep HTTP schemas and CLI DTOs close enough that one cannot silently diverge.
 - Do not present aggregate-delta compare gates as statistical significance.
+- Do not move or delete public release tags without an explicit consumer-impact check.
 
 ## Validation Notes
 

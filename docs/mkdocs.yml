@@ -17,7 +17,8 @@ nav:
   - Technical Debt: TECH_DEBT.md
   - General Roadmap: ROADMAP.md
   - UX / DX Roadmap: ROADMAP_UX_DX.md
+  - Release Checklist: RELEASE_CHECKLIST.md
   - App Layer: app.md
-  - Advanced Usage (Ollama): USAGE.md
+  - Advanced Usage: USAGE.md
   - LangChain Loaders: langchain_loaders.md
   - Framework Analysis: analysis_rag_frameworks.md
