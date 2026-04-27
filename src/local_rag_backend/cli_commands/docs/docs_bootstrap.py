@@ -13,14 +13,14 @@ def bootstrap_cmd() -> None:
         from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
 
         click.echo("[INFO] Bootstrapping database with sample data...")
+        bar: ProgressBar[int]
         with click.progressbar(length=1, label="Bootstrapping") as bar:
-            typed_bar: ProgressBar[int] = bar
             run_cli_mutation(
                 run_sample_data_ingestion,
                 use_lock=False,
                 ensure_schema=False,
             )
-            typed_bar.update(1)
+            bar.update(1)
         click.echo("[OK] Bootstrap completed successfully!")
     except Exception as e:
         click.echo(f"[ERROR] Error bootstrapping: {e}", err=True)
