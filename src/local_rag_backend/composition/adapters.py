@@ -473,6 +473,8 @@ def build_openrouter_client_from_settings(
         client=client,
         default_model=str(settings_obj.openrouter_model),
     )
+
+
 def get_available_llm_providers(*, settings_obj: Settings) -> dict[str, str]:
     providers: dict[str, str] = {}
     if settings_obj.openai_api_key:
@@ -484,6 +486,8 @@ def get_available_llm_providers(*, settings_obj: Settings) -> dict[str, str]:
     ):
         providers["openrouter"] = "configured"
     return providers
+
+
 def build_retriever_with_default_embedder_from_settings(
     *,
     settings_obj: Settings,
@@ -529,6 +533,8 @@ def build_retriever_with_default_embedder_from_settings(
         vector_repo_factory=vector_repo_factory,
         reranker_factory=reranker_factory,
     )
+
+
 def _load_local_sparse_inputs(
     *,
     doc_repo: DocumentRepoPort,
