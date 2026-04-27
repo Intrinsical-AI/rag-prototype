@@ -154,4 +154,5 @@ def test_mcp_eval_supports_filters(in_memory_sqlite, tmp_path, monkeypatch) -> N
     assert payload["dataset_id"] == "repogpt_rag_eval_v1"
     assert payload["k"] == 1
     assert payload["queries"] > 0
+    assert set(payload["metrics"]) == {"nDCG@1", "MAP@1", "MRR@1", "P@1", "Recall@1"}
     assert payload["filters"] == [{"field": "source_id", "values": ["eval:repogpt:v1"]}]

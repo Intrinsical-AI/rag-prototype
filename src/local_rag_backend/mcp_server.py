@@ -18,26 +18,19 @@ from local_rag_backend.cli_commands.runtime import (
     get_cli_runtime_snapshot,
     run_cli_mutation,
 )
-from local_rag_backend.core.domain.entities import Document as DomainDocument
-from local_rag_backend.core.domain.retrieval import (
-    RetrievalFilter,
-    RetrievalRequest,
-    RetrievalResult,
-    retrieval_result_from_pairs,
-)
+from local_rag_backend.core.domain.retrieval import RetrievalFilter
 from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input_from_raw,
 )
 from local_rag_backend.core.services.evaluation import (
-    EvalResult,
+    build_eval_retrieval_config,
+    eval_result_to_json,
     load_eval_dataset,
-    run_retrieval_eval as run_retrieval_eval_core,
 )
-from local_rag_backend.core.services.types import EvalRetrievalConfig, EvalRetrievalMode
 from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
 )
-from local_rag_backend.core.use_cases.evaluation import prepare_eval_workspace
+from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("rag_prototype_mcp")
@@ -64,51 +57,6 @@ def _parse_filters(raw_filters: object | None) -> tuple[RetrievalFilter, ...]:
             )
         )
     return tuple(parsed)
-
-
-def _coerce_retrieval_result(
-    raw_result: object,
-    *,
-    request: RetrievalRequest,
-) -> RetrievalResult:
-    if isinstance(raw_result, RetrievalResult):
-        return raw_result
-    if (
-        isinstance(raw_result, tuple)
-        and len(raw_result) == 2
-        and isinstance(raw_result[0], (list, tuple))
-        and isinstance(raw_result[1], (list, tuple))
-    ):
-        docs, scores = raw_result
-        return retrieval_result_from_pairs(
-            docs=cast("Sequence[DomainDocument]", docs),
-            scores=cast("Sequence[float]", scores),
-            mode_used=request.mode,
-            backend_used="eval",
-        )
-    raise RuntimeError(f"Unsupported eval retriever response type: {type(raw_result)!r}")
-
-
-def _eval_result_to_dict(result: EvalResult) -> dict[str, object]:
-    return {
-        "dataset_id": result.dataset_id,
-        "retrieval_mode": result.retrieval_mode,
-        "reranker_enabled": result.reranker_enabled,
-        "k": result.k,
-        "queries": result.queries,
-        "ndcg_at_k": result.ndcg_at_k,
-        "map_at_k": result.map_at_k,
-        "mrr_at_k": result.mrr_at_k,
-        "precision_at_k": result.precision_at_k,
-        "recall_at_k": result.recall_at_k,
-    }
-
-
-def _resolve_eval_mode(raw_mode: object | None) -> EvalRetrievalMode:
-    mode = str(raw_mode or "sparse").strip().lower()
-    if mode not in {"sparse", "dense", "dual", "hybrid"}:
-        raise ValueError("retrieval_mode must be one of sparse, dense, dual, hybrid.")
-    return cast("EvalRetrievalMode", mode)
 
 
 def tool_status() -> dict[str, object]:
@@ -189,7 +137,8 @@ def tool_import_canonical(
             "deleted_external_ids": list(summary.deleted_external_ids or []),
         }
 
-    return run_cli_mutation(_run_sync, use_lock=True)
+    result: dict[str, object] = run_cli_mutation(_run_sync, use_lock=True)
+    return result
 
 
 def tool_rebuild_index() -> dict[str, object]:
@@ -203,7 +152,9 @@ def tool_rebuild_index() -> dict[str, object]:
     ports = container.index_mutation_ports(build_embedder=build_dense_embedder)
 
     def _rebuild_sync() -> int:
-        return index_service.rebuild_index_sync(settings_obj=container.settings_obj, ports=ports)
+        return int(
+            index_service.rebuild_index_sync(settings_obj=container.settings_obj, ports=ports)
+        )
 
     rebuilt = run_cli_mutation(_rebuild_sync)
     return {"vectors": rebuilt, "retrieval_mode": runtime.retrieval_mode}
@@ -218,58 +169,25 @@ def tool_eval(
     runtime = get_cli_runtime_snapshot()
     dataset = load_eval_dataset(dataset_path or runtime.eval_dataset_path)
     parsed_filters = _parse_filters(filters)
-    mode = _resolve_eval_mode(retrieval_mode)
-    top_k = int(k or 3)
-    if top_k <= 0:
-        raise ValueError("k must be positive.")
+    config = build_eval_retrieval_config(
+        retrieval_mode=retrieval_mode,
+        k=(3 if k is None else k),
+    )
 
     container = get_cli_container()
     eval_bundle = container.build_eval_execution_bundle()
-    workspace = prepare_eval_workspace(
+    result = run_retrieval_eval(
         dataset=dataset,
         eval_storage_port=eval_bundle.eval_storage_port,
         eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
-    )
-    config = EvalRetrievalConfig(retrieval_mode=mode, k=top_k, reranker_enabled=False)
-    prepared = workspace.prepared_retriever_workspace
-    if prepared is not None and hasattr(prepared, "build_retriever"):
-        retriever = prepared.build_retriever(
-            config=config,
-            reranker_candidate_k=eval_bundle.reranker_candidate_k,
-            reranker_strategy=eval_bundle.reranker_strategy,
-        )
-    else:
-        retriever = workspace.eval_retriever_factory_port.build_retriever(
-            storage=workspace.eval_storage_port,
-            config=config,
-            reranker_candidate_k=eval_bundle.reranker_candidate_k,
-            reranker_strategy=eval_bundle.reranker_strategy,
-        )
-
-    def _retrieve_external_ids(query: str, requested_top_k: int) -> list[str]:
-        request = RetrievalRequest(
-            query=query,
-            top_k=requested_top_k,
-            mode=mode,
-            filters=parsed_filters,
-        )
-        retrieval = _coerce_retrieval_result(retriever.retrieve(request), request=request)
-        return [
-            str(item.document.external_id)
-            for item in retrieval.items
-            if getattr(item.document, "external_id", None) is not None
-        ]
-
-    result = run_retrieval_eval_core(
-        dataset=dataset,
-        retrieve_external_ids=_retrieve_external_ids,
-        retrieval_mode=mode,
-        k=top_k,
+        retrieval_mode=config.retrieval_mode,
+        k=config.k,
         reranker_enabled=False,
-        max_queries=None,
-        run_out=None,
+        reranker_candidate_k=eval_bundle.reranker_candidate_k,
+        reranker_strategy=eval_bundle.reranker_strategy,
+        filters=parsed_filters,
     )
-    response = _eval_result_to_dict(result)
+    response = eval_result_to_json(result)
     response["filters"] = [
         {"field": item.field, "values": list(item.values)} for item in parsed_filters
     ]
