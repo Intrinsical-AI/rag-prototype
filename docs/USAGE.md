@@ -396,12 +396,16 @@ rag-eval --retrieval-mode sparse
 rag-eval --retrieval-mode dense --candidate-k 20
 rag-eval --retrieval-mode dual --dual-candidate-k 50
 rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
-rag-eval-compare --candidate-mode dual --candidate-dual-candidate-k 50
+rag-eval --retrieval-mode sparse --run-out /tmp/run.jsonl --report-out /tmp/report.json
+rag-eval-compare --spec /tmp/rag-eval-compare-spec.json
 rag-eval-batch --specs /tmp/rag-eval-batch-specs.json
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `eval_dataset_path` en `config.yaml`).
 El comando reporta métricas estándar de IR a `@k` (`nDCG`, `MAP`, `MRR`, `P`, `Recall`).
+El evaluador conserva los scores del retriever cuando están disponibles. Los IDs recuperados
+fuera del corpus ya no se filtran silenciosamente: cuentan como no relevantes y aparecen como
+anomalías en `--report-out` / `--anomalies-out`.
 La evaluación usa un runtime local aislado bajo `<data_dir>/_eval_workspaces/`; no reutiliza ni muta el índice principal.
 Ese runtime sí puede reutilizar un índice denso de evaluación ya persistido cuando coinciden:
 
@@ -412,6 +416,12 @@ Ese runtime sí puede reutilizar un índice denso de evaluación ya persistido c
 Si cambias el modelo de embeddings, el backend vectorial o cualquier input del manifest denso, la evaluación invalida ese workspace y reconstruye el índice aislado.
 El rebuild denso se hace en batches acotados para reducir picos de memoria en corpora grandes, pero sigue siendo un rebuild completo del workspace de evaluación cuando hay drift.
 El dataset se valida de forma estricta: IDs duplicados, relevantes vacíos o relevantes fuera del corpus fallan al cargar.
+El schema v1 (`relevant_external_ids`) se mantiene. El schema v2 añade qrels graduados:
+
+```json
+{"type":"query","query":"alpha","qrels":[{"external_id":"doc:1","relevance":3}]}
+```
+
 Los overrides de modo son explícitos:
 - `--candidate-k` sólo para `dense`
 - `--dual-candidate-k` sólo para `dual`
@@ -428,20 +438,30 @@ Ese env var sobrescribe `perf_metrics_out_path` en tiempo de carga de settings s
 Comparación baseline-vs-candidate (“Detector de Placebo RAG”):
 
 ```bash
+cat > /tmp/rag-eval-compare-spec.json <<'JSON'
+{
+  "k": 3,
+  "baseline": {"retrieval_mode": "sparse"},
+  "candidate": {"retrieval_mode": "dual", "dual_candidate_k": 50},
+  "thresholds": {
+    "min_delta_ndcg": 0.02,
+    "min_delta_map": 0.02,
+    "min_delta_mrr": 0.02,
+    "max_regression_precision": 0.01,
+    "max_regression_recall": 0.01
+  }
+}
+JSON
+
 rag-eval-compare \
-  --candidate-mode dual \
-  --candidate-dual-candidate-k 50 \
-  --min-delta-ndcg 0.02 \
-  --min-delta-map 0.02 \
-  --min-delta-mrr 0.02 \
-  --max-regression-precision 0.01 \
-  --max-regression-recall 0.01 \
-  --json-out /tmp/rag-eval-compare.json
+  --spec /tmp/rag-eval-compare-spec.json \
+  --json-out /tmp/rag-eval-compare.json \
+  --report-out /tmp/rag-eval-compare-report.json
 ```
 
 Comportamiento:
-- baseline por defecto: `sparse` sin reranker
-- candidate: la configuración que quieras validar
+- `baseline` y `candidate` se declaran en `--spec`
+- `thresholds` contiene los umbrales del gate; si se omite un valor, su default es `0.0`
 - exit code `0`: pasa el gate
 - exit code `1`: la candidate no mejora lo suficiente o degrada métricas críticas
 - exit code `2`: error de configuración, dependencia o entorno
@@ -450,6 +470,9 @@ El JSON de salida incluye:
 - `baseline`
 - `candidate`
 - `delta`
+
+El report detallado añade métricas por query y contadores de anomalías, pensado para auditoría,
+pooling y futuros adapters RAGAS/BEIR/MTEB/LLM judge.
 
 Smoke e2e reproducible:
 

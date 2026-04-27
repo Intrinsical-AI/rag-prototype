@@ -74,7 +74,7 @@ def test_rag_query_list_history_entries_sync_delegates_to_crud() -> None:
 def test_evaluation_run_retrieval_eval_validates_inputs() -> None:
     dataset = SimpleNamespace(docs=[], dataset_id="d", queries=[])
 
-    with pytest.raises(ValueError, match="Unsupported retrieval_mode"):
+    with pytest.raises(ValueError, match="retrieval_mode must be one"):
         evaluation.run_retrieval_eval(
             dataset=dataset,
             eval_storage_port=SimpleNamespace(),

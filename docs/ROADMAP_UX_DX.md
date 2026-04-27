@@ -18,9 +18,9 @@ This roadmap isolates the UX / DX work so it can move independently from mutatio
 
 ## P1
 
-- Reduce `rag-eval-compare` complexity:
-  - support compare profiles or spec files, not only expanded flag matrices
-  - make common compare flows easier than bespoke flag composition
+- [x] Reduce `rag-eval-compare` complexity:
+  - use a canonical `--spec` file with baseline, candidate, and thresholds
+  - remove expanded baseline/candidate flag matrices
 - Homogenize CLI exit codes and success/error output:
   - consistent distinction between contract errors, runtime errors, and failed evaluation gates
   - consistent success summaries across commands

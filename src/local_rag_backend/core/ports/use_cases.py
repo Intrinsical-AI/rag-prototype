@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
-from local_rag_backend.core.services.types import EvalRetrievalConfig
+from local_rag_backend.core.services.evaluation_models import EvalRetrievalConfig
 
 if TYPE_CHECKING:
     from local_rag_backend.core.domain.retrieval import (

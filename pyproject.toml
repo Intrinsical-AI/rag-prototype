@@ -3,7 +3,7 @@ name = "rag-prototype"
 version = "1.3.0"
 description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }]
 maintainers = [{ name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }]

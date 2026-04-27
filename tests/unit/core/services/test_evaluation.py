@@ -7,12 +7,14 @@ import pytest
 from local_rag_backend.core.services.evaluation import (
     EvalDataset,
     compare_eval_results,
+    eval_anomalies_to_jsonl,
     eval_compare_result_to_json,
+    eval_result_report_to_json,
     format_eval_result,
     load_eval_dataset,
     run_retrieval_eval,
 )
-from local_rag_backend.core.services.types import EvalResult
+from local_rag_backend.core.services.evaluation_models import EvalResult
 
 
 def test_load_eval_dataset_missing_file_raises(tmp_path: Path) -> None:
@@ -127,6 +129,53 @@ def test_load_eval_dataset_rejects_blank_ids_after_normalization(tmp_path: Path)
         load_eval_dataset(p)
 
 
+def test_load_eval_dataset_supports_schema_v2_graded_qrels(tmp_path: Path) -> None:
+    p = tmp_path / "graded.jsonl"
+    p.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"graded","schema_version":2}',
+                '{"type":"doc","external_id":"doc:great","content":"alpha"}',
+                '{"type":"doc","external_id":"doc:ok","content":"alpha beta"}',
+                (
+                    '{"type":"query","query":"alpha","qrels":['
+                    '{"external_id":"doc:great","relevance":3},'
+                    '{"external_id":"doc:ok","relevance":1}]}'
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ds = load_eval_dataset(p)
+
+    assert ds.schema_version == 2
+    assert ds.queries[0].relevant_external_ids == ("doc:great", "doc:ok")
+    assert [qrel.relevance for qrel in ds.queries[0].qrels] == [3, 1]
+
+
+def test_load_eval_dataset_rejects_qrels_with_schema_v1(tmp_path: Path) -> None:
+    p = tmp_path / "bad-qrels.jsonl"
+    p.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"bad","schema_version":1}',
+                '{"type":"doc","external_id":"doc:1","content":"alpha"}',
+                (
+                    '{"type":"query","query":"alpha","qrels":['
+                    '{"external_id":"doc:1","relevance":2}]}'
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="qrels require schema_version=2"):
+        load_eval_dataset(p)
+
+
 def test_run_retrieval_eval_allows_non_sparse_modes_when_callback_is_valid() -> None:
     ds = load_eval_dataset()
     result = run_retrieval_eval(
@@ -176,7 +225,7 @@ def test_run_retrieval_eval_reports_standard_ir_metrics_for_perfect_run() -> Non
     assert res.recall_at_k == pytest.approx(1.0)
 
 
-def test_run_retrieval_eval_filters_unknown_ids_and_deduplicates_run() -> None:
+def test_run_retrieval_eval_keeps_unknown_ids_as_non_relevant_and_reports_anomalies() -> None:
     ds = EvalDataset(
         dataset_id="edge",
         schema_version=1,
@@ -192,7 +241,7 @@ def test_run_retrieval_eval_filters_unknown_ids_and_deduplicates_run() -> None:
 
     def _retrieve_external_ids(query: str, top_k: int) -> tuple[str, ...]:
         if "France" in query:
-            return ("doc:unknown", "doc:paris", "doc:paris")
+            return ("doc:unknown", "doc:unknown", "doc:paris")
         if "Spain" in query:
             return ("doc:paris", "doc:madrid")
         return ()
@@ -204,11 +253,54 @@ def test_run_retrieval_eval_filters_unknown_ids_and_deduplicates_run() -> None:
         k=2,
     )
 
-    assert res.ndcg_at_k == pytest.approx(0.8154648767)
-    assert res.map_at_k == pytest.approx(0.75)
-    assert res.mrr_at_k == pytest.approx(0.75)
+    assert res.ndcg_at_k == pytest.approx(0.6309297536)
+    assert res.map_at_k == pytest.approx(0.5)
+    assert res.mrr_at_k == pytest.approx(0.5)
     assert res.precision_at_k == pytest.approx(0.5)
     assert res.recall_at_k == pytest.approx(1.0)
+    assert [anomaly.kind for anomaly in res.anomalies] == [
+        "unknown_external_id",
+        "duplicate_external_id",
+    ]
+    assert res.per_query[0].ranked_docs[0].external_id == "doc:unknown"
+    assert res.per_query[0].ranked_docs[0].known is False
+
+
+def test_run_retrieval_eval_preserves_retriever_scores_in_run_output(tmp_path: Path) -> None:
+    ds = load_eval_dataset()
+    run_out = tmp_path / "run.jsonl"
+
+    res = run_retrieval_eval(
+        dataset=ds,
+        retrieve_ranked_items=lambda _query, _top_k: ({"external_id": "doc:paris", "score": 0.42},),
+        retrieval_mode="sparse",
+        k=1,
+        max_queries=1,
+        run_out=run_out,
+    )
+
+    assert res.per_query[0].ranked_docs[0].score == pytest.approx(0.42)
+    assert '"score": 0.42' in run_out.read_text(encoding="utf-8")
+
+
+def test_eval_result_report_and_anomalies_json_include_audit_details() -> None:
+    ds = load_eval_dataset()
+    res = run_retrieval_eval(
+        dataset=ds,
+        retrieve_external_ids=lambda _query, _top_k: ("doc:unknown",),
+        retrieval_mode="sparse",
+        k=1,
+        max_queries=1,
+    )
+
+    report = eval_result_report_to_json(res, config={"profile": "test"})
+    anomalies_jsonl = eval_anomalies_to_jsonl(res)
+
+    assert report["type"] == "eval_report"
+    assert report["config"] == {"profile": "test"}
+    assert report["anomalies_count"] == 1
+    assert report["per_query"][0]["ranked_docs"][0]["known"] is False
+    assert "unknown_external_id" in anomalies_jsonl
 
 
 def _eval_result(

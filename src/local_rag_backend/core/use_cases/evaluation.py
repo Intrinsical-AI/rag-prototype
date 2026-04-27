@@ -5,12 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from local_rag_backend.core.domain.retrieval import (
+    RetrievalFilter,
     RetrievalRequest,
     RetrievalResult,
-    retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import (
     EvalDatasetDocInput,
@@ -25,13 +25,20 @@ from local_rag_backend.core.services.evaluation import (
     compare_eval_results,
     run_retrieval_eval as run_retrieval_eval_core,
 )
-from local_rag_backend.core.services.types import (
+from local_rag_backend.core.services.evaluation_models import (
     EvalBatchResult,
     EvalBatchSpec,
     EvalCompareConfig,
     EvalRetrievalConfig,
     EvalRetrievalMode,
+    EvalRetrievedItem,
 )
+from local_rag_backend.core.services.evaluation_validation import (
+    build_eval_retrieval_config,
+    eval_compare_config_to_retrieval_config,
+    validate_eval_retrieval_config,
+)
+from local_rag_backend.core.services.retrieval_coercion import coerce_retrieval_result
 
 
 @dataclass(frozen=True)
@@ -65,28 +72,23 @@ def _resolve_prepared_retriever_workspace(
     return prepare_workspace(storage=eval_storage_port)
 
 
-def _external_ids_from_retrieval(retrieval: RetrievalResult) -> list[str]:
+def _ranked_items_from_retrieval(retrieval: RetrievalResult) -> list[EvalRetrievedItem]:
     return [
-        str(external_id)
-        for external_id in (
-            getattr(document, "external_id", None) for document in retrieval.documents
+        EvalRetrievedItem(external_id=str(external_id), score=float(item.score))
+        for item, external_id in (
+            (item, getattr(item.document, "external_id", None)) for item in retrieval.items
         )
         if external_id is not None and str(external_id).strip()
     ]
 
 
-def _rankings_lookup(rankings: dict[str, list[str]]) -> Callable[[str, int], Sequence[str]]:
-    def retrieve_external_ids(query: str, _top_k: int) -> list[str]:
+def _rankings_lookup(
+    rankings: dict[str, list[EvalRetrievedItem]],
+) -> Callable[[str, int], Sequence[EvalRetrievedItem]]:
+    def retrieve_ranked_items(query: str, _top_k: int) -> list[EvalRetrievedItem]:
         return rankings.get(query, [])
 
-    return retrieve_external_ids
-
-
-def _coerce_eval_retrieval_mode(retrieval_mode: str) -> EvalRetrievalMode:
-    normalized = str(retrieval_mode)
-    if normalized not in {"sparse", "dense", "dual", "hybrid"}:
-        raise ValueError(f"Unsupported retrieval_mode: {retrieval_mode}")
-    return cast("EvalRetrievalMode", normalized)
+    return retrieve_ranked_items
 
 
 def _run_eval_with_retriever(
@@ -100,21 +102,23 @@ def _run_eval_with_retriever(
     dual_candidate_k: int | None,
     max_queries: int | None,
     run_out: Path | None,
+    filters: tuple[RetrievalFilter, ...] = (),
 ) -> EvalResult:
-    def _retrieve_external_ids(query: str, top_k: int) -> list[str]:
+    def _retrieve_ranked_items(query: str, top_k: int) -> list[EvalRetrievedItem]:
         request = RetrievalRequest(
             query=query,
             top_k=top_k,
             mode=retrieval_mode,
             candidate_k=(int(candidate_k) if candidate_k is not None else None),
             dual_candidate_k=(int(dual_candidate_k) if dual_candidate_k is not None else None),
+            filters=filters,
         )
-        retrieval = _coerce_retrieval_result(retriever.retrieve(request), request=request)
-        return _external_ids_from_retrieval(retrieval)
+        retrieval = coerce_retrieval_result(retriever.retrieve(request), request=request)
+        return _ranked_items_from_retrieval(retrieval)
 
     return run_retrieval_eval_core(
         dataset=dataset,
-        retrieve_external_ids=_retrieve_external_ids,
+        retrieve_ranked_items=_retrieve_ranked_items,
         retrieval_mode=retrieval_mode,
         k=k,
         reranker_enabled=reranker_enabled,
@@ -143,50 +147,6 @@ def prepare_eval_workspace(
     )
 
 
-def _coerce_retrieval_result(
-    raw_result: Any,
-    *,
-    request: RetrievalRequest,
-) -> RetrievalResult:
-    if isinstance(raw_result, RetrievalResult):
-        return raw_result
-    if (
-        isinstance(raw_result, tuple)
-        and len(raw_result) == 2
-        and isinstance(raw_result[0], (list, tuple))
-        and isinstance(raw_result[1], (list, tuple))
-    ):
-        docs, scores = raw_result
-        return retrieval_result_from_pairs(
-            docs=docs,
-            scores=scores,
-            mode_used=request.mode,
-            backend_used="eval",
-        )
-    raise RuntimeError(f"Unsupported eval retriever response type: {type(raw_result)!r}")
-
-
-def _validate_eval_options(
-    *,
-    retrieval_mode: str,
-    candidate_k: int | None,
-    dual_candidate_k: int | None,
-    hybrid_alpha: float | None,
-) -> None:
-    if candidate_k is not None and retrieval_mode != "dense":
-        raise ValueError("--candidate-k is supported only with retrieval_mode=dense")
-    if dual_candidate_k is not None and retrieval_mode != "dual":
-        raise ValueError("--dual-candidate-k is supported only with retrieval_mode=dual")
-    if hybrid_alpha is not None and retrieval_mode != "hybrid":
-        raise ValueError("--hybrid-alpha is supported only with retrieval_mode=hybrid")
-    if candidate_k is not None and int(candidate_k) <= 0:
-        raise ValueError("candidate_k must be positive")
-    if dual_candidate_k is not None and int(dual_candidate_k) <= 0:
-        raise ValueError("dual_candidate_k must be positive")
-    if hybrid_alpha is not None and not 0.0 <= float(hybrid_alpha) <= 1.0:
-        raise ValueError("hybrid_alpha must be between 0.0 and 1.0")
-
-
 def run_retrieval_eval(
     *,
     dataset: EvalDataset,
@@ -202,18 +162,21 @@ def run_retrieval_eval(
     reranker_strategy: str = "overlap_v1",
     max_queries: int | None = None,
     run_out: Path | None = None,
+    filters: tuple[RetrievalFilter, ...] = (),
 ) -> EvalResult:
-    if retrieval_mode not in {"sparse", "dense", "dual", "hybrid"}:
-        raise ValueError(f"Unsupported retrieval_mode: {retrieval_mode}")
-    if k <= 0:
-        raise ValueError("k must be positive")
-    _validate_eval_options(
-        retrieval_mode=str(retrieval_mode),
+    config = build_eval_retrieval_config(
+        retrieval_mode=retrieval_mode,
+        k=k,
         candidate_k=candidate_k,
         dual_candidate_k=dual_candidate_k,
         hybrid_alpha=hybrid_alpha,
+        reranker_enabled=bool(reranker_enabled),
+        field_names={
+            "candidate_k": "--candidate-k",
+            "dual_candidate_k": "--dual-candidate-k",
+            "hybrid_alpha": "--hybrid-alpha",
+        },
     )
-    normalized_retrieval_mode = _coerce_eval_retrieval_mode(retrieval_mode)
     workspace = prepare_eval_workspace(
         dataset=dataset,
         eval_storage_port=eval_storage_port,
@@ -221,18 +184,12 @@ def run_retrieval_eval(
     )
     return run_prepared_retrieval_eval(
         workspace=workspace,
-        config=EvalRetrievalConfig(
-            retrieval_mode=normalized_retrieval_mode,
-            k=int(k),
-            candidate_k=(int(candidate_k) if candidate_k is not None else None),
-            dual_candidate_k=(int(dual_candidate_k) if dual_candidate_k is not None else None),
-            hybrid_alpha=(float(hybrid_alpha) if hybrid_alpha is not None else None),
-            reranker_enabled=bool(reranker_enabled),
-        ),
+        config=config,
         reranker_candidate_k=reranker_candidate_k,
         reranker_strategy=reranker_strategy,
         max_queries=max_queries,
         run_out=run_out,
+        filters=filters,
     )
 
 
@@ -244,13 +201,9 @@ def run_prepared_retrieval_eval(
     reranker_strategy: str = "overlap_v1",
     max_queries: int | None = None,
     run_out: Path | None = None,
+    filters: tuple[RetrievalFilter, ...] = (),
 ) -> EvalResult:
-    _validate_eval_options(
-        retrieval_mode=str(config.retrieval_mode),
-        candidate_k=config.candidate_k,
-        dual_candidate_k=config.dual_candidate_k,
-        hybrid_alpha=config.hybrid_alpha,
-    )
+    config = validate_eval_retrieval_config(config)
     prepared = workspace.prepared_retriever_workspace
     if prepared is not None and hasattr(prepared, "build_retriever"):
         retriever = prepared.build_retriever(
@@ -275,6 +228,7 @@ def run_prepared_retrieval_eval(
         dual_candidate_k=config.dual_candidate_k,
         max_queries=max_queries,
         run_out=run_out,
+        filters=filters,
     )
 
 
@@ -315,6 +269,8 @@ def _run_exact_hybrid_alpha_group(
                 ),
                 json_out=spec.json_out,
                 run_out=spec.run_out,
+                report_out=spec.report_out,
+                anomalies_out=spec.anomalies_out,
             )
             for spec in specs
         )
@@ -330,7 +286,9 @@ def _run_exact_hybrid_alpha_group(
     alpha_by_name = {
         spec.name: _effective_hybrid_alpha(workspace=workspace, spec=spec) for spec in specs
     }
-    ranking_by_name: dict[str, dict[str, list[str]]] = {spec.name: {} for spec in specs}
+    ranking_by_name: dict[str, dict[str, list[EvalRetrievedItem]]] = {
+        spec.name: {} for spec in specs
+    }
     queries = list(workspace.dataset.queries)
     if max_queries is not None:
         queries = queries[: max(0, int(max_queries))]
@@ -340,7 +298,7 @@ def _run_exact_hybrid_alpha_group(
         hybrid_results = retrieve_group(query=query.query, top_k=k, alphas=alphas)
         for spec in specs:
             retrieval = hybrid_results[alpha_by_name[spec.name]]
-            ranking_by_name[spec.name][query.query] = _external_ids_from_retrieval(retrieval)
+            ranking_by_name[spec.name][query.query] = _ranked_items_from_retrieval(retrieval)
 
     out: list[EvalBatchResult] = []
     for spec in specs:
@@ -349,7 +307,7 @@ def _run_exact_hybrid_alpha_group(
 
         result = run_retrieval_eval_core(
             dataset=workspace.dataset,
-            retrieve_external_ids=_rankings_lookup(rankings),
+            retrieve_ranked_items=_rankings_lookup(rankings),
             retrieval_mode="hybrid",
             k=k,
             reranker_enabled=False,
@@ -362,6 +320,8 @@ def _run_exact_hybrid_alpha_group(
                 result=result,
                 json_out=spec.json_out,
                 run_out=spec.run_out,
+                report_out=spec.report_out,
+                anomalies_out=spec.anomalies_out,
             )
         )
     return tuple(out)
@@ -411,6 +371,8 @@ def run_retrieval_eval_batch(
                 ),
                 json_out=spec.json_out,
                 run_out=spec.run_out,
+                report_out=spec.report_out,
+                anomalies_out=spec.anomalies_out,
             )
             for spec in specs
         )
@@ -452,6 +414,8 @@ def run_retrieval_eval_batch(
                 result=result,
                 json_out=spec.json_out,
                 run_out=spec.run_out,
+                report_out=spec.report_out,
+                anomalies_out=spec.anomalies_out,
             )
         )
 
@@ -487,16 +451,18 @@ def compare_retrieval_eval(
     max_regression_precision: float = 0.0,
     max_regression_recall: float = 0.0,
 ) -> EvalCompareResult:
+    baseline_config = eval_compare_config_to_retrieval_config(baseline, k=k)
+    candidate_config = eval_compare_config_to_retrieval_config(candidate, k=k)
     baseline_result = run_retrieval_eval(
         dataset=dataset,
         eval_storage_port=eval_storage_port,
         eval_retriever_factory_port=eval_retriever_factory_port,
-        retrieval_mode=baseline.retrieval_mode,
-        k=k,
-        candidate_k=baseline.candidate_k,
-        reranker_enabled=baseline.reranker_enabled,
-        dual_candidate_k=baseline.dual_candidate_k,
-        hybrid_alpha=baseline.hybrid_alpha,
+        retrieval_mode=baseline_config.retrieval_mode,
+        k=baseline_config.k,
+        candidate_k=baseline_config.candidate_k,
+        reranker_enabled=baseline_config.reranker_enabled,
+        dual_candidate_k=baseline_config.dual_candidate_k,
+        hybrid_alpha=baseline_config.hybrid_alpha,
         reranker_candidate_k=reranker_candidate_k,
         reranker_strategy=reranker_strategy,
         max_queries=max_queries,
@@ -505,12 +471,12 @@ def compare_retrieval_eval(
         dataset=dataset,
         eval_storage_port=eval_storage_port,
         eval_retriever_factory_port=eval_retriever_factory_port,
-        retrieval_mode=candidate.retrieval_mode,
-        k=k,
-        candidate_k=candidate.candidate_k,
-        reranker_enabled=candidate.reranker_enabled,
-        dual_candidate_k=candidate.dual_candidate_k,
-        hybrid_alpha=candidate.hybrid_alpha,
+        retrieval_mode=candidate_config.retrieval_mode,
+        k=candidate_config.k,
+        candidate_k=candidate_config.candidate_k,
+        reranker_enabled=candidate_config.reranker_enabled,
+        dual_candidate_k=candidate_config.dual_candidate_k,
+        hybrid_alpha=candidate_config.hybrid_alpha,
         reranker_candidate_k=reranker_candidate_k,
         reranker_strategy=reranker_strategy,
         max_queries=max_queries,

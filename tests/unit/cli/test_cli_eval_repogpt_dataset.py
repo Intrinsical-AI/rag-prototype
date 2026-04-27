@@ -36,26 +36,32 @@ def test_rag_eval_repogpt_dataset_sparse_smoke() -> None:
 
 def test_rag_eval_compare_repogpt_dataset_sparse_smoke(tmp_path: Path) -> None:
     json_out = tmp_path / "repogpt-compare.json"
+    spec = tmp_path / "repogpt-compare-spec.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "k": 1,
+                "baseline": {"retrieval_mode": "sparse"},
+                "candidate": {"retrieval_mode": "sparse"},
+                "thresholds": {
+                    "min_delta_ndcg": 0.0,
+                    "min_delta_map": 0.0,
+                    "min_delta_mrr": 0.0,
+                    "max_regression_precision": 0.0,
+                    "max_regression_recall": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     result = CliRunner().invoke(
         cli,
         [
             "eval-compare",
             "--dataset",
             str(DATASET_PATH),
-            "--k",
-            "1",
-            "--candidate-mode",
-            "sparse",
-            "--min-delta-ndcg",
-            "0.0",
-            "--min-delta-map",
-            "0.0",
-            "--min-delta-mrr",
-            "0.0",
-            "--max-regression-precision",
-            "0.0",
-            "--max-regression-recall",
-            "0.0",
+            "--spec",
+            str(spec),
             "--json-out",
             str(json_out),
         ],
