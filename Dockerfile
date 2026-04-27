@@ -32,7 +32,7 @@ RUN python -m venv /opt/venv && pip install --no-cache-dir "uv==${UV_VERSION}"
 FROM build-base as deps
 
 ARG RAG_EXTRAS=""
-COPY pyproject.toml uv.lock README.md LICENSE MANIFEST.in ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 RUN set -eux; \
     EXTRA_FLAGS=""; \
@@ -41,7 +41,7 @@ RUN set -eux; \
         EXTRA_FLAGS="${EXTRA_FLAGS} --extra ${extra}"; \
       done; \
     fi; \
-    uv sync --frozen --no-dev --extra server ${EXTRA_FLAGS}
+    uv sync --frozen --no-dev --no-editable --extra server ${EXTRA_FLAGS}
 
 # --- Stage 3: Development Environment ---
 FROM deps as development
