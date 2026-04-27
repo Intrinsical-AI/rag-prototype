@@ -231,7 +231,7 @@ rag-ingest --dry-run ./docs
 
 Notas:
 
-* En `local_split` + `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial local de forma consistente (FAISS o NumPy, según `VECTOR_BACKEND`) y borra chunks obsoletos si un fichero se acorta.
+* En `local_split` + `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial local de forma consistente (FAISS o NumPy, según `vector_backend`) y borra chunks obsoletos si un fichero se acorta.
 * En `elasticsearch` + `dense`/`hybrid`, la CLI usa el backend unificado: documentos, embeddings, history, system state y tombstones viven en Elasticsearch.
 * La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
 * Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.

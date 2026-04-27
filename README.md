@@ -64,6 +64,15 @@ source .venv/bin/activate
 # Install runtime deps (uses uv.lock); --extra server adds FastAPI/uvicorn
 uv sync --frozen --extra server
 
+# config.yaml is required at runtime. Fresh source clones include the default file;
+# this protects archive/copy workflows where only config.example.yaml is present.
+test -f config.yaml || cp config.example.yaml config.yaml
+
+# Before using /api/ask or expecting /readyz to pass, enable one LLM provider in config.yaml:
+# - openai_api_key: "..."
+# - openrouter_enabled: true + openrouter_api_key: "..."
+# - ollama_enabled: true, with Ollama running locally
+
 # (Optional) Dense/Hybrid deps for local split backend (FAISS)
 # uv sync --frozen --extra server --extra dense
 #
@@ -85,9 +94,13 @@ rag-bootstrap
 rag-server
 # UI: http://localhost:8000/
 # Health: http://localhost:8000/healthz
+# Readiness: http://localhost:8000/readyz
 # Ollama health: http://localhost:8000/healthz/ollama
 # Docs: http://localhost:8000/docs
 ```
+
+> `/healthz` confirms the HTTP app is alive. `/readyz` and `/api/ask` require a configured
+> LLM provider and may return `503` until `config.yaml` enables OpenAI, OpenRouter, or Ollama.
 
 > `rag-server` does not accept CLI flags (`--host`, `--port`, etc.). Host and port are controlled
 > exclusively via `config.yaml` (`app_host`, `app_port`).
@@ -458,7 +471,7 @@ sequenceDiagram
 ## Runtime considerations
 
 * **Singleton per process**: `RagService` is initialized as a singleton in `composition/factory`. With `uvicorn --workers N`, each process loads its own instance (and its retrieval/index adapters). Align deployment and warm-up as needed.
-* **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit `DATA_DIR`; when `DATA_DIR` is default and `SQLITE_URL` is absolute, it uses the DB parent directory to keep workers/CLI aligned.
+* **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit absolute `data_dir`; when `data_dir` is relative/default and `sqlite_url` resolves to an absolute SQLite path, it uses the DB parent directory to keep workers/CLI aligned.
 * **Metrics**: if `enable_monitoring: true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
 * **Dense/Hybrid**: must use the same embedding model for indexing and querying (`st_embedding_model`).
 
@@ -472,7 +485,7 @@ PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run --active --no-sync lint-imports
 uv run pre-commit run --all-files
 ```
 
-> Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `VECTOR_BACKEND=auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
+> Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 
 ### CI gates
 
@@ -517,27 +530,46 @@ Quick usage example:
 
 ```python
 from langchain_community.document_loaders import WebBaseLoader
-from local_rag_backend.core.services.etl import ETLService
-from local_rag_backend.core.services.ingestion import IngestionPipeline
+from local_rag_backend.composition.container import AppContainer
+from local_rag_backend.core.use_cases.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
+)
 from local_rag_backend.infrastructure.ingestion.loaders import LangChainLoader
+from local_rag_backend.settings import settings
 
-# 1) Create/obtain your ETLService as usual (doc store, vector store, embedder)
-etl = ETLService(doc_repo, vector_repo, embedder)
-
-# 2) Wrap any LangChain loader
+# 1) Wrap any LangChain loader
 lc_loader = WebBaseLoader(["https://example.com"])  # or DirectoryLoader, SitemapLoader, etc.
 loader = LangChainLoader(lc_loader, drop_empty=True, metadata_filter={"lang": "en"})
 
-# 3) Run the pipeline
-pipeline = IngestionPipeline(loader=loader, etl_service=etl)
-count = pipeline.run()
-print(f"Ingested {count} chunks")
+# 2) Convert LoaderPort items into a canonical mutation intent
+upserts = []
+for i, item in enumerate(loader.load()):
+    locator = item.lineage.record_locator or f"item:{i}"
+    upserts.append(
+        MutationUpsertInput(
+            external_id=f"{item.lineage.source_uri}#{locator}",
+            content=item.text,
+            source_id=item.lineage.source_uri,
+            metadata=item.metadata,
+        )
+    )
+
+# 3) Persist through the canonical write path
+container = AppContainer.from_settings(settings)
+coordinator = MutationCoordinator(settings_obj=settings, ports=container.docs_mutation_ports())
+summary = coordinator.execute(
+    MutationIntent(op_id="", upserts=tuple(upserts), source="langchain:web")
+)
+print(summary)
 ```
 
 Notes:
 
 - `drop_empty=True` skips whitespace-only documents.
 - `metadata_filter={...}` yields only items whose metadata includes the given key/value pairs.
+- Application writes should go through `MutationCoordinator`, not direct `ETLService`/`IngestionPipeline`, so SQL and vector state stay coordinated.
 - The adapter expects each LangChain `Document` to have `page_content` and `metadata` fields. It gracefully falls back to dict-like objects or stringification when needed.
 
 ---
