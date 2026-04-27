@@ -285,7 +285,9 @@ def compare_eval_results(
     if baseline.k != candidate.k:
         raise ValueError("Baseline and candidate k must match.")
 
-    delta = compare_metrics_delta(baseline=_result_metrics(baseline), candidate=_result_metrics(candidate))
+    delta = compare_metrics_delta(
+        baseline=_result_metrics(baseline), candidate=_result_metrics(candidate)
+    )
 
     reasons: list[str] = []
     if delta.ndcg_at_k < float(min_delta_ndcg):

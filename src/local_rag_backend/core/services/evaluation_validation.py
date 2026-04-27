@@ -100,9 +100,7 @@ def validate_eval_retrieval_config(
     if config.candidate_k is not None and int(config.candidate_k) <= 0:
         raise ValueError(f"{labels.get('candidate_k', 'candidate_k')} must be positive")
     if config.dual_candidate_k is not None and int(config.dual_candidate_k) <= 0:
-        raise ValueError(
-            f"{labels.get('dual_candidate_k', 'dual_candidate_k')} must be positive"
-        )
+        raise ValueError(f"{labels.get('dual_candidate_k', 'dual_candidate_k')} must be positive")
     if config.hybrid_alpha is not None and not 0.0 <= float(config.hybrid_alpha) <= 1.0:
         raise ValueError(
             f"{labels.get('hybrid_alpha', 'hybrid_alpha')} must be between 0.0 and 1.0"
@@ -297,12 +295,8 @@ def parse_eval_batch_spec(raw: Mapping[str, object], *, index: int) -> EvalBatch
         reranker_enabled=config.reranker_enabled,
         json_out=(str(raw["json_out"]).strip() if raw.get("json_out") is not None else None),
         run_out=(str(raw["run_out"]).strip() if raw.get("run_out") is not None else None),
-        report_out=(
-            str(raw["report_out"]).strip() if raw.get("report_out") is not None else None
-        ),
+        report_out=(str(raw["report_out"]).strip() if raw.get("report_out") is not None else None),
         anomalies_out=(
-            str(raw["anomalies_out"]).strip()
-            if raw.get("anomalies_out") is not None
-            else None
+            str(raw["anomalies_out"]).strip() if raw.get("anomalies_out") is not None else None
         ),
     )
