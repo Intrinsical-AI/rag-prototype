@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from local_rag_backend.composition import adapters as adapters_module
+from local_rag_backend.composition import evaluation as eval_adapters_module
 from local_rag_backend.composition.adapters import (
     build_eval_retriever_factory_port,
     build_eval_storage_port,
@@ -25,10 +25,11 @@ from local_rag_backend.core.services.evaluation import (
     load_eval_dataset,
     run_retrieval_eval as run_core_eval,
 )
-from local_rag_backend.core.services.types import (
+from local_rag_backend.core.services.evaluation_models import (
     EvalBatchSpec,
     EvalCompareConfig,
     EvalRetrievalConfig,
+    EvalRetrievedItem,
 )
 from local_rag_backend.core.use_cases.evaluation import (
     compare_retrieval_eval,
@@ -143,20 +144,20 @@ def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
         reranker_strategy="overlap_v1",
     )
 
-    def _retrieve_external_ids(query: str, top_k: int) -> list[str]:
+    def _retrieve_ranked_items(query: str, top_k: int) -> list[EvalRetrievedItem]:
         request = RetrievalRequest(query=query, top_k=top_k, mode="sparse")
         retrieval = _coerce_retrieval_result(retriever.retrieve(request), request=request)
         return [
-            str(external_id)
-            for external_id in (
-                getattr(document, "external_id", None) for document in retrieval.documents
+            EvalRetrievedItem(external_id=str(external_id), score=float(item.score))
+            for item, external_id in (
+                (item, getattr(item.document, "external_id", None)) for item in retrieval.items
             )
             if external_id is not None and str(external_id).strip()
         ]
 
     core_res = run_core_eval(
         dataset=ds,
-        retrieve_external_ids=_retrieve_external_ids,
+        retrieve_ranked_items=_retrieve_ranked_items,
         retrieval_mode="sparse",
         k=3,
         reranker_enabled=True,
@@ -174,7 +175,16 @@ def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
         reranker_strategy="overlap_v1",
     )
 
-    assert app_res == core_res
+    assert app_res.dataset_id == core_res.dataset_id
+    assert app_res.retrieval_mode == core_res.retrieval_mode
+    assert app_res.ndcg_at_k == pytest.approx(core_res.ndcg_at_k)
+    assert app_res.map_at_k == pytest.approx(core_res.map_at_k)
+    assert app_res.mrr_at_k == pytest.approx(core_res.mrr_at_k)
+    assert app_res.precision_at_k == pytest.approx(core_res.precision_at_k)
+    assert app_res.recall_at_k == pytest.approx(core_res.recall_at_k)
+    assert [item.metrics for item in app_res.per_query] == [
+        item.metrics for item in core_res.per_query
+    ]
 
 
 def test_build_eval_storage_port_uses_isolated_local_paths(tmp_path: Path) -> None:
@@ -431,18 +441,18 @@ def test_run_retrieval_eval_reuses_persisted_dense_eval_index(
             return super().embed(texts)
 
     monkeypatch.setattr(
-        adapters_module,
+        eval_adapters_module,
         "build_dense_embedder_from_settings",
         lambda **_kwargs: FakeEmbedder(),
     )
 
-    workspace = adapters_module._PreparedEvalWorkspace(
+    workspace = eval_adapters_module._PreparedEvalWorkspace(
         storage=storage,
         openai_embedder_factory=lambda: FakeEmbedder(),
         st_embedder_factory=lambda _model_name: FakeEmbedder(),
         dense_retriever_factory=lambda **_kwargs: None,
         hybrid_retriever_factory=lambda **_kwargs: None,
-        vector_repo_factory=adapters_module.VectorStorage,
+        vector_repo_factory=eval_adapters_module.VectorStorage,
         reranker_factory=lambda *_args, **_kwargs: None,
     )
 
@@ -451,13 +461,13 @@ def test_run_retrieval_eval_reuses_persisted_dense_eval_index(
     assert embed_calls == [len(ds.docs)]
 
     embed_calls.clear()
-    second_workspace = adapters_module._PreparedEvalWorkspace(
+    second_workspace = eval_adapters_module._PreparedEvalWorkspace(
         storage=storage,
         openai_embedder_factory=lambda: FakeEmbedder(),
         st_embedder_factory=lambda _model_name: FakeEmbedder(),
         dense_retriever_factory=lambda **_kwargs: None,
         hybrid_retriever_factory=lambda **_kwargs: None,
-        vector_repo_factory=adapters_module.VectorStorage,
+        vector_repo_factory=eval_adapters_module.VectorStorage,
         reranker_factory=lambda *_args, **_kwargs: None,
     )
     second_workspace._ensure_vector_repo_ready()
@@ -516,31 +526,31 @@ def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_change
             return super().embed(texts)
 
     monkeypatch.setattr(
-        adapters_module,
+        eval_adapters_module,
         "build_dense_embedder_from_settings",
         lambda **_kwargs: FakeEmbedder(),
     )
 
-    first_workspace = adapters_module._PreparedEvalWorkspace(
+    first_workspace = eval_adapters_module._PreparedEvalWorkspace(
         storage=storage_a,
         openai_embedder_factory=lambda: FakeEmbedder(),
         st_embedder_factory=lambda _model_name: FakeEmbedder(),
         dense_retriever_factory=lambda **_kwargs: None,
         hybrid_retriever_factory=lambda **_kwargs: None,
-        vector_repo_factory=adapters_module.VectorStorage,
+        vector_repo_factory=eval_adapters_module.VectorStorage,
         reranker_factory=lambda *_args, **_kwargs: None,
     )
     first_workspace._ensure_vector_repo_ready()
     assert embed_calls == [len(ds.docs)]
 
     embed_calls.clear()
-    second_workspace = adapters_module._PreparedEvalWorkspace(
+    second_workspace = eval_adapters_module._PreparedEvalWorkspace(
         storage=storage_b,
         openai_embedder_factory=lambda: FakeEmbedder(),
         st_embedder_factory=lambda _model_name: FakeEmbedder(),
         dense_retriever_factory=lambda **_kwargs: None,
         hybrid_retriever_factory=lambda **_kwargs: None,
-        vector_repo_factory=adapters_module.VectorStorage,
+        vector_repo_factory=eval_adapters_module.VectorStorage,
         reranker_factory=lambda *_args, **_kwargs: None,
     )
     second_workspace._ensure_vector_repo_ready()
@@ -591,20 +601,20 @@ def test_run_retrieval_eval_builds_dense_eval_index_in_chunks(
             batch_sizes.append(len(texts))
             return super().embed(texts)
 
-    monkeypatch.setattr(adapters_module, "EVAL_DENSE_REBUILD_BATCH_SIZE", 2)
+    monkeypatch.setattr(eval_adapters_module, "EVAL_DENSE_REBUILD_BATCH_SIZE", 2)
     monkeypatch.setattr(
-        adapters_module,
+        eval_adapters_module,
         "build_dense_embedder_from_settings",
         lambda **_kwargs: FakeEmbedder(),
     )
 
-    workspace = adapters_module._PreparedEvalWorkspace(
+    workspace = eval_adapters_module._PreparedEvalWorkspace(
         storage=storage,
         openai_embedder_factory=lambda: FakeEmbedder(),
         st_embedder_factory=lambda _model_name: FakeEmbedder(),
         dense_retriever_factory=lambda **_kwargs: None,
         hybrid_retriever_factory=lambda **_kwargs: None,
-        vector_repo_factory=adapters_module.VectorStorage,
+        vector_repo_factory=eval_adapters_module.VectorStorage,
         reranker_factory=lambda *_args, **_kwargs: None,
     )
     workspace._ensure_vector_repo_ready()

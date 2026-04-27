@@ -55,7 +55,7 @@ Interpretation:
 | Mutation saga | One module still owns profile validation, journal lifecycle, before-image, SQL apply, vector apply, rollback, recovery, and reconcile | [`src/local_rag_backend/core/use_cases/_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) | High blast radius for write-path changes | High |
 | Mutation coordinator | Strategy selection, profile resolution, batching, and settings-derived behavior remain concentrated in one coordinator | [`src/local_rag_backend/core/use_cases/docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) | Coordination logic still spreads across layers | High |
 | Canonical import path | Scope-sync still relies on dynamic repo capabilities outside the coordinator; transport validation is now shared, but the write semantics still depend on repo-specific delete hooks | [`src/local_rag_backend/core/use_cases/docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py) | Same business action can still depend on repo capabilities outside the core coordinator | High |
-| Evaluation methodology | Unknown retrieved IDs are silently filtered; original retriever scores are discarded; compare gate uses aggregate deltas only | [`src/local_rag_backend/core/services/evaluation.py`](../src/local_rag_backend/core/services/evaluation.py), [`src/local_rag_backend/core/use_cases/evaluation.py`](../src/local_rag_backend/core/use_cases/evaluation.py) | Retrieval defects can be masked; candidate quality can be overstated | High |
+| Evaluation methodology | Score/unknown-ID handling is fixed; compare gate still needs statistical testing beyond aggregate deltas | [`src/local_rag_backend/core/services/evaluation.py`](../src/local_rag_backend/core/services/evaluation.py), [`src/local_rag_backend/core/use_cases/evaluation.py`](../src/local_rag_backend/core/use_cases/evaluation.py) | Candidate quality can still be overstated without paired significance tests | Medium |
 | CLI / DX contract consistency | Evaluation flags are still powerful and cognitively expensive; some command surfaces remain manually shaped rather than spec-driven | [`src/local_rag_backend/cli_commands/docs/docs_mutate.py`](../src/local_rag_backend/cli_commands/docs/docs_mutate.py), [`src/local_rag_backend/cli_commands/eval.py`](../src/local_rag_backend/cli_commands/eval.py) | Users still have to learn a wide CLI surface | Medium |
 | Maintenance | Two multi-store delete flows are still near-mirror implementations | [`src/local_rag_backend/core/services/maintenance.py`](../src/local_rag_backend/core/services/maintenance.py) | Partial fixes and telemetry drift | Medium |
 | Ingestion planner | Planning, stale detection, batching, mutation execution, and terminal output still live in one module; `items` remains `Any` | [`src/local_rag_backend/cli_commands/docs/_ingestion_planner.py`](../src/local_rag_backend/cli_commands/docs/_ingestion_planner.py) | Reuse is limited; contracts remain implicit | Medium |
@@ -107,15 +107,14 @@ Validated points:
 
 - Dataset parsing and aggregate metric calculation are correctly centralized in [`load_eval_dataset`](../src/local_rag_backend/core/services/evaluation.py) and `ir_measures`.
 - The evaluation workspace is isolated through [`prepare_eval_workspace`](../src/local_rag_backend/core/use_cases/evaluation.py), so this is not a simple "production index accidentally reused" story.
-- The core evaluator still filters retrieved IDs not present in the dataset corpus:
-  `normalized_external_id not in known_doc_ids` in [`run_retrieval_eval`](../src/local_rag_backend/core/services/evaluation.py).
-- The evaluator also discards original retrieval scores because the callback contract is `Sequence[str]`, then invents rank-based scores via `k - rank + 1`.
-- [`compare_eval_results`](../src/local_rag_backend/core/services/evaluation.py) still gates on aggregate deltas only, with no per-query distribution or significance testing.
+- The core evaluator now keeps retrieved IDs not present in the dataset corpus as non-relevant results and emits explicit anomalies.
+- The evaluator now accepts ranked `(external_id, score)` style results while keeping backward compatibility for ID-only callbacks.
+- [`compare_eval_results`](../src/local_rag_backend/core/services/evaluation.py) still gates on aggregate deltas; detailed reports now expose per-query deltas, but significance testing remains future work.
 
 Why this matters:
 
-- Filtering unknown IDs can hide retrieval-state defects or corpus leakage instead of surfacing them as degraded precision.
-- Rank-only callback contracts make the evaluator lossy and block better future analysis.
+- Unknown retrieved IDs now degrade metrics and are visible in report/anomaly outputs.
+- Score-preserving callback contracts unblock better future analysis.
 - Aggregate-only gates are acceptable as operational guardrails, but not as evidence of statistical superiority.
 
 Nuance:
@@ -125,10 +124,8 @@ Nuance:
 
 Recommended direction:
 
-- Change the retrieval callback contract to return `(external_id, score)` pairs.
-- Stop silently filtering unknown IDs; either keep them as non-relevant results or surface them as explicit evaluator anomalies.
-- Extend the dataset format to support optional graded relevance.
-- Add per-query outputs and, later, paired significance testing for compare mode.
+- Add paired significance testing for compare mode.
+- Expand external benchmark adapters on top of the internal `EvalDataset`/`EvalRun`/`EvalReport` model.
 
 ### 4. CLI / DX contract consistency is now first-order debt
 
@@ -136,8 +133,8 @@ Validated points:
 
 - CLI mutation and canonical-import commands still parse JSON manually instead of reusing shared typed validation.
 - `replace_scope` semantics are aligned and the typed validation path is now shared across CLI, HTTP, and MCP.
-- `rag-eval`, `rag-eval-batch`, and `rag-eval-compare` expose powerful workflows, but the option surface is large and uneven:
-  flags such as `--candidate-candidate-k`, `--baseline-dual-candidate-k`, and JSON batch specs create a high cognitive load.
+- `rag-eval-compare` now uses a canonical `--spec` file instead of expanded baseline/candidate flag matrices.
+  `rag-eval` and `rag-eval-batch` still need continued payload-validation cleanup.
 - `_ingestion_planner.py` still emits terminal output directly, which keeps planning logic coupled to CLI behavior.
 
 Why this matters:
@@ -150,7 +147,7 @@ Recommended direction:
 
 - Reuse DTOs / use-case input models for CLI payload validation.
 - Align visible defaults across CLI and HTTP.
-- Simplify evaluation entrypoints with profiles or spec-driven compare flows, not only flag expansion.
+- Continue simplifying evaluation entrypoints by reusing the shared eval config validation path.
 - Standardize exit codes and success/error output shape across commands.
 
 ### 5. Maintenance still has cheap-to-fix duplication
@@ -230,8 +227,8 @@ Interpretation:
 - Extract a typed mutation runtime/config object from `Settings`.
 - Split mutation saga internals by phase without changing external behavior.
 - Remove duplicate profile resolution and strategy branching where possible from `MutationCoordinator`.
-- Add per-query outputs to evaluation compare mode.
-- Reduce `eval-compare` flag complexity with profiles or spec-file support.
+- [x] Add per-query outputs to evaluation compare mode.
+- [x] Reduce `eval-compare` flag complexity with spec-file support.
 - Homogenize CLI exit codes and success/error output shape.
 
 ### P2

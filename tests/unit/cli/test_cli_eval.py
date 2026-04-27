@@ -113,6 +113,44 @@ def test_rag_eval_json_out_uses_metrics_only_shape(tmp_path: Path) -> None:
     assert set(payload["metrics"].keys()) == {"nDCG@1", "MAP@1", "MRR@1", "P@1", "Recall@1"}
 
 
+def test_rag_eval_writes_detailed_report_and_anomalies(tmp_path: Path) -> None:
+    ds = tmp_path / "ds.jsonl"
+    report_out = tmp_path / "report.json"
+    anomalies_out = tmp_path / "anomalies.jsonl"
+    ds.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"x","schema_version":1}',
+                '{"type":"doc","external_id":"doc:1","source_id":"eval","content":"alpha beta"}',
+                '{"type":"query","query":"alpha","relevant_external_ids":["doc:1"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    r = CliRunner().invoke(
+        cli,
+        [
+            "eval",
+            "--dataset",
+            str(ds),
+            "--k",
+            "1",
+            "--report-out",
+            str(report_out),
+            "--anomalies-out",
+            str(anomalies_out),
+        ],
+    )
+
+    assert r.exit_code == 0, r.output
+    report = json.loads(report_out.read_text(encoding="utf-8"))
+    assert report["type"] == "eval_report"
+    assert report["per_query"][0]["ranked_docs"][0]["external_id"] == "doc:1"
+    assert anomalies_out.read_text(encoding="utf-8") == ""
+
+
 def test_rag_eval_dense_mode_uses_isolated_runtime_and_json_out(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -231,6 +269,7 @@ def test_rag_eval_rejects_incompatible_mode_specific_flags(tmp_path: Path) -> No
 
 def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) -> None:
     ds = tmp_path / "compare.jsonl"
+    spec = tmp_path / "compare-spec.json"
     json_out = tmp_path / "compare-result.json"
     ds.write_text(
         "\n".join(
@@ -242,6 +281,23 @@ def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) ->
             ]
         )
         + "\n",
+        encoding="utf-8",
+    )
+    spec.write_text(
+        json.dumps(
+            {
+                "k": 1,
+                "baseline": {"retrieval_mode": "sparse"},
+                "candidate": {"retrieval_mode": "dual", "dual_candidate_k": 1},
+                "thresholds": {
+                    "min_delta_ndcg": 0.0,
+                    "min_delta_map": 0.0,
+                    "min_delta_mrr": 0.0,
+                    "max_regression_precision": 0.0,
+                    "max_regression_recall": 0.0,
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -261,22 +317,8 @@ def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) ->
             "eval-compare",
             "--dataset",
             str(ds),
-            "--k",
-            "1",
-            "--candidate-mode",
-            "dual",
-            "--candidate-dual-candidate-k",
-            "1",
-            "--min-delta-ndcg",
-            "0.0",
-            "--min-delta-map",
-            "0.0",
-            "--min-delta-mrr",
-            "0.0",
-            "--max-regression-precision",
-            "0.0",
-            "--max-regression-recall",
-            "0.0",
+            "--spec",
+            str(spec),
             "--json-out",
             str(json_out),
         ],
@@ -295,6 +337,7 @@ def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) ->
 
 def test_rag_eval_compare_fails_gate_with_exit_code_one(tmp_path: Path) -> None:
     ds = tmp_path / "compare.jsonl"
+    spec = tmp_path / "compare-spec.json"
     ds.write_text(
         "\n".join(
             [
@@ -307,6 +350,17 @@ def test_rag_eval_compare_fails_gate_with_exit_code_one(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    spec.write_text(
+        json.dumps(
+            {
+                "k": 1,
+                "baseline": {"retrieval_mode": "sparse"},
+                "candidate": {"retrieval_mode": "sparse", "reranker_enabled": True},
+                "thresholds": {"min_delta_ndcg": 0.1},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     r = CliRunner().invoke(
         cli,
@@ -314,13 +368,8 @@ def test_rag_eval_compare_fails_gate_with_exit_code_one(tmp_path: Path) -> None:
             "eval-compare",
             "--dataset",
             str(ds),
-            "--k",
-            "1",
-            "--candidate-mode",
-            "sparse",
-            "--candidate-reranker",
-            "--min-delta-ndcg",
-            "0.1",
+            "--spec",
+            str(spec),
         ],
     )
 
@@ -333,6 +382,7 @@ def test_rag_eval_compare_reports_invalid_candidate_mode_config_with_exit_code_t
     tmp_path: Path,
 ) -> None:
     ds = tmp_path / "compare.jsonl"
+    spec = tmp_path / "compare-spec.json"
     ds.write_text(
         "\n".join(
             [
@@ -344,6 +394,15 @@ def test_rag_eval_compare_reports_invalid_candidate_mode_config_with_exit_code_t
         + "\n",
         encoding="utf-8",
     )
+    spec.write_text(
+        json.dumps(
+            {
+                "baseline": {"retrieval_mode": "sparse"},
+                "candidate": {"retrieval_mode": "sparse", "candidate_k": 5},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     r = CliRunner().invoke(
         cli,
@@ -351,10 +410,8 @@ def test_rag_eval_compare_reports_invalid_candidate_mode_config_with_exit_code_t
             "eval-compare",
             "--dataset",
             str(ds),
-            "--candidate-mode",
-            "sparse",
-            "--candidate-candidate-k",
-            "5",
+            "--spec",
+            str(spec),
         ],
     )
 

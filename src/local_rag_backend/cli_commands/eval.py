@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
 
 import click
 
 from local_rag_backend.cli_commands.runtime import get_cli_container
-from local_rag_backend.core.services.types import EvalResult, EvalRetrievalMode
+from local_rag_backend.core.services.evaluation_models import EvalResult
 from local_rag_backend.settings import settings
 
 
@@ -21,7 +20,15 @@ def _resolve_eval_dataset_path(dataset: Path | None) -> Path | str:
 
 def _write_json_output(path: Path | None, payload: object) -> None:
     if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_text_output(path: Path | None, payload: str) -> None:
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        suffix = "\n" if payload and not payload.endswith("\n") else ""
+        path.write_text(payload + suffix, encoding="utf-8")
 
 
 def _raise_cli_error(*, prefix: str, exc: Exception, exit_code: int) -> None:
@@ -36,50 +43,8 @@ def _load_batch_specs(path: Path) -> tuple[dict[str, object], ...]:
     return tuple(payload)
 
 
-def _validate_required_batch_fields(raw_specs: tuple[dict[str, object], ...]) -> None:
-    required_fields = ("name", "retrieval_mode", "k")
-    for index, item in enumerate(raw_specs):
-        for field_name in required_fields:
-            if field_name not in item:
-                raise click.BadParameter(
-                    f"Spec at index {index} is missing required field {field_name!r}.",
-                    param_hint="--specs",
-                )
-
-
-def _parse_int_field(value: object, *, field_name: str) -> int:
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be an integer, got boolean.")
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value.strip())
-    raise ValueError(f"{field_name} must be an integer.")
-
-
-def _parse_optional_int_field(value: object, *, field_name: str) -> int | None:
-    if value is None:
-        return None
-    return _parse_int_field(value, field_name=field_name)
-
-
-def _parse_optional_float_field(value: object, *, field_name: str) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be numeric, got boolean.")
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        return float(value.strip())
-    raise ValueError(f"{field_name} must be numeric.")
-
-
-def _parse_retrieval_mode_field(value: object, *, field_name: str) -> EvalRetrievalMode:
-    normalized = str(value).strip().lower()
-    if normalized not in {"sparse", "dense", "dual", "hybrid"}:
-        raise ValueError(f"{field_name} must be one of sparse, dense, dual, hybrid.")
-    return cast("EvalRetrievalMode", normalized)
+def _load_compare_spec(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _collect_eval_threshold_failures(
@@ -152,6 +117,18 @@ def _collect_eval_threshold_failures(
     default=None,
     help="Optional path to write the ranked run as JSONL (one line per query). Used for multi-run pooling.",
 )
+@click.option(
+    "--report-out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Optional path to write a detailed eval report JSON.",
+)
+@click.option(
+    "--anomalies-out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Optional path to write eval anomalies as JSONL.",
+)
 def eval_cmd(
     dataset: Path | None,
     retrieval_mode: str,
@@ -166,10 +143,14 @@ def eval_cmd(
     fail_below_mrr: float,
     json_out: Path | None,
     run_out: Path | None,
+    report_out: Path | None,
+    anomalies_out: Path | None,
 ) -> None:
     """Offline IR evaluation with standard retrieval metrics."""
     try:
         from local_rag_backend.core.services.evaluation import (
+            eval_anomalies_to_jsonl,
+            eval_result_report_to_json,
             eval_result_to_json,
             format_eval_result,
             load_eval_dataset,
@@ -195,6 +176,22 @@ def eval_cmd(
             run_out=run_out,
         )
         _write_json_output(json_out, eval_result_to_json(res))
+        _write_json_output(
+            report_out,
+            eval_result_report_to_json(
+                res,
+                config={
+                    "retrieval_mode": retrieval_mode,
+                    "k": k,
+                    "candidate_k": candidate_k,
+                    "dual_candidate_k": dual_candidate_k,
+                    "hybrid_alpha": hybrid_alpha,
+                    "reranker_enabled": bool(reranker),
+                    "max_queries": max_queries,
+                },
+            ),
+        )
+        _write_text_output(anomalies_out, eval_anomalies_to_jsonl(res))
 
         failures = _collect_eval_threshold_failures(
             result=res,
@@ -248,38 +245,18 @@ def eval_batch_cmd(
     """Offline IR evaluation for multiple specs over the same dataset."""
     try:
         from local_rag_backend.core.services.evaluation import (
+            eval_anomalies_to_jsonl,
+            eval_result_report_to_json,
             eval_result_to_json,
             format_eval_result,
             load_eval_dataset,
+            parse_eval_batch_spec,
         )
-        from local_rag_backend.core.services.types import EvalBatchSpec
         from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval_batch
 
         raw_specs = _load_batch_specs(specs)
-        _validate_required_batch_fields(raw_specs)
         batch_specs = tuple(
-            EvalBatchSpec(
-                name=str(item["name"]),
-                retrieval_mode=_parse_retrieval_mode_field(
-                    item["retrieval_mode"], field_name="retrieval_mode"
-                ),
-                k=_parse_int_field(item["k"], field_name="k"),
-                candidate_k=_parse_optional_int_field(
-                    item.get("candidate_k"), field_name="candidate_k"
-                ),
-                dual_candidate_k=_parse_optional_int_field(
-                    item.get("dual_candidate_k"), field_name="dual_candidate_k"
-                ),
-                hybrid_alpha=_parse_optional_float_field(
-                    item.get("hybrid_alpha"), field_name="hybrid_alpha"
-                ),
-                reranker_enabled=bool(item.get("reranker_enabled", False)),
-                json_out=(
-                    str(item["json_out"]).strip() if item.get("json_out") is not None else None
-                ),
-                run_out=(str(item["run_out"]).strip() if item.get("run_out") is not None else None),
-            )
-            for item in raw_specs
+            parse_eval_batch_spec(item, index=index) for index, item in enumerate(raw_specs)
         )
 
         container = get_cli_container()
@@ -298,8 +275,17 @@ def eval_batch_cmd(
         for batch_result in results:
             if batch_result.json_out is not None:
                 json_out = Path(batch_result.json_out)
-                json_out.parent.mkdir(parents=True, exist_ok=True)
                 _write_json_output(json_out, eval_result_to_json(batch_result.result))
+            if batch_result.report_out is not None:
+                _write_json_output(
+                    Path(batch_result.report_out),
+                    eval_result_report_to_json(batch_result.result),
+                )
+            if batch_result.anomalies_out is not None:
+                _write_text_output(
+                    Path(batch_result.anomalies_out),
+                    eval_anomalies_to_jsonl(batch_result.result),
+                )
             click.echo(f"{batch_result.name}: {format_eval_result(batch_result.result)}")
     except SystemExit:
         raise
@@ -317,77 +303,42 @@ def eval_batch_cmd(
         "(or eval_dataset_path in config.yaml)."
     ),
 )
-@click.option("--k", type=int, default=3, show_default=True)
 @click.option(
-    "--baseline-mode",
-    type=click.Choice(["sparse", "dense", "dual", "hybrid"], case_sensitive=False),
-    default="sparse",
-    show_default=True,
-)
-@click.option("--baseline-candidate-k", type=click.IntRange(1), default=None)
-@click.option("--baseline-dual-candidate-k", type=click.IntRange(1), default=None)
-@click.option("--baseline-hybrid-alpha", type=click.FloatRange(0.0, 1.0), default=None)
-@click.option(
-    "--baseline-reranker/--no-baseline-reranker",
-    default=False,
-    show_default=True,
-)
-@click.option(
-    "--candidate-mode",
-    type=click.Choice(["sparse", "dense", "dual", "hybrid"], case_sensitive=False),
+    "--spec",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
+    help="Path to a JSON compare spec with baseline, candidate, and thresholds.",
 )
-@click.option("--candidate-candidate-k", type=click.IntRange(1), default=None)
-@click.option("--candidate-dual-candidate-k", type=click.IntRange(1), default=None)
-@click.option("--candidate-hybrid-alpha", type=click.FloatRange(0.0, 1.0), default=None)
-@click.option(
-    "--candidate-reranker/--no-candidate-reranker",
-    default=False,
-    show_default=True,
-)
-@click.option("--max-queries", type=int, default=None, help="Evaluate only the first N queries.")
-@click.option("--min-delta-ndcg", type=float, default=0.0, show_default=True)
-@click.option("--min-delta-map", type=float, default=0.0, show_default=True)
-@click.option("--min-delta-mrr", type=float, default=0.0, show_default=True)
-@click.option("--max-regression-precision", type=float, default=0.0, show_default=True)
-@click.option("--max-regression-recall", type=float, default=0.0, show_default=True)
 @click.option(
     "--json-out",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
     help="Optional path to write compare results as JSON.",
 )
+@click.option(
+    "--report-out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Optional path to write a detailed compare report JSON.",
+)
 def eval_compare_cmd(
     dataset: Path | None,
-    k: int,
-    baseline_mode: str,
-    baseline_candidate_k: int | None,
-    baseline_dual_candidate_k: int | None,
-    baseline_hybrid_alpha: float | None,
-    baseline_reranker: bool,
-    candidate_mode: str,
-    candidate_candidate_k: int | None,
-    candidate_dual_candidate_k: int | None,
-    candidate_hybrid_alpha: float | None,
-    candidate_reranker: bool,
-    max_queries: int | None,
-    min_delta_ndcg: float,
-    min_delta_map: float,
-    min_delta_mrr: float,
-    max_regression_precision: float,
-    max_regression_recall: float,
+    spec: Path,
     json_out: Path | None,
+    report_out: Path | None,
 ) -> None:
-    """Compare baseline and candidate retrieval configs and fail on placebo improvements."""
+    """Compare baseline and candidate retrieval configs from a spec file."""
     try:
         from local_rag_backend.core.services.evaluation import (
+            eval_compare_report_to_json,
             eval_compare_result_to_json,
             format_eval_compare_result,
             load_eval_dataset,
+            parse_eval_compare_spec,
         )
-        from local_rag_backend.core.services.types import EvalCompareConfig
         from local_rag_backend.core.use_cases.evaluation import compare_retrieval_eval
 
+        compare_spec = parse_eval_compare_spec(_load_compare_spec(spec))
         container = get_cli_container()
         eval_bundle = container.build_eval_execution_bundle()
         ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
@@ -395,35 +346,20 @@ def eval_compare_cmd(
             dataset=ds,
             eval_storage_port=eval_bundle.eval_storage_port,
             eval_retriever_factory_port=eval_bundle.eval_retriever_factory_port,
-            baseline=EvalCompareConfig(
-                retrieval_mode=_parse_retrieval_mode_field(
-                    baseline_mode, field_name="baseline-mode"
-                ),
-                candidate_k=baseline_candidate_k,
-                dual_candidate_k=baseline_dual_candidate_k,
-                hybrid_alpha=baseline_hybrid_alpha,
-                reranker_enabled=bool(baseline_reranker),
-            ),
-            candidate=EvalCompareConfig(
-                retrieval_mode=_parse_retrieval_mode_field(
-                    candidate_mode, field_name="candidate-mode"
-                ),
-                candidate_k=candidate_candidate_k,
-                dual_candidate_k=candidate_dual_candidate_k,
-                hybrid_alpha=candidate_hybrid_alpha,
-                reranker_enabled=bool(candidate_reranker),
-            ),
-            k=k,
+            baseline=compare_spec.baseline,
+            candidate=compare_spec.candidate,
+            k=compare_spec.k,
             reranker_candidate_k=eval_bundle.reranker_candidate_k,
             reranker_strategy=eval_bundle.reranker_strategy,
-            max_queries=max_queries,
-            min_delta_ndcg=min_delta_ndcg,
-            min_delta_map=min_delta_map,
-            min_delta_mrr=min_delta_mrr,
-            max_regression_precision=max_regression_precision,
-            max_regression_recall=max_regression_recall,
+            max_queries=compare_spec.max_queries,
+            min_delta_ndcg=compare_spec.thresholds.min_delta_ndcg,
+            min_delta_map=compare_spec.thresholds.min_delta_map,
+            min_delta_mrr=compare_spec.thresholds.min_delta_mrr,
+            max_regression_precision=compare_spec.thresholds.max_regression_precision,
+            max_regression_recall=compare_spec.thresholds.max_regression_recall,
         )
         _write_json_output(json_out, eval_compare_result_to_json(result))
+        _write_json_output(report_out, eval_compare_report_to_json(result))
 
         baseline_line, candidate_line, delta_line, gate_line = format_eval_compare_result(result)
         click.echo(baseline_line)

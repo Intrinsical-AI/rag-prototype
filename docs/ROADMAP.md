@@ -2,7 +2,7 @@
 
 > Scope: prioritized delivery roadmap derived from the current technical-debt register and the current codebase
 >
-> Status: current as of 2026-04-08
+> Status: current as of 2026-04-26
 
 This roadmap is execution-oriented and intentionally atomic. Each item should be implementable and reviewable on its own, without bundling large architectural rewrites into one change.
 
@@ -11,9 +11,9 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - `transport`: align canonical import semantics between CLI and HTTP
   - unify `replace_scope` defaults
   - cover the behavior explicitly in transport tests
-- `eval`: preserve retriever scores in offline evaluation
+- [x] `eval`: preserve retriever scores in offline evaluation
   - change the eval callback contract from `Sequence[str]` to `(external_id, score)` pairs
-- `eval`: stop silently filtering unknown retrieved IDs
+- [x] `eval`: stop silently filtering unknown retrieved IDs
   - either keep them as non-relevant results or emit explicit evaluator anomalies
 - `ux/dx`: unify CLI payload validation with DTOs / use cases for:
   - `rag-mutate-docs`
@@ -25,9 +25,9 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - `mutation`: extract a typed mutation runtime/config object from `Settings`
 - `mutation`: remove duplicated profile resolution and strategy branching from `MutationCoordinator`
 - `mutation`: split `_mutation_saga_executor.py` into explicit phases without changing behavior
-- `eval`: emit per-query outputs for compare mode
+- [x] `eval`: emit per-query outputs for compare mode
   - this is the prerequisite for stronger statistical comparison later
-- `ux/dx`: reduce `rag-eval-compare` complexity with profiles or spec-file support
+- [x] `ux/dx`: reduce `rag-eval-compare` complexity with spec-file support
 
 ## P2
 
@@ -40,7 +40,7 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 
 ## P3
 
-- `eval`: extend dataset schema to support optional graded relevance
+- [x] `eval`: extend dataset schema to support optional graded relevance
 - `eval`: add paired significance testing for compare mode once per-query outputs exist
 - `canonical import`: decide whether scope replacement belongs inside canonical mutation or a dedicated use case
 - `ux/dx`: review evaluation help texts and flag naming for consistency and scanability
