@@ -18,6 +18,7 @@ from local_rag_backend.cli_commands.runtime import (
     get_cli_runtime_snapshot,
     run_cli_mutation,
 )
+from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter
 from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input_from_raw,
@@ -99,6 +100,58 @@ def tool_status() -> dict[str, object]:
         response["index"] = index
 
     return response
+
+
+def _document_to_json(document: Document) -> dict[str, object]:
+    return {
+        "id": str(document.id),
+        "content": str(document.content),
+        "external_id": (
+            str(document.external_id)
+            if getattr(document, "external_id", None) is not None
+            else None
+        ),
+        "source_id": (
+            str(document.source_id) if getattr(document, "source_id", None) is not None else None
+        ),
+        "metadata": (
+            dict(document.metadata or {})
+            if getattr(document, "metadata", None) is not None
+            else None
+        ),
+    }
+
+
+def tool_ask(
+    question: str,
+    k: int = 3,
+    filters: list[dict[str, Any]] | None = None,
+) -> dict[str, object]:
+    rendered_question = str(question).strip()
+    if not rendered_question:
+        raise ValueError("question must not be blank")
+    top_k = int(k)
+    if top_k < 1 or top_k > 10:
+        raise ValueError("k must be between 1 and 10")
+
+    parsed_filters = _parse_filters(filters)
+    container = get_cli_container()
+    service = container.build_rag_service()
+    result = service.ask(
+        rendered_question,
+        top_k=top_k,
+        filters=parsed_filters,
+        retrieval_mode=str(container.settings_obj.retrieval_mode),
+    )
+    docs = list(result["docs"])
+    scores = list(result["scores"])
+    return {
+        "answer": str(result["answer"]),
+        "sources": [
+            {"document": _document_to_json(doc), "score": float(score)}
+            for doc, score in zip(docs, scores, strict=False)
+        ],
+    }
 
 
 def tool_import_canonical(
@@ -199,6 +252,31 @@ TOOLS: dict[str, dict[str, Any]] = {
         "description": "Return structured runtime status, counts, and index diagnostics.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "handler": tool_status,
+    },
+    "rag_ask": {
+        "description": "Ask a question using the configured RAG runtime.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "k": {"type": "integer", "minimum": 1, "maximum": 10},
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "field": {"type": "string"},
+                            "values": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["field", "values"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["question"],
+            "additionalProperties": False,
+        },
+        "handler": tool_ask,
     },
     "rag_import_canonical": {
         "description": "Import canonical documents via the native scope/snapshot sync flow.",

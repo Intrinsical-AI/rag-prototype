@@ -243,10 +243,15 @@ rag-mcp
 
 Tools:
 
+* `rag_ask`
 * `rag_import_canonical`
 * `rag_rebuild_index`
 * `rag_eval`
 * `rag_status`
+
+`rag_ask` is the narrow query/status integration surface used by the sibling
+`event-based-agent-runtime` repo. The runtime calls it over stdio MCP and keeps
+document mutation, index rebuild, and evaluation workflows owned by this repo.
 
 `rag_status` now returns a structured runtime snapshot plus health/index diagnostics, so agents
 do not need to infer topology from raw config fields.

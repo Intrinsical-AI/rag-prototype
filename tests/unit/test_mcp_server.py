@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+from local_rag_backend import mcp_server
+from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.mcp_server import handle_request
 from local_rag_backend.settings import settings
@@ -20,7 +23,96 @@ def test_mcp_initialize_and_list_tools() -> None:
 
     listed = handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     names = {tool["name"] for tool in listed["result"]["tools"]}  # type: ignore[index]
-    assert {"rag_status", "rag_import_canonical", "rag_rebuild_index", "rag_eval"} <= names
+    assert {
+        "rag_ask",
+        "rag_status",
+        "rag_import_canonical",
+        "rag_rebuild_index",
+        "rag_eval",
+    } <= names
+
+
+def test_mcp_ask_uses_configured_rag_service(monkeypatch) -> None:
+    calls = []
+
+    class FakeRagService:
+        def ask(self, question, top_k, filters, retrieval_mode):
+            calls.append((question, top_k, filters, retrieval_mode))
+            return {
+                "answer": "runtime answer",
+                "docs": [
+                    Document(
+                        id="doc:1",
+                        content="context",
+                        external_id="ext-1",
+                        source_id="source-1",
+                        metadata={"scope": "demo"},
+                    )
+                ],
+                "scores": [0.75],
+            }
+
+    class FakeContainer:
+        settings_obj = SimpleNamespace(retrieval_mode="sparse")
+
+        def build_rag_service(self):
+            return FakeRagService()
+
+    monkeypatch.setattr(mcp_server, "get_cli_container", lambda: FakeContainer())
+
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {
+                "name": "rag_ask",
+                "arguments": {
+                    "question": "  what is indexed?  ",
+                    "k": 1,
+                    "filters": [{"field": "metadata.scope", "values": ["demo"]}],
+                },
+            },
+        }
+    )
+
+    payload = _extract_content_text(response)
+    assert payload == {
+        "answer": "runtime answer",
+        "sources": [
+            {
+                "document": {
+                    "id": "doc:1",
+                    "content": "context",
+                    "external_id": "ext-1",
+                    "source_id": "source-1",
+                    "metadata": {"scope": "demo"},
+                },
+                "score": 0.75,
+            }
+        ],
+    }
+    assert calls[0][0] == "what is indexed?"
+    assert calls[0][1] == 1
+    assert calls[0][2][0].field == "metadata.scope"
+    assert calls[0][3] == "sparse"
+
+
+def test_mcp_ask_rejects_invalid_k() -> None:
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "rag_ask",
+                "arguments": {"question": "hello", "k": 0},
+            },
+        }
+    )
+
+    assert "error" in response
+    assert "k must be between 1 and 10" in response["error"]["message"]  # type: ignore[index]
 
 
 def test_mcp_import_canonical_and_status(in_memory_sqlite, tmp_path, monkeypatch) -> None:
