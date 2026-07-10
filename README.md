@@ -64,9 +64,12 @@ source .venv/bin/activate
 # Install runtime deps (uses uv.lock); --extra server adds FastAPI/uvicorn
 uv sync --frozen --extra server
 
-# config.yaml is required at runtime. Fresh source clones include the default file;
+# config.yaml is required by default. Fresh source clones include the default file;
 # this protects archive/copy workflows where only config.example.yaml is present.
 test -f config.yaml || cp config.example.yaml config.yaml
+
+# Installed commands can run from another directory by selecting the same YAML explicitly.
+# export RAG_CONFIG_PATH=/absolute/path/to/config.yaml
 
 # Before using /api/ask or expecting /readyz to pass, enable one LLM provider in config.yaml:
 # - openai_api_key: "..."
@@ -113,9 +116,16 @@ rag-server
 
 ## Configuration
 
-Runtime configuration lives in the repository-root `config.yaml`.
-It is the only runtime source of truth; the process fails fast if the file is missing or invalid.
+Runtime configuration defaults to `config.yaml` in the process working directory.
+Set `RAG_CONFIG_PATH=/absolute/path/to/runtime.yaml` when an installed console script, including
+`rag-mcp`, runs outside the checkout. The selected YAML remains the single runtime source of truth,
+and relative paths inside it resolve against that file's directory. An explicit path passed to
+`load_settings_from_yaml(...)` takes precedence over the environment variable. The process fails
+fast if the selected file is missing or invalid.
 See [`config.example.yaml`](./config.example.yaml) for the canonical template.
+
+`RAG_PERF_METRICS_OUT` remains a narrow runtime override for `perf_metrics_out_path`; when both
+environment variables are set, its relative value is resolved against the selected YAML directory.
 
 All runtime keys are shown in `snake_case` and map 1:1 to the fields in `config.yaml`.
 

@@ -23,10 +23,15 @@ Si tu caso de uso no necesita este nivel de control, probablemente te baste una 
 
 ## Paso 1: Configuración del Entorno
 
-La librería se configura mediante un único archivo `config.yaml` en la raíz del proyecto.
+La librería se configura mediante un único archivo YAML. Por defecto se carga `config.yaml` desde
+el directorio de trabajo; un comando instalado puede ejecutarse desde otra ubicación definiendo
+`RAG_CONFIG_PATH=/ruta/absoluta/runtime.yaml`.
 Las rutas se resuelven relativas a ese archivo, no al directorio actual.
 Toma como base `config.example.yaml` y copia el archivo a `config.yaml` antes de editarlo.
-Importante: `docker-compose.yml` puede definir variables de entorno para el contenedor, pero el runtime no las usa como fuente de configuración hoy. Si despliegas con Compose, mantén `config.yaml` sincronizado o móntalo explícitamente.
+El YAML seleccionado sigue siendo la única fuente de configuración: `RAG_CONFIG_PATH` elige el
+archivo, no reemplaza campos individuales. `RAG_PERF_METRICS_OUT` conserva su excepción limitada
+para `perf_metrics_out_path`. Si despliegas con Compose, monta el YAML y apunta
+`RAG_CONFIG_PATH` a su ruta dentro del contenedor.
 
 ```yaml
 # config.yaml

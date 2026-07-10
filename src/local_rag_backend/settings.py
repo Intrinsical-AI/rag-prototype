@@ -20,6 +20,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 DEFAULT_CONFIG_PATH = Path("config.yaml")
+CONFIG_PATH_ENV_VAR = "RAG_CONFIG_PATH"
 
 
 def _resolve_relative_path_value(value: Any, *, base_dir: Path) -> str | None:
@@ -59,15 +60,25 @@ def _resolve_sqlite_url_value(value: Any, *, base_dir: Path) -> str | None:
     return f"{prefix}{resolved}"
 
 
-def load_settings_from_yaml(config_path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
+def _resolve_config_path(config_path: str | Path | None) -> Path:
+    if config_path is not None:
+        return Path(config_path)
+    configured_path = str(os.getenv(CONFIG_PATH_ENV_VAR, "") or "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return DEFAULT_CONFIG_PATH
+
+
+def load_settings_from_yaml(config_path: str | Path | None = None) -> Settings:
     """Load settings from YAML and apply path/url normalization in one place.
 
     Side effects:
-    - Validates file exists and is a top-level mapping.
+    - Selects ``config_path`` explicitly, then ``RAG_CONFIG_PATH``, then ``config.yaml``.
+    - Validates the selected file exists and is a top-level mapping.
     - Resolves known relative paths into absolute paths rooted at the config file.
     - Applies runtime override for ``perf_metrics_out_path`` when env variable is set.
     """
-    path = Path(config_path)
+    path = _resolve_config_path(config_path)
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file not found: {path}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))

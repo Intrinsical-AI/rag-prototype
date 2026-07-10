@@ -1,4 +1,7 @@
 # tests/unit/settings/test_settings_validators.py
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -177,6 +180,61 @@ def test_load_settings_from_yaml_resolves_relative_paths(tmp_path):
     assert settings.sqlite_url == f"sqlite:///{(config_dir / 'data/app.db').resolve()}"
     assert settings.faq_csv == str((config_dir / "data/faq.csv").resolve())
     assert settings.eval_dataset_path == str((config_dir / "datasets/rag_eval_v1.jsonl").resolve())
+
+
+def test_load_settings_from_yaml_uses_config_path_env_and_perf_override(tmp_path, monkeypatch):
+    config_dir = tmp_path / "deployment"
+    config_dir.mkdir()
+    config_file = config_dir / "runtime.yaml"
+    config_file.write_text(
+        "data_dir: runtime-data\nperf_metrics_out_path: yaml-perf.json\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RAG_CONFIG_PATH", str(config_file))
+    monkeypatch.setenv("RAG_PERF_METRICS_OUT", "override/perf.json")
+
+    loaded = load_settings_from_yaml()
+
+    assert loaded.data_dir == (config_dir / "runtime-data").resolve()
+    assert loaded.perf_metrics_out_path == str((config_dir / "override/perf.json").resolve())
+
+
+def test_explicit_config_path_takes_precedence_over_environment(tmp_path, monkeypatch):
+    explicit_config = tmp_path / "explicit.yaml"
+    explicit_config.write_text("log_level: warning\n", encoding="utf-8")
+    monkeypatch.setenv("RAG_CONFIG_PATH", str(tmp_path / "missing.yaml"))
+
+    loaded = load_settings_from_yaml(explicit_config)
+
+    assert loaded.log_level == "WARNING"
+
+
+def test_config_path_env_allows_import_outside_checkout(tmp_path):
+    config_dir = tmp_path / "deployment"
+    config_dir.mkdir()
+    config_file = config_dir / "runtime.yaml"
+    config_file.write_text("data_dir: runtime-data\n", encoding="utf-8")
+    env = os.environ.copy()
+    for key in tuple(env):
+        if key.startswith("COV_CORE_") or key == "COVERAGE_PROCESS_START":
+            env.pop(key)
+    env["RAG_CONFIG_PATH"] = str(config_file)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from local_rag_backend.settings import settings; print(settings.data_dir)",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str((config_dir / "runtime-data").resolve())
 
 
 def test_load_settings_from_yaml_rejects_missing_file(tmp_path):
