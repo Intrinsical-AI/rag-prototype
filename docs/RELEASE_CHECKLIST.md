@@ -32,6 +32,7 @@
    - `mypy src`
    - `lint-imports`
    - `pre-commit run --all-files`
+   - `make smoke-embedding-api-wheel`
 
 ## RC Notes: 2026-04-27
 
