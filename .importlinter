@@ -39,3 +39,13 @@ type = independence
 modules =
     local_rag_backend.http
     local_rag_backend.cli_commands
+
+[importlinter:contract:public-integrations-boundary]
+name = Public integrations must not depend on transports or composition
+type = forbidden
+source_modules =
+    local_rag_backend.integrations
+forbidden_modules =
+    local_rag_backend.cli_commands
+    local_rag_backend.composition
+    local_rag_backend.http

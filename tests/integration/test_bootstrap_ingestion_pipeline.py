@@ -101,7 +101,7 @@ def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, cap
     # Mock embedder and FAISS
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
-        lambda model_name=None: DummyEmbedder(),
+        lambda model_name=None, settings_obj=None: DummyEmbedder(),
         raising=True,
     )
     monkeypatch.setattr(
