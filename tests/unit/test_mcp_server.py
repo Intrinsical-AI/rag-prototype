@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from local_rag_backend import mcp_server
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
@@ -113,6 +115,91 @@ def test_mcp_ask_rejects_invalid_k() -> None:
 
     assert "error" in response
     assert "k must be between 1 and 10" in response["error"]["message"]  # type: ignore[index]
+
+
+@pytest.mark.parametrize("invalid_k", [True, "1", 1.0])
+def test_mcp_ask_rejects_non_integer_k(invalid_k) -> None:
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {
+                "name": "rag_ask",
+                "arguments": {"question": "hello", "k": invalid_k},
+            },
+        }
+    )
+
+    assert "error" in response
+    assert "k must be an integer" in response["error"]["message"]  # type: ignore[index]
+
+
+def test_mcp_ask_rejects_question_over_schema_limit() -> None:
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 23,
+            "method": "tools/call",
+            "params": {
+                "name": "rag_ask",
+                "arguments": {"question": "x" * (mcp_server.MAX_ASK_QUESTION_CHARS + 1)},
+            },
+        }
+    )
+
+    assert "error" in response
+    assert "question must not exceed 4096 characters" in response["error"]["message"]  # type: ignore[index]
+
+
+def test_mcp_ask_rejects_non_string_question() -> None:
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 24,
+            "method": "tools/call",
+            "params": {"name": "rag_ask", "arguments": {"question": 123}},
+        }
+    )
+
+    assert "error" in response
+    assert "question must be a string" in response["error"]["message"]  # type: ignore[index]
+
+
+def test_mcp_ask_rejects_malformed_service_result(monkeypatch) -> None:
+    class FakeRagService:
+        def ask(self, question, top_k, filters, retrieval_mode):
+            _ = (question, top_k, filters, retrieval_mode)
+            return {
+                "answer": "runtime answer",
+                "docs": [Document(id="doc:1", content="context")],
+                "scores": [],
+            }
+
+    class FakeContainer:
+        settings_obj = SimpleNamespace(retrieval_mode="sparse")
+
+        def build_rag_service(self):
+            return FakeRagService()
+
+    monkeypatch.setattr(mcp_server, "get_cli_container", lambda: FakeContainer())
+
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 25,
+            "method": "tools/call",
+            "params": {"name": "rag_ask", "arguments": {"question": "hello"}},
+        }
+    )
+
+    assert "error" in response
+    assert (
+        "RAG service contract violated: 1 docs != 0 scores"
+        in response["error"][  # type: ignore[index]
+            "message"
+        ]
+    )
 
 
 def test_mcp_import_canonical_and_status(in_memory_sqlite, tmp_path, monkeypatch) -> None:

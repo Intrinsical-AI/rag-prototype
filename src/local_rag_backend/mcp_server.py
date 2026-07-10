@@ -36,6 +36,8 @@ from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("rag_prototype_mcp")
 
+MAX_ASK_QUESTION_CHARS = 4096
+
 
 def _parse_filters(raw_filters: object | None) -> tuple[RetrievalFilter, ...]:
     if raw_filters is None:
@@ -127,11 +129,16 @@ def tool_ask(
     k: int = 3,
     filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, object]:
-    rendered_question = str(question).strip()
+    if not isinstance(question, str):
+        raise ValueError("question must be a string")
+    if len(question) > MAX_ASK_QUESTION_CHARS:
+        raise ValueError(f"question must not exceed {MAX_ASK_QUESTION_CHARS} characters")
+    rendered_question = question.strip()
     if not rendered_question:
         raise ValueError("question must not be blank")
-    top_k = int(k)
-    if top_k < 1 or top_k > 10:
+    if type(k) is not int:
+        raise ValueError("k must be an integer")
+    if k < 1 or k > 10:
         raise ValueError("k must be between 1 and 10")
 
     parsed_filters = _parse_filters(filters)
@@ -139,17 +146,21 @@ def tool_ask(
     service = container.build_rag_service()
     result = service.ask(
         rendered_question,
-        top_k=top_k,
+        top_k=k,
         filters=parsed_filters,
         retrieval_mode=str(container.settings_obj.retrieval_mode),
     )
     docs = list(result["docs"])
     scores = list(result["scores"])
+    if len(docs) != len(scores):
+        raise RuntimeError(
+            f"RAG service contract violated: {len(docs)} docs != {len(scores)} scores."
+        )
     return {
         "answer": str(result["answer"]),
         "sources": [
             {"document": _document_to_json(doc), "score": float(score)}
-            for doc, score in zip(docs, scores, strict=False)
+            for doc, score in zip(docs, scores, strict=True)
         ],
     }
 
@@ -258,7 +269,11 @@ TOOLS: dict[str, dict[str, Any]] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "question": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_ASK_QUESTION_CHARS,
+                },
                 "k": {"type": "integer", "minimum": 1, "maximum": 10},
                 "filters": {
                     "type": "array",
