@@ -17,32 +17,17 @@ class AskEvalConfigLike(Protocol):
     including Pydantic HTTP schemas and plain dataclasses.
     """
 
-    @property
-    def retrieval_mode(self) -> str: ...
-
-    @property
-    def k(self) -> int: ...
-
-    @property
-    def hybrid_alpha(self) -> float | None: ...
-
-    @property
-    def llm_provider(self) -> str | None: ...
-
-    @property
-    def model(self) -> str | None: ...
-
-    @property
-    def temperature(self) -> float | None: ...
-
-    @property
-    def top_p(self) -> float | None: ...
-
-    @property
-    def max_tokens(self) -> int | None: ...
-
-    @property
-    def prompt_template(self) -> str | None: ...
+    retrieval_mode: str
+    filters: object | None
+    k: int
+    dual_candidate_k: int | None
+    hybrid_alpha: float | None
+    llm_provider: str | None
+    model: str | None
+    temperature: float | None
+    top_p: float | None
+    max_tokens: int | None
+    prompt_template: str | None
 
 
 @dataclass(frozen=True)

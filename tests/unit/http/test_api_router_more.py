@@ -3,16 +3,15 @@
 import pytest
 
 from local_rag_backend.composition import factory
-from local_rag_backend.core.errors import LLMConnectionError, LLMTimeoutError
+from local_rag_backend.core.errors import LLMConfigurationError, LLMConnectionError, LLMTimeoutError
 from local_rag_backend.http import dependencies as deps
-from local_rag_backend.http.main import app
-from local_rag_backend.http.routers import health as health_router
+from local_rag_backend.http.routers import health as health_router, rag_router
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import settings
 
 
 async def test_health_endpoint_ok(asgi_client):
-    r = await asgi_client.get("/api/health")
+    r = await asgi_client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["status"] == "healthy"
 
@@ -30,7 +29,7 @@ async def test_ready_endpoint_ok(asgi_client, monkeypatch):
         return _Dummy()
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ready"
@@ -52,11 +51,11 @@ async def test_ready_endpoint_not_ready_no_llm(asgi_client, monkeypatch):
         return _Dummy()
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 503
     payload = r.json()
-    assert payload["detail"]["status"] == "not_ready"
-    assert "llm_providers" in payload["detail"]["checks"]
+    assert payload["status"] == "not_ready"
+    assert "llm_providers" in payload["checks"]
 
 
 async def test_templates_endpoint(asgi_client):
@@ -133,14 +132,41 @@ async def test_openrouter_generate_not_configured(asgi_client, monkeypatch):
     assert r.status_code == 400
 
 
-async def test_dependencies_no_llm(monkeypatch, in_memory_sqlite):
+async def test_dependencies_no_llm(monkeypatch, in_memory_sqlite, reset_app_context):
+    _ = reset_app_context
     deps.reset_rag_service()
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(LLMConfigurationError):
         await deps.get_rag_service()
+
+
+async def test_ask_returns_503_without_llm_for_valid_payload(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
+    monkeypatch.setattr(settings, "openrouter_enabled", False, raising=False)
+    monkeypatch.setattr(settings, "openrouter_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
+    assert r.status_code == 503
+    assert "No LLM configured" in r.json().get("detail", "")
+
+
+@pytest.mark.parametrize("payload", [{"question": "", "k": 1}, {"question": "hi", "k": 0}])
+async def test_ask_validation_errors_take_precedence_without_llm(
+    asgi_client, in_memory_sqlite, monkeypatch, payload
+):
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "ollama_enabled", False, raising=False)
+    monkeypatch.setattr(settings, "openrouter_enabled", False, raising=False)
+    monkeypatch.setattr(settings, "openrouter_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    r = await asgi_client.post("/api/ask", json=payload)
+    assert r.status_code == 422
 
 
 async def test_metrics_endpoint_disabled(asgi_client, monkeypatch):
@@ -151,7 +177,7 @@ async def test_metrics_endpoint_disabled(asgi_client, monkeypatch):
     assert r.text.startswith("# Monitoring disabled")
 
 
-async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite):
+async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite, monkeypatch):
     class _FailingService:
         def ask(self, question, top_k=3):
             raise LLMTimeoutError("provider timeout")
@@ -159,11 +185,8 @@ async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite):
     async def _override():
         return _FailingService()
 
-    app.dependency_overrides[deps.get_rag_service] = _override
-    try:
-        r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
-    finally:
-        app.dependency_overrides.pop(deps.get_rag_service, None)
+    monkeypatch.setattr(rag_router, "get_rag_service", _override, raising=True)
+    r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
 
     assert r.status_code == 504
     assert "provider timeout" in r.json()["detail"]

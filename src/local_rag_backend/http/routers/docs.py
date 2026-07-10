@@ -7,10 +7,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
-from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from local_rag_backend.composition.adapters import DEFAULT_DENSE_BACKEND_MESSAGE
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
+from local_rag_backend.core.services.canonical_import_transport import (
+    build_canonical_import_request_input,
+    validate_canonical_import_payload,
+)
 from local_rag_backend.core.use_cases.docs_import import (
     DEFAULT_IMPORT_MAX_BYTES,
     ImportDocsOutcome,
@@ -19,6 +24,9 @@ from local_rag_backend.core.use_cases.docs_import import (
     InvalidImportPayloadError,
     UnsupportedImportFormatError,
     execute_import_docs_sync,
+)
+from local_rag_backend.core.use_cases.docs_import_canonical import (
+    execute_import_canonical_sync,
 )
 from local_rag_backend.core.use_cases.docs_ingest import ingest_docs_sync
 from local_rag_backend.core.use_cases.docs_mutation import (
@@ -34,13 +42,14 @@ from local_rag_backend.core.use_cases.errors import (
 from local_rag_backend.core.use_cases.mutations import run_api_mutation
 from local_rag_backend.http.dependencies import (
     get_app_container_dependency,
-    get_db,
     get_settings_dependency,
     reset_rag_service,
 )
 from local_rag_backend.http.schemas.docs import (
+    CanonicalImportResponse,
     DocsMutateRequest,
     DocsMutateResponse,
+    DocsQueryRequest,
     ImportResponse,
     IngestRequest,
     IngestResponse,
@@ -55,13 +64,25 @@ from local_rag_backend.infrastructure.observability.observability import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
     from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.core.use_cases.results import MutationSummary
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
+
+
+def _to_document_in_db(item: Any) -> DocumentInDB:
+    return DocumentInDB(
+        id=str(item.id),
+        content=str(item.content),
+        external_id=(
+            str(item.external_id) if getattr(item, "external_id", None) is not None else None
+        ),
+        source_id=(str(item.source_id) if getattr(item, "source_id", None) is not None else None),
+        metadata=(
+            dict(item.metadata or {}) if getattr(item, "metadata", None) is not None else None
+        ),
+    )
 
 
 def _map_docs_error(
@@ -87,29 +108,32 @@ async def _run_docs_mutation_operation(
     *,
     operation: Callable[[], Any],
     container: AppContainer,
+    run_locked: Callable[[Callable[[], Any]], Any] | None = None,
     map_error: Callable[
         [Exception], PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None
     ],
 ) -> Any:
     return await run_api_mutation(
         operation=operation,
-        run_locked=lambda fn: fn(),
+        run_locked=(run_locked or (lambda fn: fn())),
         reset_after=reset_rag_service,
         blocking_executor=container.blocking_executor(run_blocking_fn=run_blocking),
         map_error=map_error,
     )
 
 
-@router.get("/docs", response_model=list[DocumentInDB])
-async def list_docs(
-    limit: int = Query(100, ge=1, le=1000, description="Max number of docs"),
-    offset: int = Query(0, ge=0, description="Offset for pagination"),
-    db: Session = Depends(get_db),
+@router.post("/docs/query", response_model=list[DocumentInDB])
+async def query_docs(
+    payload: Annotated[DocsQueryRequest, Body(...)],
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
-    docs_reader = container.build_docs_read_port(db=db)
-    docs = docs_reader.list_docs_page(limit=limit, offset=offset)
-    return [DocumentInDB(id=item.id, content=item.content) for item in docs]
+    docs_reader = container.build_docs_read_port()
+    docs = docs_reader.query_docs(
+        limit=payload.limit,
+        offset=payload.offset,
+        filters=tuple(item.to_domain() for item in payload.filters),
+    )
+    return [_to_document_in_db(item) for item in docs]
 
 
 async def _read_upload_with_limit(
@@ -154,6 +178,8 @@ async def mutate_docs(
                         external_id=item.external_id,
                         content=item.content,
                         source_id=item.source_id,
+                        scope=item.scope,
+                        snapshot_id=item.snapshot_id,
                         metadata=item.metadata,
                     )
                     for item in payload.upserts
@@ -192,6 +218,62 @@ async def mutate_docs(
             )
             for r in list(summary.results or [])
         ],
+    )
+
+
+@router.post("/docs/import-canonical", response_model=CanonicalImportResponse)
+async def import_canonical_docs(
+    payload_raw: Annotated[dict[str, Any], Body(...)],
+    container: AppContainer = Depends(get_app_container_dependency),
+    settings_obj: Settings = Depends(get_settings_dependency),
+) -> CanonicalImportResponse:
+    try:
+        payload = validate_canonical_import_payload(payload_raw)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    mutation_bundle = container.build_docs_mutation_bundle(
+        missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
+    )
+
+    def _import_operation() -> CanonicalImportResponse:
+        summary = execute_import_canonical_sync(
+            request=build_canonical_import_request_input(
+                payload,
+                source="api:/docs/import-canonical",
+            ),
+            settings_obj=settings_obj,
+            ports=mutation_bundle.ports,
+        )
+        return CanonicalImportResponse(
+            scope=summary.scope,
+            snapshot_id=summary.snapshot_id,
+            replace_scope=summary.replace_scope,
+            inserted=summary.inserted,
+            updated=summary.updated,
+            unchanged=summary.unchanged,
+            deleted_sql=summary.deleted_sql,
+            deleted_index=summary.deleted_index,
+            deleted_external_ids=list(summary.deleted_external_ids or []),
+            results=[
+                UpsertDocResult(
+                    external_id=row.external_id,
+                    id=row.id,
+                    action=row.action,
+                    content_changed=row.content_changed,
+                )
+                for row in list(summary.results or [])
+            ],
+        )
+
+    return cast(
+        "CanonicalImportResponse",
+        await _run_docs_mutation_operation(
+            operation=_import_operation,
+            container=container,
+            map_error=lambda exc: _map_docs_error(exc, operation="mutate"),
+            run_locked=container.run_multi_store_write_locked,
+        ),
     )
 
 

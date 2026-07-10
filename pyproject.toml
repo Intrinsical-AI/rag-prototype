@@ -1,9 +1,9 @@
 [project]
 name = "rag-prototype"
-version = "1.3.0"
+version = "2.1.0"
 description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }]
 maintainers = [{ name = "Intrinsical-AI", email = "intrinsicalai@proton.me" }]
@@ -40,6 +40,7 @@ classifiers = [
 dependencies = [
   # AI/ML Core (lightweight defaults; heavy deps are optional extras)
   "rank-bm25>=0.2,<1.0",
+  "ir-measures>=0.4,<1.0",
   "numpy>=2.0,<2.3",
   # LLM Integrations
   "openai>=1.24,<2.0",
@@ -48,12 +49,10 @@ dependencies = [
   "sqlalchemy>=2.0,<3.0",
   # Configuration & Validation
   "pydantic>=2.0,<3.0",
-  "pydantic-settings>=2.2,<3.0",
-  "python-dotenv>=1.0,<2.0",
+  "PyYAML>=6.0,<7.0",
   # CLI & Utilities
   "click>=8.0,<9.0",
   "rich>=13.0,<14.0",
-  "pre-commit>=4.5.1",
 ]
 
 [project.optional-dependencies]
@@ -105,6 +104,8 @@ test = [
 lint = [
   "ruff>=0.4,<1.0",
   "mypy>=1.10,<2.0",
+  "types-PyYAML>=6.0.12",
+  "import-linter>=2.0,<3.0",
   "pre-commit>=4.2.0,<5.0",
 ]
 dev = [
@@ -142,11 +143,15 @@ Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 [project.scripts]
 rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
 rag-ingest      = "local_rag_backend.cli:rag_ingest"
+rag-import-canonical = "local_rag_backend.cli:rag_import_canonical"
 rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
 rag-mutate-docs = "local_rag_backend.cli:rag_mutate_docs"
 rag-server      = "local_rag_backend.cli:rag_server"
 rag-status      = "local_rag_backend.cli:rag_status"
 rag-eval        = "local_rag_backend.cli:rag_eval"
+rag-eval-batch  = "local_rag_backend.cli:rag_eval_batch"
+rag-eval-compare = "local_rag_backend.cli:rag_eval_compare"
+rag-mcp         = "local_rag_backend.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -164,7 +169,6 @@ include = ["local_rag_backend*"]
 "*" = ["*.txt","*.md","*.yml","*.yaml","*.json","*.toml"]
 "local_rag_backend" = ["py.typed"]
 "local_rag_backend.frontend" = ["*.html","*.css","*.js","*.ico"]
-"local_rag_backend.config" = ["*.yaml","*.json"]
 
 # === DEVELOPMENT TOOLS ===
 

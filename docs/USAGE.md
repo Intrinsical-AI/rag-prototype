@@ -1,52 +1,73 @@
-# Guía de Uso Avanzado: Orquestación de RAG Local con Ollama
+# RAG Stateful: mutación canónica y evaluación
 
-Este documento describe cómo utilizar `rag-prototype` como una librería de Python para construir flujos de trabajo de RAG (Retrieval-Augmented Generation) personalizados. Aprenderás a implementar tu propio cargador de datos (`Loader`) y a orquestar el proceso de ingesta y consulta utilizando un modelo local de Ollama.
+Este documento describe el uso avanzado de `rag-prototype` como librería de Python para construir flujos de trabajo de RAG (Retrieval-Augmented Generation) personalizados. El quick start vive en `README.md`; aquí se documentan la configuración, la ingesta canónica, la consulta y la evaluación.
+
+## Por qué existe esta complejidad
+
+Este proyecto no está optimizado para "subir documentos y preguntar". Está diseñado como una plataforma RAG stateful donde el estado canónico, la proyección de búsqueda y la evaluación viven separados por contrato.
+
+Por eso existen tres piezas que no conviene saltarse:
+
+* `MutationCoordinator`: garantiza que toda mutación pase por un write-path canónico, con saga durable o path atómico según el backend.
+* `rag-rebuild-index` / `POST /api/index/rebuild`: el índice de lectura es reparable y derivado; el rebuild explícito evita que el estado corrupto se oculte como si fuera normal.
+* `rag-eval` y `rag-eval-compare`: cualquier cambio de chunking, retrieval o reranking debe pasar por un gate reproducible para evitar regresiones silenciosas.
+
+Si tu caso de uso no necesita este nivel de control, probablemente te baste una topología más simple. Si sí lo necesitas, esta complejidad es intencional.
 
 ## Requisitos Previos
 
-1.  **Ollama en ejecución**: Asegúrate de tener Ollama instalado y un modelo descargado (ej. `ollama pull lfm2.5-thinking`).
-2.  **Proyecto instalado**: Instala el proyecto en modo editable para facilitar el desarrollo:
-
-    ```bash
-    uv venv .venv
-    source .venv/bin/activate
-    # Windows: .venv\Scripts\activate
-    uv sync --frozen
-    ```
-
-3.  **Extras según el flujo** (opcionales):
-
-    ```bash
-    # Si vas a usar API HTTP / rag-server
-    uv sync --frozen --extra server
-
-    # Si además quieres endpoint /metrics (Prometheus)
-    uv sync --frozen --extra server --extra monitoring
-    ```
+1.  **Proveedor LLM habilitado**: Configura `openai_api_key`, `openrouter_enabled` + `openrouter_api_key` o `ollama_enabled: true` en `config.yaml`, y verifica que el proveedor elegido esté operativo.
+2.  **Entorno listo**: Este documento asume que el proyecto ya está instalado y configurado. Los pasos de instalación viven en el `README.md`.
 
 ---
 
 ## Paso 1: Configuración del Entorno
 
-La librería se configura mediante variables de entorno o un archivo `.env`. Para este caso de uso, crea un archivo `.env` en la raíz de tu proyecto con la siguiente configuración:
+La librería se configura mediante un único archivo YAML. Por defecto se carga `config.yaml` desde
+el directorio de trabajo; un comando instalado puede ejecutarse desde otra ubicación definiendo
+`RAG_CONFIG_PATH=/ruta/absoluta/runtime.yaml`.
+Las rutas se resuelven relativas a ese archivo, no al directorio actual.
+Toma como base `config.example.yaml` y copia el archivo a `config.yaml` antes de editarlo.
+El YAML seleccionado sigue siendo la única fuente de configuración: `RAG_CONFIG_PATH` elige el
+archivo, no reemplaza campos individuales. `RAG_PERF_METRICS_OUT` conserva su excepción limitada
+para `perf_metrics_out_path`. Si despliegas con Compose, monta el YAML y apunta
+`RAG_CONFIG_PATH` a su ruta dentro del contenedor.
 
-```dotenv
-# .env
+```yaml
+# config.yaml
+persistence_backend: local_split
+app_host: 127.0.0.1
+app_port: 8000
+debug: false
+log_level: INFO
+enable_monitoring: false
+enable_reranker: false
 
-# Habilitar el generador de Ollama
-OLLAMA_ENABLED=True
-OLLAMA_MODEL="lfm2.5-thinking" # O el modelo que prefieras
+api_key: null
+public_bind_requires_api_key: true
+cors_allow_origins: []
 
-# Configurar el modo de recuperación (sparse, dense, o hybrid)
-# Para empezar, 'sparse' es el más sencillo ya que no requiere embeddings.
-RETRIEVAL_MODE="sparse"
+search_backend: local_split
+retrieval_mode: sparse
+vector_backend: auto
+hybrid_retrieval_alpha: 0.5
+dual_candidate_k: 50
+st_embedding_model: all-MiniLM-L6-v2
 
-# Ruta de la base de datos para almacenar los documentos
-SQLITE_URL="sqlite:///./data/custom_app.db"
-
-# Opcional: ajusta los parámetros de logging
-LOG_LEVEL="INFO"
+openai_api_key: null
+openrouter_enabled: false
+openrouter_api_key: null
+ollama_enabled: false
+ollama_model: lfm2.5-thinking
+sqlite_url: sqlite:///./data/custom_app.db
+data_dir: data
+faq_csv: data/faq.csv
+eval_dataset_path: datasets/rag_eval_v1.jsonl
 ```
+
+Nota de topología: `search_backend` controla el motor de consulta independientemente de
+`persistence_backend`. Consulta la matriz del README para validar `dense`, `dual` o `hybrid`
+antes de cambiar valores.
 
 ## Paso 2: Implementación de un `Loader` Personalizado
 
@@ -85,78 +106,82 @@ class DictListLoader(LoaderPort):
 
 ```
 
-## Paso 3: Script de Ingesta de Datos
+## Paso 3: Ingesta canónica con `AppContainer` + `MutationCoordinator`
 
-Necesitamos un script para orquestar el proceso de ingesta. Este script inicializará los componentes necesarios, usará el nuevo `Loader` personalizado y ejecutará el pipeline.
+Para persistir datos usa siempre el write-path canónico. El script siguiente convierte los items del `Loader` en `MutationIntent` y delega en `MutationCoordinator`; no abre SQLite ni escribe a mano en repositorios concretos.
 
 ```python
 # run_ingestion.py
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-# 1. Importar componentes de la librería
+from local_rag_backend.composition.container import AppContainer
+from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
+from local_rag_backend.core.use_cases.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
+)
 from local_rag_backend.settings import settings
-from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
-# 2. Importar Loader (custom)
+# 1. Importar Loader (custom)
 from my_custom_loader import DictListLoader
 
-# 3. Datos de ejemplo
+# 2. Datos de ejemplo
 my_data = [
     {"title": "Inteligencia Artificial", "content": "La IA es la simulación de procesos de inteligencia humana.", "metadata": {"category": "Tech"}},
     {"title": "Hexagonal Architecture", "content": "Es un patrón de diseño de software que desacopla el núcleo de la aplicación.", "metadata": {"category": "Software"}}
 ]
 
 def main():
-    print("--- Iniciando script de ingesta ---")
+    print("--- Iniciando ingesta canónica ---")
 
-    # 4. Configurar la base de datos
-    # Asegurarse de que el directorio de datos exista
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(settings.sqlite_url)
-    db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
-    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-    # 5. Instanciar los componentes
-    doc_storage = SqlDocumentStorage(session_factory=session_factory)
+    # 3. Instanciar el contenedor y el coordinador canónico
+    container = AppContainer.from_settings(settings)
+    coordinator = MutationCoordinator(
+        settings_obj=settings,
+        ports=container.docs_mutation_ports(
+            build_embedder=lambda: build_dense_embedder_from_settings(settings_obj=settings),
+        ),
+    )
     custom_loader = DictListLoader(data=my_data)
 
-    # El ETLService es necesario solo para modos 'dense' o 'hybrid'.
-    # Para 'sparse', podemos interactuar directamente con el repositorio.
-    # Ejemplo de cómo hacerlo de forma simple para 'sparse'.
-    from local_rag_backend.core.services.ingestion import default_preprocess, default_chunker, default_formatter
+    # 4. Convertir cada LoadedItem a MutationUpsertInput
+    upserts: list[MutationUpsertInput] = []
+    for i, item in enumerate(custom_loader.load()):
+        upserts.append(
+            MutationUpsertInput(
+                external_id=f"dict_item_{i}",
+                content=item.text,
+                source_id=item.lineage.source_uri,
+                metadata=item.metadata,
+            )
+        )
 
-    print(f"Cargando {len(my_data)} documentos...")
-    all_chunks = []
-    for item in custom_loader.load():
-        clean_text = default_preprocess(item.text, item.metadata)
-        chunks = default_chunker()(clean_text, item.metadata)
-        for chunk in chunks:
-            formatted_chunk = default_formatter(chunk, item.metadata)
-            all_chunks.append(formatted_chunk)
-
-    # 6. Almacenar los documentos procesados
-    stored_ids = list(doc_storage.store_documents(all_chunks))
-    print(f"\n[OK] Ingesta completada. {len(stored_ids)} chunks almacenados en la base de datos.")
+    # 5. Ejecutar la mutación canónica
+    summary = coordinator.execute(
+        MutationIntent(
+            op_id="script-op-1",
+            upserts=tuple(upserts),
+            source="script:custom_loader",
+        )
+    )
+    print(f"\n[OK] Ingesta completada: {summary}")
 
 if __name__ == "__main__":
     main()
 
 ```
 
-Ejecuta el script para poblar tu base de datos:
+Ejecuta el script para poblar tu backend canónico:
 
 ```bash
-python run_ingestion.py
+uv run python run_ingestion.py
 ```
 
-Nota: este ejemplo escribe directo en SQLite para mantener el flujo simple (útil en `sparse`). Para el write-path canónico y consistente entre `sparse`/`dense`/`hybrid`, usa `MutationCoordinator` (sección de mutaciones más abajo).
+Nota: el ejemplo evita escrituras directas a SQLite. El mismo flujo funciona en `sparse`, `dense` y `hybrid`; el coordinador decide la estrategia adecuada según la configuración.
 
-## Paso 4: Script de Consulta con Ollama
+## Paso 4: Script de Consulta con un proveedor LLM
 
-Script para hacer preguntas a los datos utilizando el `RagService` y Ollama.
+Script para hacer preguntas a los datos utilizando `RagService` y el proveedor LLM configurado.
 
 ```python
 # run_query.py
@@ -176,7 +201,7 @@ def main():
     # Realizar la consulta
     response = rag_service.ask(question)
 
-    print(f"\nRespuesta de Ollama:\n{response['answer']}")
+    print(f"\nRespuesta del LLM:\n{response['answer']}")
 
     print("\n--- Fuentes utilizadas ---")
     for doc, score in zip(response["docs"], response["scores"], strict=False):
@@ -190,10 +215,10 @@ if __name__ == "__main__":
 Ejecuta este script para obtener una respuesta:
 
 ```bash
-python run_query.py
+uv run python run_query.py
 ```
 
-> Siguiendo estos pasos, puedes adaptar este proyecto para entender cómo construir un sistema RAG, con soporte para modelos locales con Ollama.
+> Siguiendo estos pasos, puedes adaptar este proyecto para construir un sistema RAG con el proveedor LLM que te convenga (OpenAI, OpenRouter u Ollama).
 
 ---
 
@@ -211,16 +236,19 @@ rag-ingest --dry-run ./docs
 
 Notas:
 
-* En `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial de forma consistente (FAISS o NumPy, según `VECTOR_BACKEND`) y borra chunks obsoletos si un fichero se acorta.
+* En `local_split` + `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial local de forma consistente (FAISS o NumPy, según `vector_backend`) y borra chunks obsoletos si un fichero se acorta.
+* En `elasticsearch` + `dense`/`hybrid`, la CLI usa el backend unificado: documentos, embeddings, history, system state y tombstones viven en Elasticsearch.
 * La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
 * Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.
 
 ---
 
-## Mantenimiento (dense/hybrid): mutación canónica + repair explícito
+## Mantenimiento (dense/dual/hybrid): mutación canónica + repair explícito
 
-En `dense`/`hybrid`, SQLite es el store de entidad y el índice vectorial es estado operacional incremental.
-El write-path canónico usa `MutationCoordinator` (`DURABLE_SAGA`) con journal duradero.
+`MutationCoordinator` es el write-path canónico en ambos backends:
+
+* `local_split`: `DURABLE_SAGA` con journal duradero, SQLite como store canónico y vector index local como estado derivado.
+* `elasticsearch`: path atómico sobre backend unificado; no hay journal de mutación local ni lock SQL.
 
 ### 1) CLI (canónico)
 
@@ -243,7 +271,25 @@ cat > /tmp/mutate_delete_ext.json <<'JSON'
 JSON
 rag-mutate-docs --json /tmp/mutate_delete_ext.json
 
-# Repair explícito del índice
+# Import/sync canónico para productores externos (p.ej. RepoGPT)
+cat > /tmp/canonical_import.json <<'JSON'
+{
+  "scope":"repogpt:demo",
+  "snapshot_id":"snap-1",
+  "replace_scope": true,
+  "documents":[
+    {
+      "external_id":"repogpt:demo:1",
+      "source_id":"repogpt:demo:file:src/app.py",
+      "content":"def hello():\n    return 1\n",
+      "metadata":{"path":"src/app.py","unit_type":"function"}
+    }
+  ]
+}
+JSON
+rag-import-canonical --json /tmp/canonical_import.json
+
+# Repair explícito del estado de retrieval
 rag-rebuild-index
 ```
 
@@ -255,6 +301,17 @@ Levanta el servidor antes de llamar a la API:
 rag-server
 ```
 
+Probes operacionales (públicas):
+
+```bash
+curl -s http://localhost:8000/healthz
+curl -s http://localhost:8000/readyz
+```
+
+`/healthz` solo valida disponibilidad básica del servicio. `/readyz` es más estricto y puede devolver
+`503` si no hay proveedor LLM configurado (`openai_api_key`, `ollama_enabled: true`, u OpenRouter con
+`openrouter_enabled: true` + `openrouter_api_key`), aunque la app y SQLite estén sanos.
+
 ```bash
 curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \
@@ -264,10 +321,18 @@ curl -X POST "http://localhost:8000/api/docs/mutate" \
   -H "Content-Type: application/json" \
   -d '{"op_id":"op-2","delete_external_ids":["chunk:<sha256>"]}'
 
+curl -X POST "http://localhost:8000/api/docs/import-canonical" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"repogpt:demo","snapshot_id":"snap-1","replace_scope":true,"documents":[{"external_id":"repogpt:demo:1","source_id":"repogpt:demo:file:src/app.py","content":"def hello():\n    return 1\n","metadata":{"path":"src/app.py","unit_type":"function"}}]}'
+
+curl -X POST "http://localhost:8000/api/docs/query" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":50,"offset":0,"filters":[{"field":"scope","values":["repogpt:demo"]},{"field":"metadata.unit_type","values":["function"]}]}'
+
 curl -X POST "http://localhost:8000/api/index/rebuild"
 ```
 
-Si has configurado `API_KEY`, añade `-H "X-API-Key: <API_KEY>"`. Además, por defecto las peticiones no-locales requieren API key.
+Si has configurado `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"`. Además, por defecto las peticiones no-locales requieren API key.
 
 ### 3) Como librería (flujo programático recomendado)
 
@@ -298,34 +363,136 @@ summary = coordinator.execute(
 print(summary)
 ```
 
-Nota: el rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
+Notas:
+
+* En `local_split`, el rebuild recompone el índice vectorial local desde el store canónico.
+* En `elasticsearch`, el rebuild re-embebe los documentos del índice de documentos y actualiza los vectores in-place.
+* El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
+* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI y HTTP ahora usan el mismo default: `true`.
+* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v4` se normaliza en el borde de transporte, no en el core del importador.
+* Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
+* `rag_status` devuelve un `runtime` estructurado con topología, seguridad, backends y rutas, además de `health` e `index` cuando aplican.
+
+### RepoGPT contract
+
+`RepoGPT code-units v4` es el contrato soportado para la integración canónica de código:
+
+* `kind = "code-units"`
+* `schema_version = "4"`
+* `scope`, `snapshot_id`, `replace_scope`
+* `documents[]` con `external_id`, `content`, `metadata`
+
+El import canónico sigue siendo genérico; no se especializa el use case al dominio RepoGPT. La validación específica vive en el borde de transporte para detectar payloads `code-units` desalineados antes de tocar el write-path canónico.
 
 ---
 
 ## Operabilidad: métricas, evaluación y reranker
 
 Monitoring mínimo (Prometheus):
+Si activas `enable_monitoring: true` en `config.yaml`, `rag-server` expone `/metrics` cuando la
+dependencia opcional está instalada.
 
-```bash
-uv sync --frozen --extra server --extra monitoring
-export ENABLE_MONITORING=true
-rag-server
-curl -s http://localhost:8000/metrics | head
-```
-
-Si tienes `API_KEY`, añade `-H "X-API-Key: <API_KEY>"` al `curl`.
+Si tienes `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"` al `curl`.
 
 Evaluación offline reproducible (gate):
 
 ```bash
 rag-eval --retrieval-mode sparse
+rag-eval --retrieval-mode dense --candidate-k 20
+rag-eval --retrieval-mode dual --dual-candidate-k 50
+rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
+rag-eval --retrieval-mode sparse --run-out /tmp/run.jsonl --report-out /tmp/report.json
+rag-eval-compare --spec /tmp/rag-eval-compare-spec.json
+rag-eval-batch --specs /tmp/rag-eval-batch-specs.json
 ```
 
-Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `RAG_EVAL_DATASET_PATH`).
+Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `eval_dataset_path` en `config.yaml`).
+El comando reporta métricas estándar de IR a `@k` (`nDCG`, `MAP`, `MRR`, `P`, `Recall`).
+El evaluador conserva los scores del retriever cuando están disponibles. Los IDs recuperados
+fuera del corpus ya no se filtran silenciosamente: cuentan como no relevantes y aparecen como
+anomalías en `--report-out` / `--anomalies-out`.
+La evaluación usa un runtime local aislado bajo `<data_dir>/_eval_workspaces/`; no reutiliza ni muta el índice principal.
+Ese runtime sí puede reutilizar un índice denso de evaluación ya persistido cuando coinciden:
+
+* la firma del dataset (`dataset_id` + documentos)
+* el conjunto de `doc_ids` cargados en el workspace
+* el backend vectorial y el manifest esperado del índice
+
+Si cambias el modelo de embeddings, el backend vectorial o cualquier input del manifest denso, la evaluación invalida ese workspace y reconstruye el índice aislado.
+El rebuild denso se hace en batches acotados para reducir picos de memoria en corpora grandes, pero sigue siendo un rebuild completo del workspace de evaluación cuando hay drift.
+El dataset se valida de forma estricta: IDs duplicados, relevantes vacíos o relevantes fuera del corpus fallan al cargar.
+El schema v1 (`relevant_external_ids`) se mantiene. El schema v2 añade qrels graduados:
+
+```json
+{"type":"query","query":"alpha","qrels":[{"external_id":"doc:1","relevance":3}]}
+```
+
+Los overrides de modo son explícitos:
+- `--candidate-k` sólo para `dense`
+- `--dual-candidate-k` sólo para `dual`
+- `--hybrid-alpha` sólo para `hybrid`
+
+Override útil para wrappers/benchmarks:
+
+```bash
+RAG_PERF_METRICS_OUT=/tmp/rag-perf.json rag-eval --retrieval-mode dense
+```
+
+Ese env var sobrescribe `perf_metrics_out_path` en tiempo de carga de settings sin editar `config.yaml`.
+
+Comparación baseline-vs-candidate (“Detector de Placebo RAG”):
+
+```bash
+cat > /tmp/rag-eval-compare-spec.json <<'JSON'
+{
+  "k": 3,
+  "baseline": {"retrieval_mode": "sparse"},
+  "candidate": {"retrieval_mode": "dual", "dual_candidate_k": 50},
+  "thresholds": {
+    "min_delta_ndcg": 0.02,
+    "min_delta_map": 0.02,
+    "min_delta_mrr": 0.02,
+    "max_regression_precision": 0.01,
+    "max_regression_recall": 0.01
+  }
+}
+JSON
+
+rag-eval-compare \
+  --spec /tmp/rag-eval-compare-spec.json \
+  --json-out /tmp/rag-eval-compare.json \
+  --report-out /tmp/rag-eval-compare-report.json
+```
+
+Comportamiento:
+- `baseline` y `candidate` se declaran en `--spec`
+- `thresholds` contiene los umbrales del gate; si se omite un valor, su default es `0.0`
+- exit code `0`: pasa el gate
+- exit code `1`: la candidate no mejora lo suficiente o degrada métricas críticas
+- exit code `2`: error de configuración, dependencia o entorno
+
+El JSON de salida incluye:
+- `baseline`
+- `candidate`
+- `delta`
+
+El report detallado añade métricas por query y contadores de anomalías, pensado para auditoría,
+pooling y futuros adapters RAGAS/BEIR/MTEB/LLM judge.
+
+Smoke e2e reproducible:
+
+```bash
+bash scripts/test_rag_eval_compare_e2e.sh
+```
 
 Reranker opcional (mejora de calidad medible con `rag-eval`):
 
 ```bash
-export ENABLE_RERANKER=true
-export RERANKER_CANDIDATE_K=20
+# set these in config.yaml:
+# enable_reranker: true
+# reranker_candidate_k: 20
 ```
+
+Las notas internas de `synergy` y los packs de demo/evaluación específicos de ese workspace
+se movieron a [`docs/internal-synergy.md`](./internal-synergy.md) para mantener esta guía
+centrada en el flujo de uso avanzado del proyecto.

@@ -1,6 +1,6 @@
-# Intrinsical RAG Prototype
+# Stateful RAG Platform: A Port & Adapters Modular Approach
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11-3.12](https://img.shields.io/badge/python-3.11--3.12-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -10,8 +10,8 @@
 <!-- [![PyPI](https://img.shields.io/pypi/v/rag-prototype.svg)](https://pypi.org/project/rag-prototype/)
 [![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/) -->
 
-> General-purpose RAG system with a hexagonal architecture (Ports & Adapters), FastAPI, three retrieval modes (BM25, dense vector, hybrid), and swappable LLM connectors (OpenAI, OpenRouter, Ollama). Designed as a solid base to iterate in experimental environments.
-> Default runtime mode is `sparse` (SQLite-only). In dense/hybrid modes, vector state is persisted to disk (`faiss` or `numpy` backend).
+> Stateful RAG platform with a hexagonal architecture (Ports & Adapters), FastAPI, canonical mutation flows, and offline evaluation gates. It supports four retrieval modes (BM25, dense vector, dual, hybrid) plus swappable LLM connectors (OpenAI, OpenRouter, Ollama).
+> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/dual/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend. The write-path is intentionally stateful: canonical mutations, rebuilds, and recovery are first-class.
 
 ---
 
@@ -24,8 +24,9 @@
 * **Retrieval**
 
   * Sparse: BM25 (offline).
-  * Dense: vector index (`faiss`/`numpy`) + embeddings backend (OpenAI or SentenceTransformers).
-  * Hybrid: dense + BM25 combination with configurable weight.
+  * Dual: sparse candidate pool with dense rerank.
+  * Dense: local vector index (`faiss`/`numpy`) or unified Elasticsearch vector search.
+  * Hybrid: local dense+BM25 combination or Elasticsearch lexical+vector fusion.
 * **LLMs**
 
   * OpenAI Chat (via API key).
@@ -33,12 +34,12 @@
   * Local Ollama (over HTTP). Current clients are synchronous.
 * **Persistence**
 
-  * SQLite via SQLAlchemy: documents and Q\&A history.
-  * Vector index on disk for dense/hybrid mode (`faiss` or `numpy` backend).
+  * `local_split`: SQLite via SQLAlchemy for documents/history + on-disk vector index for dense/hybrid.
+  * `elasticsearch`: unified documents, vectors, history, system state, and tombstones in Elasticsearch.
 * **API**
 
   * FastAPI with validation and OpenAPI at `/docs`.
-  * Health: `/api/health`, Readiness: `/api/ready`, Ollama health: `/api/health/ollama`.
+  * Public probes: `/healthz`, `/readyz`, Ollama health: `/healthz/ollama`.
   * Config: `/api/config`, Templates: `/api/templates`.
   * OpenRouter proxy (OpenAI-compatible): `POST /api/openrouter/generate`.
 * **Tests**
@@ -47,15 +48,15 @@
 
 ---
 
-## Installation and startup (from source)
+## Quick start
 
 ```bash
 git clone https://github.com/Intrinsical-AI/rag-prototype.git
 cd rag-prototype
 
 # Recommended: uv-managed local venv + lockfile installs
-# If your environment has a non-writable home directory, keep uv cache local:
-# export UV_CACHE_DIR=.uv_cache
+# Keep uv cache local to the repo for sandboxed/devcontainer setups.
+export UV_CACHE_DIR=.uv_cache
 uv venv .venv
 source .venv/bin/activate
 # Windows: .venv\Scripts\activate
@@ -63,7 +64,19 @@ source .venv/bin/activate
 # Install runtime deps (uses uv.lock); --extra server adds FastAPI/uvicorn
 uv sync --frozen --extra server
 
-# (Optional) Dense/Hybrid deps (FAISS)
+# config.yaml is required by default. Fresh source clones include the default file;
+# this protects archive/copy workflows where only config.example.yaml is present.
+test -f config.yaml || cp config.example.yaml config.yaml
+
+# Installed commands can run from another directory by selecting the same YAML explicitly.
+# export RAG_CONFIG_PATH=/absolute/path/to/config.yaml
+
+# Before using /api/ask or expecting /readyz to pass, enable one LLM provider in config.yaml:
+# - openai_api_key: "..."
+# - openrouter_enabled: true + openrouter_api_key: "..."
+# - ollama_enabled: true, with Ollama running locally
+
+# (Optional) Dense/Hybrid deps for local split backend (FAISS)
 # uv sync --frozen --extra server --extra dense
 #
 # (Optional) SentenceTransformers embeddings (heavy: torch/transformers)
@@ -76,17 +89,24 @@ uv sync --frozen --extra server
 Initialize sample data and start:
 
 ```bash
-# Load sample CSV into SQLite and, if applicable, build vector index
+# Load sample CSV into the configured backend and, if applicable, build/rebuild retrieval state
 rag-bootstrap
 
 
 # FastAPI server
 rag-server
 # UI: http://localhost:8000/
-# Health: http://localhost:8000/api/health
-# Ollama health: http://localhost:8000/api/health/ollama
+# Health: http://localhost:8000/healthz
+# Readiness: http://localhost:8000/readyz
+# Ollama health: http://localhost:8000/healthz/ollama
 # Docs: http://localhost:8000/docs
 ```
+
+> `/healthz` confirms the HTTP app is alive. `/readyz` and `/api/ask` require a configured
+> LLM provider and may return `503` until `config.yaml` enables OpenAI, OpenRouter, or Ollama.
+
+> `rag-server` does not accept CLI flags (`--host`, `--port`, etc.). Host and port are controlled
+> exclusively via `config.yaml` (`app_host`, `app_port`).
 
 > Alternative startup (without `rag-server` wrapper):
 > `uvicorn local_rag_backend.http.main:app --reload`.
@@ -96,175 +116,98 @@ rag-server
 
 ## Configuration
 
-Default `src/local_rag_backend/settings.py` (Pydantic Settings). Overridden with environment variables or a `.env` file (case-insensitive).
+Runtime configuration defaults to `config.yaml` in the process working directory.
+Set `RAG_CONFIG_PATH=/absolute/path/to/runtime.yaml` when an installed console script, including
+`rag-mcp`, runs outside the checkout. The selected YAML remains the single runtime source of truth,
+and relative paths inside it resolve against that file's directory. An explicit path passed to
+`load_settings_from_yaml(...)` takes precedence over the environment variable. The process fails
+fast if the selected file is missing or invalid.
+See [`config.example.yaml`](./config.example.yaml) for the canonical template.
 
-> **Security note:** when exposing this service behind a reverse proxy, keep `API_KEY` enabled and ensure the proxy sanitizes forwarding headers.
-Runtime auth guards evaluate client origin using `X-Forwarded-For` and RFC 7239 `Forwarded`; untrusted/unsanitized header chains can weaken source attribution. When `API_KEY` is unset and `PUBLIC_BIND_REQUIRES_API_KEY=true`, ambiguous forwarding chains (e.g. empty/unknown-only proxy headers) are rejected fail-closed.
+`RAG_PERF_METRICS_OUT` remains a narrow runtime override for `perf_metrics_out_path`; when both
+environment variables are set, its relative value is resolved against the selected YAML directory.
 
-
-
-Key variables (non-exhaustive):
-
-| Variable                         | Default                   | Scope        | Description                                            |
-| -------------------------------- | ------------------------- | ------------ | ------------------------------------------------------ |
-| `APP_HOST`                       | `127.0.0.1`               | server       | Service host                                           |
-| `APP_PORT`                       | `8000`                    | server       | Service port                                           |
-| `DEBUG`                          | `false`                   | server       | Reload/detailed logging                                |
-| `LOG_LEVEL`                      | `INFO`                    | server       | Logging level                                          |
-| `API_KEY`                        | —                         | security     | If set, require `X-API-Key: <API_KEY>` for `/api/*` and `/metrics` |
-| `PUBLIC_BIND_REQUIRES_API_KEY`   | `true`                    | security     | Refuse unsafe public startup and reject non-local `/api/*` + `/metrics` requests when `API_KEY` is unset |
-| `CORS_ALLOW_ORIGINS`             | `[]`                      | security     | Allowed CORS origins when `DEBUG=false` (JSON list or comma-separated) |
-| `RETRIEVAL_MODE`                 | `sparse`                  | retrieval    | `sparse` \| `dense` \| `hybrid`                        |
-| `DATA_DIR`                       | `data`                    | storage      | Base data directory (SQLite parent, vector index paths) |
-| `SQLITE_URL`                     | `sqlite:///./data/app.db` | storage      | SQLite URL                                             |
-| `FAQ_CSV`                        | `data/faq.csv`            | ingestion    | FAQ CSV                                                |
-| `CSV_HAS_HEADER`                 | `true`                    | ingestion    | CSV has header                                         |
-| `INGEST_CHUNK_STRATEGY`          | `chars_v1`                | ingestion    | Chunking strategy identifier (deterministic)           |
-| `INGEST_CHUNKER_VERSION`         | `chars_v1`                | ingestion    | Version token included in chunk dedup hashes           |
-| `INGEST_CHUNK_CHARS`             | `1200`                    | ingestion    | Chunk size in characters (`200..8000`)                 |
-| `INGEST_CHUNK_OVERLAP`           | `200`                     | ingestion    | Chunk overlap in characters (`0..4000`, `< CHUNK_CHARS`) |
-| `INGEST_BATCH_SIZE`              | `64`                      | ingestion    | File-plans per ingestion batch (`1..512`)              |
-| `INGEST_CLEAN_LOWERCASE`         | `true`                    | ingestion    | Lowercase during ingestion preprocessing               |
-| `INGEST_CLEAN_REMOVE_HTML`       | `true`                    | ingestion    | Remove HTML tags during ingestion preprocessing        |
-| `INGEST_CLEAN_COLLAPSE_WHITESPACE` | `true`                 | ingestion    | Collapse consecutive whitespace                         |
-| `INGEST_CLEAN_STRIP`             | `true`                    | ingestion    | Strip leading/trailing whitespace                       |
-| `ST_EMBEDDING_MODEL`             | `all-MiniLM-L6-v2`        | dense/hybrid | SentenceTransformers model                             |
-| `OPENAI_EMBEDDING_MODEL`         | `text-embedding-3-small`  | OpenAI       | Embeddings model                                       |
-| `VECTOR_BACKEND`                 | `auto`                    | dense/hybrid | Vector backend selector: `auto` \| `faiss` \| `numpy` |
-| `STORAGE_PROFILE`                | _(auto)_                  | consistency  | Optional explicit storage profile (`sql_only_local`, `sql_faiss_local`, `sql_numpy_local`) |
-| `WRITE_LOCK_TIMEOUT_S`           | `30.0`                    | consistency  | Timeout (seconds) for multi-store write lock           |
-| `WRITE_LOCK_POLL_S`              | `0.05`                    | consistency  | Poll interval (seconds) while waiting for lock         |
-| `MUTATION_BATCH_MAX_SIZE`        | `32`                      | consistency  | Max queued mutation requests coalesced per batch cycle (`1..512`) |
-| `MUTATION_BATCH_MAX_WAIT_MS`     | `50`                      | consistency  | Coalescing wait time before draining a mutation batch (`0..5000`) |
-| `MUTATION_RECOVERY_ENABLED`      | `true`                    | consistency  | Enable startup/background replay of incomplete mutations |
-| `MUTATION_RECOVERY_INTERVAL_S`   | `30.0`                    | consistency  | Background recovery interval (seconds)                 |
-| `INDEX_PATH`                     | `data/index.faiss`        | dense/hybrid | FAISS file                                             |
-| `ID_MAP_PATH`                    | `data/id_map.json`        | dense/hybrid | FAISS ID map (JSON)                                    |
-| (derived) `index_manifest.json`  | `data/index_manifest.json`| dense/hybrid | Index manifest (model/dim/chunker) for drift detection |
-| `ENABLE_RERANKER`                | `false`                   | retrieval    | Wrap selected retriever with reranking layer           |
-| `RERANKER_CANDIDATE_K`           | `20`                      | retrieval    | Candidate set size fetched before reranking (`3..200`) |
-| `RERANKER_STRATEGY`              | `overlap_v1`              | retrieval    | Reranker strategy identifier                            |
-| `ENABLE_MONITORING`              | `false`                   | monitoring   | Enable metrics middleware and `/metrics` endpoint      |
-| `OPENAI_TOP_P`                   | `1.0`                     | OpenAI       | top-p parameter                                        |
-| `OPENROUTER_ENABLED`             | `false`                  | OpenRouter   | Enable OpenRouter proxy                                |
-| `OPENROUTER_API_KEY`             | —                        | OpenRouter   | API key                                                |
-| `OPENROUTER_BASE_URL`            | `https://openrouter.ai/api/v1` | OpenRouter | Base URL                                          |
-| `OPENROUTER_MODEL`               | `openai/gpt-4o-mini`     | OpenRouter   | Default model                                         |
-| `OPENROUTER_SITE_URL`            | —                        | OpenRouter   | Optional Referer header                                |
-| `OPENROUTER_APP_TITLE`           | —                        | OpenRouter   | Optional X-Title header                                |
-| `HYBRID_RETRIEVAL_ALPHA`         | `0.5`                     | hybrid       | Weight of the **sparse** component (0=dense, 1=sparse) |
-| `OPENAI_API_KEY`                 | —                         | OpenAI       | API key                                                |
-| `OPENAI_MODEL`                   | `gpt-4o-mini`             | OpenAI       | Chat model                                             |
-| `OPENAI_REQUEST_TIMEOUT`         | `60`                      | OpenAI       | Timeout (s) for OpenAI-compatible HTTP requests        |
-| `OPENAI_TEMPERATURE`             | `0.2`                     | OpenAI       | Temperature                                            |
-| `OPENAI_MAX_TOKENS`              | `256`                     | OpenAI       | Max tokens                                             |
-| `OPENAI_PROMPT_TEMPLATE`         | _(builtin template)_      | prompting    | Prompt template for OpenAI/OpenRouter generators       |
-| `OLLAMA_ENABLED`                 | `false`                   | Ollama       | Enable Ollama                                          |
-| `OLLAMA_MODEL`                   | `lfm2.5-thinking`               | Ollama       | Model served by Ollama                                 |
-| `OLLAMA_BASE_URL`                | `http://localhost:11434`  | Ollama       | Server URL                                             |
-| `OLLAMA_REQUEST_TIMEOUT`         | `180`                     | Ollama       | Timeout (s)                                            |
-| `OLLAMA_PROMPT_TEMPLATE`         | _(builtin template)_      | prompting    | Prompt template for Ollama generator                   |
+All runtime keys are shown in `snake_case` and map 1:1 to the fields in `config.yaml`.
 
 
-### Index manifest (dense/hybrid)
+### Backend matrix
 
-When `RETRIEVAL_MODE=dense|hybrid`, the system writes an `index_manifest.json` next to `INDEX_PATH`.
+| `persistence_backend` | `search_backend` | `retrieval_mode` | Canonical write model | Notes |
+| --- | --- | --- | --- | --- |
+| `local_split` | `local_split` (default) | `sparse`, `dense`, `dual`, `hybrid` | `DURABLE_SAGA` | Default standalone topology. Sparse/dual are SQLite-backed; dense/hybrid add local vector state. |
+| `local_split` | `elasticsearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote Elasticsearch query execution over local SQL persistence. `hybrid` is rejected. |
+| `local_split` | `opensearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote OpenSearch query execution over local SQL persistence. `hybrid` is rejected. |
+| `local_split` | `solr` | `sparse` | `DURABLE_SAGA` | Lexical-only backend. Dense/dual/hybrid are rejected. |
+| `elasticsearch` | `elasticsearch` | `sparse`, `dense`, `dual`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch. |
+| `elasticsearch` | `local_split` | `dense`, `dual`, `hybrid` | `ATOMIC` | ES-backed persistence with local_split query orchestration. Sparse is rejected. |
+| `elasticsearch` | `opensearch` | `dense`, `dual` | `ATOMIC` | ES-backed persistence with OpenSearch query execution. Sparse/hybrid are rejected. |
+| `elasticsearch` | `solr` | none | `ATOMIC` | Rejected at startup. Solr is sparse-only, but sparse is disallowed with ES persistence unless `search_backend=elasticsearch`. |
+
+The selector in `Settings` plus `composition/adapters.py` enforce this matrix at startup.
+
+### Index manifest (`local_split` dense/hybrid only)
+
+When `persistence_backend=local_split` and `retrieval_mode=dense|hybrid`, the system writes an `index_manifest.json` next to `index_path`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
-If you change any of these settings, `/api/ready` and `rag-status` will report drift and instruct you to rebuild:
+If you change any of these settings, `/readyz` and `rag-status` will report drift and instruct you to rebuild:
 `rag-rebuild-index` (or `POST /api/index/rebuild`).
 
 **Note:**  **fresh-install only** storage contract.
 * canonical document IDs are opaque strings (`doc:<uuid7>`)
 * SQL documents use `doc_id` as the primary key
 * vector `id_map.json` stores `list[str]`
-* no runtime migration/fallback for legacy schemas or legacy id maps
+* no runtime migration/fallback for older schemas or id maps
 
-### Retrieval adapter resolution (strict)
+### Retrieval Adapter Resolution
 
-* `RETRIEVAL_MODE=sparse`:
-  `RetrieverPort := SparseBM25Retriever` (BM25 corpus + SQL doc repo)
-* `RETRIEVAL_MODE=dense`:
-  `RetrieverPort := DenseVectorRetriever` (embedder + vector index + SQL doc repo)
-* `RETRIEVAL_MODE=hybrid`:
-  `RetrieverPort := HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`
-* If `ENABLE_RERANKER=true`, the selected retriever is wrapped as:
-  `RetrieverPort := RerankingRetriever(base=<selected>)`
+The backend matrix above is authoritative. The common runtime routes are:
+
+* `local_split` + `local_split`:
+  `SparseBM25Retriever`, `DenseVectorRetriever`, or `HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`.
+* `local_split` + `elasticsearch` or `opensearch`:
+  `ElasticLikeSearchRetriever` for `sparse`, `dense`, or `dual`.
+* `local_split` + `solr`:
+  `SolrSearchRetriever` for `sparse` only.
+* `elasticsearch` + `elasticsearch`:
+  `ElasticLikeSearchRetriever` for `sparse`/`dense`, and `HybridRetriever(DenseVectorRetriever, Elastic lexical retriever, alpha)` for `hybrid`.
+* `elasticsearch` + `local_split`:
+  `LocalSplitSearchRetriever`-style orchestration over ES-backed persistence for `dense`/`dual`/`hybrid`.
+* `elasticsearch` + `opensearch`:
+  `ElasticLikeSearchRetriever` for `dense`/`dual`.
+* If `enable_reranker: true`, the selected retriever is wrapped as:
+  `RerankingRetriever(base=<selected>)`
 
 This boundary is enforced in `composition/adapters.py` and consumed by `AppContainer`.
 
 
 ---
 
-## Ingestion and indexing flow
+## Advanced usage
 
-The ingestion process is orchestrated by `IngestionPipeline`:
+The detailed ingestion, canonical mutation, and evaluation flows are documented in
+[`docs/USAGE.md`](./docs/USAGE.md).
 
-1. Load items from a `LoaderPort` (e.g., `CSVLoader`) returning `LoadedItem(text, lineage, metadata)`.
-2. Preprocess (`preprocess_text`) and chunk (`default_chunker`) with overlap.
-3. Format chunks (metadata header) and batch-ingest via `ETLService.ingest()`.
+Use these entrypoints for the main workflows:
 
-### CLI support
+* `rag-ingest` for file/directory ingestion.
+* `rag-mutate-docs` for canonical writes via `MutationCoordinator`.
+* `rag-import-canonical` for scope/snapshot import and sync.
+* `rag-rebuild-index` for explicit repair of dense/dual/hybrid state.
+* `rag-eval`, `rag-eval-batch`, and `rag-eval-compare` for offline evaluation gates.
 
-* **Sparse**: stores directly in SQLite (no embeddings required).
-* **Dense / Hybrid**:
-  1. Save chunks in SQLite
-  2. Generate embeddings with OpenAI (if `OPENAI_API_KEY`) or SentenceTransformers (`ST_EMBEDDING_MODEL`)
-  3. Upsert into the vector index (`INDEX_PATH`, `ID_MAP_PATH`)
+See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
+for batch-spec examples and compare-mode usage.
 
-Chunking parameters (in settings):
+`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
 
-* `INGEST_CHUNK_CHARS` (default 1200)
-* `INGEST_CHUNK_OVERLAP` (default 200)
-* `INGEST_CHUNKER_VERSION` (default `chars_v1`): changes the dedup key used by `/api/docs` to force re-chunk/re-embed.
-* `INGEST_BATCH_SIZE` (default `64`, valid range `1..512`): file-plans processed per ingestion batch.
+Offline evaluation uses dataset-scoped workspaces under `<data_dir>/_eval_workspaces/`.
+That runtime stays isolated from the main index, but it is no longer purely ephemeral:
 
-Available scripts:
-
-```bash
-# Ingest from CSV and build vector index if applicable
-rag-bootstrap
-
-
-# Ingest .txt/.md/.csv from file(s) or directory(ies)
-rag-ingest ./my_notes ./docs/handbook.md ./data/faq.csv
-
-# Keep symlink targets out of scope (also skips symlink paths passed as root inputs)
-rag-ingest --no-follow-symlinks ./docs
-
-
-# Rebuild vector index from current SQLite documents (idempotent; dense/hybrid only)
-rag-rebuild-index
-
-
-# Unified docs mutation (canonical write path)
-cat > /tmp/mutate_upsert.json <<'JSON'
-{"op_id":"op-upsert-1","upserts":[{"external_id":"doc-1","content":"hello"}]}
-JSON
-rag-mutate-docs --json /tmp/mutate_upsert.json
-
-# Delete by SQL doc IDs
-cat > /tmp/mutate_delete_ids.json <<'JSON'
-{"op_id":"op-del-ids-1","delete_ids":["doc:...","doc:..."]}
-JSON
-rag-mutate-docs --json /tmp/mutate_delete_ids.json
-
-# Delete by external IDs (creates tombstones)
-cat > /tmp/mutate_delete_external_ids.json <<'JSON'
-{"op_id":"op-del-ext-1","delete_external_ids":["chunk:abcd...","file:/path:part=file:chunk=0"]}
-JSON
-rag-mutate-docs --json /tmp/mutate_delete_external_ids.json
-
-
-# Summarized system and files status
-rag-status
-
-
-# Offline retrieval evaluation (reproducible gate; default dataset from `datasets/rag_eval_v1.jsonl`)
-rag-eval --retrieval-mode sparse
-```
-
-> Retrieval mode is selected via `RETRIEVAL_MODE` (there is no `--mode` flag).
+* dense eval workspaces reuse the persisted local index when the dataset signature and vector manifest still match
+* changing the dense backend, embedding model, or other vector manifest inputs invalidates the cached eval workspace and rebuilds it
+* dense rebuilds happen in bounded batches to reduce memory spikes on larger evaluation corpora
+* `RAG_PERF_METRICS_OUT=/abs/path.json` can override `perf_metrics_out_path` for benchmark wrappers without editing `config.yaml`
 
 Optional: better file type detection (best-effort) using `python-magic`:
 
@@ -280,17 +223,48 @@ Optional: Prometheus metrics (`/metrics`) and structured-ish domain metrics:
 
 ```bash
 uv sync --frozen --extra monitoring
-# then:
-export ENABLE_MONITORING=true
+# then set `enable_monitoring: true` in config.yaml
 rag-server
 ```
+
+Optional: performance extras (`torch` + `orjson` for faster JSON serialization):
+
+```bash
+uv sync --frozen --extra performance      # torch + orjson (CPU)
+uv sync --frozen --extra performance-cpu  # alias, identical to performance
+```
+
+These extras are included in `all` but are **not required** for sparse or dense retrieval. Install only when you have profiled a serialization or inference bottleneck that justifies the `torch` dependency weight.
 
 Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 
 ```bash
-export ENABLE_RERANKER=true
-export RERANKER_CANDIDATE_K=20
+# set these in config.yaml:
+# enable_reranker: true
+# reranker_candidate_k: 20
 ```
+
+Optional: MCP server for agent-facing operational workflows:
+
+```bash
+rag-mcp
+# or: python -m local_rag_backend.mcp_server
+```
+
+Tools:
+
+* `rag_ask`
+* `rag_import_canonical`
+* `rag_rebuild_index`
+* `rag_eval`
+* `rag_status`
+
+`rag_ask` is the narrow query/status integration surface used by the sibling
+`event-based-agent-runtime` repo. The runtime calls it over stdio MCP and keeps
+document mutation, index rebuild, and evaluation workflows owned by this repo.
+
+`rag_status` now returns a structured runtime snapshot plus health/index diagnostics, so agents
+do not need to infer topology from raw config fields.
 
 
 
@@ -304,16 +278,16 @@ docker compose up -d --build
 docker exec -it ollama ollama pull lfm2.5-thinking
 
 # Verify services
-curl http://localhost:8000/api/health
-curl http://localhost:8000/api/health/ollama
+curl http://localhost:8000/healthz
+curl http://localhost:8000/healthz/ollama
 ```
 
 Notes:
 - Backend listens on `8000`, Ollama on `11434`.
-- Configure providers via `.env` or environment variables (see `.env.example`).
-- In `docker-compose.yml`, `OLLAMA_ENABLED=true` and `OLLAMA_BASE_URL=http://ollama:11434` are set.
-- `docker-compose.yml` defaults to `RETRIEVAL_MODE=sparse` for a lightweight image.
-- For dense/hybrid in compose, build backend with extras, for example:
+- Configure providers via `config.yaml`.
+- `docker-compose.yml` sets container environment defaults for convenience, but the app still reads `config.yaml` as the runtime source of truth. If you want compose-driven config, mount or generate a `config.yaml` inside the container.
+- `docker-compose.yml` defaults the container runtime to `persistence_backend: local_split` and `retrieval_mode: sparse`, but those values do not override `config.yaml` by themselves.
+- For `local_split` dense/hybrid in compose, build backend with extras, for example:
 
 ```bash
 docker compose build --build-arg RAG_EXTRAS=dense rag-backend
@@ -340,6 +314,7 @@ docker compose up -d
 │   │   └── use_cases/         # application use cases (ingest, query, mutation, …)
 │   ├── infrastructure/        # adapters: llms, retrievers, storage, loaders, observability
 │   ├── composition/           # DI container, factory, wiring (transport-neutral)
+│   ├── integrations/          # stable installed-consumer APIs (PEP 561 typed)
 │   ├── http/                  # FastAPI transport adapter (routers, schemas, middleware)
 │   ├── cli_commands/          # CLI transport adapters (ingest, mutate, eval, …)
 │   ├── scripts/               # internal scripts (sample data ingestion)
@@ -349,6 +324,7 @@ docker compose up -d
 
 ### Extension and integration points
 
+* **Installed embeddings consumer**: use the typed [`local_rag_backend.integrations.embeddings`](docs/embedding_integration.md) API; do not import CLI or composition helpers.
 * **LLM**: implement `GeneratorPort` (see `infrastructure/llms/*`) and wire it in `composition/factory.py`.
 * **Retriever**: implement `RetrieverPort` and wire it through `composition/adapters.py` (`build_retriever_from_settings` / `build_retriever_with_default_embedder_from_settings`).
 * **Vector store**: implement `VectorRepoPort` (e.g., an alternative to FAISS).
@@ -360,41 +336,48 @@ docker compose up -d
 ## API
 
 * `GET /` → Serves packaged `index.html` or the source tree `src/local_rag_backend/frontend/index.html`.
-* `GET /api/health` and `GET /api/ready`
-* `GET /api/health/ollama`
+* `GET /healthz` and `GET /readyz`
+* `GET /healthz/ollama`
 * `GET /api/config` and `GET /api/templates`
 * `POST /api/ask`
-  * Body: `{ "question": "str", "k": int (1..10, default 3) }`
-  * Response: `{ "answer": "str", "sources": [ { "document": {"id": "doc:...", "content": "str"}, "score": float(0..1) }, ... ] }`
+  * Body: `{ "question": "str", "k": int (1..10, default 3), "filters": [{"field":"scope|snapshot_id|source_id|metadata.<key>","values":["..."]}] }`
+  * Response: `{ "answer": "str", "sources": [ { "document": {"id": "doc:...", "content": "str", "external_id": "str|null", "source_id": "str|null", "metadata": {...}|null}, "score": float(0..1) }, ... ] }`
 * `POST /api/ask_eval` (ephemeral per-request RAG config for retrieval/generator evaluation)
 * `GET /api/history?limit=1..100&offset>=0`
 
-  * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
+* Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
-* `POST /api/docs` (ingest texts) and `GET /api/docs` (list docs)
+* `POST /api/docs` (ingest texts)
+* `POST /api/docs/query` (list/query documents with structured filters)
 * `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
-* `POST /api/index/rebuild` (idempotent rebuild of vector index from SQLite; dense/hybrid only)
-* `POST /api/openrouter/generate` (enabled if OpenRouter configured)
+* `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
+* `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/dual/hybrid only)
+* `POST /api/openrouter/generate` (enabled only when `openrouter_enabled=true` and `openrouter_api_key`
+  are both set)
 
 Notes:
 
 * Retrieval “scores” are normalized to [0,1] in the adapters.
 * The service persists each Q/A with the IDs of the retrieved sources (best-effort; retrieval/answer response is not blocked if history persistence fails).
-* For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active configuration.
-* In dense/hybrid mode, the vector index is **derived operational state**; write via `/api/docs/mutate` (or `rag-mutate-docs`) rather than mutating stores independently.
-* Write-path consistency uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
+* For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active
+  configuration. OpenRouter is only considered available when `openrouter_enabled=true` and
+  `openrouter_api_key` is set.
+* In dense/dual/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
+* `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
+* `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
-* v1.0 removed legacy write endpoints: `/api/docs/upsert`, `/api/docs/delete`, `/api/docs/delete_by_external_id`.
-* In dense/hybrid mode, `/api/ready` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index (hinting how to rebuild).
-* For public/proxy deployments, use `API_KEY` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
+* `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
+* In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
+* In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
+* For public/proxy deployments, set `api_key` in `config.yaml` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
 
 Example:
 
 ```bash
 curl -X POST "http://localhost:8000/api/ask" \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is RAG?", "k": 3}'
+  -d '{"question": "What is RAG?", "k": 3, "filters":[{"field":"metadata.unit_type","values":["function"]}]}'
 ```
 
 ---
@@ -499,15 +482,15 @@ sequenceDiagram
 
 * Synchronous LLM clients (httpx/OpenAI SDK); migration to async is straightforward but not included.
 * Minimal UI without front-end tests.
-* Minimal API-key auth is available (`API_KEY`), but there is no user/role authZ or rate limiting.
+* Minimal API-key auth is available via `api_key` in `config.yaml`, but there is no user/role authZ or rate limiting.
 * When using the FAISS backend, the index type is `IndexFlatL2` (simple). For large volumes, consider IVF/HNSW or other backends.
 
 ## Runtime considerations
 
 * **Singleton per process**: `RagService` is initialized as a singleton in `composition/factory`. With `uvicorn --workers N`, each process loads its own instance (and its retrieval/index adapters). Align deployment and warm-up as needed.
-* **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit `DATA_DIR`; when `DATA_DIR` is default and `SQLITE_URL` is absolute, it uses the DB parent directory to keep workers/CLI aligned.
-* **Metrics**: if `ENABLE_MONITORING=true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
-* **Dense/Hybrid**: must use the same embedding model for indexing and querying (`ST_EMBEDDING_MODEL`).
+* **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit absolute `data_dir`; when `data_dir` is relative/default and `sqlite_url` resolves to an absolute SQLite path, it uses the DB parent directory to keep workers/CLI aligned.
+* **Metrics**: if `enable_monitoring: true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
+* **Dense/Hybrid**: must use the same embedding model for indexing and querying (`st_embedding_model`).
 
 ## Tests
 
@@ -515,10 +498,11 @@ sequenceDiagram
 UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --extra server --no-default-groups
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
 UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
+PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run --active --no-sync lint-imports
 uv run pre-commit run --all-files
 ```
 
-> Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `VECTOR_BACKEND=auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
+> Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 
 ### CI gates
 
@@ -527,7 +511,8 @@ Current CI gates include:
 - `pre-commit run --all-files`
 - `ruff check src tests` and `ruff format --check src tests`
 - `mypy src`
-- architecture guardrails: `pytest -q -o addopts='' tests/unit/http/test_architecture_*.py`
+- architecture guardrails: `pytest -q -o addopts='' tests/architecture/test_*.py`
+- `lint-imports` (macro architecture contracts via `.importlinter`)
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
 - security scan job (`bandit` + `safety` report generation)
 - Docker build for `--target production` on `main/master`
@@ -540,6 +525,7 @@ For local parity, use:
 
 ```bash
 make lint
+make lint-imports
 make type
 make test
 make sec        # strict
@@ -561,27 +547,46 @@ Quick usage example:
 
 ```python
 from langchain_community.document_loaders import WebBaseLoader
-from local_rag_backend.core.services.etl import ETLService
-from local_rag_backend.core.services.ingestion import IngestionPipeline
+from local_rag_backend.composition.container import AppContainer
+from local_rag_backend.core.use_cases.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
+)
 from local_rag_backend.infrastructure.ingestion.loaders import LangChainLoader
+from local_rag_backend.settings import settings
 
-# 1) Create/obtain your ETLService as usual (doc store, vector store, embedder)
-etl = ETLService(doc_repo, vector_repo, embedder)
-
-# 2) Wrap any LangChain loader
+# 1) Wrap any LangChain loader
 lc_loader = WebBaseLoader(["https://example.com"])  # or DirectoryLoader, SitemapLoader, etc.
 loader = LangChainLoader(lc_loader, drop_empty=True, metadata_filter={"lang": "en"})
 
-# 3) Run the pipeline
-pipeline = IngestionPipeline(loader=loader, etl_service=etl)
-count = pipeline.run()
-print(f"Ingested {count} chunks")
+# 2) Convert LoaderPort items into a canonical mutation intent
+upserts = []
+for i, item in enumerate(loader.load()):
+    locator = item.lineage.record_locator or f"item:{i}"
+    upserts.append(
+        MutationUpsertInput(
+            external_id=f"{item.lineage.source_uri}#{locator}",
+            content=item.text,
+            source_id=item.lineage.source_uri,
+            metadata=item.metadata,
+        )
+    )
+
+# 3) Persist through the canonical write path
+container = AppContainer.from_settings(settings)
+coordinator = MutationCoordinator(settings_obj=settings, ports=container.docs_mutation_ports())
+summary = coordinator.execute(
+    MutationIntent(op_id="", upserts=tuple(upserts), source="langchain:web")
+)
+print(summary)
 ```
 
 Notes:
 
 - `drop_empty=True` skips whitespace-only documents.
 - `metadata_filter={...}` yields only items whose metadata includes the given key/value pairs.
+- Application writes should go through `MutationCoordinator`, not direct `ETLService`/`IngestionPipeline`, so SQL and vector state stay coordinated.
 - The adapter expects each LangChain `Document` to have `page_content` and `metadata` fields. It gracefully falls back to dict-like objects or stringification when needed.
 
 ---

@@ -5,7 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
+
+from local_rag_backend.core.services.evaluation_models import EvalRetrievalConfig
+
+if TYPE_CHECKING:
+    from local_rag_backend.core.domain.retrieval import (
+        RetrievalFilter,
+        RetrievalRequest,
+        RetrievalResult,
+    )
 
 BlockingTaskType = Literal["default", "mutation", "network", "eval"]
 T = TypeVar("T")
@@ -67,7 +76,13 @@ class EvalDatasetDocInput:
 
 
 class DocsReadPort(Protocol):
-    def list_docs_page(self, *, limit: int, offset: int) -> tuple[ListedDocument, ...]: ...
+    def query_docs(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        filters: tuple[RetrievalFilter, ...],
+    ) -> tuple[ListedDocument, ...]: ...
 
 
 class HistoryReadPort(Protocol):
@@ -122,19 +137,21 @@ class EvalStoragePort(Protocol):
 
     def get_retriever_storage(self) -> Any: ...
 
+    def get_eval_settings(self) -> Any: ...
+
 
 class EvalRetrieverPort(Protocol):
-    def retrieve(self, query: str, k: int = 5) -> tuple[tuple[Any, ...], tuple[float, ...]]: ...
+    def retrieve(self, query: RetrievalRequest) -> RetrievalResult: ...
 
 
 class EvalRetrieverFactoryPort(Protocol):
-    def build_sparse_retriever(
+    def build_retriever(
         self,
         *,
         storage: EvalStoragePort,
-        reranker_enabled: bool,
-        candidate_k: int,
-        strategy: str,
+        config: EvalRetrievalConfig,
+        reranker_candidate_k: int,
+        reranker_strategy: str,
     ) -> EvalRetrieverPort: ...
 
 

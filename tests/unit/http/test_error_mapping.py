@@ -20,7 +20,7 @@ from local_rag_backend.core.use_cases.errors import AppError, map_runtime_error
         (LLMTimeoutError("timeout"), 504),
         (LLMConnectionError("connection"), 503),
         (LLMResponseError("response"), 502),
-        (LLMConfigurationError("config"), 500),
+        (LLMConfigurationError("config"), 503),
         (LLMProviderError("provider"), 502),
     ],
 )

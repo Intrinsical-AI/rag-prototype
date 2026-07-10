@@ -1,0 +1,51 @@
+[importlinter]
+root_package = local_rag_backend
+
+[importlinter:contract:core-base-layering]
+name = Core domain/ports/services must not depend on infra/http/composition
+type = forbidden
+source_modules =
+    local_rag_backend.core
+forbidden_modules =
+    local_rag_backend.infrastructure
+    local_rag_backend.http
+    local_rag_backend.composition
+
+[importlinter:contract:use-cases-layering]
+name = Use cases must not depend on infra/http/composition
+type = forbidden
+source_modules =
+    local_rag_backend.core.use_cases
+forbidden_modules =
+    local_rag_backend.infrastructure
+    local_rag_backend.http
+    local_rag_backend.composition
+
+[importlinter:contract:http-routers-boundary]
+name = HTTP routers must not import concrete infrastructure adapters
+type = forbidden
+source_modules =
+    local_rag_backend.http.routers
+forbidden_modules =
+    local_rag_backend.infrastructure.persistence
+    local_rag_backend.infrastructure.retrieval
+    local_rag_backend.infrastructure.llms
+    local_rag_backend.infrastructure.embeddings
+    local_rag_backend.infrastructure.ingestion
+
+[importlinter:contract:transport-independence]
+name = HTTP and CLI transports should stay independent
+type = independence
+modules =
+    local_rag_backend.http
+    local_rag_backend.cli_commands
+
+[importlinter:contract:public-integrations-boundary]
+name = Public integrations must not depend on transports or composition
+type = forbidden
+source_modules =
+    local_rag_backend.integrations
+forbidden_modules =
+    local_rag_backend.cli_commands
+    local_rag_backend.composition
+    local_rag_backend.http

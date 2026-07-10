@@ -45,11 +45,11 @@ def _resolve_csv_path(*, csv_path: str | Path | None, settings_obj: Any) -> Path
     csv_path_obj = Path(settings_obj.faq_csv) if csv_path is None else Path(csv_path)
     if csv_path_obj.is_file():
         return csv_path_obj
-
-    repo_csv = Path(__file__).resolve().parents[3] / "data" / "faq.csv"
-    if repo_csv.is_file():
-        return repo_csv
-    raise FileNotFoundError(f"FAQ CSV not found at {csv_path_obj}. Set FAQ_CSV to a valid path.")
+    source_name = "csv_path" if csv_path is not None else "FAQ_CSV"
+    raise FileNotFoundError(
+        f"{source_name} must point to an existing CSV file: {csv_path_obj}. "
+        "Update FAQ_CSV or pass a valid path explicitly."
+    )
 
 
 def _build_bootstrap_container(
@@ -197,7 +197,7 @@ def run_sample_data_ingestion(
     )
     processed = int(summary.inserted + summary.updated + summary.unchanged)
 
-    if settings_obj.retrieval_mode in ("dense", "hybrid"):
+    if settings_obj.retrieval_mode in ("dense", "dual", "hybrid"):
         logger.info("Ingested %d docs into SQL and FAISS.", processed)
     else:
         logger.info("Ingested %d docs into SQL only (sparse mode).", processed)

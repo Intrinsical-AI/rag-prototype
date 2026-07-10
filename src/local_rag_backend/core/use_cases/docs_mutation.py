@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from local_rag_backend.core.domain.profiles import StorageCapability
+from local_rag_backend.core.use_cases._atomic_mutation_executor import AtomicMutationExecutor
 from local_rag_backend.core.use_cases._batch_coordinator import (
     MutationBatchCoordinator,
     MutationBatchItem,
@@ -44,6 +46,7 @@ class MutationCoordinator:
         self.ports = ports
         self._batcher = MutationBatchCoordinator()
         self._saga = MutationSagaExecutor(settings_obj=settings_obj, ports=ports)
+        self._atomic = AtomicMutationExecutor(settings_obj=settings_obj, ports=ports)
 
     def execute(self, intent: MutationIntent) -> MutationSummary:
         normalized = normalize_intent(intent=intent, new_op_id=_new_op_id)
@@ -53,13 +56,24 @@ class MutationCoordinator:
             ports=self.ports,
             vector_mode_enabled=vector_mode_enabled,
         )
-        if vector_mode_enabled:
+        profile = self.ports.storage_profile_registry.resolve(
+            profile_id=getattr(self.settings_obj, "storage_profile", ""),
+            persistence_backend=getattr(self.settings_obj, "persistence_backend", "local_split"),
+            retrieval_mode=self.settings_obj.retrieval_mode,
+            vector_backend=getattr(self.settings_obj, "vector_backend", "auto"),
+        )
+        use_atomic = profile.has(StorageCapability.ATOMIC) and not profile.has(
+            StorageCapability.DURABLE_SAGA
+        )
+        if vector_mode_enabled and not use_atomic:
             validate_rollback_contract(ports=self.ports)
 
-        journal = build_journal(ports=self.ports)
-        replay = self._saga.get_committed_replay_summary(journal=journal, intent=normalized)
-        if replay is not None:
-            return replay
+        journal = None
+        if not use_atomic:
+            journal = build_journal(ports=self.ports)
+            replay = self._saga.get_committed_replay_summary(journal=journal, intent=normalized)
+            if replay is not None:
+                return replay
 
         precomputed_vectors = self._saga.precompute_vectors_for_intent(
             intent=normalized,
@@ -78,11 +92,25 @@ class MutationCoordinator:
                 payload=prepared,
                 max_batch_size=self._batch_max_size(),
                 max_wait_ms=self._batch_max_wait_ms(),
-                process_batch=lambda batch: self._process_batch(batch=batch, journal=journal),
+                process_batch=lambda batch: self._process_batch(
+                    batch=batch,
+                    journal=journal,
+                    use_atomic=use_atomic,
+                ),
             ),
         )
 
     def recover_incomplete(self, *, limit: int = 100) -> int:
+        profile = self.ports.storage_profile_registry.resolve(
+            profile_id=getattr(self.settings_obj, "storage_profile", ""),
+            persistence_backend=getattr(self.settings_obj, "persistence_backend", "local_split"),
+            retrieval_mode=self.settings_obj.retrieval_mode,
+            vector_backend=getattr(self.settings_obj, "vector_backend", "auto"),
+        )
+        if profile.has(StorageCapability.ATOMIC) and not profile.has(
+            StorageCapability.DURABLE_SAGA
+        ):
+            return self._atomic.recover_incomplete(limit=limit)
         return self._saga.recover_incomplete(limit=limit)
 
     def _batch_state_key(self) -> str:
@@ -101,15 +129,25 @@ class MutationCoordinator:
         self,
         *,
         batch: list[MutationBatchItem],
-        journal: MutationJournalPort,
+        journal: MutationJournalPort | None,
+        use_atomic: bool,
     ) -> None:
         with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
             for item in batch:
                 try:
-                    item.result = self._saga.execute_locked(
-                        prepared=cast("PreparedMutation", item.payload),
-                        journal=journal,
-                    )
+                    if use_atomic:
+                        item.result = self._atomic.execute_locked(
+                            prepared=cast("PreparedMutation", item.payload)
+                        )
+                    else:
+                        if journal is None:  # pragma: no cover
+                            raise RuntimeError(
+                                "Mutation journal is required for durable saga mode."
+                            )
+                        item.result = self._saga.execute_locked(
+                            prepared=cast("PreparedMutation", item.payload),
+                            journal=journal,
+                        )
                 except Exception as exc:
                     item.error = exc
                 finally:

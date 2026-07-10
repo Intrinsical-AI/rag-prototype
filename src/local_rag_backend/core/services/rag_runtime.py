@@ -8,6 +8,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalFilter,
+    RetrievalRequest,
+    RetrievalResult,
+    retrieval_result_from_pairs,
+)
+
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
 
@@ -31,7 +38,39 @@ class RagService:
         self.history_storage = history_storage
         self.no_docs_answer = no_docs_answer
 
-    def ask(self, question: str, top_k: int = 3) -> dict[str, Any]:
+    def _coerce_retrieval_result(
+        self,
+        raw_result: Any,
+        *,
+        request: RetrievalRequest,
+    ) -> RetrievalResult:
+        if isinstance(raw_result, RetrievalResult):
+            return raw_result
+        if (
+            isinstance(raw_result, tuple)
+            and len(raw_result) == 2
+            and isinstance(raw_result[0], (list, tuple))
+            and isinstance(raw_result[1], (list, tuple))
+        ):
+            docs, scores = raw_result
+            return retrieval_result_from_pairs(
+                docs=docs,
+                scores=scores,
+                mode_used=request.mode,
+                backend_used="tuple_adapter",
+            )
+        raise RuntimeError(f"Unsupported retriever response type: {type(raw_result)!r}")
+
+    def ask(
+        self,
+        question: str,
+        top_k: int = 3,
+        *,
+        filters: tuple[RetrievalFilter, ...] = (),
+        candidate_k: int | None = None,
+        dual_candidate_k: int | None = None,
+        retrieval_mode: str = "sparse",
+    ) -> dict[str, Any]:
         """Processes a question through the RAG pipeline.
 
         1. Retrieves relevant documents.
@@ -41,8 +80,18 @@ class RagService:
         Returns:
             A dictionary containing the answer, source documents, and scores.
         """
-        # 1. Retrieve relevant documents
-        docs, scores = self.retriever.retrieve(question, top_k)
+        request = RetrievalRequest(
+            query=question,
+            top_k=top_k,
+            mode=str(retrieval_mode),  # type: ignore[arg-type]
+            filters=filters,
+            candidate_k=candidate_k,
+            dual_candidate_k=dual_candidate_k,
+        )
+        raw_result = self.retriever.retrieve(request)
+        retrieval = self._coerce_retrieval_result(raw_result, request=request)
+        docs = list(retrieval.documents)
+        scores = list(retrieval.scores)
         if len(docs) != len(scores):
             raise RuntimeError(
                 f"Retriever contract violated: {len(docs)} docs != {len(scores)} scores."
@@ -55,7 +104,7 @@ class RagService:
                 self.history_storage.save(question, answer, [])
             except Exception as e:  # pragma: no cover
                 logger.warning("History persistence failed (ignored): %s", e)
-            return {"answer": answer, "docs": [], "scores": []}
+            return {"answer": answer, "docs": [], "scores": [], "retrieval": retrieval}
 
         # 3. Generate an answer using the retrieved contexts
         contexts = [doc.content for doc in docs]
@@ -68,4 +117,9 @@ class RagService:
         except Exception as e:  # pragma: no cover
             logger.warning("History persistence failed (ignored): %s", e)
 
-        return {"answer": answer, "docs": docs, "scores": scores}
+        return {
+            "answer": answer,
+            "docs": docs,
+            "scores": scores,
+            "retrieval": retrieval,
+        }

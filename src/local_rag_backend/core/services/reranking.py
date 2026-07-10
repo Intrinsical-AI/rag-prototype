@@ -11,10 +11,13 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalRequest,
+    RetrievalResult,
+    RetrievedDoc,
+)
 
-    from local_rag_backend.core.domain.entities import Document
+if TYPE_CHECKING:
     from local_rag_backend.core.ports import RetrieverPort
 
 
@@ -61,22 +64,38 @@ class RerankingRetriever:
             raise ValueError(f"Unsupported reranker strategy: {strategy}")
         self._reranker = OverlapV1Reranker()
 
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
-        if k <= 0:
-            return [], []
-        cand_k = max(int(k), int(self.candidate_k))
-        docs, _scores = self.base.retrieve(query, cand_k)
+    def retrieve(self, query: RetrievalRequest) -> RetrievalResult:
+        request = query
+        if request.top_k <= 0:
+            return RetrievalResult(items=(), mode_used=request.mode, backend_used="reranked")
+        cand_k = max(int(request.top_k), int(self.candidate_k))
+        base_request = RetrievalRequest(
+            query=request.query,
+            top_k=cand_k,
+            mode=request.mode,
+            filters=request.filters,
+            candidate_k=request.candidate_k,
+            dual_candidate_k=request.dual_candidate_k,
+            min_score=request.min_score,
+        )
+        structured_result = self.base.retrieve(base_request)
+        docs = list(structured_result.documents)
+        mode_used = structured_result.mode_used
+        backend_used = structured_result.backend_used
         if not docs:
-            return [], []
-
-        scored = [(doc, self._reranker.score(query=query, doc_text=doc.content)) for doc in docs]
-        # Sort by reranker score, stable on the original order (Python sort is stable).
-        scored.sort(key=lambda t: t[1], reverse=True)
-
-        top = scored[:k]
-        if not top:
-            return [], []
-
-        docs_out = [d for d, _ in top]
-        scores_out = [float(s) for _, s in top]
-        return docs_out, scores_out
+            return RetrievalResult(items=(), mode_used=mode_used, backend_used=backend_used)
+        scored = [
+            RetrievedDoc(
+                document=doc,
+                score=self._reranker.score(query=request.query, doc_text=doc.content),
+                stage="reranker",
+            )
+            for doc in docs
+        ]
+        scored.sort(key=lambda item: item.score, reverse=True)
+        return RetrievalResult(
+            items=tuple(scored[: request.top_k]),
+            mode_used=mode_used,
+            backend_used=backend_used,
+            candidate_count=len(docs),
+        )

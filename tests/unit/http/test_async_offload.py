@@ -3,13 +3,12 @@ import threading
 import pytest
 
 from local_rag_backend.composition import adapters as composition_adapters
-from local_rag_backend.http.dependencies import get_rag_service
-from local_rag_backend.http.main import app
+from local_rag_backend.http.routers import rag_router
 from local_rag_backend.settings import settings
 
 
 @pytest.mark.unit
-async def test_ask_runs_in_worker_thread(asgi_client, in_memory_sqlite):
+async def test_ask_runs_in_worker_thread(asgi_client, in_memory_sqlite, monkeypatch):
     main_tid = threading.get_ident()
     seen: dict[str, int] = {}
 
@@ -21,13 +20,10 @@ async def test_ask_runs_in_worker_thread(asgi_client, in_memory_sqlite):
     async def _override():
         return DummyService()
 
-    app.dependency_overrides[get_rag_service] = _override
-    try:
-        r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
-        assert r.status_code == 200
-        assert seen["tid"] != main_tid
-    finally:
-        app.dependency_overrides.pop(get_rag_service, None)
+    monkeypatch.setattr(rag_router, "get_rag_service", _override, raising=True)
+    r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
+    assert r.status_code == 200
+    assert seen["tid"] != main_tid
 
 
 @pytest.mark.unit
@@ -95,7 +91,7 @@ async def test_ollama_health_check_runs_in_worker_thread(asgi_client, monkeypatc
         return DummyResp()
 
     monkeypatch.setattr(health_router.httpx, "get", _fake_get)
-    r = await asgi_client.get("/api/health/ollama")
+    r = await asgi_client.get("/healthz/ollama")
     assert r.status_code == 200
     assert seen["tid"] != main_tid
 

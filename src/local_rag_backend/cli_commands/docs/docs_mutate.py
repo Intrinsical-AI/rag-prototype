@@ -51,6 +51,10 @@ def _build_intent(payload: dict[str, Any]) -> MutationIntent:
                 source_id=(
                     str(item.get("source_id")) if item.get("source_id") is not None else None
                 ),
+                scope=(str(item.get("scope")) if item.get("scope") is not None else None),
+                snapshot_id=(
+                    str(item.get("snapshot_id")) if item.get("snapshot_id") is not None else None
+                ),
                 metadata=(cast("dict[str, Any]", md) if isinstance(md, dict) else None),
             )
         )

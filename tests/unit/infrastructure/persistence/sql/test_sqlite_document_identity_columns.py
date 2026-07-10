@@ -36,6 +36,8 @@ def test_fresh_schema_contains_doc_id_and_identity_columns(tmp_path):
             "doc_id",
             "external_id",
             "source_id",
+            "scope",
+            "snapshot_id",
             "metadata",
             "content_sha256",
             "chunk_dedup_sha256",

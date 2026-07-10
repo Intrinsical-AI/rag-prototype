@@ -13,7 +13,11 @@ services:
       # Security (recommended when exposing beyond localhost)
       # - API_KEY=${API_KEY}
       # - CORS_ALLOW_ORIGINS=["http://localhost:5173"]
-      # Default sparse lightweight image. For dense/hybrid, install `dense` extra
+      # Default lightweight image.
+      # local_split => sparse|dense|hybrid
+      # elasticsearch => dense|hybrid (requires external ES service/env)
+      - PERSISTENCE_BACKEND=local_split
+      # For local_split dense/hybrid, install the `dense` extra
       - RETRIEVAL_MODE=sparse # if dense set accordingly.
       # OpenAI (optional)
       # - OPENAI_API_KEY=${OPENAI_API_KEY}

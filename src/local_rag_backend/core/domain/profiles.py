@@ -47,6 +47,18 @@ def default_storage_profiles() -> dict[str, StorageProfile]:
             supports_vectors=True,
             description="SQL + numpy vector store with durable saga semantics.",
         ),
+        "es_unified_dense": StorageProfile(
+            profile_id="es_unified_dense",
+            capabilities=frozenset({StorageCapability.ATOMIC}),
+            supports_vectors=True,
+            description="Elasticsearch unified storage profile for dense retrieval.",
+        ),
+        "es_unified_hybrid": StorageProfile(
+            profile_id="es_unified_hybrid",
+            capabilities=frozenset({StorageCapability.ATOMIC}),
+            supports_vectors=True,
+            description="Elasticsearch unified storage profile for hybrid retrieval.",
+        ),
     }
 
 
@@ -68,6 +80,7 @@ class StorageProfileRegistry:
         self,
         *,
         profile_id: str | None,
+        persistence_backend: str,
         retrieval_mode: str,
         vector_backend: str,
     ) -> StorageProfile:
@@ -75,7 +88,12 @@ class StorageProfileRegistry:
         if explicit:
             return self.get(explicit)
 
+        backend = str(persistence_backend).strip().lower()
         mode = str(retrieval_mode).strip().lower()
+        if backend == "elasticsearch":
+            if mode == "hybrid":
+                return self.get("es_unified_hybrid")
+            return self.get("es_unified_dense")
         if mode == "sparse":
             return self.get("sql_only_local")
         if str(vector_backend).strip().lower() == "numpy":

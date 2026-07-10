@@ -64,7 +64,9 @@ async def get_config(settings_obj: Settings = Depends(get_settings_dependency)) 
     providers = get_available_llm_providers_from_settings(settings_obj=settings_obj)
     available_providers = list(providers.keys())
     return ConfigResponse(
+        search_backend=settings_obj.search_backend,
         retrieval_mode=settings_obj.retrieval_mode,
+        dual_candidate_k=settings_obj.dual_candidate_k,
         hybrid_alpha=settings_obj.hybrid_retrieval_alpha,
         temperature=settings_obj.openai_temperature,
         max_tokens=settings_obj.openai_max_tokens,

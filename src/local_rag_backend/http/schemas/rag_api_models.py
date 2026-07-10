@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
+from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
 from local_rag_backend.http.schemas.shared import DocumentInDB
 
 
@@ -12,11 +13,28 @@ class QueryResult(BaseModel):
     score: float
 
 
+class RetrievalFilterModel(BaseModel):
+    field: str = Field(..., min_length=1, max_length=256)
+    values: list[str] = Field(..., min_length=1)
+
+    @field_validator("field")
+    @classmethod
+    def _field_is_supported(cls, v: str) -> str:
+        return normalize_filter_field(v)
+
+    def to_domain(self) -> RetrievalFilter:
+        return RetrievalFilter(field=self.field, values=tuple(self.values))
+
+
 class AskRequest(BaseModel):
     """Request schema for the `/ask` endpoint."""
 
     question: str = Field(..., min_length=1, max_length=4096, description="User's question")
     k: int = Field(3, ge=1, le=10, description="Number of documents to retrieve")
+    filters: list[RetrievalFilterModel] = Field(
+        default_factory=list,
+        description="Optional structured field filters applied before ranking.",
+    )
 
     @field_validator("question")
     @classmethod
@@ -43,14 +61,25 @@ class HistoryItem(BaseModel):
 class AskEvalConfig(BaseModel):
     """Ephemeral RAG configuration for per-request evaluation."""
 
-    retrieval_mode: str = Field(..., description="sparse|dense|hybrid")
+    retrieval_mode: str = Field(..., description="sparse|dense|dual|hybrid")
     k: int = Field(3, ge=1, le=10, description="Number of documents to retrieve")
+    filters: list[RetrievalFilterModel] = Field(
+        default_factory=list,
+        description="Optional structured field filters.",
+    )
+    dual_candidate_k: int | None = Field(
+        default=None,
+        ge=1,
+        le=1000,
+        description="Sparse candidate pool for dual retrieval before dense rerank.",
+    )
     hybrid_alpha: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Hybrid alpha (weight for sparse) in [0,1]"
     )
 
     llm_provider: str | None = Field(
-        default=None, description="Optional override for generator provider: 'openai'|'ollama'"
+        default=None,
+        description="Optional override for generator provider: 'openai'|'ollama'|'openrouter'",
     )
     model: str | None = Field(default=None, max_length=256)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)

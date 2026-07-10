@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult, RetrievedDoc
 from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
@@ -13,7 +14,7 @@ class DummyEmbedder:
     dim = 2
 
     def embed(self, texts):
-        # “A” siempre [1, 0], “B” siempre [0, 1]
+        # "A" siempre [1, 0], "B" siempre [0, 1]
         return [[1, 0] if "A" in t else [0, 1] for t in texts]
 
 
@@ -57,16 +58,18 @@ def test_dense_vector_retriever_basic():
         vector_repo=DummyVectorIndex(),
         doc_repo=DummyDocRepo(),
     )
-    docs, scores = retriever.retrieve("Doc A", k=1)
+    result = retriever.retrieve(RetrievalRequest(query="Doc A", top_k=1, mode="dense"))
+    docs, scores = result.documents, result.scores
     assert docs and docs[0].content == "Doc A"
     # With similarity normalization, identical match should score at top (~1.0)
     assert scores[0] == pytest.approx(1.0)
-    docs, scores = retriever.retrieve("Doc B", k=1)
+    result = retriever.retrieve(RetrievalRequest(query="Doc B", top_k=1, mode="dense"))
+    docs, scores = result.documents, result.scores
     assert docs and docs[0].content == "Doc B"
 
 
 def test_sparse_bm25_retriever_basic():
-    # Sin tokenización real, pero BM25Okapi exige listas de palabras, así que “hackeamos”:
+    # Sin tokenización real, pero BM25Okapi exige listas de palabras, así que "hackeamos":
 
     class DummyBM25:
         def __init__(self):
@@ -89,13 +92,37 @@ def test_sparse_bm25_retriever_basic():
 
     repo = DummyDocRepo()
     retriever = DummySparse(documents=["Doc A", "Doc B"], doc_ids=[1, 2], doc_repo=repo)
-    docs, scores = retriever.retrieve("a", k=1)
+    result = retriever.retrieve(RetrievalRequest(query="a", top_k=1, mode="sparse"))
+    docs, scores = result.documents, result.scores
     assert len(docs) == 1 and docs[0].content == "Doc A"
     assert scores[0] == 1.0
 
-    docs, scores = retriever.retrieve("b", k=1)
+    result = retriever.retrieve(RetrievalRequest(query="b", top_k=1, mode="sparse"))
+    docs, scores = result.documents, result.scores
     assert len(docs) == 1 and docs[0].content == "Doc B"
     assert scores[0] == 1.0
+
+
+def test_sparse_bm25_retriever_flat_scores_fall_back_to_zero():
+    class DummyBM25:
+        def get_scores(self, query):
+            return [4.0, 4.0]
+
+    class DummySparse(SparseBM25Retriever):
+        def __init__(self, documents, doc_ids, doc_repo):
+            self.doc_ids = doc_ids
+            self.doc_repo = doc_repo
+            self.bm25 = DummyBM25()
+            self.corpus_is_empty = False
+
+        @staticmethod
+        def _tok(text):
+            return list(text.lower())
+
+    repo = DummyDocRepo()
+    retriever = DummySparse(documents=["Doc A", "Doc B"], doc_ids=[1, 2], doc_repo=repo)
+    result = retriever.retrieve(RetrievalRequest(query="flat", top_k=2, mode="sparse"))
+    assert result.scores == (0.0, 0.0)
 
 
 def test_hybrid_retriever_merges_and_ranks():
@@ -104,14 +131,23 @@ def test_hybrid_retriever_merges_and_ranks():
         def __init__(self, docs, scores):
             self._docs, self._scores = docs, scores
 
-        def retrieve(self, query, k=5):
-            return self._docs[:k], self._scores[:k]
+        def retrieve(self, request):
+            k = request.top_k
+            return RetrievalResult(
+                items=tuple(
+                    RetrievedDoc(document=d, score=s, stage="test")
+                    for d, s in zip(self._docs[:k], self._scores[:k], strict=False)
+                ),
+                mode_used="sparse",
+                backend_used="test",
+            )
 
     doc_a = Document(id=1, content="Doc A")
     doc_b = Document(id=2, content="Doc B")
     dense = DummyRetriever([doc_a], [0.7])
     sparse = DummyRetriever([doc_b], [1.0])
     hybrid = HybridRetriever(dense=dense, sparse=sparse, alpha=0.5)
-    docs, scores = hybrid.retrieve("irrelevant", k=2)
+    result = hybrid.retrieve(RetrievalRequest(query="irrelevant", top_k=2, mode="hybrid"))
+    docs, scores = result.documents, result.scores
     assert {d.content for d in docs} == {"Doc A", "Doc B"}
     assert len(scores) == 2

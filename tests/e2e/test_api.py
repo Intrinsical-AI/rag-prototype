@@ -2,8 +2,7 @@
 import tempfile
 from pathlib import Path
 
-from local_rag_backend.http.dependencies import get_rag_service
-from local_rag_backend.http.main import app
+from local_rag_backend.http.routers import rag_router
 
 
 class DummyRagSvc:
@@ -27,17 +26,16 @@ class DummyRagSvcWithDocs:
 
 
 # ---------- tests -----------------------------------------------------------
-async def test_post_ask_endpoint(asgi_client):
+async def test_post_ask_endpoint(asgi_client, monkeypatch):
     async def _override():
         return DummyRagSvc()
 
-    app.dependency_overrides[get_rag_service] = _override
+    monkeypatch.setattr(rag_router, "get_rag_service", _override, raising=True)
     resp = await asgi_client.post("/api/ask", json={"question": "hola", "k": 2})
     assert resp.status_code == 200
     data = resp.json()
     assert data["answer"] == "eco:hola"
     assert data["sources"] == []
-    app.dependency_overrides.clear()
 
 
 async def test_get_root_frontend_not_found(asgi_client, tmp_path, monkeypatch):
@@ -102,12 +100,12 @@ async def test_get_frontend_assets_path_traversal_404(asgi_client):
     assert r.status_code == 404
 
 
-async def test_api_ask_schema_with_sources(asgi_client):
+async def test_api_ask_schema_with_sources(asgi_client, monkeypatch):
     # Test API schema validation for /api/ask endpoint with documents
     async def _override():
         return DummyRagSvcWithDocs()
 
-    app.dependency_overrides[get_rag_service] = _override
+    monkeypatch.setattr(rag_router, "get_rag_service", _override, raising=True)
     resp = await asgi_client.post("/api/ask", json={"question": "test", "k": 1})
     assert resp.status_code == 200
     data = resp.json()
@@ -128,4 +126,3 @@ async def test_api_ask_schema_with_sources(asgi_client):
     assert source["document"]["content"] == "Test document"
     assert isinstance(source["score"], int | float)
     assert 0.0 <= source["score"] <= 1.0
-    app.dependency_overrides.clear()

@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 _LOCAL_WRITE_LOCK = threading.RLock()
 _THREAD_STATE = threading.local()
-_LOCK_METRICS_PATH_ENV = "RAG_LOCK_METRICS_PATH"
 
 
 def _exclusive_file_lock(
@@ -48,7 +47,7 @@ def _record_lock_event(
     wait_s: float | None = None,
     hold_s: float | None = None,
 ) -> None:
-    metrics_path = str(os.getenv(_LOCK_METRICS_PATH_ENV, "")).strip()
+    metrics_path = str(getattr(settings, "lock_metrics_path", "") or "").strip()
     if not metrics_path:
         return
     payload: dict[str, float | int | str] = {

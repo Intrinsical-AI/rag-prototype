@@ -22,6 +22,7 @@ from local_rag_backend.infrastructure.persistence.shared.id_map_json import (
     load_id_map_json,
     save_id_map_json,
 )
+from local_rag_backend.infrastructure.persistence.vector.engines.numpy_engine import NumpyEngine
 from local_rag_backend.infrastructure.persistence.vector.factory import build_vector_engine
 
 if TYPE_CHECKING:
@@ -57,17 +58,29 @@ class VectorIndex:
         self.id_map_path = Path(id_map_path)
         self.dim = dim if dim is not None else 0
 
+        self._backend_name = str(backend).strip().lower()
         self.engine = build_vector_engine(backend=backend)
         self._state_lock = threading.RLock()
         self._lock_path = self.index_path.with_name(self.index_path.name + ".lock")
 
         if dim is None:
-            self.dim = self.engine.infer_dim_or_raise(self.index_path)
+            self.dim = self._infer_dim_with_fallback()
         self._load_or_initialize()
 
     @property
     def backend(self) -> str:
         return self.engine.backend
+
+    def _infer_dim_with_fallback(self) -> int:
+        try:
+            return self.engine.infer_dim_or_raise(self.index_path)
+        except Exception:
+            if self._backend_name != "auto" or self.engine.backend != "faiss":
+                raise
+            fallback_engine = NumpyEngine()
+            inferred = fallback_engine.infer_dim_or_raise(self.index_path)
+            self.engine = fallback_engine
+            return inferred
 
     @property
     def ntotal(self) -> int:
@@ -176,6 +189,37 @@ class VectorIndex:
             self.engine.load_or_initialize(self.index_path, int(self.dim))
             self.engine.rebuild(vecs)
             self.id_map = [DocId(str(x)) for x in ids]
+            self._save_locked()
+
+    def rebuild_from_batches(
+        self,
+        batches: Sequence[tuple[Sequence[DocId], Sequence[Sequence[float]]]],
+    ) -> None:
+        normalized_batches: list[tuple[list[DocId], NDArray[np.float32]]] = []
+        for ids, vectors in batches:
+            batch_ids = [DocId(str(x)) for x in ids]
+            if not batch_ids:
+                continue
+            vecs = np.asarray(list(vectors), dtype="float32")
+            if vecs.ndim != 2:
+                raise ValueError("Vectors must be a 2D array-like (n, dim)")
+            if vecs.shape[0] != len(batch_ids):
+                raise ValueError(
+                    f"ids/vectors length mismatch in batch: {len(batch_ids)} != {vecs.shape[0]}"
+                )
+            if vecs.shape[1] != self.dim:
+                raise ValueError(
+                    f"Dim mismatch: vectors have dim {vecs.shape[1]} but index dim is {self.dim}"
+                )
+            normalized_batches.append((batch_ids, vecs))
+
+        with self._locked_write():
+            self.engine.load_or_initialize(self.index_path, int(self.dim))
+            self.engine.rebuild(np.empty((0, self.dim), dtype="float32"))
+            self.id_map = []
+            for batch_ids, vecs in normalized_batches:
+                self.engine.add(vecs)
+                self.id_map.extend(batch_ids)
             self._save_locked()
 
     def search(

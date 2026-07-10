@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
+from local_rag_backend.composition.runtime import RuntimeSnapshot, build_runtime_snapshot
 from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
@@ -31,6 +32,9 @@ def ensure_sqlite_schema_for_cli() -> None:
     CLI commands can be run without starting the FastAPI server, so they must
     apply the same best-effort SQLite migrations that the app does at startup.
     """
+    if settings.persistence_backend == "elasticsearch":
+        return
+
     from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
     settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +66,11 @@ def get_cli_container() -> AppContainer:
     from local_rag_backend.composition.factory import get_app_context
 
     return get_app_context().container
+
+
+def get_cli_runtime_snapshot() -> RuntimeSnapshot:
+    """Return the current CLI runtime snapshot without exposing raw Settings."""
+    return build_runtime_snapshot(settings)
 
 
 def run_cli_mutation(
@@ -97,5 +106,6 @@ __all__ = [
     "build_dense_embedder",
     "ensure_sqlite_schema_for_cli",
     "get_cli_container",
+    "get_cli_runtime_snapshot",
     "run_cli_mutation",
 ]

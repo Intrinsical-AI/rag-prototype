@@ -2,13 +2,12 @@
 Shared dense/hybrid upsert helpers.
 
 These helpers centralize two critical operations used by API and CLI mutating flows:
-- precomputing embeddings for changed documents before SQL upsert
+- precomputing embeddings for all candidate upserts before SQL upsert
 - syncing FAISS after SQL upsert with rebuild fallback
 """
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING, Protocol
 
 from local_rag_backend.core.services.maintenance import rebuild_index_from_db
@@ -53,21 +52,6 @@ class ExistingStateRepoLike(Protocol):
     ) -> Mapping[str, ExistingStateLookupLike]: ...
 
 
-def _content_sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _needs_embedding(item: UpsertItemLike, existing: Mapping[str, ExistingStateLookupLike]) -> bool:
-    current = existing.get(item.external_id)
-    if current is None:
-        return True
-
-    normalized_content = item.content.strip()
-    new_sha = _content_sha256(normalized_content)
-    old_sha = current.content_sha256 or ""
-    return old_sha != new_sha or current.content != normalized_content
-
-
 def precompute_vectors_for_changed_items(
     *,
     items: Sequence[UpsertItemLike],
@@ -75,17 +59,15 @@ def precompute_vectors_for_changed_items(
     embedder: EmbedderPort,
 ) -> dict[str, list[float]]:
     """
-    Precompute vectors for inserts/content-changes only.
+    Precompute vectors for every requested upsert.
 
-    This must run before SQL upsert to avoid SQL/index drift when embedding providers fail.
+    Safety takes precedence over avoiding redundant embedding calls here. Another mutation may
+    update the same external_id between precompute and the later locked SQL/vector application,
+    turning an apparently unchanged item into a real content update.
     """
     if not items:
         return {}
     _ = doc_repo
-
-    # Safety-first strategy: precompute every upsert vector. This avoids stale
-    # snapshot races when another mutation updates the same external_id between
-    # precompute and locked SQL/vector application.
     to_embed = list(items)
 
     embedded = embedder.embed([it.content.strip() for it in to_embed])

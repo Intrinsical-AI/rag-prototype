@@ -18,13 +18,65 @@ async def test_post_docs_sparse_and_list(asgi_client, in_memory_sqlite, monkeypa
     assert data["count"] == 2
     assert len(data["ids"]) == 2
 
-    # Now list
-    r2 = await asgi_client.get("/api/docs", params={"limit": 10, "offset": 0})
+    # Now query
+    r2 = await asgi_client.post("/api/docs/query", json={"limit": 10, "offset": 0, "filters": []})
     assert r2.status_code == 200
     docs = r2.json()
     assert isinstance(docs, list)
     assert len(docs) >= 2
     assert set([d["id"] for d in docs]) >= set(data["ids"])  # ids contained
+    assert all(
+        set(doc.keys()) >= {"id", "content", "external_id", "source_id", "metadata"} for doc in docs
+    )
+
+
+async def test_docs_query_filters_by_scope_snapshot_and_metadata(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    payload = {
+        "upserts": [
+            {
+                "external_id": "doc:net-node",
+                "content": "sensor alpha node",
+                "source_id": "tr3v0r:dataset:artifact:net_nodes",
+                "scope": "tr3v0r:rf-lab-demo",
+                "snapshot_id": "rf-lab-demo-1",
+                "metadata": {
+                    "doc_type": "net_node",
+                    "sensor_ids": ["sensor-a", "sensor-b"],
+                },
+            },
+            {
+                "external_id": "doc:net-edge",
+                "content": "sensor edge",
+                "source_id": "tr3v0r:dataset:artifact:net_edges",
+                "scope": "tr3v0r:rf-lab-demo",
+                "snapshot_id": "rf-lab-demo-2",
+                "metadata": {"doc_type": "net_edge", "sensor_ids": ["sensor-c"]},
+            },
+        ]
+    }
+    r = await asgi_client.post("/api/docs/mutate", json=payload)
+    assert r.status_code == 200
+
+    query = {
+        "limit": 10,
+        "offset": 0,
+        "filters": [
+            {"field": "scope", "values": ["tr3v0r:rf-lab-demo"]},
+            {"field": "snapshot_id", "values": ["rf-lab-demo-1"]},
+            {"field": "metadata.doc_type", "values": ["net_node"]},
+            {"field": "metadata.sensor_ids", "values": ["sensor-a"]},
+        ],
+    }
+    r2 = await asgi_client.post("/api/docs/query", json=query)
+    assert r2.status_code == 200
+    docs = r2.json()
+    assert len(docs) == 1
+    assert docs[0]["external_id"] == "doc:net-node"
+    assert docs[0]["source_id"] == "tr3v0r:dataset:artifact:net_nodes"
+    assert docs[0]["metadata"]["doc_type"] == "net_node"
 
 
 @pytest.mark.parametrize(
@@ -145,6 +197,13 @@ async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatc
     data = r.json()
     assert data["answer"] == "ans"
     assert isinstance(data.get("sources", []), list)
+    assert set(data["sources"][0]["document"].keys()) == {
+        "id",
+        "content",
+        "external_id",
+        "source_id",
+        "metadata",
+    }
 
 
 async def test_ask_eval_rejects_unsafe_prompt_template(asgi_client, in_memory_sqlite, monkeypatch):
@@ -187,7 +246,7 @@ async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_
 
     monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
 
-    r = await asgi_client.get("/api/ready")
+    r = await asgi_client.get("/readyz")
     assert r.status_code == 200
     checks = r.json()["checks"]
     assert checks.get("retrieval_index") == "ok"

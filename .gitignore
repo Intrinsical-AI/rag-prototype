@@ -131,6 +131,8 @@ dmypy.json
 .pytype/
 .ruff_cache/
 cython_debug/
+.import_linter_cache/
+.pre-commit-cache/
 
 # === OPERATING SYSTEM ===
 # macOS
@@ -141,6 +143,9 @@ cython_debug/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# === LLMs ===
+.claude/
 
 # =============================================================================
 # RAG-SPECIFIC IGNORES
@@ -208,17 +213,12 @@ output/
 plots/
 figures/
 
-.locals/
-.github/workflows/release.yml
-
-build_package.py
-concatenate_src.py
-
 /pr
 
 medium-blog/
 curso/
 
 openai**
-
-.pre-commit-cache
+.codex
+/artifacts
+data/_eval_workspaces/

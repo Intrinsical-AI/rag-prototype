@@ -32,7 +32,7 @@ RUN python -m venv /opt/venv && pip install --no-cache-dir "uv==${UV_VERSION}"
 FROM build-base as deps
 
 ARG RAG_EXTRAS=""
-COPY pyproject.toml uv.lock README.md LICENSE MANIFEST.in ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 RUN set -eux; \
     EXTRA_FLAGS=""; \
@@ -41,7 +41,7 @@ RUN set -eux; \
         EXTRA_FLAGS="${EXTRA_FLAGS} --extra ${extra}"; \
       done; \
     fi; \
-    uv sync --frozen --no-dev --extra server ${EXTRA_FLAGS}
+    uv sync --frozen --no-dev --no-editable --extra server ${EXTRA_FLAGS}
 
 # --- Stage 3: Development Environment ---
 FROM deps as development
@@ -83,7 +83,7 @@ WORKDIR /app
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"
 
 USER appuser
 EXPOSE 8000

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def uses_vector_index(*, settings_obj: Settings) -> bool:
-    return str(settings_obj.retrieval_mode) in ("dense", "hybrid")
+    return str(settings_obj.retrieval_mode) in ("dense", "dual", "hybrid")
 
 
 def validate_storage_profile(
@@ -43,6 +43,7 @@ def validate_storage_profile(
 ) -> None:
     profile = ports.storage_profile_registry.resolve(
         profile_id=getattr(settings_obj, "storage_profile", ""),
+        persistence_backend=getattr(settings_obj, "persistence_backend", "local_split"),
         retrieval_mode=settings_obj.retrieval_mode,
         vector_backend=getattr(settings_obj, "vector_backend", "auto"),
     )
@@ -50,9 +51,11 @@ def validate_storage_profile(
         raise RuntimeError(
             f"Storage profile {profile.profile_id!r} is read-only and cannot serve mutations."
         )
-    if not profile.has(StorageCapability.DURABLE_SAGA):
+    if not profile.has(StorageCapability.DURABLE_SAGA) and not profile.has(
+        StorageCapability.ATOMIC
+    ):
         raise RuntimeError(
-            f"Storage profile {profile.profile_id!r} does not satisfy DURABLE_SAGA writes."
+            f"Storage profile {profile.profile_id!r} does not satisfy writable storage capabilities."
         )
     if vector_mode_enabled and not profile.supports_vectors:
         raise RuntimeError(
@@ -435,6 +438,8 @@ def _apply_sql_mutation(
                 external_id=u.external_id,
                 content=u.content,
                 source_id=u.source_id,
+                scope=u.scope,
+                snapshot_id=u.snapshot_id,
                 metadata=u.metadata,
             )
             for u in intent.upserts

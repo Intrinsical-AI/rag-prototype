@@ -7,11 +7,14 @@
 
 ## 0) TL;DR (90 seconds)
 
-- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it runs with SQL + local vector index adapters, and target architecture evolves to backend-agnostic persistence adapters (split-store or unified-store engines).
+- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it supports split-store persistence (`local_split`: SQLite + local vector index), unified persistence (`elasticsearch`), and external search adapters (`opensearch`, `solr`) controlled via `search_backend` in `config.yaml`, while keeping application contracts backend-agnostic.
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
-  - Canonical write path via `MutationCoordinator` (thin orchestrator), with batch and saga execution delegated to dedicated modules. Current write consistency model is `DURABLE_SAGA`; capability-driven alternatives are future work.
+  - Canonical write path via `MutationCoordinator` (thin orchestrator), with batch and execution strategy delegated to dedicated modules.
+  - Current write consistency model is capability-driven:
+    - `local_split` => `DURABLE_SAGA`
+    - `elasticsearch` => `ATOMIC`
   - SQL writes inside canonical mutation run under explicit `mutation_uow_factory` and shared SQL session context (`session_uow`).
   - App/runtime wiring centralized in `AppContainer` + `composition/*`.
   - Architecture guard tests enforce import boundaries in CI.
@@ -46,7 +49,7 @@
 - Legal / regulatory: no special regulated-domain requirement declared for D1.
 - Budget / latency / throughput: local-first single-node operation, optional Docker; avoid infra-heavy dependencies by default.
 - Team: small maintainer set; changes must be reviewable in small increments.
-- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current baseline uses SQLite + local vector index, but architecture must support unified engines (ElasticSearch, pgvector, Qdrant) through ports.
+- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current supported persistence backends are `local_split` (SQLite + local vector index) and `elasticsearch`. Active search adapters: `local_split`, `elasticsearch`, `opensearch`, `solr` (controlled via `search_backend` in `config.yaml`). Architecture keeps room for future unified engines (pgvector, Qdrant) through ports.
 - Product constraint: breaking changes explicitly allowed for this deliverable.
 
 ### 1.4 Quality attributes
@@ -54,8 +57,8 @@
 | Attribute    | Target | Measured by |
 | ------------ | -----: | ----------- |
 | Latency p95 (`POST /api/ask`, sparse, local sample dataset) | <= 2000ms | `rag_query_duration_seconds` metric + e2e smoke |
-| Availability (single instance) | >= 99.0% in controlled environment | `/api/health` + `/api/ready` checks |
-| Consistency | `DURABLE_SAGA` (current write model), with capability-driven variants as future work | mutation journal recovery tests + integration tests |
+| Availability (single instance) | >= 99.0% in controlled environment | `/healthz` + `/readyz` checks |
+| Consistency | capability-driven (`DURABLE_SAGA` or `ATOMIC`) | mutation/recovery tests + integration tests |
 | Cost | single-node local runtime (no mandatory external SaaS except optional LLM provider) | Docker/local runtime footprint |
 
 ### 1.5 Definition of Done (Deliverable D1)
@@ -84,7 +87,8 @@
 - **MutationIntent:** Requested write operation (upserts/deletes) for canonical mutation flow.
 - **MutationRecord:** Durable journal state for multi-store writes.
 - **StorageProfile:** Capability profile (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`) for allowed operations.
-- **Retriever mode:** `sparse`, `dense`, `hybrid` retrieval strategy.
+- **Retriever mode:** `sparse`, `dense`, `dual`, `hybrid` retrieval strategy.
+- **Search backend:** `search_backend` setting decouples query execution engine from persistence topology (`local_split`, `elasticsearch`, `opensearch`, `solr`).
 
 ### 2.2 Bounded contexts
 
@@ -92,8 +96,8 @@
 | ------- | -------------- | ---------: | ------------- | ----------- |
 | Retrieval Query | Retrieve docs + generate answer | No | LLM adapters, retrievers | `/api/ask`, `/api/ask_eval`, `RagService.ask` |
 | Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs`, `/api/docs/import`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
-| Index Maintenance | Rebuild/repair vector index | Yes | embedder + vector adapter | `/api/index/rebuild`, `rag-rebuild-index` |
-| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files | `/api/health`, `/api/ready`, `rag-status` |
+| Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag-rebuild-index` |
+| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, ES mappings | `/healthz`, `/readyz`, `rag-status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
 | Composition Runtime | Dependency wiring + runtime cache invalidation | No | settings + adapters | DI factory/container |
 
@@ -137,18 +141,21 @@
 ## 3) Data model
 
 ### 3.1 Storage overview
-- Current baseline:
-  - relational persistence via SQLite + SQLAlchemy;
-  - vector index via FAISS/numpy adapters on local disk.
+- Current supported backends:
+  - `local_split`: relational persistence via SQLite + SQLAlchemy plus vector index via FAISS/numpy adapters on local disk.
+  - `elasticsearch`: unified document/vector/history/system-state/tombstone persistence via HTTP adapter.
+  - `opensearch` (`search_backend=opensearch`): OpenSearch adapter for query execution; persistence still handled by `local_split` SQL layer.
+  - `solr` (`search_backend=solr`): Solr adapter for sparse (lexical) retrieval; only `retrieval_mode=sparse` is supported in v1.
+- `search_backend` decouples the query-execution engine from `persistence_backend`. When both are set to the same system (e.g. `elasticsearch`/`elasticsearch`), writes and reads are colocated; mixed configurations (e.g. `local_split` + `opensearch`) split SQL writes from remote retrieval.
 - Target abstraction:
   - application uses persistence ports and capability profile, not concrete store topology;
   - supported topologies:
     - split-store (`DocumentRepoPort` + `VectorRepoPort`);
     - unified-store (single adapter handles document + vector + metadata operations).
-- Cache: in-process runtime cache (`RagService` cache versioned via `system_state`).
+- Cache: in-process runtime cache (`RagService` cache versioned via `system_state`, stored in SQLite or Elasticsearch depending on backend).
 - Files / blobs: local filesystem (`data/`, index artifacts, mutation journal).
 - Concurrency locks: OS-level file/write lock adapters in `infrastructure/concurrency/locks/{file_lock.py,write_lock.py}`.
-- Evaluation fixtures: repository-level datasets under `datasets/` (for example `datasets/rag_eval_v1.jsonl`), optionally overridden by `RAG_EVAL_DATASET_PATH`.
+- Evaluation fixtures: repository-level datasets under `datasets/` (for example `datasets/rag_eval_v1.jsonl`), optionally overridden by `eval_dataset_path` in `config.yaml`.
 
 ### 3.2 Schemas
 - SQL models: `src/local_rag_backend/infrastructure/persistence/sql/models.py`
@@ -195,15 +202,15 @@
 ## 4) Invariants & validation
 
 ### 4.1 Global invariants
-- Multi-store write operations are serialized under shared write lock.
-- Canonical write flow is journaled and recoverable (`DURABLE_SAGA`).
+- Multi-store write operations are serialized under shared write lock when the active storage profile requires `DURABLE_SAGA`.
+- Canonical write flow is strategy-driven by `StorageProfile` capability (`DURABLE_SAGA` or `ATOMIC`).
 - Canonical SQL mutation and SQL compensation run inside explicit unit-of-work boundaries.
 - When UoW is active, SQL repositories must reuse the bound session and must not force early commit.
-- Lock scope is bounded to local commit work only (journal transition + SQL + vector/index commit).
+- Lock scope is bounded to local commit work only when the active backend requires split-store coordination.
 - Network I/O (`embeddings`/provider calls) must never execute while holding `multiprocess_write_lock`.
 - Mutation requests may be coalesced before lock acquisition and drained as bounded micro-batches (`max_batch_size`, `max_wait_ms`).
 - Dense/hybrid mutation cannot silently proceed when embeddings backend is unavailable.
-- Retrieval mode must be one of `sparse|dense|hybrid`.
+- Retrieval mode must be one of `sparse|dense|dual|hybrid`.
 - Transport isolation rule: removing `http/` must not break core mutation/query capabilities.
 - Persistence topology isolation rule: application behavior must be invariant under split-store vs unified-store backends (except declared capability differences).
 
@@ -220,10 +227,11 @@
 - Idempotency: `op_id` in mutation intent guarantees replay-safe behavior.
 - Retry safety: incomplete mutation records are recoverable at startup/background intervals.
 - Embedding failures are pre-lock failures: they must not leave partial SQL/vector state.
-- Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id` and journal state transitions.
+- Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id`; journal state transitions apply only to `DURABLE_SAGA` backends.
 - Consistency model per operation:
   - SQL-only operations: atomic per DB transaction (owned session) or per explicit unit-of-work (shared session).
-  - SQL + vector mutations: `DURABLE_SAGA` with compensation/recovery.
+  - `local_split` SQL + vector mutations: `DURABLE_SAGA` with compensation/recovery.
+  - `elasticsearch` unified mutations: `ATOMIC` backend path with no local journal recovery loop.
 
 ---
 
@@ -291,7 +299,8 @@ Ports defined in `core/ports/use_cases.py` are active and used by all migrated u
 - [TODO: architecture] Move SQL/FAISS-specific assumptions fully to adapters/composition.
 - [TODO: architecture] Add contract test suite to validate adapter parity across:
   - split baseline (`SQLite + FAISS/numpy`);
-  - unified candidates (`ElasticSearch`, `pgvector`, `Qdrant`).
+  - active search adapters (`OpenSearch`, `Solr`);
+  - unified candidates (`pgvector`, `Qdrant`).
 - [TODO: architecture] Keep external HTTP/CLI contracts stable while allowing internal breaking changes.
 
 Fase B closure (2026-03-01):
@@ -349,14 +358,14 @@ Fase B closure (2026-03-01):
 
 ### 7.1 Public API
 - Protocol: REST + CLI + Python library usage.
-- Auth: `X-API-Key` is optional for localhost-only setups; with `PUBLIC_BIND_REQUIRES_API_KEY=true` (default), non-local requests are rejected when `API_KEY` is unset, and public bind startup without key is refused fail-closed.
+- Auth: `X-API-Key` is optional for localhost-only setups; with `public_bind_requires_api_key=true` (default), non-local requests are rejected when `api_key` is unset in `config.yaml`, and public bind startup without key is refused fail-closed.
 - Rate limiting: no explicit built-in limiter currently (must be handled by deployment edge if needed).
 - HTTP endpoints (current):
   - `/api/ask`, `/api/ask_eval`, `/api/history`
   - `/api/docs`, `/api/docs/import`, `/api/docs/mutate`
   - `/api/index/rebuild`
   - `/api/config`, `/api/templates`
-  - `/api/health`, `/api/ready`, `/api/health/ollama`
+  - `/healthz`, `/readyz`, `/healthz/ollama`
   - `/api/openrouter/generate`
   - `/metrics` (when monitoring is enabled)
 
@@ -371,7 +380,7 @@ Fase B closure (2026-03-01):
 ## 8) Security, privacy, compliance
 
 - Threat model: accidental public exposure of costly/mutating endpoints.
-- Secrets management: environment variables (`.env` for local dev), never hardcoded.
+- Secrets management: `config.yaml` for runtime config, never hardcoded.
 - PII handling: avoid raw question logging; logs use hashed question fingerprint (`q_sha256`, `q_len`).
 - Log redaction: structured logs avoid full payloads by default.
 - Supply-chain:
@@ -429,7 +438,7 @@ Fase B closure (2026-03-01):
 | Integration | SQL/vector/index/recovery interactions | `pytest` | pass |
 | E2E | API behavior and retrieval smoke | `pytest` | pass |
 | Stress | mutation contention and cross-process lock behavior | `pytest` (integration profile) | pass |
-| Architecture | import boundaries/layer rules | `pytest` + AST checks | pass |
+| Architecture | import boundaries/layer rules | `import-linter` + `pytest` (AST checks) | pass |
 | Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | CI jobs green (security includes report generation) |
 
 Mandatory CI gate: total coverage >= 85% (`pytest` config in `pyproject.toml`).
@@ -445,7 +454,7 @@ Key mutation/UoW characterization tests:
 ## 12) Deployment & environments
 
 - Environments: local dev, CI, containerized runtime.
-- Config strategy: 12-factor with `pydantic-settings` + env vars.
+- Config strategy: single-file `config.yaml` loaded at startup, validated by Pydantic, and used as the sole runtime source of truth.
 - Migrations/compatibility:
   - SQLite compatibility ensured at startup/CLI bootstrap.
   - D1 allows breaking schema/contracts if required for decoupling.
@@ -506,7 +515,8 @@ Active ADR set for D1:
   - `rag-server`
 - How to run tests:
   - full: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q`
-  - architecture smoke: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q -o addopts='' tests/unit/http/test_architecture_*.py`
+  - architecture smoke: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q -o addopts='' tests/architecture/test_*.py`
+  - import contracts: `PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run lint-imports`
 - Where to add a new feature:
   - domain rules in `core/domain` or `core/services`
   - orchestration in `core/use_cases`

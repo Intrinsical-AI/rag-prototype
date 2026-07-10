@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
+    from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
     from local_rag_backend.core.domain.types import DocId
 
 
@@ -35,7 +36,7 @@ class GeneratorPort(Protocol):
 class RetrieverPort(Protocol):
     """Interface for retrieving relevant documents for a given query."""
 
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]: ...
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult: ...
 
 
 @runtime_checkable
@@ -74,7 +75,7 @@ class VectorRepoPort(Protocol):
         ...
 
     def similar(self, vector: Embedding, k: int) -> Sequence[tuple[DocId, float]]:
-        """Find similar vectors, returning (ID, normalized_similarity_score)."""
+        """Find similar vectors, returning (ID, normalized higher-is-better score in [0, 1])."""
         ...
 
 

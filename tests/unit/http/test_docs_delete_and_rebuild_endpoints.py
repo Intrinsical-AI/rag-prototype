@@ -6,7 +6,7 @@ from local_rag_backend.settings import settings
 @pytest.mark.unit
 async def test_mutate_delete_ids_sparse_removes_from_sql(
     asgi_client, in_memory_sqlite, monkeypatch
-):
+) -> None:
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
     r = await asgi_client.post("/api/docs", json={"texts": ["a", "b", "c"]})
@@ -17,7 +17,7 @@ async def test_mutate_delete_ids_sparse_removes_from_sql(
     assert r2.status_code == 200
     assert r2.json()["deleted_sql"] == 2
 
-    r3 = await asgi_client.get("/api/docs", params={"limit": 100, "offset": 0})
+    r3 = await asgi_client.post("/api/docs/query", json={"limit": 100, "offset": 0, "filters": []})
     assert r3.status_code == 200
     remaining_ids = {d["id"] for d in r3.json()}
     assert ids[0] not in remaining_ids
@@ -34,7 +34,7 @@ async def test_rebuild_index_dense_from_db(tmp_path, asgi_client, in_memory_sqli
     class DummyEmbedder:
         dim = 2
 
-        def embed(self, texts):
+        def embed(self, texts: list[str]) -> list[list[float]]:
             return [[float(len(t)), 0.0] for t in texts]
 
     monkeypatch.setattr(
@@ -62,7 +62,7 @@ async def test_rebuild_index_dense_from_db(tmp_path, asgi_client, in_memory_sqli
 @pytest.mark.unit
 async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
     asgi_client, in_memory_sqlite, monkeypatch
-):
+) -> None:
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     r = await asgi_client.post("/api/docs", json={"texts": ["zeta"]})
     assert r.status_code == 200
@@ -73,13 +73,13 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
 
     embedder_calls = 0
 
-    def _boom_embedder(**_kwargs):
+    def _boom_embedder(**_kwargs: object) -> object:
         nonlocal embedder_calls
         embedder_calls += 1
         raise RuntimeError("embedder should not be called on successful delete path")
 
     class DummyVec:
-        def apply_delta_atomic(self, *, delete_ids, upserts):
+        def apply_delta_atomic(self, *, delete_ids: object, upserts: object) -> None:
             assert len(list(delete_ids)) == 1
             assert list(upserts) == []
 
@@ -101,3 +101,12 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
     assert payload["deleted_index"] == 1
     assert payload["index_rebuilt"] is False
     assert embedder_calls == 0
+
+
+@pytest.mark.unit
+async def test_legacy_delete_endpoint_is_removed(asgi_client, in_memory_sqlite) -> None:
+    r = await asgi_client.post(
+        "/api/docs/delete",
+        json={"ids": ["doc-legacy"]},
+    )
+    assert r.status_code == 404

@@ -103,3 +103,26 @@ def test_preprocess_text_options_respected():
     assert preprocess_text(
         raw, strip=False, collapse_whitespace=False, remove_html=False
     ).startswith("  ")
+
+
+def test_preprocess_unicode_spaces_collapsed() -> None:
+    # Non-breaking space (U+00A0) and en-space (U+2002) are matched by \s+
+    result = preprocess_text("hello\u00a0world\u2002end")
+    assert result == "hello world end"
+
+
+def test_preprocess_unicode_newline_variants() -> None:
+    # Vertical tab, form feed, line separator (U+2028) handled by \s+
+    result = preprocess_text("a\x0bb\x0cc\u2028d")
+    assert result == "a b c d"
+
+
+def test_preprocess_long_string_does_not_raise() -> None:
+    long_text = "word " * 10_000
+    result = preprocess_text(long_text)
+    assert result == "word " * 9_999 + "word"
+
+
+def test_preprocess_only_unicode_whitespace() -> None:
+    result = preprocess_text("\u00a0\u2002\u2003")
+    assert result == ""

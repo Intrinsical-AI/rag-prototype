@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from local_rag_backend.cli import cli
+
+DATASET_PATH = Path(__file__).resolve().parents[3] / "datasets" / "vuln_pilot_rag_eval_v1.jsonl"
+
+
+def test_rag_eval_vuln_pilot_dataset_sparse_smoke() -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "eval",
+            "--dataset",
+            str(DATASET_PATH),
+            "--retrieval-mode",
+            "sparse",
+            "--k",
+            "1",
+            "--fail-below-ndcg",
+            "0.0",
+            "--fail-below-map",
+            "0.0",
+            "--fail-below-mrr",
+            "0.0",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "dataset=vuln_pilot_rag_eval_v1 mode=sparse" in result.output
+
+
+def test_rag_eval_compare_vuln_pilot_dataset_sparse_smoke(tmp_path: Path) -> None:
+    json_out = tmp_path / "vuln-pilot-compare.json"
+    spec = tmp_path / "vuln-pilot-compare-spec.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "k": 1,
+                "baseline": {"retrieval_mode": "sparse"},
+                "candidate": {"retrieval_mode": "sparse"},
+                "thresholds": {
+                    "min_delta_ndcg": 0.0,
+                    "min_delta_map": 0.0,
+                    "min_delta_mrr": 0.0,
+                    "max_regression_precision": 0.0,
+                    "max_regression_recall": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        cli,
+        [
+            "eval-compare",
+            "--dataset",
+            str(DATASET_PATH),
+            "--spec",
+            str(spec),
+            "--json-out",
+            str(json_out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert payload["dataset_id"] == "vuln_pilot_rag_eval_v1"
+    assert payload["gate"]["passed"] is True

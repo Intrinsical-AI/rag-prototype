@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.composition.context import AppContext
+from local_rag_backend.composition.runtime import RuntimeSnapshot, build_runtime_snapshot
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.persistence.sql import (
     SystemStateStorage,
@@ -111,6 +112,11 @@ def get_app_context() -> AppContext:
     return ctx
 
 
+def get_runtime_snapshot() -> RuntimeSnapshot:
+    """Return a fresh, typed runtime snapshot derived from current Settings."""
+    return build_runtime_snapshot(settings)
+
+
 def reset_app_context() -> None:
     global _APP_CONTEXT
     with _APP_CONTEXT_LOCK:
@@ -120,7 +126,10 @@ def reset_app_context() -> None:
 def build_rag_service() -> RagService:
     """Build a RagService instance based on current settings (no caching)."""
     ctx = get_app_context()
-    logger.info("Creating RAG service with retrieval mode: '%s'", ctx.settings.retrieval_mode)
+    logger.info(
+        "Creating RAG service with retrieval mode: '%s'",
+        ctx.runtime_snapshot.retrieval_mode,
+    )
     return ctx.container.build_rag_service()
 
 
@@ -153,6 +162,7 @@ __all__ = [
     "build_rag_service",
     "get_app_context",
     "get_rag_service",
+    "get_runtime_snapshot",
     "multi_store_write_lock",
     "purge_index_artifacts",
     "rebuild_index_from_db",

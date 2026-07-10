@@ -15,6 +15,7 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
     read_manifest,
     validate_manifest,
 )
+from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
 from local_rag_backend.settings import Settings, settings as _global_settings
 
 if TYPE_CHECKING:
@@ -127,6 +128,13 @@ class VectorStorage(VectorRepoPort):
         self.vector_index.rebuild(ids, vectors)
         self._ensure_manifest(overwrite=True)
 
+    def rebuild_from_batches(
+        self,
+        batches: Sequence[tuple[Sequence[DocId], Sequence[Sequence[float]]]],
+    ) -> None:
+        self.vector_index.rebuild_from_batches(batches)
+        self._ensure_manifest(overwrite=True)
+
     def search(
         self, query_vector: Sequence[float], k: int
     ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
@@ -149,11 +157,10 @@ class VectorStorage(VectorRepoPort):
 
         doc_ids, valid_distances = zip(*valid_results, strict=False)
         sim_raw = [1.0 / (1.0 + d) for d in valid_distances]
-        min_s, max_s = min(sim_raw), max(sim_raw)
-
-        if max_s == min_s:
-            normalized_sims = [1.0] * len(sim_raw)
-        else:
-            normalized_sims = [(s - min_s) / (max_s - min_s) for s in sim_raw]
+        normalized_sims = normalize_min_max_scores(
+            sim_raw,
+            flat_value=0.0,
+            singleton_value=1.0,
+        )
 
         return list(zip(doc_ids, normalized_sims, strict=False))

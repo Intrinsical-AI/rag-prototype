@@ -50,11 +50,14 @@ Composition root y lifecycle runtime (transport-neutral):
 
 Adaptadores HTTP por bounded context:
 
-- `docs.py`: `GET /docs`, `POST /docs`, `POST /docs/import`, `POST /docs/mutate`
-- `rag_router.py`: `POST /ask`, `POST /ask_eval`, `GET /history`
-- `index.py`: `POST /index/rebuild`
-- `health.py`: `GET /health`, `GET /ready`, `GET /health/ollama`
+- `docs.py`: `POST /api/docs`, `POST /api/docs/import`, `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- `rag_router.py`: `POST /api/ask`, `POST /api/ask_eval`, `GET /api/history`
+- `index.py`: `POST /api/index/rebuild`
+- `health.py`: `GET /healthz`, `GET /readyz`, `GET /healthz/ollama` (app-level)
 - `openrouter.py`, `meta.py`
+
+Swagger UI (`GET /docs`) and OpenAPI JSON (`GET /openapi.json`) are app-level FastAPI routes exposed by
+`http/main.py`, not part of `http/routers/docs.py`.
 
 ---
 
@@ -74,8 +77,8 @@ Estas reglas están cubiertas por tests de arquitectura.
 
 ### Entradas
 
-- API: `POST /api/docs/mutate`
-- API ingest/import: internamente transforman a `MutationIntent`
+- API canónica/recomendada: `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- API de compatibilidad operacional: `POST /api/docs`, `POST /api/docs/import` (también transforman a `MutationIntent`)
 - CLI: `rag-mutate-docs`
 - CLI ingest: internamente transforma a `MutationIntent`
 - CLI bootstrap: `rag-bootstrap` usa `run_sample_data_ingestion` y delega en `MutationCoordinator`
@@ -106,7 +109,7 @@ No se promete 2PC universal entre cualquier backend, pero sí garantía de opera
 
 ## Read path
 
-`/ask` y `/ask_eval` usan `core/services/rag_runtime.py::RagService` con retriever/generator resueltos en `AppContainer`.
+`POST /api/ask` y `POST /api/ask_eval` usan `core/services/rag_runtime.py::RagService` con retriever/generator resueltos en `AppContainer`.
 
 El offload de trabajo bloqueante está centralizado en `infrastructure/concurrency/blocking.py` con pools por tipo de tarea (`default|mutation|network|eval`).
 
@@ -116,17 +119,13 @@ Los locks de escritura/archivo están en `infrastructure/concurrency/locks/{file
 
 ## Superficie v1.0 (breaking)
 
-Se eliminaron endpoints/commands legacy de mutación:
+La superficie de mutación habilitada por operación incluye estos endpoints HTTP (todos pasan por `MutationCoordinator`):
 
-- `/api/docs/upsert`
-- `/api/docs/delete`
-- `/api/docs/delete_by_external_id`
-- `rag-upsert-docs`
-- `rag-delete-docs`
-- `rag-delete-external-ids`
+- HTTP: `POST /api/docs`, `POST /api/docs/import`, `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- CLI: `rag-mutate-docs`, `rag-import-canonical`
 
-La mutación write-enabled se hace solo por la superficie unificada (`/api/docs/mutate`, `rag-mutate-docs`).
+Si necesitas distinguir contratos: `POST /api/docs/mutate` y `POST /api/docs/import-canonical` son los caminos canónicos/recomendados; `POST /api/docs` y `POST /api/docs/import` se mantienen como compatibilidad operacional porque siguen ejecutando el flujo de mutación canónico.
 
 ## Artefactos de evaluación
 
-El dataset de evaluación por defecto vive en `datasets/rag_eval_v1.jsonl` (raíz del repositorio), no dentro de `src/`. Puede sobreescribirse con `RAG_EVAL_DATASET_PATH`.
+El dataset de evaluación por defecto vive en `datasets/rag_eval_v1.jsonl` (raíz del repositorio), no dentro de `src/`. Puede sobreescribirse con `eval_dataset_path` en `config.yaml`.

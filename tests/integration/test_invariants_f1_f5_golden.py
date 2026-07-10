@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from local_rag_backend.composition import factory
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.http.dependencies import get_rag_service
-from local_rag_backend.http.main import app
-from local_rag_backend.http.routers import health as health_router
+from local_rag_backend.http.routers import health as health_router, rag_router
 from local_rag_backend.infrastructure.persistence.sql import HistorySqlStorage
 from local_rag_backend.settings import settings
 
@@ -64,12 +62,15 @@ async def test_golden_f1_f2_docs_mutation_ingest_and_list(
     assert p4["count"] == 2
     assert len(p4["ids"]) == 2
 
-    r5 = await asgi_client.get("/api/docs")
+    r5 = await asgi_client.post("/api/docs/query", json={"limit": 100, "offset": 0, "filters": []})
     assert r5.status_code == 200
     docs = r5.json()
     assert isinstance(docs, list)
     assert len(docs) >= 3
-    assert all(set(item.keys()) >= {"id", "content"} for item in docs)
+    assert all(
+        set(item.keys()) >= {"id", "content", "external_id", "source_id", "metadata"}
+        for item in docs
+    )
 
 
 async def test_golden_f3_query_eval_and_history_contract(
@@ -100,7 +101,7 @@ async def test_golden_f3_query_eval_and_history_contract(
                 "scores": [0.8],
             }
 
-    app.dependency_overrides[get_rag_service] = _override_rag_service
+    monkeypatch.setattr(rag_router, "get_rag_service", _override_rag_service, raising=True)
     container = factory.get_app_context().container
     monkeypatch.setattr(
         container,
@@ -108,38 +109,35 @@ async def test_golden_f3_query_eval_and_history_contract(
         lambda: _DummyRagRuntimeFactory(),
         raising=True,
     )
-    try:
-        r1 = await asgi_client.post("/api/ask", json={"question": "hello", "k": 1})
-        assert r1.status_code == 200
-        p1 = r1.json()
-        assert p1["answer"] == "echo:hello"
-        assert isinstance(p1["sources"], list) and len(p1["sources"]) == 1
-        assert set(p1["sources"][0].keys()) >= {"document", "score"}
+    r1 = await asgi_client.post("/api/ask", json={"question": "hello", "k": 1})
+    assert r1.status_code == 200
+    p1 = r1.json()
+    assert p1["answer"] == "echo:hello"
+    assert isinstance(p1["sources"], list) and len(p1["sources"]) == 1
+    assert set(p1["sources"][0].keys()) >= {"document", "score"}
 
-        r2 = await asgi_client.post(
-            "/api/ask_eval",
-            json={
-                "question": "hello",
-                "config": {
-                    "retrieval_mode": "sparse",
-                    "k": 1,
-                },
+    r2 = await asgi_client.post(
+        "/api/ask_eval",
+        json={
+            "question": "hello",
+            "config": {
+                "retrieval_mode": "sparse",
+                "k": 1,
             },
-        )
-        assert r2.status_code == 200
-        p2 = r2.json()
-        assert p2["answer"] == "eval:hello"
-        assert isinstance(p2.get("latency_ms"), int)
-        assert isinstance(p2["sources"], list) and len(p2["sources"]) == 1
+        },
+    )
+    assert r2.status_code == 200
+    p2 = r2.json()
+    assert p2["answer"] == "eval:hello"
+    assert isinstance(p2.get("latency_ms"), int)
+    assert isinstance(p2["sources"], list) and len(p2["sources"]) == 1
 
-        HistorySqlStorage().save("q-golden", "a-golden", ["doc:1"])
-        r3 = await asgi_client.get("/api/history?limit=1")
-        assert r3.status_code == 200
-        rows = r3.json()
-        assert isinstance(rows, list) and rows
-        assert set(rows[0].keys()) >= {"id", "question", "answer", "created_at", "source_ids"}
-    finally:
-        app.dependency_overrides.pop(get_rag_service, None)
+    HistorySqlStorage().save("q-golden", "a-golden", ["doc:1"])
+    r3 = await asgi_client.get("/api/history?limit=1")
+    assert r3.status_code == 200
+    rows = r3.json()
+    assert isinstance(rows, list) and rows
+    assert set(rows[0].keys()) >= {"id", "question", "answer", "created_at", "source_ids"}
 
 
 async def test_golden_f4_f5_rebuild_and_readiness(
@@ -179,10 +177,10 @@ async def test_golden_f4_f5_rebuild_and_readiness(
     assert r1.status_code == 200
     assert int(r1.json()["indexed"]) >= 1
 
-    r2 = await asgi_client.get("/api/health")
+    r2 = await asgi_client.get("/healthz")
     assert r2.status_code == 200
     assert r2.json().get("status") == "healthy"
 
-    r3 = await asgi_client.get("/api/ready")
+    r3 = await asgi_client.get("/readyz")
     assert r3.status_code == 200
     assert r3.json().get("status") == "ready"

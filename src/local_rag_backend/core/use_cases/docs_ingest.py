@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 def _embedding_model_name_for_dedup(settings_obj: Settings) -> str:
-    if settings_obj.retrieval_mode not in ("dense", "hybrid"):
+    if settings_obj.retrieval_mode not in ("dense", "dual", "hybrid"):
         return "none"
     if settings_obj.openai_api_key:
         return str(settings_obj.openai_embedding_model)

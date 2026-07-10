@@ -6,6 +6,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from local_rag_backend.http.schemas.rag_api_models import RetrievalFilterModel
+
 
 class IngestRequest(BaseModel):
     texts: list[Annotated[str, Field(max_length=20000)]] = Field(
@@ -25,6 +27,8 @@ class UpsertDocItem(BaseModel):
     external_id: str = Field(..., min_length=1, max_length=512)
     content: str = Field(..., min_length=1, max_length=20000)
     source_id: str | None = Field(default=None, max_length=1024)
+    scope: str | None = Field(default=None, min_length=1, max_length=512)
+    snapshot_id: str | None = Field(default=None, min_length=1, max_length=512)
     metadata: dict[str, Any] | None = None
 
     @field_validator("external_id")
@@ -49,6 +53,25 @@ class UpsertDocResult(BaseModel):
     id: str
     action: str
     content_changed: bool
+
+
+class CanonicalImportResponse(BaseModel):
+    scope: str
+    snapshot_id: str
+    replace_scope: bool
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    deleted_sql: int = 0
+    deleted_index: int | None = None
+    deleted_external_ids: list[str] = Field(default_factory=list)
+    results: list[UpsertDocResult] = Field(default_factory=list)
+
+
+class DocsQueryRequest(BaseModel):
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+    filters: list[RetrievalFilterModel] = Field(default_factory=list)
 
 
 class ImportResponse(BaseModel):

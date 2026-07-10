@@ -19,6 +19,8 @@ class Document(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     external_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     source_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    snapshot_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
     content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_dedup_sha256: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)

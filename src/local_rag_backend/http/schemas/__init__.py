@@ -1,8 +1,10 @@
 """HTTP transport schemas grouped by bounded context."""
 
 from local_rag_backend.http.schemas.docs import (
+    CanonicalImportResponse,
     DocsMutateRequest,
     DocsMutateResponse,
+    DocsQueryRequest,
     ImportResponse,
     IngestRequest,
     IngestResponse,
@@ -33,9 +35,11 @@ __all__ = [
     "AskEvalResponse",
     "AskRequest",
     "AskResponse",
+    "CanonicalImportResponse",
     "ConfigResponse",
     "DocsMutateRequest",
     "DocsMutateResponse",
+    "DocsQueryRequest",
     "DocumentInDB",
     "HistoryItem",
     "ImportResponse",

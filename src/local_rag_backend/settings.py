@@ -2,28 +2,117 @@
 """
 Configuration management for Intrinsical RAG Prototype.
 
-This module provides centralized configuration using Pydantic Settings with
-environment variable support and validation. All settings can be overridden
-via environment variables or .env file.
-
-Example:
-    export OPENAI_API_KEY=\"your-key-here\"
-    export RETRIEVAL_MODE=\"hybrid\"
-    python -m local_rag_backend.http.main
+This module is the single source of truth for runtime configuration.
+The YAML payload is loaded at startup and validated through a Pydantic model.
+The module keeps path/url normalization intentionally explicit to avoid cross-process
+and deployment-drift surprises.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+
+DEFAULT_CONFIG_PATH = Path("config.yaml")
+CONFIG_PATH_ENV_VAR = "RAG_CONFIG_PATH"
 
 
-class Settings(BaseSettings):
+def _resolve_relative_path_value(value: Any, *, base_dir: Path) -> str | None:
+    """Resolve a potentially relative path against the config file directory.
+
+    Inputs can be YAML strings, ``Path`` objects, or ``None``.
+    Absolute paths are left untouched, relative paths are resolved against the
+    location of the settings file.
+    """
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    path = (base_dir / path).resolve() if not path.is_absolute() else path.resolve()
+    return str(path)
+
+
+def _resolve_sqlite_url_value(value: Any, *, base_dir: Path) -> str | None:
+    """Normalize ``sqlite:///`` URLs.
+
+    A bare relative path in a sqlite URL is interpreted relative to the loaded
+    settings file directory so local runs and containerized runs keep consistent
+    behavior.
+    """
+    if value is None:
+        return None
+    rendered = str(value).strip()
+    prefix = "sqlite:///"
+    if not rendered.startswith(prefix):
+        return rendered
+    raw_path = rendered[len(prefix) :]
+    if not raw_path:
+        return rendered
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return f"{prefix}{path}"
+    resolved = (base_dir / path).resolve()
+    return f"{prefix}{resolved}"
+
+
+def _resolve_config_path(config_path: str | Path | None) -> Path:
+    if config_path is not None:
+        return Path(config_path)
+    configured_path = str(os.getenv(CONFIG_PATH_ENV_VAR, "") or "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser()
+    return DEFAULT_CONFIG_PATH
+
+
+def load_settings_from_yaml(config_path: str | Path | None = None) -> Settings:
+    """Load settings from YAML and apply path/url normalization in one place.
+
+    Side effects:
+    - Selects ``config_path`` explicitly, then ``RAG_CONFIG_PATH``, then ``config.yaml``.
+    - Validates the selected file exists and is a top-level mapping.
+    - Resolves known relative paths into absolute paths rooted at the config file.
+    - Applies runtime override for ``perf_metrics_out_path`` when env variable is set.
+    """
+    path = _resolve_config_path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if raw is None:
+        data: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        data = dict(raw)
+    else:
+        raise ValueError("Configuration file must contain a YAML mapping at the top level.")
+
+    base_dir = path.resolve().parent
+    # Benchmark/orchestration runners can redirect perf metrics without editing the
+    # repository config.yaml that remains the main runtime source of truth.
+    perf_metrics_override = str(os.getenv("RAG_PERF_METRICS_OUT", "") or "").strip()
+    if perf_metrics_override:
+        data["perf_metrics_out_path"] = perf_metrics_override
+    for key in (
+        "data_dir",
+        "index_path",
+        "id_map_path",
+        "faq_csv",
+        "embedding_cache_db_path",
+        "eval_dataset_path",
+        "perf_metrics_out_path",
+        "lock_metrics_path",
+    ):
+        if key in data:
+            data[key] = _resolve_relative_path_value(data.get(key), base_dir=base_dir)
+    if "sqlite_url" in data:
+        data["sqlite_url"] = _resolve_sqlite_url_value(data.get("sqlite_url"), base_dir=base_dir)
+    return Settings(**data)
+
+
+class Settings(BaseModel):
     """Centralized application configuration.
 
     All fields have default values, so the class can be instantiated without arguments.
@@ -33,6 +122,15 @@ class Settings(BaseSettings):
     if False:
 
         def __init__(self, **kwargs: Any) -> None: ...
+
+    persistence_backend: Literal["local_split", "elasticsearch"] = Field(
+        "local_split",
+        description=(
+            "Persistence backend topology. "
+            "'local_split' uses SQLite + local vector index; "
+            "'elasticsearch' uses Elasticsearch as unified storage."
+        ),
+    )
 
     # --- Core --- #
     app_host: str = Field("127.0.0.1", description="Server host IP.")
@@ -70,7 +168,16 @@ class Settings(BaseSettings):
     )
 
     # --- Retrieval --- #
-    retrieval_mode: Literal["sparse", "dense", "hybrid"] = Field(
+    search_backend: Literal["local_split", "elasticsearch", "opensearch", "solr"] = Field(
+        "local_split",
+        description=(
+            "Search execution backend. "
+            "'local_split' queries the local SQL/vector stores; "
+            "'elasticsearch' and 'opensearch' query remote search clusters; "
+            "'solr' queries a remote Solr core."
+        ),
+    )
+    retrieval_mode: Literal["sparse", "dense", "dual", "hybrid"] = Field(
         # Default to sparse to keep the base installation lightweight; dense/hybrid require extra deps.
         "sparse",
         description="Retrieval strategy.",
@@ -84,6 +191,12 @@ class Settings(BaseSettings):
     )
     hybrid_retrieval_alpha: float = Field(
         0.5, ge=0.0, le=1.0, description="Weight of sparse vs. dense in hybrid mode."
+    )
+    dual_candidate_k: int = Field(
+        50,
+        ge=1,
+        le=1000,
+        description="Sparse candidate count for dual retrieval before dense rerank.",
     )
     st_embedding_model: str = Field(
         "all-MiniLM-L6-v2", description="Sentence Transformers model for embeddings."
@@ -135,6 +248,91 @@ class Settings(BaseSettings):
             "and vector backend."
         ),
     )
+    eval_dataset_path: str = Field(
+        "datasets/rag_eval_v1.jsonl",
+        description="Default JSONL dataset path for offline retrieval evaluation.",
+    )
+    embedding_cache_db_path: str = Field(
+        "data/embedding_cache.sqlite3",
+        description="Persistent embedding cache DB path.",
+    )
+    disable_embedding_cache: bool = Field(
+        False,
+        description="Disable the content-addressed embedding cache wrapper.",
+    )
+    synthetic_embeddings: bool = Field(
+        False,
+        description="Enable synthetic SentenceTransformer embeddings for local stress testing.",
+    )
+    synthetic_embedding_fail_rate: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Probability of synthetic embedding failure when synthetic_embeddings=true.",
+    )
+    synthetic_embedding_jitter_min_ms: float = Field(
+        0.0,
+        ge=0.0,
+        description="Minimum synthetic embedding jitter in milliseconds.",
+    )
+    synthetic_embedding_jitter_max_ms: float = Field(
+        0.0,
+        ge=0.0,
+        description="Maximum synthetic embedding jitter in milliseconds.",
+    )
+    synthetic_embedding_dim: int = Field(
+        384,
+        ge=1,
+        description="Embedding dimensionality used when synthetic embeddings are enabled.",
+    )
+    perf_metrics_out_path: str | None = Field(
+        None,
+        description="Optional JSON output file for process-local perf metrics.",
+    )
+    lock_metrics_path: str | None = Field(
+        None,
+        description="Optional NDJSON output file for write-lock metrics.",
+    )
+    blocking_workers: int = Field(
+        8,
+        ge=1,
+        description="Default worker count for blocking tasks.",
+    )
+    blocking_workers_mutation: int = Field(
+        2,
+        ge=1,
+        description="Worker count for blocking mutation tasks.",
+    )
+    blocking_workers_network: int = Field(
+        4,
+        ge=1,
+        description="Worker count for blocking network tasks.",
+    )
+    blocking_workers_eval: int = Field(
+        2,
+        ge=1,
+        description="Worker count for blocking eval tasks.",
+    )
+    blocking_queue_default: int = Field(
+        64,
+        ge=1,
+        description="Queue depth for default blocking tasks beyond worker count.",
+    )
+    blocking_queue_mutation: int = Field(
+        32,
+        ge=1,
+        description="Queue depth for mutation blocking tasks beyond worker count.",
+    )
+    blocking_queue_network: int = Field(
+        64,
+        ge=1,
+        description="Queue depth for network blocking tasks beyond worker count.",
+    )
+    blocking_queue_eval: int = Field(
+        32,
+        ge=1,
+        description="Queue depth for eval blocking tasks beyond worker count.",
+    )
     write_lock_timeout_s: float = Field(
         30.0,
         ge=0.1,
@@ -174,6 +372,50 @@ class Settings(BaseSettings):
         ge=1.0,
         le=3600.0,
         description="Background interval (seconds) for retrying incomplete mutation recovery.",
+    )
+    es_base_url: str | None = Field(None, description="Elasticsearch base URL.")
+    es_api_key: str | None = Field(None, description="Elasticsearch API key.")
+    es_username: str | None = Field(None, description="Elasticsearch username.")
+    es_password: str | None = Field(None, description="Elasticsearch password.")
+    es_verify_tls: bool = Field(True, description="Verify Elasticsearch TLS certificates.")
+    es_request_timeout_s: float = Field(
+        30.0, ge=0.5, le=600.0, description="Elasticsearch request timeout in seconds."
+    )
+    es_docs_index: str = Field("rag-docs", description="Elasticsearch index for documents.")
+    es_history_index: str = Field("rag-history", description="Elasticsearch index for history.")
+    es_system_index: str = Field("rag-system", description="Elasticsearch index for system state.")
+    es_tombstones_index: str = Field(
+        "rag-tombstones", description="Elasticsearch index for document tombstones."
+    )
+    es_content_field: str = Field("content", description="Elasticsearch content field name.")
+    es_embedding_field: str = Field(
+        "embedding", description="Elasticsearch dense vector field name."
+    )
+    es_hybrid_lexical_k: int = Field(
+        50, ge=1, le=1000, description="Lexical candidate count for Elasticsearch hybrid."
+    )
+    es_hybrid_vector_k: int = Field(
+        50, ge=1, le=1000, description="Vector candidate count for Elasticsearch hybrid."
+    )
+    os_base_url: str | None = Field(None, description="OpenSearch base URL.")
+    os_api_key: str | None = Field(None, description="OpenSearch API key.")
+    os_username: str | None = Field(None, description="OpenSearch username.")
+    os_password: str | None = Field(None, description="OpenSearch password.")
+    os_verify_tls: bool = Field(True, description="Verify OpenSearch TLS certificates.")
+    os_request_timeout_s: float = Field(
+        30.0, ge=0.5, le=600.0, description="OpenSearch request timeout in seconds."
+    )
+    os_docs_index: str = Field("rag-docs", description="OpenSearch index for documents.")
+    os_content_field: str = Field("content", description="OpenSearch content field name.")
+    os_embedding_field: str = Field("embedding", description="OpenSearch dense vector field name.")
+    os_dense_candidate_k: int = Field(
+        50, ge=1, le=1000, description="Vector candidate count for OpenSearch dense retrieval."
+    )
+    solr_base_url: str | None = Field(None, description="Solr base URL.")
+    solr_core: str = Field("rag-docs", description="Solr core/collection for documents.")
+    solr_content_field: str = Field("content", description="Solr content field name.")
+    solr_request_timeout_s: float = Field(
+        30.0, ge=0.5, le=600.0, description="Solr request timeout in seconds."
     )
 
     # --- Ingestion --- #
@@ -219,19 +461,24 @@ class Settings(BaseSettings):
         "Based on the context, answer the question.\nIf the context is not enough, say so.\n\nCONTEXT:\n{context}\n\nQUESTION:\n{question}"
     )
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-        # Allow non-JSON env vars for complex fields (e.g., comma-separated CORS origins).
-        enable_decoding=False,
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def _normalize_debug_bool(cls, v: Any) -> Any:
+        """Allow friendlier debug aliases from legacy deploy-time sources."""
+        if isinstance(v, str):
+            normalized = v.strip().lower()
+            if normalized in {"debug", "development", "dev"}:
+                return True
+            if normalized in {"release", "production", "prod"}:
+                return False
+        return v
 
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: Any) -> Any:
-        # Make env/config more forgiving while keeping a strict Literal type.
+        """Keep YAML input forgiving while preserving strict runtime literals."""
         if isinstance(v, str):
             return v.upper()
         return v
@@ -240,8 +487,8 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_cors_allow_origins(cls, v: Any) -> Any:
         """
-        Allow `CORS_ALLOW_ORIGINS` to be set as:
-        - JSON list (recommended): ["http://localhost:5173", ...]
+        Allow `cors_allow_origins` to be set as:
+        - YAML list (recommended): ["http://localhost:5173", ...]
         - Comma-separated string: http://localhost:5173,http://127.0.0.1:5173
         - Empty string: (disable CORS)
         """
@@ -251,7 +498,7 @@ class Settings(BaseSettings):
             s = v.strip()
             if not s:
                 return []
-            # JSON list string (common in docker-compose env)
+            # JSON list string (useful when the YAML loader gets a quoted scalar).
             if s.startswith("["):
                 try:
                     parsed = json.loads(s)
@@ -266,12 +513,15 @@ class Settings(BaseSettings):
     @field_validator("data_dir", mode="before")
     @classmethod
     def _normalize_data_dir(cls, v: Any) -> Path:
-        # Keep Settings side-effect free; callers are responsible for creating directories.
+        """Normalize path-like input eagerly; side-effects remain in callers."""
         return Path(v)
 
     @field_validator("sqlite_url")
     @classmethod
-    def _validate_sqlite_url(cls, v: str) -> str:
+    def _validate_sqlite_url(cls, v: str, info: ValidationInfo) -> str:
+        persistence_backend = str(info.data.get("persistence_backend") or "local_split")
+        if persistence_backend == "elasticsearch":
+            return v
         if not v.startswith("sqlite:///"):
             raise ValueError("SQLite URL must start with 'sqlite:///'")
         return v
@@ -283,11 +533,79 @@ class Settings(BaseSettings):
             raise ValueError("Ollama URL must start with http:// or https://")
         return v.rstrip("/")
 
+    @field_validator("es_base_url")
+    @classmethod
+    def _validate_es_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Elasticsearch URL must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("os_base_url")
+    @classmethod
+    def _validate_os_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("OpenSearch URL must start with http:// or https://")
+        return v.rstrip("/")
+
+    @field_validator("solr_base_url")
+    @classmethod
+    def _validate_solr_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Solr URL must start with http:// or https://")
+        return v.rstrip("/")
+
     @model_validator(mode="after")
     def _validate_chunking(self) -> Settings:
-        """Ensure chunk overlap is strictly less than chunk size."""
+        """Cross-field validation for retrieval/storage compatibility.
+
+        - Chunking constraints are validated for ingestion safety.
+        - Backend-specific URL requirements are enforced before runtime wiring.
+        - Hybrid/search/persistence combinations are constrained to known-safe modes.
+        """
         if self.ingest_chunk_overlap >= self.ingest_chunk_chars:
             raise ValueError("ingest_chunk_overlap must be strictly less than ingest_chunk_chars")
+        if self.persistence_backend == "elasticsearch":
+            if self.retrieval_mode == "sparse" and self.search_backend != "elasticsearch":
+                raise ValueError(
+                    "persistence_backend=elasticsearch supports retrieval_mode=sparse only when "
+                    "search_backend=elasticsearch"
+                )
+            if not self.es_base_url:
+                raise ValueError("es_base_url is required when persistence_backend=elasticsearch")
+        else:
+            if not self.sqlite_url.startswith("sqlite:///"):
+                raise ValueError("SQLite URL must start with 'sqlite:///'")
+
+        if self.search_backend == "elasticsearch" and not self.es_base_url:
+            raise ValueError("es_base_url is required when search_backend=elasticsearch")
+        if self.search_backend == "opensearch" and not self.os_base_url:
+            raise ValueError("os_base_url is required when search_backend=opensearch")
+        if self.search_backend == "solr" and not self.solr_base_url:
+            raise ValueError("solr_base_url is required when search_backend=solr")
+        if self.search_backend == "solr" and self.retrieval_mode in {"dense", "dual"}:
+            raise ValueError("search_backend=solr supports only retrieval_mode=sparse in v1")
+        if self.retrieval_mode == "hybrid" and self.search_backend not in {
+            "local_split",
+            "elasticsearch",
+        }:
+            raise ValueError(
+                "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
+            )
+        if (
+            self.retrieval_mode == "hybrid"
+            and self.search_backend == "elasticsearch"
+            and self.persistence_backend != "elasticsearch"
+        ):
+            raise ValueError(
+                "retrieval_mode=hybrid with search_backend=elasticsearch requires "
+                "persistence_backend=elasticsearch"
+            )
         return self
 
     def get_database_path(self) -> Path:
@@ -322,4 +640,4 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-settings: Settings = Settings()
+settings: Settings = load_settings_from_yaml()

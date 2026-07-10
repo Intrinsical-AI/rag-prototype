@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalRequest,
+    RetrievalResult,
+    retrieval_result_from_pairs,
+)
 from local_rag_backend.core.ports import (
     DocumentRepoPort,
     EmbedderPort,
     RetrieverPort,
     VectorRepoPort,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from local_rag_backend.core.domain.entities import Document
 
 
 class DenseVectorRetriever(RetrieverPort):
@@ -27,14 +25,14 @@ class DenseVectorRetriever(RetrieverPort):
         self.vector_repo = vector_repo
         self.doc_repo = doc_repo
 
-    def retrieve(self, query: str, k: int = 5) -> tuple[Sequence[Document], Sequence[float]]:
-        if k <= 0:
-            return [], []
+    def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
+        if request.top_k <= 0:
+            return RetrievalResult(items=(), mode_used="dense", backend_used="legacy_dense")
 
-        query_embedding = self.embedder.embed([query])[0]
-        id_score_pairs = self.vector_repo.similar(query_embedding, k)
+        query_embedding = self.embedder.embed([request.query])[0]
+        id_score_pairs = self.vector_repo.similar(query_embedding, request.top_k)
         if not id_score_pairs:
-            return [], []
+            return RetrievalResult(items=(), mode_used="dense", backend_used="legacy_dense")
 
         doc_ids, scores = zip(*id_score_pairs, strict=False)
         docs = self.doc_repo.get(list(doc_ids))
@@ -44,4 +42,10 @@ class DenseVectorRetriever(RetrieverPort):
         ordered_docs = [docs_by_id[doc_id] for doc_id, _ in ordered_pairs if doc_id in docs_by_id]
         ordered_scores = [score for doc_id, score in ordered_pairs if doc_id in docs_by_id]
 
-        return ordered_docs, ordered_scores
+        return retrieval_result_from_pairs(
+            docs=ordered_docs,
+            scores=ordered_scores,
+            mode_used="dense",
+            backend_used="legacy_dense",
+            stage="dense",
+        )

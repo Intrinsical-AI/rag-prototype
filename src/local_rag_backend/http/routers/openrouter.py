@@ -50,7 +50,7 @@ async def openrouter_generate(
         and getattr(settings_obj, "openrouter_api_key", None)
     ):
         raise BadRequestError(
-            detail="OpenRouter is not configured (set OPENROUTER_ENABLED and OPENROUTER_API_KEY)",
+            detail="OpenRouter is not configured (set openrouter_enabled and openrouter_api_key in config.yaml)",
         )
 
     service_payload = OpenRouterServiceRequest(

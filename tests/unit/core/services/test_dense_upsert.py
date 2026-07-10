@@ -68,7 +68,7 @@ class _VecRepo:
         self.upsert_calls.append(([int(i) for i in ids], [list(v) for v in vectors]))
 
 
-def test_precompute_vectors_for_changed_and_new_items_only() -> None:
+def test_precompute_vectors_for_all_items_to_avoid_stale_precompute_races() -> None:
     stable_sha = hashlib.sha256(b"stable").hexdigest()
     repo = _DocRepoExisting(
         {
