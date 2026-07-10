@@ -36,10 +36,10 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - `ingest`: remove `click.echo` from planner internals so planning stays transport-neutral
 - `state`: make `ElasticSystemStateStorage.bump_version()` atomic
   - add a contention-focused test, not only a sequential monotonic test
-- `release`: reconcile tags, GitHub Releases, package version, and default branch
+- `release` (in progress for v2.1.0): reconcile tags, GitHub Releases, package version, and default branch
   - current mismatch: GitHub latest release is `2.0.1`, package metadata is `1.3.0`
-  - choose one tag convention: `vX.Y.Z` or `X.Y.Z`
-  - decide whether `master` or `develop` is the canonical release/default branch
+  - next release uses forward-only package/tag version `2.1.0` / `v2.1.0`
+  - promote `develop` through `main`; retain frozen `master` and historical tags
   - prune stale remote-tracking refs locally after the branch policy is clear
 - `ux/dx`: homogenize CLI exit codes and success/error output shape
 

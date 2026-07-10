@@ -34,6 +34,30 @@
    - `pre-commit run --all-files`
    - `make smoke-embedding-api-wheel`
 
+## RC Notes: 2026-07-10
+
+Planned release:
+
+- Canonical promotion path: `develop` -> `main`.
+- Package/tag version: `2.1.0` / `v2.1.0`.
+- Historical `2.0.1` and `v1.3.0` tags remain untouched.
+- `2.1.0` is intentionally forward-only because GitHub already published
+  `2.0.1`, even though that tagged commit reports package version `1.3.0`.
+- Release scope: strict `rag_ask` MCP input handling, explicit
+  `RAG_CONFIG_PATH`, safe Makefile environment bootstrap, and the installed
+  typed embedding integration API.
+
+Validated locally before remote promotion:
+
+- Full suite: 742 passed, 4 skipped, 87.41% branch coverage.
+- Ruff, formatting, mypy, pre-commit/security hooks: passed.
+- Import-linter: 5 contracts kept.
+- Installed-wheel embedding API smoke: passed outside the checkout with no
+  SentenceTransformers dependency.
+
+Remote CI, Docker, Python 3.11, final `main` commit, and release artifact hashes
+must be recorded after GitHub authentication is restored.
+
 ## RC Notes: 2026-04-27
 
 Assumed RC:
