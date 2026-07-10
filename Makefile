@@ -3,38 +3,53 @@
 .PHONY: help venv sync sync-dense-st sync-sec lint lint-imports type test test-architecture sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
+VENV_DIR ?= .venv
 UV_CACHE_DIR ?= .uv_cache
-UV := UV_CACHE_DIR=$(UV_CACHE_DIR) uv
+UV := UV_CACHE_DIR=$(UV_CACHE_DIR) UV_PROJECT_ENVIRONMENT=$(VENV_DIR) uv
+VENV_PYTHON_STAMP := $(VENV_DIR)/.python-stamp
+VENV_SYNC_STAMP := $(VENV_DIR)/.uv-sync-stamp
+VENV_DENSE_ST_STAMP := $(VENV_DIR)/.uv-sync-dense-st-stamp
+VENV_SEC_STAMP := $(VENV_DIR)/.uv-sec-stamp
 IMAGE_NAME ?= intrinsical/rag-prototype
 IMAGE_TAG ?= latest
 
-.venv/.python-stamp:
-	$(UV) venv .venv
-	@touch $@
+$(VENV_PYTHON_STAMP):
+	@if [ -x "$(VENV_DIR)/bin/python" ] || [ -f "$(VENV_DIR)/Scripts/python.exe" ]; then \
+		:; \
+	elif [ -f "$(VENV_DIR)/pyvenv.cfg" ]; then \
+		echo "Recreating unusable generated environment at $(VENV_DIR)"; \
+		$(UV) venv --clear "$(VENV_DIR)"; \
+	elif [ -e "$(VENV_DIR)" ]; then \
+		echo "Refusing to replace existing non-virtualenv directory: $(VENV_DIR)" >&2; \
+		exit 1; \
+	else \
+		$(UV) venv "$(VENV_DIR)"; \
+	fi
+	@touch "$@"
 
-.venv/.uv-sync-stamp: .venv/.python-stamp pyproject.toml uv.lock
+$(VENV_SYNC_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
 	$(UV) sync --frozen --group test --group lint --extra server --no-default-groups
-	@touch $@
+	@touch "$@"
 
-.venv/.uv-sync-dense-st-stamp: .venv/.python-stamp pyproject.toml uv.lock
+$(VENV_DENSE_ST_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
 	$(UV) sync --frozen --group test --group lint --extra server --extra dense-st --no-default-groups
-	@touch $@
+	@touch "$@"
 
-.venv/.uv-sec-stamp: .venv/.python-stamp pyproject.toml uv.lock
+$(VENV_SEC_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
 	$(UV) sync --frozen --group test --group lint --group sec --extra server --no-default-groups
-	@touch $@
+	@touch "$@"
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*##' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*##"}; {printf "  %-14s %s\n", $$1, $$2}'
 
-venv: .venv/.python-stamp ## Create local virtual environment
+venv: $(VENV_PYTHON_STAMP) ## Create local virtual environment
 
-sync: .venv/.uv-sync-stamp ## Sync locked test and lint dependencies
+sync: $(VENV_SYNC_STAMP) ## Sync locked test and lint dependencies
 
-sync-dense-st: .venv/.uv-sync-dense-st-stamp ## Sync test/lint plus heavy SentenceTransformers dependencies
+sync-dense-st: $(VENV_DENSE_ST_STAMP) ## Sync test/lint plus heavy SentenceTransformers dependencies
 
-sync-sec: .venv/.uv-sec-stamp ## Sync locked security tooling dependencies
+sync-sec: $(VENV_SEC_STAMP) ## Sync locked security tooling dependencies
 
 lint: sync ## Run Ruff lint and format checks
 	$(UV) run --active --no-sync ruff check .
@@ -44,7 +59,7 @@ lint-imports: sync ## Run import-linter architecture contracts
 	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
 
 type: sync ## Run mypy type checking
-	DEBUG=false $(UV) run --no-sync mypy --python-executable .venv/bin/python src/local_rag_backend
+	DEBUG=false $(UV) run --no-sync mypy --python-executable $(VENV_DIR)/bin/python src/local_rag_backend
 
 test: sync ## Run test suite
 	$(UV) run --active --no-sync pytest -q
@@ -79,7 +94,7 @@ clean: ## Remove cache, coverage, and Python build artifacts
 	rm -rf src/*.egg-info
 
 clean-all: clean ## Also remove local virtualenv and uv cache
-	rm -rf .venv .uv_cache
+	rm -rf $(VENV_DIR) .uv_cache
 
 docker-build: ## Build production Docker image (IMAGE_NAME/IMAGE_TAG overridable)
 	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) --target production .
