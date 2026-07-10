@@ -173,6 +173,32 @@ jobs:
       - name: Run architecture guardrails
         run: DEBUG=false uv run pytest -q -o addopts='' tests/architecture/test_*.py
 
+  embedding-api-wheel:
+    name: Installed embedding API wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv (cached)
+        uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/uv.lock
+          cache-suffix: embedding-api-wheel
+
+      - name: Build and smoke installed embedding API
+        run: make smoke-embedding-api-wheel
+
   coverage-critical:
     name: Coverage (critical modules)
     runs-on: ubuntu-latest
