@@ -9,11 +9,14 @@ import hashlib
 import random
 import time
 from collections.abc import Sequence
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from local_rag_backend.core.errors import LLMResponseError, LLMTimeoutError
 from local_rag_backend.core.ports import EmbedderPort
 from local_rag_backend.settings import settings
+
+if TYPE_CHECKING:
+    from local_rag_backend.settings import Settings
 
 Embedding = Sequence[float]
 
@@ -21,18 +24,30 @@ Embedding = Sequence[float]
 class SentenceTransformerEmbedder(EmbedderPort):
     """Embedder using the sentence-transformers library."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        *,
+        settings_obj: Settings | None = None,
+    ):
+        configured_settings = settings_obj or settings
         self.model_name = model_name
-        self._synthetic = bool(settings.synthetic_embeddings)
+        self._synthetic = bool(configured_settings.synthetic_embeddings)
         # nosec S311: intentional non-cryptographic RNG for synthetic stress-mode jitter/failures.
         self._rng = random.Random()  # noqa: S311
-        self._fail_rate = max(0.0, min(1.0, float(settings.synthetic_embedding_fail_rate)))
-        self._jitter_min_ms = max(0.0, float(settings.synthetic_embedding_jitter_min_ms))
+        self._fail_rate = max(
+            0.0,
+            min(1.0, float(configured_settings.synthetic_embedding_fail_rate)),
+        )
+        self._jitter_min_ms = max(
+            0.0,
+            float(configured_settings.synthetic_embedding_jitter_min_ms),
+        )
         self._jitter_max_ms = max(
             self._jitter_min_ms,
-            float(settings.synthetic_embedding_jitter_max_ms),
+            float(configured_settings.synthetic_embedding_jitter_max_ms),
         )
-        self.dim = int(settings.synthetic_embedding_dim)
+        self.dim = int(configured_settings.synthetic_embedding_dim)
         self.model = None
 
         if self._synthetic:

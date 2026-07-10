@@ -1,6 +1,6 @@
 # Simple developer helpers (uv-first).
 
-.PHONY: help venv sync sync-dense-st sync-sec lint lint-imports type test test-architecture sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
+.PHONY: help venv sync sync-dense-st sync-sec lint lint-imports type test test-architecture smoke-embedding-api-wheel sec sec-run sec-hard sec-soft clean clean-all docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
 VENV_DIR ?= .venv
@@ -67,6 +67,9 @@ test: sync ## Run test suite
 test-architecture: sync ## Run architecture guardrail tests only
 	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
 	DEBUG=false $(UV) run --active --no-sync pytest -q -o addopts='' tests/architecture/test_*.py
+
+smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embedding API outside checkout
+	$(UV) run --no-sync python scripts/smoke_embedding_api_wheel.py
 
 sec: sec-hard ## Run strict security checks
 

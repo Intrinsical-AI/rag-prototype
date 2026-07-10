@@ -256,6 +256,16 @@ Options:
 - Prevent recurrence:
   - add a pre-release check that asserts tag name, package version, GitHub release target, and branch policy match.
 
+Local resolution prepared on 2026-07-10 (publication still pending):
+
+- use `2.1.0` / annotated `v2.1.0` for the next release so public versioning
+  moves forward from the existing `2.0.1` GitHub release;
+- promote `develop` through a protected `main` branch and keep `master` frozen;
+- leave `2.0.1` and `v1.3.0` untouched, documenting them as historical
+  inconsistent release metadata rather than rewriting public history;
+- do not mark this item closed until remote CI, the `main` merge, tag, GitHub
+  Release, and artifact/version checks agree.
+
 ## What Is Not The Problem
 
 These hotspots are not primarily about missing tests.

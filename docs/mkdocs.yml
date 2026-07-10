@@ -20,5 +20,6 @@ nav:
   - Release Checklist: RELEASE_CHECKLIST.md
   - App Layer: app.md
   - Advanced Usage: USAGE.md
+  - Embedding Integration API: embedding_integration.md
   - LangChain Loaders: langchain_loaders.md
   - Framework Analysis: analysis_rag_frameworks.md

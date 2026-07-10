@@ -314,6 +314,7 @@ docker compose up -d
 │   │   └── use_cases/         # application use cases (ingest, query, mutation, …)
 │   ├── infrastructure/        # adapters: llms, retrievers, storage, loaders, observability
 │   ├── composition/           # DI container, factory, wiring (transport-neutral)
+│   ├── integrations/          # stable installed-consumer APIs (PEP 561 typed)
 │   ├── http/                  # FastAPI transport adapter (routers, schemas, middleware)
 │   ├── cli_commands/          # CLI transport adapters (ingest, mutate, eval, …)
 │   ├── scripts/               # internal scripts (sample data ingestion)
@@ -323,6 +324,7 @@ docker compose up -d
 
 ### Extension and integration points
 
+* **Installed embeddings consumer**: use the typed [`local_rag_backend.integrations.embeddings`](docs/embedding_integration.md) API; do not import CLI or composition helpers.
 * **LLM**: implement `GeneratorPort` (see `infrastructure/llms/*`) and wire it in `composition/factory.py`.
 * **Retriever**: implement `RetrieverPort` and wire it through `composition/adapters.py` (`build_retriever_from_settings` / `build_retriever_with_default_embedder_from_settings`).
 * **Vector store**: implement `VectorRepoPort` (e.g., an alternative to FAISS).
