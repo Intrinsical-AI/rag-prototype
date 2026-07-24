@@ -2,7 +2,11 @@
 
 > Scope: validated hotspots in `core/services`, `core/use_cases`, `cli_commands`, plus selected repo-level seams in `composition` and `infrastructure` when they materially affect runtime behavior
 >
-> Status: current as of 2026-04-08, based on code inspection and targeted unit tests
+> Status: banner refreshed 2026-07-24 against package `2.1.0`; hotspot inventory
+> still rooted in the 2026-04-08 inspection plus later embedding-consumer work.
+> Re-verify mutation/eval rows before large refactors. See also
+> [`embedding_integration.md`](./embedding_integration.md) for the installed
+> embeddings consumer surface (not treated as primary debt).
 
 ## Summary
 
