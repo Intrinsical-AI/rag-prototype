@@ -12,9 +12,9 @@ from support.repogpt_fixture import (
     emit_repogpt_code_units,
 )
 
-if not REPOGPT_CLI_AVAILABLE or not REPOGPT_FIXTURE_REPO.exists():
+if not REPOGPT_CLI_AVAILABLE or REPOGPT_FIXTURE_REPO is None:
     pytest.skip(
-        "cross-repo fixture not available (synergy monorepo layout required)",
+        "external RepoGPT fixture unavailable; set REPOGPT_ROOT and REPOGPT_FIXTURE_REPO",
         allow_module_level=True,
     )
 

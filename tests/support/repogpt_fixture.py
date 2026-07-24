@@ -6,18 +6,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+from support.external_paths import configured_directory
+
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-SYNERGY_ROOT = WORKSPACE_ROOT / "synergy"
 REPOGPT_ROOT = Path(os.environ.get("REPOGPT_ROOT", WORKSPACE_ROOT / "RepoGPT"))
 REPOGPT_CLI_AVAILABLE = REPOGPT_ROOT.is_dir()
-REPOGPT_FIXTURE_REPO = SYNERGY_ROOT / "fixtures" / "repogpt_eval_repo"
+REPOGPT_FIXTURE_REPO = configured_directory("REPOGPT_FIXTURE_REPO")
 
 
 def emit_repogpt_code_units(
     *,
     payload_path: Path,
-    repo_path: Path = REPOGPT_FIXTURE_REPO,
+    repo_path: Path | None = REPOGPT_FIXTURE_REPO,
 ) -> dict[str, object]:
+    if repo_path is None:
+        raise RuntimeError("REPOGPT_FIXTURE_REPO is required for this external E2E fixture")
     env = dict(os.environ)
     repogpt_src = REPOGPT_ROOT / "src"
     existing_pythonpath = env.get("PYTHONPATH")

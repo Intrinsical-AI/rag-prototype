@@ -15,7 +15,6 @@ from local_rag_backend.infrastructure.search_backends.local_split import LocalSp
 from local_rag_backend.settings import settings
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-SYNERGY_ROOT = WORKSPACE_ROOT / "synergy"
 TR3V0R_SRC = WORKSPACE_ROOT / "tr3v0r" / "src"
 pytest.importorskip("pyarrow")
 if str(TR3V0R_SRC) not in sys.path:
