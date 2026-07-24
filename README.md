@@ -495,11 +495,10 @@ sequenceDiagram
 ## Tests
 
 ```bash
-UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --extra server --no-default-groups
-UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
-UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
-PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run --active --no-sync lint-imports
-uv run pre-commit run --all-files
+make sync
+make check
+make pre-commit
+make smoke-embedding-api-wheel
 ```
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
@@ -514,12 +513,13 @@ Current CI gates include:
 - architecture guardrails: `pytest -q -o addopts='' tests/architecture/test_*.py`
 - `lint-imports` (macro architecture contracts via `.importlinter`)
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
-- security scan job (`bandit` + `safety` report generation)
+- strict, locked security gate (`bandit` + `safety` over runtime/server dependencies)
 - Docker build for `--target production` on `main/master`
 
-Workflow trigger note:
-- PRs/commits that only change docs (`**/*.md`, `docs/**`) do not trigger CI due to `paths-ignore` in `.github/workflows/ci.yml`.
-- Run local validation manually for doc-only changes when they alter architecture/API/operations guidance.
+Workflow trigger note: documentation-only changes run CI because docs describe
+executable setup, gate, and operational contracts.
+- Run local validation before pushing doc-only changes that alter
+  architecture/API/operations guidance.
 
 For local parity, use:
 
