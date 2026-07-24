@@ -12,6 +12,5 @@ This folder contains the project documentation.
 - [App Layer Boundaries](app.md)
 - [Advanced usage](USAGE.md)
 - [Embedding integration](embedding_integration.md)
-- [Internal synergy](internal-synergy.md)
 - [LangChain loaders adapter](langchain_loaders.md)
 - [Framework analysis](analysis_rag_frameworks.md)

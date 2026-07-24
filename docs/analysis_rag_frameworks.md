@@ -335,7 +335,7 @@ START: "I need to build RAG"
 
 ## Summary Recommendation
 
-**For your Synergy project (assuming medium-to-long-term, custom persistence):**
+**For a medium-to-long-term project with custom persistence:**
 → **Start: rag-prototype + local_split (learning phase)**
 → **Graduate: rag-prototype + pgvector (production phase, < 100M docs)**
 → **Scale: Add Qdrant adapter if vector perf matters**
