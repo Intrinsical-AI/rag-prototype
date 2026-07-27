@@ -112,6 +112,22 @@ def test_debug_accepts_development_alias_from_string():
     assert s.debug is True
 
 
+def test_production_cors_rejects_wildcard_origin():
+    with pytest.raises(ValueError, match="explicit origins"):
+        Settings(debug=False, cors_allow_origins=["*"])
+
+
+def test_production_cors_accepts_explicit_and_empty_origins():
+    assert Settings(debug=False, cors_allow_origins=[]).cors_allow_origins == []
+    assert Settings(
+        debug=False, cors_allow_origins=["https://app.example.com"]
+    ).cors_allow_origins == ["https://app.example.com"]
+
+
+def test_debug_cors_accepts_wildcard_origin():
+    assert Settings(debug=True, cors_allow_origins="*").cors_allow_origins == ["*"]
+
+
 def test_data_dir_is_not_created_as_a_side_effect(tmp_path):
     d = tmp_path / "new-data-dir"
     assert not d.exists()

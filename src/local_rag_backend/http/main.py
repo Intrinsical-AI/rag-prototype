@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from importlib.resources.abc import Traversable
 
+    from local_rag_backend.settings import Settings
+
 _LOG_LEVEL = getattr(logging, settings.log_level, logging.INFO)
 logging.basicConfig(level=_LOG_LEVEL, stream=sys.stdout)
 logger = logging.getLogger(__name__)
@@ -148,11 +150,16 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
     raise NotFoundError("Asset not found.")
 
 
+def _get_cors_allow_origins(settings_obj: Settings) -> list[str]:
+    """Resolve the CORS policy after settings validation."""
+    return ["*"] if settings_obj.debug else list(settings_obj.cors_allow_origins)
+
+
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
 register_exception_handlers(app)
 
 # CORS: keep permissive defaults ONLY in debug mode.
-cors_allow_origins = ["*"] if settings.debug else list(settings.cors_allow_origins)
+cors_allow_origins = _get_cors_allow_origins(settings)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allow_origins,

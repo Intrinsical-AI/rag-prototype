@@ -14,6 +14,7 @@ enable_reranker: false
 # --- Security / HTTP ---
 api_key: null
 public_bind_requires_api_key: true
+# Production requires exact origins; "*" is accepted only when debug is true.
 cors_allow_origins: []
 
 # --- Retrieval ---
