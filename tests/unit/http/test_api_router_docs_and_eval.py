@@ -343,4 +343,5 @@ async def test_openrouter_generate_malformed_response_is_502(asgi_client, monkey
         },
     )
     assert r.status_code == 502
-    assert "malformed response" in r.json()["detail"]
+    assert r.json()["detail"] == "Bad gateway."
+    assert "malformed response" not in r.text

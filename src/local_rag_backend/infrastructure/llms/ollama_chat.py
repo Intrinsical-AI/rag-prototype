@@ -63,16 +63,20 @@ class OllamaGenerator(GeneratorPort):
                 return response_data["response"].strip()
             raise LLMResponseError("Ollama response malformed")
 
-        except httpx.TimeoutException as e:
-            raise LLMTimeoutError(f"Ollama request timed out to {self.api_url}") from e
-        except httpx.ConnectError as e:
-            raise LLMConnectionError(f"Could not connect to Ollama at {self.api_url}") from e
-        except httpx.HTTPStatusError as e:
-            status = e.response.status_code if e.response is not None else 500
-            detail = e.response.text if e.response is not None else str(e)
-            raise LLMResponseError(f"Ollama API error (status={status}): {detail}") from e
-        except httpx.RequestError as e:
-            raise LLMResponseError(f"Ollama API error: {e!s}") from e
-        except Exception as e:
-            logger.error(f"Unexpected error calling Ollama: {e}", exc_info=True)
-            raise LLMResponseError(f"Unexpected error calling Ollama: {e!s}") from e
+        except httpx.TimeoutException as exc:
+            logger.exception("Ollama request timed out")
+            raise LLMTimeoutError("Ollama request timed out") from exc
+        except httpx.ConnectError as exc:
+            logger.exception("Ollama connection failed")
+            raise LLMConnectionError("Could not connect to Ollama") from exc
+        except httpx.HTTPStatusError as exc:
+            logger.exception("Ollama returned an HTTP error")
+            raise LLMResponseError("Ollama returned an error response") from exc
+        except httpx.RequestError as exc:
+            logger.exception("Ollama request failed")
+            raise LLMResponseError("Ollama request failed") from exc
+        except LLMResponseError:
+            raise
+        except Exception as exc:
+            logger.exception("Unexpected error calling Ollama")
+            raise LLMResponseError("Unexpected error calling Ollama") from exc

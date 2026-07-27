@@ -117,6 +117,10 @@ rag-server
 ## Configuration
 
 Runtime configuration defaults to `config.yaml` in the process working directory.
+When `debug: false`, `cors_allow_origins` accepts only explicit origins such as
+`https://app.example.com`; a wildcard (`"*"`) is rejected at startup. Leave the
+list empty to disable cross-origin access. Debug mode keeps the permissive
+wildcard policy for local development.
 Set `RAG_CONFIG_PATH=/absolute/path/to/runtime.yaml` when an installed console script, including
 `rag-mcp`, runs outside the checkout. The selected YAML remains the single runtime source of truth,
 and relative paths inside it resolve against that file's directory. An explicit path passed to

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 async def handle_app_error(_request: Request, exc: Exception) -> JSONResponse:
     app_error = exc if isinstance(exc, AppError) else InternalServerError(str(exc))
     detail = app_error.detail
-    if int(app_error.status_code) == 500 and not bool(settings.debug):
+    if int(app_error.status_code) >= 500 and not bool(settings.debug):
         detail = app_error.default_detail
     return JSONResponse(status_code=int(app_error.status_code), content={"detail": detail})
 

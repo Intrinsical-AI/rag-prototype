@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from importlib.resources.abc import Traversable
 
+    from local_rag_backend.settings import Settings
+
 _LOG_LEVEL = getattr(logging, settings.log_level, logging.INFO)
 logging.basicConfig(level=_LOG_LEVEL, stream=sys.stdout)
 logger = logging.getLogger(__name__)
@@ -123,6 +125,11 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
     """
     Load a frontend asset (css/js/etc.), first from packaged resources, then from repo structure.
     """
+    if not asset_path or "\\" in asset_path:
+        raise NotFoundError("Asset not found.")
+    raw_parts = asset_path.split("/")
+    if any(part in {"", ".", ".."} for part in raw_parts):
+        raise NotFoundError("Asset not found.")
     posix = PurePosixPath(asset_path)
     if posix.is_absolute() or ".." in posix.parts:
         raise NotFoundError("Asset not found.")
@@ -139,7 +146,10 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
         pass
 
     # 2) Repo assets
-    fs_file = FRONTEND_DIR.joinpath(*posix.parts)
+    fs_root = FRONTEND_DIR.resolve()
+    fs_file = fs_root.joinpath(*posix.parts).resolve()
+    if not fs_file.is_relative_to(fs_root):
+        raise NotFoundError("Asset not found.")
     if fs_file.is_file():
         data = fs_file.read_bytes()
         mt = mimetypes.guess_type(fs_file.name)[0] or "application/octet-stream"
@@ -148,11 +158,16 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
     raise NotFoundError("Asset not found.")
 
 
+def _get_cors_allow_origins(settings_obj: Settings) -> list[str]:
+    """Resolve the CORS policy after settings validation."""
+    return ["*"] if settings_obj.debug else list(settings_obj.cors_allow_origins)
+
+
 app = FastAPI(title="Local RAG Demo", lifespan=lifespan)
 register_exception_handlers(app)
 
 # CORS: keep permissive defaults ONLY in debug mode.
-cors_allow_origins = ["*"] if settings.debug else list(settings.cors_allow_origins)
+cors_allow_origins = _get_cors_allow_origins(settings)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allow_origins,

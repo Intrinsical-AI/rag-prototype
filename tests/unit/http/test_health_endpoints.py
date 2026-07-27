@@ -180,7 +180,9 @@ async def test_ready_endpoint_503_when_dense_manifest_missing(
     assert r.status_code == 503
     detail = r.json()
     assert detail["status"] == "not_ready"
-    assert "manifest" in detail["checks"]["retrieval_index_stats"].get("error", "")
+    assert detail["checks"]["retrieval_index_stats"]["error"] == "retrieval index unavailable"
+    assert str(idx) not in r.text
+    assert str(id_map) not in r.text
 
 
 async def test_ready_endpoint_503_when_dense_manifest_mismatch_embedding_model(

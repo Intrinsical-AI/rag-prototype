@@ -153,7 +153,8 @@ async def test_ask_returns_503_without_llm_for_valid_payload(
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
     assert r.status_code == 503
-    assert "No LLM configured" in r.json().get("detail", "")
+    assert r.json()["detail"] == "Service unavailable."
+    assert "No LLM configured" not in r.text
 
 
 @pytest.mark.parametrize("payload", [{"question": "", "k": 1}, {"question": "hi", "k": 0}])
@@ -189,7 +190,8 @@ async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite, 
     r = await asgi_client.post("/api/ask", json={"question": "hi", "k": 1})
 
     assert r.status_code == 504
-    assert "provider timeout" in r.json()["detail"]
+    assert r.json()["detail"] == "Gateway timeout."
+    assert "provider timeout" not in r.text
 
 
 async def test_ask_eval_maps_typed_llm_connection_error_to_503(
@@ -209,4 +211,5 @@ async def test_ask_eval_maps_typed_llm_connection_error_to_503(
         json={"question": "hello", "config": {"retrieval_mode": "sparse", "k": 1}},
     )
     assert r.status_code == 503
-    assert "provider unreachable" in r.json()["detail"]
+    assert r.json()["detail"] == "Service unavailable."
+    assert "provider unreachable" not in r.text
