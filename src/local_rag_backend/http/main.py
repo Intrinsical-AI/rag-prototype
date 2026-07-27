@@ -125,6 +125,11 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
     """
     Load a frontend asset (css/js/etc.), first from packaged resources, then from repo structure.
     """
+    if not asset_path or "\\" in asset_path:
+        raise NotFoundError("Asset not found.")
+    raw_parts = asset_path.split("/")
+    if any(part in {"", ".", ".."} for part in raw_parts):
+        raise NotFoundError("Asset not found.")
     posix = PurePosixPath(asset_path)
     if posix.is_absolute() or ".." in posix.parts:
         raise NotFoundError("Asset not found.")
@@ -141,7 +146,10 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
         pass
 
     # 2) Repo assets
-    fs_file = FRONTEND_DIR.joinpath(*posix.parts)
+    fs_root = FRONTEND_DIR.resolve()
+    fs_file = fs_root.joinpath(*posix.parts).resolve()
+    if not fs_file.is_relative_to(fs_root):
+        raise NotFoundError("Asset not found.")
     if fs_file.is_file():
         data = fs_file.read_bytes()
         mt = mimetypes.guess_type(fs_file.name)[0] or "application/octet-stream"

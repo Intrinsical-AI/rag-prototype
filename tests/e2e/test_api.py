@@ -96,8 +96,14 @@ async def test_get_frontend_assets_packaged_ok(asgi_client, monkeypatch):
 
 
 async def test_get_frontend_assets_path_traversal_404(asgi_client):
-    r = await asgi_client.get("/assets/../pyproject.toml")
-    assert r.status_code == 404
+    paths = (
+        "/assets/../pyproject.toml",
+        "/assets/%2e%2e%2fpyproject.toml",
+        "/assets/%2e%2e%5cpyproject.toml",
+    )
+    for path in paths:
+        r = await asgi_client.get(path)
+        assert r.status_code == 404
 
 
 async def test_api_ask_schema_with_sources(asgi_client, monkeypatch):
