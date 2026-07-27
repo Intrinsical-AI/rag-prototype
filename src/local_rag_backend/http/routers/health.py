@@ -4,6 +4,7 @@ Bounded router for health and readiness endpoints.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
     from local_rag_backend.composition.container import AppContainer
     from local_rag_backend.settings import Settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -40,8 +43,9 @@ async def _check_rag_service(checks: dict[str, Any]) -> bool:
         service = await get_rag_service()
         checks["rag_service"] = "ok" if service else "failed: not initialized"
         return bool(service)
-    except Exception as e:
-        checks["rag_service"] = f"failed: {e!s}"
+    except Exception:
+        logger.exception("RAG-service readiness check failed")
+        checks["rag_service"] = "failed: unavailable"
         return False
 
 
@@ -63,8 +67,9 @@ async def health_check(
         readiness_bundle = container.build_health_readiness_bundle()
         ping_database(diagnostics=readiness_bundle.diagnostics)
         return {"status": "healthy"}
-    except Exception as e:
-        raise ServiceUnavailableError(f"Database connection failed: {e!s}") from e
+    except Exception as exc:
+        logger.exception("Database health check failed")
+        raise ServiceUnavailableError() from exc
 
 
 @router.get("/readyz", tags=["Health"], summary="Readiness probe endpoint")
@@ -118,8 +123,7 @@ async def ollama_health_check(
             httpx.get, settings_obj.ollama_base_url, timeout=5, task_type="network"
         )
         response.raise_for_status()
-        return {"status": "ok", "url": settings_obj.ollama_base_url}
-    except httpx.HTTPError as e:
-        raise ServiceUnavailableError(
-            f"Ollama server not accessible at {settings_obj.ollama_base_url}. Error: {e}",
-        )
+        return {"status": "ok"}
+    except httpx.HTTPError as exc:
+        logger.exception("Ollama health check failed")
+        raise ServiceUnavailableError() from exc

@@ -3,7 +3,11 @@
 import httpx
 import pytest
 
-from local_rag_backend.core.errors import LLMResponseError, LLMTimeoutError
+from local_rag_backend.core.errors import (
+    LLMConnectionError,
+    LLMResponseError,
+    LLMTimeoutError,
+)
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 
 
@@ -50,5 +54,59 @@ def test_generate_timeout(monkeypatch):
 
     monkeypatch.setattr("local_rag_backend.infrastructure.llms.ollama_chat.httpx.post", _timeout)
     gen = OllamaGenerator()
-    with pytest.raises(LLMTimeoutError):
+    with pytest.raises(LLMTimeoutError) as exc:
         gen.generate("q", ["ctx"])
+    assert str(exc.value) == "Ollama request timed out"
+
+
+def test_generate_connection_error_does_not_expose_uri(monkeypatch):
+    request = httpx.Request("POST", "http://internal-host:11434/api/generate")
+
+    def _connect(*_, **__):
+        raise httpx.ConnectError("secret internal URI", request=request)
+
+    monkeypatch.setattr("local_rag_backend.infrastructure.llms.ollama_chat.httpx.post", _connect)
+    with pytest.raises(LLMConnectionError) as exc:
+        OllamaGenerator().generate("q", ["ctx"])
+    assert str(exc.value) == "Could not connect to Ollama"
+    assert "internal-host" not in str(exc.value)
+
+
+def test_generate_http_error_does_not_expose_response_body(monkeypatch):
+    request = httpx.Request("POST", "http://internal-host:11434/api/generate")
+    response = httpx.Response(500, request=request, text="secret upstream body")
+
+    def _http_error(*_, **__):
+        raise httpx.HTTPStatusError("secret status", request=request, response=response)
+
+    monkeypatch.setattr("local_rag_backend.infrastructure.llms.ollama_chat.httpx.post", _http_error)
+    with pytest.raises(LLMResponseError) as exc:
+        OllamaGenerator().generate("q", ["ctx"])
+    assert str(exc.value) == "Ollama returned an error response"
+    assert "secret" not in str(exc.value)
+
+
+def test_generate_request_error_does_not_expose_detail(monkeypatch):
+    request = httpx.Request("POST", "http://internal-host:11434/api/generate")
+
+    def _request_error(*_, **__):
+        raise httpx.RequestError("secret request detail", request=request)
+
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.llms.ollama_chat.httpx.post", _request_error
+    )
+    with pytest.raises(LLMResponseError) as exc:
+        OllamaGenerator().generate("q", ["ctx"])
+    assert str(exc.value) == "Ollama request failed"
+    assert "secret" not in str(exc.value)
+
+
+def test_generate_unexpected_error_does_not_expose_detail(monkeypatch):
+    def _unexpected(*_, **__):
+        raise RuntimeError("secret unexpected detail")
+
+    monkeypatch.setattr("local_rag_backend.infrastructure.llms.ollama_chat.httpx.post", _unexpected)
+    with pytest.raises(LLMResponseError) as exc:
+        OllamaGenerator().generate("q", ["ctx"])
+    assert str(exc.value) == "Unexpected error calling Ollama"
+    assert "secret" not in str(exc.value)

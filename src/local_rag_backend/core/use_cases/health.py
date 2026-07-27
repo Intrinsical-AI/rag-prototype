@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import HealthDiagnosticsPort
     from local_rag_backend.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+
+def _public_retrieval_stats(stats: dict[str, Any]) -> dict[str, Any]:
+    """Remove internal paths and raw error text from public readiness data."""
+    hidden_keys = {"error", "hint", "id_map_path", "index_path", "manifest_path"}
+    public = {key: value for key, value in stats.items() if key not in hidden_keys}
+    if "error" in stats:
+        public["error"] = "retrieval index unavailable"
+    return public
 
 
 def ping_database(*, diagnostics: HealthDiagnosticsPort) -> None:
@@ -18,8 +30,9 @@ def check_database(*, checks: dict[str, Any], diagnostics: HealthDiagnosticsPort
         ping_database(diagnostics=diagnostics)
         checks["database"] = "ok"
         return True
-    except Exception as e:
-        checks["database"] = f"failed: {e!s}"
+    except Exception:
+        logger.exception("Database readiness check failed")
+        checks["database"] = "failed: unavailable"
         return False
 
 
@@ -33,14 +46,16 @@ def check_sql_counts(
     try:
         docs_count = diagnostics.get_documents_count()
         checks["documents"] = {"count": docs_count}
-    except Exception as e:
-        checks["documents"] = f"failed: {e!s}"
+    except Exception:
+        logger.exception("Document-count readiness check failed")
+        checks["documents"] = "failed: unavailable"
         is_ready = False
 
     try:
         checks["history"] = {"count": diagnostics.get_history_count()}
-    except Exception as e:
-        checks["history"] = f"failed: {e!s}"
+    except Exception:
+        logger.exception("History-count readiness check failed")
+        checks["history"] = "failed: unavailable"
     return is_ready, docs_count
 
 
@@ -58,8 +73,6 @@ def _check_retrieval_index_id_set_drift(
         if not stale and not missing:
             return True
         checks["retrieval_index_drift"] = {
-            "stale_in_index": stale[:20],
-            "missing_in_index": missing[:20],
             "stale_count": len(stale),
             "missing_count": len(missing),
         }
@@ -68,8 +81,9 @@ def _check_retrieval_index_id_set_drift(
             "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
         )
         return False
-    except Exception as e:
-        checks["retrieval_index_drift"] = f"failed: {e!s}"
+    except Exception:
+        logger.exception("Retrieval-index ID drift check failed")
+        checks["retrieval_index_drift"] = "failed: unavailable"
         checks["retrieval_index"] = (
             "failed: unable to verify retrieval index drift. "
             "Hint: inspect the index/id_map and rebuild if needed "
@@ -98,13 +112,13 @@ def check_retrieval_index(
         dim=None,
         expected_manifest=expected_manifest,
     )
-    checks["retrieval_index_stats"] = stats
+    checks["retrieval_index_stats"] = _public_retrieval_stats(stats)
 
     if stats.get("status") != "ok":
         checks["retrieval_index"] = (
             f"failed: {stats.get('status')} "
-            f"(index_path={stats.get('index_path')}, id_map_path={stats.get('id_map_path')}). "
-            f"Hint: {stats.get('hint')}"
+            "Hint: inspect the retrieval index and rebuild it if needed "
+            "(`rag-rebuild-index` or POST /api/index/rebuild)."
         )
         return False
 
@@ -144,8 +158,9 @@ def check_mutation_journal(
         incomplete = diagnostics.get_incomplete_mutation_records_count(
             coordination_dir=settings_obj.get_coordination_dir()
         )
-    except Exception as e:
-        checks["mutation_journal"] = {"status": "failed", "error": str(e)}
+    except Exception:
+        logger.exception("Mutation-journal readiness check failed")
+        checks["mutation_journal"] = {"status": "failed"}
         return
 
     if incomplete > 0:
