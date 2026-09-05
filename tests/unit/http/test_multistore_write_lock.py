@@ -178,7 +178,7 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
     monkeypatch.setattr(docs_router, "run_blocking", _fake_run_blocking, raising=True)
     monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
-    resp = await asgi_client.post("/api/docs", json={"texts": ["  hello world  "]})
+    resp = await asgi_client.post("/api/docs/ingest", json={"texts": ["  hello world  "]})
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["count"] >= 1

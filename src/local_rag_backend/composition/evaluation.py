@@ -13,12 +13,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from local_rag_backend.composition.embeddings import (
-    DEFAULT_DENSE_BACKEND_MESSAGE,
-    _build_default_openai_embedder,
-    _build_default_st_embedder,
-    build_dense_embedder_from_settings,
-)
 from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
 from local_rag_backend.core.ports import (
     EmbedderPort,
@@ -45,6 +39,12 @@ from local_rag_backend.infrastructure.retrieval.hybrid import (
 )
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 from local_rag_backend.infrastructure.search_backends import LocalSplitSearchRetriever
+from local_rag_backend.integrations.embeddings._factory import (
+    DEFAULT_DENSE_BACKEND_MESSAGE,
+    _build_default_openai_embedder,
+    _build_default_st_embedder,
+    build_dense_embedder_from_settings,
+)
 
 if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
@@ -87,7 +87,7 @@ class _SqlEvalStoragePort(EvalStoragePort):
         # Side-effect import: registers SQLAlchemy model metadata with db_base.
         from local_rag_backend.infrastructure.persistence.sql import models as _models  # noqa: F401
 
-        db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
+        db_base.ensure_sqlite_schema_current(engine_to_use=engine)
         return SqlDocumentStorage(session_factory=session_local)
 
     def _settings_for_eval_root(self, eval_root: Path) -> Settings:

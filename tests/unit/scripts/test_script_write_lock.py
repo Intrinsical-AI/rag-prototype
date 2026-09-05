@@ -122,11 +122,11 @@ def test_build_index_raises_when_schema_ensure_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "sqlite_url", f"sqlite:///{tmp_path / 'app.db'}", raising=False)
     monkeypatch.setattr(settings, "data_dir", tmp_path / "coord", raising=False)
 
-    def _boom_schema(*, engine_to_use=None, id_map_path=None):
+    def _boom_schema(*, engine_to_use=None):
         raise RuntimeError("forced schema failure")
 
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.sql.base.ensure_sqlite_schema_compatible",
+        "local_rag_backend.infrastructure.persistence.sql.base.ensure_sqlite_schema_current",
         _boom_schema,
         raising=True,
     )

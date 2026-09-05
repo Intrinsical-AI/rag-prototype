@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
+import pytest
 
-from local_rag_backend.infrastructure.persistence.elasticsearch.client import ElasticClient
+from local_rag_backend.core.use_cases.docs_import_canonical import _delete_stale_scope_documents
+from local_rag_backend.infrastructure.persistence.elasticsearch.client import (
+    ElasticBackendError,
+    ElasticClient,
+)
 from local_rag_backend.infrastructure.persistence.elasticsearch.document_storage import (
     ElasticDocsRepository,
 )
@@ -146,6 +152,75 @@ def _build_repo() -> ElasticDocsRepository:
         client=httpx.Client(base_url="http://example.test", transport=_build_transport()),
     )
     return ElasticDocsRepository(settings_obj=settings_obj, client=client)
+
+
+def test_canonical_scope_delete_removes_colocated_embedding_without_vector_update():
+    repo = _build_repo()
+    repo.upsert_documents_by_external_id(
+        [
+            repo.UpsertDoc(external_id="stale", content="old", scope="demo", embedding=[1.0, 0.0]),
+            repo.UpsertDoc(external_id="keep", content="new", scope="demo", embedding=[0.0, 1.0]),
+        ]
+    )
+
+    def vector_factory(**kwargs):
+        raise AssertionError("Embedding is deleted with its Elasticsearch document")
+
+    kwargs = {
+        "scope": "demo",
+        "keep_external_ids": {"keep"},
+        "settings_obj": repo._settings,
+        "ports": SimpleNamespace(doc_repo_factory=lambda: repo, vector_repo_factory=vector_factory),
+    }
+    assert _delete_stale_scope_documents(**kwargs) == (["stale"], 1, 1)
+    assert [doc.external_id for doc in repo.get(["keep", "stale"])] == ["keep"]
+    assert not repo.get_tombstoned_external_ids(["stale"])
+    assert _delete_stale_scope_documents(**kwargs) == ([], 0, 0)
+
+
+@pytest.mark.parametrize("errors", [True, False])
+def test_bulk_reports_individual_failures_even_when_http_succeeds(errors):
+    response = {
+        "errors": errors,
+        "items": [
+            {"delete": {"_id": "good", "status": 200}},
+            {
+                "delete": {
+                    "_id": "bad",
+                    "status": 429,
+                    "error": {"type": "rejected_execution_exception"},
+                }
+            },
+        ],
+    }
+    client = ElasticClient(
+        client=httpx.Client(
+            base_url="http://example.test",
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)),
+        )
+    )
+    with pytest.raises(ElasticBackendError, match="delete bad: status 429"):
+        client.bulk([{"delete": {"_index": "docs", "_id": "bad"}}])
+
+
+def test_bulk_delete_absent_document_is_idempotent():
+    client = ElasticClient(
+        client=httpx.Client(
+            base_url="http://example.test",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "errors": False,
+                        "items": [
+                            {"delete": {"_id": "missing", "status": 404, "result": "not_found"}}
+                        ],
+                    },
+                )
+            ),
+        )
+    )
+    assert not client.bulk([{"delete": {"_index": "docs", "_id": "missing"}}])["errors"]
 
 
 def test_upsert_is_unchanged_when_metadata_matches() -> None:

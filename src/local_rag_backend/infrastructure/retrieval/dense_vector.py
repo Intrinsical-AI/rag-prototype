@@ -27,12 +27,12 @@ class DenseVectorRetriever(RetrieverPort):
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         if request.top_k <= 0:
-            return RetrievalResult(items=(), mode_used="dense", backend_used="legacy_dense")
+            return RetrievalResult(items=(), mode_used="dense", backend_used="local_vector")
 
         query_embedding = self.embedder.embed([request.query])[0]
         id_score_pairs = self.vector_repo.similar(query_embedding, request.top_k)
         if not id_score_pairs:
-            return RetrievalResult(items=(), mode_used="dense", backend_used="legacy_dense")
+            return RetrievalResult(items=(), mode_used="dense", backend_used="local_vector")
 
         doc_ids, scores = zip(*id_score_pairs, strict=False)
         docs = self.doc_repo.get(list(doc_ids))
@@ -46,6 +46,6 @@ class DenseVectorRetriever(RetrieverPort):
             docs=ordered_docs,
             scores=ordered_scores,
             mode_used="dense",
-            backend_used="legacy_dense",
+            backend_used="local_vector",
             stage="dense",
         )

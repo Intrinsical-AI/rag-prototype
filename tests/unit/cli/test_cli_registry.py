@@ -23,13 +23,13 @@ def test_cli_registers_all_expected_commands() -> None:
     assert "delete-external-ids" not in cli_module.cli.commands
 
 
-def test_cli_does_not_register_legacy_mutation_commands() -> None:
-    legacy = {
+def test_cli_does_not_register_removed_mutation_commands() -> None:
+    removed_commands = {
         "upsert-docs",
         "delete-docs",
         "delete-external-ids",
     }
-    assert legacy.isdisjoint(cli_module.cli.commands.keys())
+    assert removed_commands.isdisjoint(cli_module.cli.commands.keys())
 
 
 @pytest.mark.parametrize(

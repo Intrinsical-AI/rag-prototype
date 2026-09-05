@@ -190,7 +190,7 @@ type: project
   - **Fallback if pgvector doesn't cut it**: Switch to Qdrant (modern, battle-tested in 2024, fewer ops surprises than Milvus)
 
 **Scenario 2: Building for billion-scale search (academic + research orgs)**
-- **Choice**: Add Milvus to rag-prototype (keep ES as option for legacy)
+- **Choice**: Add Milvus to rag-prototype
 - **Reasoning**:
   - Milvus is THE distributed vector DB (comparable to ES but vector-native)
   - Hybrid (dense + sparse) retrieval baked in

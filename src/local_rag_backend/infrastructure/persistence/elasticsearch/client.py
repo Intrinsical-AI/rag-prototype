@@ -112,13 +112,28 @@ class ElasticClient:
     def bulk(self, operations: Iterable[dict[str, Any]]) -> dict[str, Any]:
         lines = [json.dumps(op) for op in operations]
         payload = "\n".join(lines) + ("\n" if lines else "")
-        return self.request_json(
+        result = self.request_json(
             "POST",
             "/_bulk",
             content=payload.encode("utf-8"),
             params={"refresh": "true"},
             expected=(200,),
         )
+        failures = []
+        for item in result.get("items", []):
+            for operation, outcome in item.items():
+                status = int(outcome.get("status", 0))
+                # Deleting an already absent document/tombstone is an idempotent success.
+                missing_delete = (
+                    operation == "delete" and status == 404 and not outcome.get("error")
+                )
+                if outcome.get("error") or (status >= 400 and not missing_delete):
+                    failures.append(f"{operation} {outcome.get('_id', '?')}: status {status}")
+        if failures or result.get("errors"):
+            raise ElasticBackendError(
+                "Elasticsearch bulk item failures: " + ("; ".join(failures[:10]) or "unknown items")
+            )
+        return result
 
     def mget(self, *, index: str, ids: Sequence[str]) -> list[dict[str, Any]]:
         if not ids:

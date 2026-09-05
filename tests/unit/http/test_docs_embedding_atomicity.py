@@ -19,7 +19,7 @@ async def test_docs_dense_embed_failure_does_not_persist_sql(
     monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: BadEmbedder(), raising=True)
 
     with pytest.raises(RuntimeError, match="embed fail"):
-        await asgi_client.post("/api/docs", json={"texts": ["hello world"]})
+        await asgi_client.post("/api/docs/ingest", json={"texts": ["hello world"]})
     assert SqlDocumentStorage().get_all_documents() == []
 
 

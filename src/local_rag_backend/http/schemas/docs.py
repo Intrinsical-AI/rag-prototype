@@ -75,7 +75,7 @@ class DocsQueryRequest(BaseModel):
 
 
 class ImportResponse(BaseModel):
-    """Response for POST /api/docs/import."""
+    """Response for POST /api/docs/import-conversations."""
 
     count: int = Field(..., description="Number of documents imported")
     ids: list[str] = Field(default_factory=list, description="IDs of imported documents")

@@ -59,7 +59,7 @@ def test_execute_import_docs_sync_parses_and_ingests_chatgpt(monkeypatch) -> Non
     monkeypatch.setattr(
         docs_import,
         "ingest_docs_sync",
-        lambda *, texts, settings_obj, ports, source="api:/docs/import": (
+        lambda *, texts, settings_obj, ports, source="api:/docs/import-conversations": (
             [10, 11] if texts == ["a", "b"] else []
         ),
         raising=True,

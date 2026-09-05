@@ -75,12 +75,7 @@ magic = [
   # Optional file type detection via libmagic. Requires system libmagic on many distros.
   "python-magic>=0.4,<1.0"
 ]
-# CPU por defecto (retro-compat mantenida)
 performance = [
-  "torch>=2.0,<3.0",
-  "orjson>=3.10,<4.0"
-]
-performance-cpu = [
   "torch>=2.0,<3.0",
   "orjson>=3.10,<4.0"
 ]

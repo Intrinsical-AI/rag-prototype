@@ -9,7 +9,7 @@ async def test_mutate_delete_ids_sparse_removes_from_sql(
 ) -> None:
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
-    r = await asgi_client.post("/api/docs", json={"texts": ["a", "b", "c"]})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["a", "b", "c"]})
     assert r.status_code == 200
     ids = r.json()["ids"]
 
@@ -43,7 +43,7 @@ async def test_rebuild_index_dense_from_db(tmp_path, asgi_client, in_memory_sqli
         raising=True,
     )
 
-    r = await asgi_client.post("/api/docs", json={"texts": ["alpha", "beta"]})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["alpha", "beta"]})
     assert r.status_code == 200
     ids = r.json()["ids"]
 
@@ -64,7 +64,7 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
     asgi_client, in_memory_sqlite, monkeypatch
 ) -> None:
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    r = await asgi_client.post("/api/docs", json={"texts": ["zeta"]})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["zeta"]})
     assert r.status_code == 200
     doc_id = r.json()["ids"][0]
 
@@ -104,9 +104,9 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
 
 
 @pytest.mark.unit
-async def test_legacy_delete_endpoint_is_removed(asgi_client, in_memory_sqlite) -> None:
+async def test_removed_delete_endpoint_returns_not_found(asgi_client, in_memory_sqlite) -> None:
     r = await asgi_client.post(
         "/api/docs/delete",
-        json={"ids": ["doc-legacy"]},
+        json={"ids": ["doc-removed"]},
     )
     assert r.status_code == 404

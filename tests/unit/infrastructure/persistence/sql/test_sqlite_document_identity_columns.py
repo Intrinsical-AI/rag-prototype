@@ -6,7 +6,7 @@ from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage,
 from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 
 
-def test_ensure_sqlite_schema_compatible_runs_bootstrap_steps(monkeypatch):
+def test_ensure_sqlite_schema_current_runs_bootstrap_steps(monkeypatch):
     calls: list[tuple[object, ...]] = []
     dummy_engine = object()
 
@@ -15,10 +15,7 @@ def test_ensure_sqlite_schema_compatible_runs_bootstrap_steps(monkeypatch):
 
     monkeypatch.setattr(db_base.Base.metadata, "create_all", _create_all, raising=False)
 
-    db_base.ensure_sqlite_schema_compatible(
-        engine_to_use=dummy_engine,
-        id_map_path="id_map.json",
-    )
+    db_base.ensure_sqlite_schema_current(engine_to_use=dummy_engine)
     assert calls == [
         ("create_all", dummy_engine),
     ]
@@ -28,7 +25,7 @@ def test_fresh_schema_contains_doc_id_and_identity_columns(tmp_path):
     db_path = tmp_path / "app.db"
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
 
-    db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
+    db_base.ensure_sqlite_schema_current(engine_to_use=engine)
 
     with engine.begin() as conn:
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(documents)")).fetchall()}
@@ -52,7 +49,7 @@ def test_external_id_unique_constraint(tmp_path):
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-    db_base.ensure_sqlite_schema_compatible(engine_to_use=engine)
+    db_base.ensure_sqlite_schema_current(engine_to_use=engine)
 
     with SessionLocal() as s:
         s.add(DbDocument(doc_id="doc:1", content="a", external_id="X"))

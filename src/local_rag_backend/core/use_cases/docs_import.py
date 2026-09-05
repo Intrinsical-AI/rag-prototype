@@ -86,7 +86,7 @@ def execute_import_docs_sync(
         texts=texts,
         settings_obj=settings_obj,
         ports=ports,
-        source="api:/docs/import",
+        source="api:/docs/import-conversations",
     )
     return ImportDocsOutcome(
         count=len(ids),

@@ -1,6 +1,7 @@
 const qs = (selector) => document.querySelector(selector);
 const API_URL = '/api/ask';
-const DOCS_URL = '/api/docs';
+const DOCS_INGEST_URL = '/api/docs/ingest';
+const DOCS_QUERY_URL = '/api/docs/query';
 
 // --- DOM Elements ---
 const themeBtn = qs('#themeBtn');
@@ -169,7 +170,7 @@ addDocBtn.addEventListener('click', async () => {
   addDocBtn.disabled = true;
   addDocBtn.textContent = 'Adding...';
   try {
-    const r = await fetch(DOCS_URL, {
+    const r = await fetch(DOCS_INGEST_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ texts: [txt] })
@@ -191,7 +192,11 @@ refreshDocsBtn.addEventListener('click', loadDocs);
 
 async function loadDocs() {
   try {
-    const r = await fetch(DOCS_URL + '?limit=100&offset=0');
+    const r = await fetch(DOCS_QUERY_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({limit: 100, offset: 0})
+    });
     if (!r.ok) throw new Error(await r.text());
     const docs = await r.json();
     renderDocs(docs);

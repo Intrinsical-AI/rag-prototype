@@ -63,7 +63,7 @@ def _coerce_retrieval_result(raw_result: Any, *, request: RetrievalRequest) -> R
         docs=docs,
         scores=scores,
         mode_used=request.mode,
-        backend_used="legacy_test",
+        backend_used="test_backend",
     )
 
 

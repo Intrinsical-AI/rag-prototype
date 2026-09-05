@@ -58,7 +58,7 @@ def test_delete_does_not_mutate_index_when_manifest_drifts(tmp_path, monkeypatch
     assert idx.id_map == ["doc:1"]
 
 
-def test_upsert_fails_closed_when_manifest_is_missing_for_non_empty_legacy_index(
+def test_upsert_fails_closed_when_manifest_is_missing_for_non_empty_unmanaged_index(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
@@ -67,9 +67,9 @@ def test_upsert_fails_closed_when_manifest_is_missing_for_non_empty_legacy_index
     index_path = tmp_path / "index.faiss"
     id_map_path = tmp_path / "id_map.json"
 
-    # Simulate a legacy pre-manifest index with existing vectors.
-    legacy = VectorIndex(index_path, id_map_path, dim=4)
-    legacy.rebuild(["doc:101"], [[0.1, 0.2, 0.3, 0.4]])
+    # Simulate a unmanaged pre-manifest index with existing vectors.
+    unmanaged = VectorIndex(index_path, id_map_path, dim=4)
+    unmanaged.rebuild(["doc:101"], [[0.1, 0.2, 0.3, 0.4]])
     assert manifest_path_for(index_path).exists() is False
 
     vec = VectorStorage(str(index_path), str(id_map_path), dim=4, settings_obj=settings)

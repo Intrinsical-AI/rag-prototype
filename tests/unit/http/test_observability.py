@@ -45,8 +45,8 @@ def test_observability_delegates_to_telemetry(monkeypatch) -> None:
         ok=True,
         duration_s=0.01,
     )
-    observability.observe_ingest(source="api:/docs", ok=True, inserted=2)
+    observability.observe_ingest(source="api:/docs/ingest", ok=True, inserted=2)
 
     assert sink.events == [("e", {"a": 1})]
     assert sink.queries == [("sparse", False, True)]
-    assert sink.ingests == [("api:/docs", True, 2)]
+    assert sink.ingests == [("api:/docs/ingest", True, 2)]

@@ -56,7 +56,7 @@ async def test_golden_f1_f2_docs_mutation_ingest_and_list(
     )
     assert r3.status_code == 400
 
-    r4 = await asgi_client.post("/api/docs", json={"texts": ["Uno", "Dos"]})
+    r4 = await asgi_client.post("/api/docs/ingest", json={"texts": ["Uno", "Dos"]})
     assert r4.status_code == 200
     p4 = r4.json()
     assert p4["count"] == 2
@@ -82,7 +82,15 @@ async def test_golden_f3_query_eval_and_history_contract(
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
     class _DummyRagService:
-        def ask(self, question: str, top_k: int = 3) -> dict[str, object]:
+        def ask(
+            self,
+            question: str,
+            top_k: int = 3,
+            *,
+            filters=(),
+            retrieval_mode: str = "sparse",
+        ) -> dict[str, object]:
+            _ = (filters, retrieval_mode)
             return {
                 "answer": f"echo:{question}",
                 "docs": [Document(id="doc:1", content="ctx")],

@@ -54,14 +54,14 @@ def combine_hybrid_results(
     top_k_results = combined_results[:top_k]
 
     if not top_k_results:
-        return RetrievalResult(items=(), mode_used="hybrid", backend_used="legacy_hybrid")
+        return RetrievalResult(items=(), mode_used="hybrid", backend_used="local_hybrid")
 
     final_docs, final_scores = zip(*top_k_results, strict=False)
     return retrieval_result_from_pairs(
         docs=list(final_docs),
         scores=list(final_scores),
         mode_used="hybrid",
-        backend_used="legacy_hybrid",
+        backend_used="local_hybrid",
         stage="hybrid",
     )
 

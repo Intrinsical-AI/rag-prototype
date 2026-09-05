@@ -49,7 +49,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Ensure the data directory exists (SQLite cannot create parent directories).
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
-    db_base.ensure_sqlite_schema_compatible(engine_to_use=db_base.engine)
+    db_base.ensure_sqlite_schema_current(engine_to_use=db_base.engine)
     if settings.mutation_recovery_enabled:
         try:
             repaired = get_app_context().container.recover_incomplete_doc_mutations(limit=200)

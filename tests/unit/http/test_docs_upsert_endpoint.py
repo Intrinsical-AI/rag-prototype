@@ -124,9 +124,9 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
     assert dummy_vec.calls[2]["upsert_ids"] == [doc_id]
 
 
-async def test_legacy_upsert_endpoint_is_removed(asgi_client, in_memory_sqlite):
+async def test_removed_upsert_endpoint_returns_not_found(asgi_client, in_memory_sqlite):
     r = await asgi_client.post(
         "/api/docs/upsert",
-        json={"docs": [{"external_id": "doc-legacy", "content": "x"}]},
+        json={"docs": [{"external_id": "doc-removed", "content": "x"}]},
     )
     assert r.status_code == 404

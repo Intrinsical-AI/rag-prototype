@@ -1,7 +1,7 @@
 # Simple developer helpers (uv-first).
 
 .PHONY: help venv sync sync-dense-st sync-sec format format-check lint lint-imports
-.PHONY: type types test test-architecture check pre-commit build
+.PHONY: type test test-architecture check pre-commit build
 .PHONY: contract-check
 .PHONY: smoke-embedding-api-wheel sec sec-run sec-hard sec-soft clean clean-all
 .PHONY: docker-build compose-up compose-down
@@ -73,8 +73,6 @@ lint-imports: sync ## Run import-linter architecture contracts
 
 type: sync ## Run mypy type checking
 	DEBUG=false $(UV) run --no-sync mypy --python-executable $(VENV_DIR)/bin/python src/local_rag_backend
-
-types: type ## Alias for the type-checking gate
 
 test: sync ## Run test suite
 	$(UV) run --active --no-sync pytest -q

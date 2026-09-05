@@ -6,7 +6,8 @@ from local_rag_backend.http.routers import rag_router
 
 
 class DummyRagSvc:
-    def ask(self, question, top_k=3):
+    def ask(self, question, top_k=3, *, filters=(), retrieval_mode="sparse"):
+        _ = (top_k, filters, retrieval_mode)
         return {
             "answer": f"eco:{question}",
             "docs": [],
@@ -15,7 +16,8 @@ class DummyRagSvc:
 
 
 class DummyRagSvcWithDocs:
-    def ask(self, question, top_k=3):
+    def ask(self, question, top_k=3, *, filters=(), retrieval_mode="sparse"):
+        _ = (top_k, filters, retrieval_mode)
         from local_rag_backend.core.domain.entities import Document
 
         return {

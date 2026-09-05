@@ -36,7 +36,7 @@ def ingest_docs_sync(
     texts: Sequence[str],
     settings_obj: Settings,
     ports: DocsMutationPorts,
-    source: str = "api:/docs",
+    source: str = "api:/docs/ingest",
 ) -> list[str]:
     if not texts:
         return []

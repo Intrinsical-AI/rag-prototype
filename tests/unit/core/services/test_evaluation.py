@@ -180,7 +180,7 @@ def test_run_retrieval_eval_allows_non_sparse_modes_when_callback_is_valid() -> 
     ds = load_eval_dataset()
     result = run_retrieval_eval(
         dataset=ds,
-        retrieve_external_ids=lambda _query, _top_k: (),
+        retrieve_ranked_items=lambda _query, _top_k: (),
         retrieval_mode="dense",
         k=1,
     )
@@ -192,13 +192,18 @@ def test_run_retrieval_eval_allows_non_sparse_modes_when_callback_is_valid() -> 
 def test_run_retrieval_eval_max_queries_zero_raises() -> None:
     ds: EvalDataset = load_eval_dataset()
     with pytest.raises(ValueError, match="No queries"):
-        run_retrieval_eval(dataset=ds, retrieval_mode="sparse", max_queries=0)
+        run_retrieval_eval(
+            dataset=ds,
+            retrieve_ranked_items=lambda _query, _top_k: (),
+            retrieval_mode="sparse",
+            max_queries=0,
+        )
 
 
 def test_run_retrieval_eval_reports_standard_ir_metrics_for_perfect_run() -> None:
     ds = load_eval_dataset()
 
-    def _retrieve_external_ids(query: str, top_k: int) -> tuple[str, ...]:
+    def _retrieve_ranked_items(query: str, top_k: int) -> tuple[str, ...]:
         if "France" in query:
             return ("doc:paris",)
         if "Spain" in query:
@@ -213,7 +218,7 @@ def test_run_retrieval_eval_reports_standard_ir_metrics_for_perfect_run() -> Non
 
     res = run_retrieval_eval(
         dataset=ds,
-        retrieve_external_ids=_retrieve_external_ids,
+        retrieve_ranked_items=_retrieve_ranked_items,
         retrieval_mode="sparse",
         k=3,
     )
@@ -239,7 +244,7 @@ def test_run_retrieval_eval_keeps_unknown_ids_as_non_relevant_and_reports_anomal
         ),
     )
 
-    def _retrieve_external_ids(query: str, top_k: int) -> tuple[str, ...]:
+    def _retrieve_ranked_items(query: str, top_k: int) -> tuple[str, ...]:
         if "France" in query:
             return ("doc:unknown", "doc:unknown", "doc:paris")
         if "Spain" in query:
@@ -248,7 +253,7 @@ def test_run_retrieval_eval_keeps_unknown_ids_as_non_relevant_and_reports_anomal
 
     res = run_retrieval_eval(
         dataset=ds,
-        retrieve_external_ids=_retrieve_external_ids,
+        retrieve_ranked_items=_retrieve_ranked_items,
         retrieval_mode="sparse",
         k=2,
     )
@@ -287,7 +292,7 @@ def test_eval_result_report_and_anomalies_json_include_audit_details() -> None:
     ds = load_eval_dataset()
     res = run_retrieval_eval(
         dataset=ds,
-        retrieve_external_ids=lambda _query, _top_k: ("doc:unknown",),
+        retrieve_ranked_items=lambda _query, _top_k: ("doc:unknown",),
         retrieval_mode="sparse",
         k=1,
         max_queries=1,

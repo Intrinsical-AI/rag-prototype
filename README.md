@@ -252,6 +252,32 @@ for batch-spec examples and compare-mode usage.
 
 `rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
 
+Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
+a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP
+`replace_scope: false`, or the MCP `replace_scope_override: false` option to import
+the available documents while preserving absent ones. Overrides are checked before
+any writes. RepoGPT needs its own environment: run `uv sync --frozen --extra dev`
+in its checkout before running the producer-to-RAG E2E; RAG's interpreter is not a fallback.
+
+Scope cleanup in `local_split` uses one SQL transaction through vector deletion.
+A vector failure rolls SQL back, but the two vector files are not a single atomic
+write. If the vector write or final SQL commit fails, the command/API reports that
+`rag-rebuild-index` (or `POST /api/index/rebuild`) is required before retrying.
+Rebuild reads canonical SQL and recreates the index. Elasticsearch deletes the
+document and its colocated embedding together and reports bulk item failures.
+These guarantees cover stale-document cleanup, not whole-import batch atomicity
+or process-crash recovery.
+
+The included frontend uses `POST /api/docs/ingest` and `POST /api/docs/query` with
+`{"limit": 100, "offset": 0}`; the latter still returns an array of documents.
+Clients must migrate from the removed `/api/docs` routes. Other removed aliases
+are replaced by `make type`, the `performance` extra, and boolean `debug` values.
+Retrievers return `RetrievalResult`; diagnostic backend names are now
+`local_bm25`, `local_vector`, and `local_hybrid`. Evaluation uses the single
+`retrieve_ranked_items` callback, returning IDs or `(external_id, score)` pairs.
+Embeddings consumers use `local_rag_backend.integrations.embeddings`, rather than
+the removed composition wrapper.
+
 Offline evaluation uses dataset-scoped workspaces under `<data_dir>/_eval_workspaces/`.
 That runtime stays isolated from the main index, but it is no longer purely ephemeral:
 
@@ -282,7 +308,6 @@ Optional: performance extras (`torch` + `orjson` for faster JSON serialization):
 
 ```bash
 uv sync --frozen --extra performance      # torch + orjson (CPU)
-uv sync --frozen --extra performance-cpu  # alias, identical to performance
 ```
 
 These extras are included in `all` but are **not required** for sparse or dense retrieval. Install only when you have profiled a serialization or inference bottleneck that justifies the `torch` dependency weight.
@@ -398,9 +423,9 @@ docker compose up -d
 
 * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
-* `POST /api/docs` (ingest texts)
+* `POST /api/docs/ingest` (ingest texts)
 * `POST /api/docs/query` (list/query documents with structured filters)
-* `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
+* `POST /api/docs/import-conversations` (ingest ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
 * `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/dual/hybrid only)

@@ -30,9 +30,9 @@ def create_embedding_service(
     """Create a reusable embedding service.
 
     ``config_path`` has priority over ``RAG_CONFIG_PATH``. The temporary environment
-    assignment only permits the legacy eager settings module to initialize safely when
-    this is the first RAG import in an installed process; provider construction receives
-    the explicitly loaded settings object directly.
+    assignment permits the eager settings module to initialize when this is the first
+    RAG import in an installed process; provider construction receives the explicitly
+    loaded settings object directly.
     """
     with _SERVICE_IMPORT_LOCK:
         settings_need_initialization = "local_rag_backend.settings" not in sys.modules

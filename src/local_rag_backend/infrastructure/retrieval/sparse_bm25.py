@@ -101,20 +101,20 @@ class SparseBM25Retriever(RetrieverPort):
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         """Retrieve documents using BM25 scores."""
         if request.top_k <= 0:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         if not self.bm25 or not request.query:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
 
         query_tokens = self._tokenize(request.query)
         if not query_tokens:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
 
         doc_scores = np.asarray(self.bm25.get_scores(query_tokens), dtype=np.float32)
         if doc_scores.size == 0:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         k_eff = min(int(request.top_k), int(doc_scores.size))
         if k_eff <= 0:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         rank_scores = np.nan_to_num(doc_scores, nan=float("-inf"))
         ranked_indices = np.argsort(-rank_scores, kind="stable")
         if k_eff == 1:
@@ -129,7 +129,7 @@ class SparseBM25Retriever(RetrieverPort):
         scores = [float(rank_scores[int(i)]) for i in top_indices]
 
         if not scores:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="legacy_sparse")
+            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         normalized_scores = normalize_min_max_scores(scores, flat_value=0.0, singleton_value=1.0)
 
         docs_by_id = self._ensure_docs_cache()
@@ -145,6 +145,6 @@ class SparseBM25Retriever(RetrieverPort):
             docs=ordered_docs,
             scores=ordered_scores,
             mode_used="sparse",
-            backend_used="legacy_sparse",
+            backend_used="local_bm25",
             stage="sparse",
         )

@@ -1,7 +1,7 @@
 # rag-prototype — Architecture Spec
 
 > **Owners:** Intrinsical-AI maintainers (core + platform)
-> **Scope:** core architecture, boundaries, write/read flows, contracts, quality gates / **Out of scope:** product roadmap/features, UI design, legacy backward compatibility
+> **Scope:** core architecture, boundaries, write/read flows, contracts, quality gates / **Out of scope:** product roadmap/features, UI design, historical API preservation
 
 ---
 
@@ -41,9 +41,9 @@
 
 ### 1.2 Non-goals
 - Adding new user-facing features.
-- Preserving old internal APIs or legacy module paths.
+- Preserving superseded internal APIs or module paths.
 - Multi-service split (keep modular monolith).
-- Backward compatibility with external clients from previous iterations.
+- Supporting external clients that do not target the current API.
 
 ### 1.3 Constraints (hard)
 - Legal / regulatory: no special regulated-domain requirement declared for D1.
@@ -95,7 +95,7 @@
 | Context | Responsibility | Owns data? | External deps | Public APIs |
 | ------- | -------------- | ---------: | ------------- | ----------- |
 | Retrieval Query | Retrieve docs + generate answer | No | LLM adapters, retrievers | `/api/ask`, `/api/ask_eval`, `RagService.ask` |
-| Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs`, `/api/docs/import`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
+| Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs/ingest`, `/api/docs/import-conversations`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
 | Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag-rebuild-index` |
 | Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, ES mappings | `/healthz`, `/readyz`, `rag-status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
@@ -159,7 +159,7 @@
 
 ### 3.2 Schemas
 - SQL models: `src/local_rag_backend/infrastructure/persistence/sql/models.py`
-- SQL compatibility/bootstrap: `src/local_rag_backend/infrastructure/persistence/sql/base.py`
+- SQL schema bootstrap: `src/local_rag_backend/infrastructure/persistence/sql/base.py`
 - Vector manifest contract: `src/local_rag_backend/infrastructure/persistence/vector/manifest.py`
 - SQL UoW/session binding: `session_uow()` + `get_bound_session()` in `sql/base.py`
 - [TODO: persistence-agnostic] Add backend contract tests validating unified adapters against the same application persistence behaviors.
@@ -176,7 +176,7 @@
 - **Fields:**
   - request: `question:str`, `k:int`
   - response: `answer:str`, `sources:[document+score]`
-- **Backward compat:** not guaranteed during D1 stabilization
+- **API stability:** only the current documented contract is supported
 - **Example:**
 
 ```json
@@ -332,7 +332,8 @@ Fase B closure (2026-03-01):
 - Failure modes: provider timeout/error, retrieval errors, malformed provider response
 
 #### Flow: `Canonical mutation`
-- Trigger: `/api/docs/mutate`, `/api/docs`, `/api/docs/import`, `rag-mutate-docs`, `rag-ingest`
+- Trigger: `/api/docs/mutate`, `/api/docs/ingest`,
+  `/api/docs/import-conversations`, `rag-mutate-docs`, `rag-ingest`
 - Steps:
   - normalize intent and enqueue into `MutationBatchCoordinator`;
   - batch coordinator drains by bounded policy (`max_batch_size`, `max_wait_ms`);
@@ -362,7 +363,7 @@ Fase B closure (2026-03-01):
 - Rate limiting: no explicit built-in limiter currently (must be handled by deployment edge if needed).
 - HTTP endpoints (current):
   - `/api/ask`, `/api/ask_eval`, `/api/history`
-  - `/api/docs`, `/api/docs/import`, `/api/docs/mutate`
+  - `/api/docs/ingest`, `/api/docs/import-conversations`, `/api/docs/mutate`
   - `/api/index/rebuild`
   - `/api/config`, `/api/templates`
   - `/healthz`, `/readyz`, `/healthz/ollama`
@@ -455,8 +456,8 @@ Key mutation/UoW characterization tests:
 
 - Environments: local dev, CI, containerized runtime.
 - Config strategy: single-file `config.yaml` loaded at startup, validated by Pydantic, and used as the sole runtime source of truth.
-- Migrations/compatibility:
-  - SQLite compatibility ensured at startup/CLI bootstrap.
+- Migrations:
+  - Fresh SQLite tables are created at startup/CLI bootstrap; existing-schema migration is not provided.
   - D1 allows breaking schema/contracts if required for decoupling.
 - Rollback plan:
   - code rollback via git release tags

@@ -15,7 +15,7 @@ def test_ragas_adapter_builds_core_report_payload_without_importing_ragas() -> N
     ds = load_eval_dataset()
     result = run_retrieval_eval(
         dataset=ds,
-        retrieve_external_ids=lambda _query, _top_k: ("doc:paris",),
+        retrieve_ranked_items=lambda _query, _top_k: ("doc:paris",),
         retrieval_mode="sparse",
         k=1,
         max_queries=1,
