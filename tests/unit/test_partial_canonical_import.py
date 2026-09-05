@@ -97,3 +97,49 @@ async def test_partial_rejected_without_writes_and_explicit_upsert_preserves_abs
     assert ok, detail
     assert {doc.external_id for doc in repo.get_all_documents()} == {"absent-doc", "new-doc"}
     assert not repo.get_tombstoned_external_ids(["absent-doc"])
+
+
+@pytest.mark.parametrize("transport", ["http", "cli", "mcp"])
+@pytest.mark.parametrize("failed_files", [0, 1])
+@pytest.mark.parametrize("upsert_only", [False, True])
+async def test_empty_snapshot_rejected_without_writes(
+    transport, failed_files, upsert_only, asgi_client, tmp_path, monkeypatch
+):
+    from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
+
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse")
+    repo = SqlDocumentStorage()
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id="last-doc", content="keep last document", scope="repogpt:demo")]
+    )
+    before = repo.get_all_documents()
+
+    def no_mutation(*args, **kwargs):
+        pytest.fail("An empty canonical snapshot reached the write coordinator")
+
+    monkeypatch.setattr(MutationCoordinator, "execute", no_mutation)
+    payload = _payload(failed_files=failed_files, replace_scope=not upsert_only)
+    payload["documents"] = []
+    payload["stats"].update(total_files=failed_files, ok_files=0, emitted_documents=0)
+    if failed_files:
+        payload["failures"] = [{"path": "broken.py", "message": "parse failed"}]
+    if transport == "http":
+        response = await asgi_client.post("/api/docs/import-canonical", json=payload)
+        assert response.status_code == 422
+        detail = response.text
+    elif transport == "cli":
+        path = tmp_path / "empty.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        args = ["import-canonical", "--json", str(path)]
+        if upsert_only:
+            args.append("--upsert-only")
+        result = CliRunner().invoke(cli, args)
+        assert result.exit_code != 0
+        detail = result.output
+    else:
+        with pytest.raises(ValueError) as caught:
+            tool_import_canonical(payload, replace_scope_override=False if upsert_only else None)
+        detail = str(caught.value)
+    assert "non-empty documents list" in detail
+    assert repo.get_all_documents() == before
+    assert not repo.get_tombstoned_external_ids(["last-doc"])

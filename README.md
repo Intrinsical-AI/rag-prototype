@@ -263,6 +263,20 @@ the available documents while preserving absent ones. Overrides are checked befo
 any writes. RepoGPT needs its own environment: run `uv sync --frozen --extra dev`
 in its checkout before running the producer-to-RAG E2E; RAG's interpreter is not a fallback.
 
+Empty snapshots are rejected before writes on CLI, HTTP and MCP, including
+upsert-only mode. RepoGPT v4 can emit `documents: []` with zero files, failures
+and emitted documents (for example after removing the last exportable file),
+but RAG reports `RepoGPT canonical payloads must include a non-empty documents list.`
+An empty export with failures is also rejected. Neither case clears the existing
+scope. Authoritative empty replacement needs a separate explicit clearing policy.
+
+Explicit deletion is available through `POST /api/docs/mutate` and
+`rag-mutate-docs --json ...`, using `delete_ids` or `delete_external_ids` (at most
+2,048 of each per request). These mutations create tombstones, so they are not
+equivalent to an empty canonical replacement. Enumerate documents with filtered,
+paginated `/api/docs/query` requests (`limit` at most 1,000, plus `offset`); the
+frontend's first 100 documents do not represent an entire scope.
+
 Scope cleanup in `local_split` uses one SQL transaction through vector deletion.
 A vector failure rolls SQL back, but the two vector files are not a single atomic
 write. If the vector write or final SQL commit fails, the command/API reports that
@@ -579,7 +593,16 @@ make sync
 make check
 make pre-commit
 make smoke-embedding-api-wheel
+make smoke-frontend
 ```
+
+The frontend smoke reuses the workspace's installed Playwright and Chromium
+from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`
+path outside this workspace. It checks accepted Elasticsearch IDs with a local
+HTTP storage double, and real browser add/list/query plus visibility using
+temporary SQLite data and a loopback Ollama response double. It needs permission
+to launch Chromium and bind loopback ports; it does not contact an external LLM
+or Elasticsearch service. Temporary evidence is printed under `/tmp`.
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 

@@ -51,23 +51,26 @@ def emit_repogpt_code_units(
         if existing_pythonpath
         else str(repogpt_src)
     )
-    completed = subprocess.run(
-        [
-            str(python_executable),
-            "-m",
-            "repogpt.app.cli",
-            "--emit",
-            "code-units",
-            "-o",
-            str(payload_path),
-            str(repo_path),
-        ],
-        cwd=REPOGPT_ROOT,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                str(python_executable),
+                "-m",
+                "repogpt.app.cli",
+                "--emit",
+                "code-units",
+                "-o",
+                str(payload_path),
+                str(repo_path),
+            ],
+            cwd=REPOGPT_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"RepoGPT code-units launch failed. {preparation}") from exc
     if completed.returncode != 0:
         raise RuntimeError(
             f"RepoGPT code-units emission failed. {preparation}\n"
