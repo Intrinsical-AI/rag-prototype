@@ -82,6 +82,7 @@ def _build_transport() -> httpx.MockTransport:
 
         if method == "POST" and path == "/_bulk":
             ops = _bulk_ops(request)
+            items = []
             i = 0
             while i < len(ops):
                 op = ops[i]
@@ -89,15 +90,17 @@ def _build_transport() -> httpx.MockTransport:
                     meta = dict(op["index"])
                     body = dict(ops[i + 1])
                     _docs(str(meta["_index"]))[str(meta["_id"])] = body
+                    items.append({"index": {"_id": str(meta["_id"]), "status": 201}})
                     i += 2
                     continue
                 if "delete" in op:
                     meta = dict(op["delete"])
                     _docs(str(meta["_index"])).pop(str(meta["_id"]), None)
+                    items.append({"delete": {"_id": str(meta["_id"]), "status": 200}})
                     i += 1
                     continue
                 raise AssertionError(f"unexpected bulk op: {op}")
-            return httpx.Response(200, json={"errors": False})
+            return httpx.Response(200, json={"errors": False, "items": items})
 
         if method == "POST" and path.endswith("/_search"):
             index = path.strip("/").split("/")[0]
@@ -134,6 +137,9 @@ def _build_transport() -> httpx.MockTransport:
                         (hit.get("_source") or {}).get("external_id") or hit.get("_id") or ""
                     )
                 )
+            if body.get("search_after"):
+                hits = [hit for hit in hits if hit["sort"] > body["search_after"]]
+            hits = hits[: int(body.get("size", 10))]
             return httpx.Response(200, json={"hits": {"hits": hits}})
 
         raise AssertionError(f"Unhandled {method} {path}")
@@ -178,6 +184,79 @@ def test_canonical_scope_delete_removes_colocated_embedding_without_vector_updat
     assert _delete_stale_scope_documents(**kwargs) == ([], 0, 0)
 
 
+@pytest.mark.parametrize("count", [1000, 1002, 2503])
+def test_scope_cleanup_enumerates_all_pages_before_deleting(count, monkeypatch):
+    repo = _build_repo()
+    ids = [f"doc-{i:05d}" for i in range(count)]
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id=id_, content=id_, scope="demo") for id_ in ids]
+        + [repo.UpsertDoc(external_id="foreign", content="keep other scope", scope="other")]
+    )
+    events = []
+    search, bulk = repo._client.search, repo._client.bulk
+
+    def observe_search(**kwargs):
+        events.append(("search", kwargs["body"].get("search_after")))
+        return search(**kwargs)
+
+    def observe_bulk(*args, **kwargs):
+        events.append(("bulk", None))
+        return bulk(*args, **kwargs)
+
+    monkeypatch.setattr(repo._client, "search", observe_search)
+    monkeypatch.setattr(repo._client, "bulk", observe_bulk)
+    kwargs = {
+        "scope": "demo",
+        "keep_external_ids": set(ids[:1000]),
+        "settings_obj": repo._settings,
+        "ports": SimpleNamespace(doc_repo_factory=lambda: repo),
+    }
+    stale, deleted, vectors = _delete_stale_scope_documents(**kwargs)
+    assert stale == ids[1000:]
+    assert deleted == vectors == max(0, count - 1000)
+    expected_pages = count // 1000 + 1
+    assert events[:expected_pages] == [
+        ("search", None if page == 0 else [ids[page * 1000 - 1]]) for page in range(expected_pages)
+    ]
+    assert all(event[0] == "bulk" for event in events[expected_pages:])
+    assert repo.list_external_ids_by_scope("demo") == ids[:1000]
+    assert repo.get(["foreign"])[0].content == "keep other scope"
+    assert _delete_stale_scope_documents(**kwargs) == ([], 0, 0)
+    assert not repo.get_tombstoned_external_ids(stale)
+
+
+@pytest.mark.parametrize("bad_token", [None, [], [None], [1], "cursor", ["a", "b"], ["doc-00999"]])
+def test_incomplete_or_repeated_scope_cursor_fails_before_deletion(bad_token, monkeypatch):
+    repo = _build_repo()
+    repo.upsert_documents_by_external_id(
+        [
+            repo.UpsertDoc(external_id=f"doc-{i:05d}", content="old", scope="demo")
+            for i in range(2001)
+        ]
+    )
+    search = repo._client.search
+
+    def broken_page(**kwargs):
+        result = search(**kwargs)
+        # The second full page cannot be mistaken for successful enumeration.
+        if kwargs["body"].get("search_after"):
+            result["hits"]["hits"][-1]["sort"] = bad_token
+        return result
+
+    def no_deletion(*args, **kwargs):
+        pytest.fail("Deletion started before scope enumeration completed")
+
+    monkeypatch.setattr(repo._client, "search", broken_page)
+    monkeypatch.setattr(repo._client, "bulk", no_deletion)
+    with pytest.raises(ElasticBackendError, match="pagination"):
+        _delete_stale_scope_documents(
+            scope="demo",
+            keep_external_ids={"doc-00000"},
+            settings_obj=repo._settings,
+            ports=SimpleNamespace(doc_repo_factory=lambda: repo),
+        )
+
+
 @pytest.mark.parametrize("errors", [True, False])
 def test_bulk_reports_individual_failures_even_when_http_succeeds(errors):
     response = {
@@ -200,7 +279,12 @@ def test_bulk_reports_individual_failures_even_when_http_succeeds(errors):
         )
     )
     with pytest.raises(ElasticBackendError, match="delete bad: status 429"):
-        client.bulk([{"delete": {"_index": "docs", "_id": "bad"}}])
+        client.bulk(
+            [
+                {"delete": {"_index": "docs", "_id": "good"}},
+                {"delete": {"_index": "docs", "_id": "bad"}},
+            ]
+        )
 
 
 def test_bulk_delete_absent_document_is_idempotent():

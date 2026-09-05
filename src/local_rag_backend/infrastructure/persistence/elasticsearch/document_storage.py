@@ -359,19 +359,43 @@ class ElasticDocsRepository(DocumentRepoPort):
         scope_s = str(scope).strip()
         if not scope_s:
             return []
-        body = {
-            "size": 1000,
-            "_source": ["external_id"],
-            "query": {"term": {"scope": scope_s}},
-            "sort": [{"external_id": "asc"}],
-        }
-        data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-        hits = ((data.get("hits") or {}).get("hits")) or []
-        return [
-            str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or "")
-            for hit in hits
-            if str((hit.get("_source") or {}).get("external_id") or hit.get("_id") or "").strip()
-        ]
+        external_ids: list[str] = []
+        search_after: list[str] | None = None
+        while True:
+            body: dict[str, Any] = {
+                "size": 1000,
+                "_source": ["external_id"],
+                "query": {"term": {"scope": scope_s}},
+                "sort": [{"external_id": "asc"}],
+            }
+            if search_after is not None:
+                body["search_after"] = search_after
+            data = self._client.search(index=str(self._settings.es_docs_index), body=body)
+            hits = (data.get("hits") or {}).get("hits")
+            if not isinstance(hits, list):
+                raise ElasticBackendError("Incomplete Elasticsearch scope pagination response")
+            for hit in hits:
+                external_id = str(
+                    (hit.get("_source") or {}).get("external_id") or hit.get("_id") or ""
+                )
+                if not external_id.strip():
+                    raise ElasticBackendError("Missing document ID in scope pagination")
+                external_ids.append(external_id)
+            if len(hits) < body["size"]:
+                return external_ids
+            token = hits[-1].get("sort")
+            if (
+                not isinstance(token, list)
+                or len(token) != 1
+                or not isinstance(token[0], str)
+                or not token[0]
+                or token[0] != external_ids[-1]
+                or (search_after is not None and token[0] <= search_after[0])
+            ):
+                raise ElasticBackendError(
+                    "Invalid or repeated Elasticsearch scope pagination token"
+                )
+            search_after = token
 
     def delete_tombstones(self, external_ids: Sequence[str]) -> int:
         ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
@@ -505,10 +529,13 @@ class ElasticVectorRepo(VectorRepoPort):
         upserts: Sequence[tuple[DocId, Sequence[float]]],
     ) -> None:
         ops: list[dict[str, Any]] = []
+        missing_vector_delete_ordinals: set[int] = set()
         for doc_id in delete_ids:
             ext = str(doc_id).strip()
             if not ext:
                 continue
+            # Each vector removal is one update action followed by its script line.
+            missing_vector_delete_ordinals.add(len(ops) // 2)
             ops.extend(
                 [
                     {"update": {"_index": str(self._settings.es_docs_index), "_id": ext}},
@@ -530,7 +557,7 @@ class ElasticVectorRepo(VectorRepoPort):
                 ]
             )
         if ops:
-            self._client.bulk(ops)
+            self._client.bulk(ops, missing_vector_delete_ordinals=missing_vector_delete_ordinals)
 
     def delete(self, ids: Sequence[DocId]) -> int:
         count = len([x for x in ids if str(x).strip()])
