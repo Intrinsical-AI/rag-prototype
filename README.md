@@ -1,5 +1,56 @@
 # Stateful RAG Platform: A Port & Adapters Modular Approach
 
+<!-- repo-ledger:start -->
+
+## Repository Contract
+
+**Profile:** `python-service`<br>
+**Status:** `active`<br>
+**Surfaces:** `cli`, `http`, `mcp`, `library`
+
+### Overview
+
+Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, and MCP surfaces.
+
+### Surfaces & Features
+
+- `retrieval-backend-matrix` — Sparse BM25, dense, hybrid, and selectable persistence backends. (`implemented`; `library`, `http`)
+- `canonical-import` — Validated canonical document import for external producers such as RepoGPT. (`implemented`; `cli`, `library`)
+- `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
+- `mcp-server` — MCP server surface for exposing retrieval operations to tool clients. (`implemented`; `mcp`)
+
+### Commands
+
+- `make check` — Run format, lint, architecture, type, and test gates. (`make`)
+- `rag-import-canonical` — Import a canonical external document export. (`console-script`)
+- `rag-server` — Start the FastAPI service. (`console-script`)
+- `rag-mcp` — Start the MCP server. (`mcp`)
+- `make contract-check` — Validate the workspace contract and generated README block. (`make`)
+
+### Stack & Dependencies
+
+- Declared languages: `Python`
+- Observed languages: `Python`
+- Runtimes: `Python >=3.11,<3.13`
+- Package managers: `uv`
+- Frameworks: `FastAPI`, `FAISS`, `Pydantic`, `SQLAlchemy`
+
+### Validation & Artifacts
+
+- `make check`
+- `make pre-commit`
+- `make build`
+
+### Integrations & Relations
+
+- No integration hint declared; graph relations remain centralized.
+
+### Status & Limitations
+
+- External model providers and heavy dense extras are optional runtime dependencies.
+
+<!-- repo-ledger:end -->
+
 [![Python 3.11-3.12](https://img.shields.io/badge/python-3.11--3.12-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

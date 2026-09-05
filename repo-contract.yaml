@@ -1,0 +1,80 @@
+schema_version: "1.0.0"
+repo_id: repo-agentic-loopings-agentic-rag-prototype
+profile: python-service
+summary: Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, and MCP surfaces.
+status: active
+surfaces: [cli, http, mcp, library]
+features:
+  - id: retrieval-backend-matrix
+    status: implemented
+    summary: Sparse BM25, dense, hybrid, and selectable persistence backends.
+    surfaces: [library, http]
+    entrypoints:
+      - src/local_rag_backend/composition/factory.py
+      - src/local_rag_backend/core
+    tests: [tests/integration, tests/e2e]
+    evidence: [README.md, pyproject.toml]
+  - id: canonical-import
+    status: implemented
+    summary: Validated canonical document import for external producers such as RepoGPT.
+    surfaces: [cli, library]
+    entrypoints:
+      - src/local_rag_backend/core/services/external_canonical.py
+      - src/local_rag_backend/cli.py
+    tests: [tests/e2e/test_repogpt_import_flow.py]
+    evidence: [README.md, src/local_rag_backend/core/services/external_canonical.py]
+  - id: http-api
+    status: implemented
+    summary: FastAPI health, readiness, ask, import, and index-management endpoints.
+    surfaces: [http]
+    entrypoints: [src/local_rag_backend/http/api_router.py, src/local_rag_backend/http/main.py]
+    tests: [tests/e2e/test_api.py]
+    evidence: [README.md]
+  - id: mcp-server
+    status: implemented
+    summary: MCP server surface for exposing retrieval operations to tool clients.
+    surfaces: [mcp]
+    entrypoints: [src/local_rag_backend/mcp_server.py]
+    tests: [tests/unit/test_mcp_server.py]
+    evidence: [README.md, pyproject.toml]
+commands:
+  - id: check
+    kind: make
+    invocation: make check
+    purpose: Run format, lint, architecture, type, and test gates.
+    evidence: [Makefile]
+  - id: rag-import-canonical
+    kind: console-script
+    invocation: rag-import-canonical
+    purpose: Import a canonical external document export.
+    evidence: [pyproject.toml, README.md]
+  - id: rag-server
+    kind: console-script
+    invocation: rag-server
+    purpose: Start the FastAPI service.
+    evidence: [pyproject.toml, README.md]
+  - id: rag-mcp
+    kind: mcp
+    invocation: rag-mcp
+    purpose: Start the MCP server.
+    evidence: [pyproject.toml, README.md]
+  - id: contract-check
+    kind: make
+    invocation: make contract-check
+    purpose: Validate the workspace contract and generated README block.
+    evidence: [Makefile]
+stack:
+  languages: [Python]
+  runtimes: ["Python >=3.11,<3.13"]
+  package_managers: [uv]
+  frameworks: [FastAPI, FAISS, Pydantic, SQLAlchemy]
+  dependencies:
+    runtime: [rank-bm25, ir-measures, numpy, openai, httpx, sqlalchemy, pydantic, PyYAML, click, rich]
+    optional: [fastapi, uvicorn, faiss-cpu, sentence-transformers, torch, langchain-community, prometheus-client]
+    dev: [pytest, ruff, mypy, pre-commit, import-linter]
+validation:
+  commands: [make check, make pre-commit, make build]
+  artifacts: [dist]
+integrations: []
+limitations:
+  - External model providers and heavy dense extras are optional runtime dependencies.

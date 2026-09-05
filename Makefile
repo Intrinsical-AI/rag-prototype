@@ -2,6 +2,7 @@
 
 .PHONY: help venv sync sync-dense-st sync-sec format format-check lint lint-imports
 .PHONY: type types test test-architecture check pre-commit build
+.PHONY: contract-check
 .PHONY: smoke-embedding-api-wheel sec sec-run sec-hard sec-soft clean clean-all
 .PHONY: docker-build compose-up compose-down
 
@@ -16,6 +17,8 @@ VENV_DENSE_ST_STAMP := $(VENV_DIR)/.uv-sync-dense-st-stamp
 VENV_SEC_STAMP := $(VENV_DIR)/.uv-sec-stamp
 IMAGE_NAME ?= intrinsical/rag-prototype
 IMAGE_TAG ?= latest
+WORKSPACE_CONTROL_ROOT ?= $(abspath ../../../workspace-control)
+WORKSPACE_CONTROL_CACHE ?= /tmp/uv-cache
 
 $(VENV_PYTHON_STAMP):
 	@if [ -x "$(VENV_DIR)/bin/python" ] || [ -f "$(VENV_DIR)/Scripts/python.exe" ]; then \
@@ -81,6 +84,10 @@ test-architecture: sync ## Run architecture guardrail tests only
 	DEBUG=false $(UV) run --active --no-sync pytest -q -o addopts='' tests/architecture/test_*.py
 
 check: format-check lint lint-imports type test ## Run local non-security gates
+
+contract-check: ## Validate the workspace repository contract and README block.
+	UV_CACHE_DIR=$(WORKSPACE_CONTROL_CACHE) uv run --project "$(WORKSPACE_CONTROL_ROOT)" --frozen --group dev workspace-control contract-check \
+		--repo-root "$(CURDIR)" --repo-id repo-agentic-loopings-agentic-rag-prototype
 
 pre-commit: sync ## Run all repository hooks
 	PRE_COMMIT_HOME=$(PRE_COMMIT_HOME) $(UV) run --active --no-sync pre-commit run --all-files
