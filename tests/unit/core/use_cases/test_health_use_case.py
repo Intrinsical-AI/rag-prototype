@@ -19,7 +19,7 @@ def test_check_sql_counts_marks_documents_failure_without_failing_history() -> N
 
     assert ready is False
     assert docs_count is None
-    assert str(checks["documents"]).startswith("failed: docs unavailable")
+    assert checks["documents"] == "failed: unavailable"
     assert checks["history"] == {"count": 5}
 
 
@@ -110,7 +110,7 @@ def test_check_retrieval_index_handles_count_mismatch_and_id_drift_errors() -> N
         )
         is False
     )
-    assert str(checks["retrieval_index_drift"]).startswith("failed: cannot read id map")
+    assert checks["retrieval_index_drift"] == "failed: unavailable"
     assert str(checks["retrieval_index"]).startswith(
         "failed: unable to verify retrieval index drift"
     )
@@ -155,7 +155,4 @@ def test_check_mutation_journal_reports_not_applicable_warning_and_failure() -> 
         ),
         diagnostics=_FailingDiagnostics(),
     )
-    assert checks["mutation_journal"] == {
-        "status": "failed",
-        "error": "journal unavailable",
-    }
+    assert checks["mutation_journal"] == {"status": "failed"}

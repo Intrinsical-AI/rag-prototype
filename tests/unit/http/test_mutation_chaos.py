@@ -57,7 +57,8 @@ async def test_mutation_fails_when_write_lock_unavailable_returns_503(
             json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
         )
         assert resp.status_code == 503
-        assert "lock unavailable" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Service unavailable."
+        assert "lock unavailable" not in resp.text
         assert SqlDocumentStorage().get_all_documents() == []
     finally:
         factory.reset_app_context()

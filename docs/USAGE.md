@@ -65,6 +65,10 @@ faq_csv: data/faq.csv
 eval_dataset_path: datasets/rag_eval_v1.jsonl
 ```
 
+En producción (`debug: false`), `cors_allow_origins` debe quedar vacío o enumerar
+orígenes exactos, por ejemplo `["https://app.example.com"]`. El comodín `"*"`
+se rechaza al arrancar; solo se habilita automáticamente en modo debug local.
+
 Nota de topología: `search_backend` controla el motor de consulta independientemente de
 `persistence_backend`. Consulta la matriz del README para validar `dense`, `dual` o `hybrid`
 antes de cambiar valores.

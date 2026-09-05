@@ -556,6 +556,11 @@ class Settings(BaseModel):
         - Backend-specific URL requirements are enforced before runtime wiring.
         - Hybrid/search/persistence combinations are constrained to known-safe modes.
         """
+        if not self.debug and any(origin.strip() == "*" for origin in self.cors_allow_origins):
+            raise ValueError(
+                "cors_allow_origins must contain explicit origins when debug=false; "
+                "the wildcard '*' is allowed only in debug mode"
+            )
         if self.ingest_chunk_overlap >= self.ingest_chunk_chars:
             raise ValueError("ingest_chunk_overlap must be strictly less than ingest_chunk_chars")
         if self.persistence_backend == "elasticsearch":
