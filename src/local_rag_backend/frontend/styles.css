@@ -166,8 +166,9 @@ textarea:not(:placeholder-shown) + .floating-label {
 }
 
 .row {
-  display: flex; gap:.8rem; flex-wrap:wrap; align-items:center; margin-top:0.3rem
+  gap:.8rem; flex-wrap:wrap; align-items:center; margin-top:0.3rem
 }
+.row:not([hidden]) { display: flex; }
 .row > * { flex: none; }
 .row input[type="number"] {
   width:3.6rem;
@@ -253,10 +254,11 @@ button:active:not(:disabled) { transform: scale(.98);}
 }
 .status-message {
   font-size: 1.07rem; color:var(--subtle-text);
-  display: flex; align-items: center;
+  align-items: center;
   gap: .45rem;
   font-weight: 500;
 }
+.status-message:not([hidden]) { display: flex; }
 .spinner{
   width:17px;height:17px;
   border:2.8px solid var(--accent);
