@@ -23,6 +23,26 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# Elasticsearch answers partial searches with 200 OK, so completeness is opt-in.
+_STRICT_SEARCH_PARAMS = {"allow_partial_search_results": "false"}
+
+
+def _require_complete_search(data: Mapping[str, Any], context: str) -> None:
+    """Reject a search that Elasticsearch itself reports as partial.
+
+    A missing ``_shards`` block counts as complete: enumeration must not depend on
+    optional response metadata.
+    """
+    if data.get("timed_out"):
+        raise ElasticBackendError(f"Elasticsearch {context} timed out; response is partial")
+    shards = data.get("_shards")
+    failed = shards.get("failed") if isinstance(shards, Mapping) else None
+    if type(failed) is int and failed != 0:
+        raise ElasticBackendError(
+            f"Elasticsearch {context} lost {failed} shard(s); response is partial"
+        )
+
+
 @dataclass(frozen=True)
 class _SearchResult:
     id: str
@@ -370,7 +390,12 @@ class ElasticDocsRepository(DocumentRepoPort):
             }
             if search_after is not None:
                 body["search_after"] = search_after
-            data = self._client.search(index=str(self._settings.es_docs_index), body=body)
+            data = self._client.search(
+                index=str(self._settings.es_docs_index),
+                body=body,
+                params=_STRICT_SEARCH_PARAMS,
+            )
+            _require_complete_search(data, "scope pagination")
             hits = (data.get("hits") or {}).get("hits")
             if not isinstance(hits, list):
                 raise ElasticBackendError("Incomplete Elasticsearch scope pagination response")
@@ -470,14 +495,23 @@ class ElasticDocsRepository(DocumentRepoPort):
             }
             if search_after is not None:
                 body["search_after"] = list(search_after)
-            data = self._client.search(index=str(self._settings.es_docs_index), body=body)
-            hits = ((data.get("hits") or {}).get("hits")) or []
+            data = self._client.search(
+                index=str(self._settings.es_docs_index),
+                body=body,
+                params=_STRICT_SEARCH_PARAMS,
+            )
+            _require_complete_search(data, "document scan")
+            hits = (data.get("hits") or {}).get("hits")
+            if not isinstance(hits, list):
+                raise ElasticBackendError("Incomplete Elasticsearch document scan response")
             if not hits:
                 break
             docs.extend(self._to_domain_document(hit) for hit in hits)
+            if len(hits) < body["size"]:
+                break
             search_after = hits[-1].get("sort")
             if not search_after:
-                break
+                raise ElasticBackendError("Missing Elasticsearch scan cursor after a full page")
         return docs
 
     def _to_domain_document(self, hit: Mapping[str, Any]) -> DomainDocument:

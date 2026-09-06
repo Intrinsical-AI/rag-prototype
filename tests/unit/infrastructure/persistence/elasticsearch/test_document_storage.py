@@ -257,6 +257,144 @@ def test_incomplete_or_repeated_scope_cursor_fails_before_deletion(bad_token, mo
         )
 
 
+def _partial_markers(mode: str) -> dict[str, object]:
+    """Response fields Elasticsearch uses to declare a search incomplete."""
+    if mode == "timed_out":
+        return {"timed_out": True}
+    return {"_shards": {"total": 2, "successful": 1, "skipped": 0, "failed": 1}}
+
+
+PARTIAL_MODES = ["timed_out", "shard_failure"]
+
+
+@pytest.mark.parametrize("mode", PARTIAL_MODES)
+def test_partial_scope_search_fails_before_any_deletion(mode, monkeypatch):
+    repo = _build_repo()
+    repo.upsert_documents_by_external_id(
+        [
+            repo.UpsertDoc(external_id="keep", content="keep", scope="demo"),
+            repo.UpsertDoc(external_id="stale", content="stale", scope="demo"),
+        ]
+    )
+    search = repo._client.search
+
+    def partial_page(**kwargs):
+        result = search(**kwargs)
+        # Elasticsearch silently drops the hidden document from a partial response.
+        result["hits"]["hits"] = [hit for hit in result["hits"]["hits"] if hit["_id"] != "stale"]
+        result.update(_partial_markers(mode))
+        return result
+
+    def no_deletion(*args, **kwargs):
+        pytest.fail("Deletion started from a partial scope enumeration")
+
+    monkeypatch.setattr(repo._client, "search", partial_page)
+    monkeypatch.setattr(repo._client, "bulk", no_deletion)
+    with pytest.raises(ElasticBackendError, match="partial"):
+        _delete_stale_scope_documents(
+            scope="demo",
+            keep_external_ids={"keep"},
+            settings_obj=repo._settings,
+            ports=SimpleNamespace(doc_repo_factory=lambda: repo),
+        )
+
+
+@pytest.mark.parametrize("mode", PARTIAL_MODES)
+def test_scope_search_turning_partial_after_a_full_page_fails_before_deletion(mode, monkeypatch):
+    repo = _build_repo()
+    ids = [f"doc-{i:05d}" for i in range(1500)]
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id=id_, content=id_, scope="demo") for id_ in ids]
+    )
+    search = repo._client.search
+
+    def partial_second_page(**kwargs):
+        result = search(**kwargs)
+        # The first page is complete, so truncation can only be seen on the second.
+        if kwargs["body"].get("search_after"):
+            result.update(_partial_markers(mode))
+        return result
+
+    def no_deletion(*args, **kwargs):
+        pytest.fail("Deletion started from a partial scope enumeration")
+
+    monkeypatch.setattr(repo._client, "search", partial_second_page)
+    monkeypatch.setattr(repo._client, "bulk", no_deletion)
+    with pytest.raises(ElasticBackendError, match="partial"):
+        _delete_stale_scope_documents(
+            scope="demo",
+            keep_external_ids=set(ids[:1000]),
+            settings_obj=repo._settings,
+            ports=SimpleNamespace(doc_repo_factory=lambda: repo),
+        )
+
+
+def test_scope_search_requests_strict_completeness():
+    repo = _build_repo()
+    seen = []
+    search = repo._client.search
+
+    def record_params(**kwargs):
+        seen.append(kwargs.get("params"))
+        return search(**kwargs)
+
+    repo._client.search = record_params
+    repo.list_external_ids_by_scope("demo")
+    repo.get_all_documents()
+    assert seen == [{"allow_partial_search_results": "false"}] * 2
+
+
+@pytest.mark.parametrize("mode", PARTIAL_MODES)
+def test_partial_document_scan_is_rejected(mode, monkeypatch):
+    repo = _build_repo()
+    repo.upsert_documents_by_external_id([repo.UpsertDoc(external_id="doc-1", content="hello")])
+    search = repo._client.search
+
+    def partial_page(**kwargs):
+        result = search(**kwargs)
+        result.update(_partial_markers(mode))
+        return result
+
+    monkeypatch.setattr(repo._client, "search", partial_page)
+    with pytest.raises(ElasticBackendError, match="partial"):
+        repo.get_all_documents()
+
+
+def test_document_scan_rejects_full_page_without_cursor(monkeypatch):
+    repo = _build_repo()
+    ids = [f"doc-{i:05d}" for i in range(600)]
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id=id_, content=id_) for id_ in ids]
+    )
+    search = repo._client.search
+
+    def cursorless_page(**kwargs):
+        result = search(**kwargs)
+        result["hits"]["hits"][-1].pop("sort", None)
+        return result
+
+    monkeypatch.setattr(repo._client, "search", cursorless_page)
+    with pytest.raises(ElasticBackendError, match="cursor"):
+        repo.get_all_documents()
+
+
+def test_document_scan_rejects_malformed_hits(monkeypatch):
+    repo = _build_repo()
+    repo.upsert_documents_by_external_id([repo.UpsertDoc(external_id="doc-1", content="hello")])
+    monkeypatch.setattr(repo._client, "search", lambda **kwargs: {"hits": {"hits": "not-a-list"}})
+    with pytest.raises(ElasticBackendError, match="document scan"):
+        repo.get_all_documents()
+
+
+def test_complete_multi_page_scan_returns_every_document():
+    repo = _build_repo()
+    ids = [f"doc-{i:05d}" for i in range(1200)]
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id=id_, content=id_) for id_ in ids]
+    )
+    assert sorted(doc.external_id for doc in repo.get_all_documents()) == ids
+
+
 @pytest.mark.parametrize("errors", [True, False])
 def test_bulk_reports_individual_failures_even_when_http_succeeds(errors):
     response = {
