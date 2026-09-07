@@ -19,11 +19,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from openai import OpenAI
 from sqlalchemy import text
 
-from local_rag_backend.composition.embeddings import (
-    DEFAULT_DENSE_BACKEND_MESSAGE as DEFAULT_DENSE_BACKEND_MESSAGE,
-    _settings_cfg_version,
-    build_dense_embedder_from_settings,
-)
 from local_rag_backend.composition.evaluation import (
     build_eval_retriever_factory_port as build_eval_retriever_factory_port,
     build_eval_storage_port as build_eval_storage_port,
@@ -91,6 +86,11 @@ from local_rag_backend.infrastructure.search_backends import (
     ElasticLikeSearchRetriever,
     LocalSplitSearchRetriever,
     SolrSearchRetriever,
+)
+from local_rag_backend.integrations.embeddings._factory import (
+    DEFAULT_DENSE_BACKEND_MESSAGE as DEFAULT_DENSE_BACKEND_MESSAGE,
+    _settings_cfg_version,
+    build_dense_embedder_from_settings,
 )
 
 if TYPE_CHECKING:

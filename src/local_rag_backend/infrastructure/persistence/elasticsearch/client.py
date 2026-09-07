@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -109,16 +109,79 @@ class ElasticClient:
             )
         return True
 
-    def bulk(self, operations: Iterable[dict[str, Any]]) -> dict[str, Any]:
-        lines = [json.dumps(op) for op in operations]
+    def bulk(
+        self,
+        operations: Iterable[dict[str, Any]],
+        *,
+        missing_vector_delete_ordinals: Collection[int] = (),
+    ) -> dict[str, Any]:
+        ops = list(operations)
+        actions = self._bulk_actions(ops)
+        lines = [json.dumps(op) for op in ops]
         payload = "\n".join(lines) + ("\n" if lines else "")
-        return self.request_json(
+        result = self.request_json(
             "POST",
             "/_bulk",
             content=payload.encode("utf-8"),
             params={"refresh": "true"},
             expected=(200,),
         )
+        items = result.get("items")
+        if (
+            not isinstance(items, list)
+            or len(items) != len(actions)
+            or not isinstance(result.get("errors"), bool)
+        ):
+            raise ElasticBackendError("Incomplete Elasticsearch bulk response")
+        failures = []
+        explained_missing_updates = 0
+        for ordinal, ((operation, id_), item) in enumerate(zip(actions, items, strict=True)):
+            if not isinstance(item, dict) or set(item) != {operation}:
+                raise ElasticBackendError("Mismatched Elasticsearch bulk response action")
+            outcome = item[operation]
+            if not isinstance(outcome, dict) or outcome.get("_id") != id_:
+                raise ElasticBackendError("Mismatched Elasticsearch bulk response document")
+            status = outcome.get("status")
+            if type(status) is not int or status < 200:
+                raise ElasticBackendError("Incomplete Elasticsearch bulk response status")
+            error = outcome.get("error")
+            missing_update = (
+                ordinal in missing_vector_delete_ordinals
+                and operation == "update"
+                and status == 404
+                and isinstance(error, dict)
+                and error.get("type") == "document_missing_exception"
+            )
+            if missing_update:
+                explained_missing_updates += 1
+                continue
+            # Ordinary document/tombstone deletion is already idempotent.
+            missing_delete = operation == "delete" and status == 404 and not error
+            if error or (status >= 300 and not missing_delete):
+                failures.append(f"{operation} {outcome.get('_id', '?')}: status {status}")
+        if failures or (result["errors"] and not explained_missing_updates):
+            raise ElasticBackendError(
+                "Elasticsearch bulk item failures: " + ("; ".join(failures[:10]) or "unknown items")
+            )
+        return result
+
+    @staticmethod
+    def _bulk_actions(operations: Sequence[dict[str, Any]]) -> list[tuple[str, str]]:
+        """Read action ordinals, skipping the NDJSON data lines of non-deletes."""
+        actions: list[tuple[str, str]] = []
+        line = 0
+        while line < len(operations):
+            action = operations[line]
+            if len(action) != 1:
+                raise ValueError("A bulk action must contain exactly one operation")
+            operation, metadata = next(iter(action.items()))
+            if operation not in {"index", "create", "update", "delete"}:
+                raise ValueError(f"Unknown bulk operation: {operation}")
+            actions.append((operation, str(metadata["_id"])))
+            line += 1 if operation == "delete" else 2
+            if line > len(operations):
+                raise ValueError(f"Missing data line for bulk {operation}")
+        return actions
 
     def mget(self, *, index: str, ids: Sequence[str]) -> list[dict[str, Any]]:
         if not ids:

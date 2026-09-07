@@ -15,13 +15,13 @@ async def test_ask_rejects_overlong_question(asgi_client, in_memory_sqlite, monk
 
 @pytest.mark.unit
 async def test_docs_rejects_too_many_texts(asgi_client, in_memory_sqlite):
-    r = await asgi_client.post("/api/docs", json={"texts": ["a"] * 65})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["a"] * 65})
     assert r.status_code == 422
 
 
 @pytest.mark.unit
 async def test_docs_rejects_overlong_text_item(asgi_client, in_memory_sqlite):
-    r = await asgi_client.post("/api/docs", json={"texts": ["x" * 20001]})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["x" * 20001]})
     assert r.status_code == 422
 
 

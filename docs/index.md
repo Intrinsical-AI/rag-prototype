@@ -11,5 +11,6 @@ This folder contains the project documentation.
 - [Release Checklist](RELEASE_CHECKLIST.md)
 - [App Layer Boundaries](app.md)
 - [Advanced usage](USAGE.md)
+- [Embedding integration](embedding_integration.md)
 - [LangChain loaders adapter](langchain_loaders.md)
 - [Framework analysis](analysis_rag_frameworks.md)

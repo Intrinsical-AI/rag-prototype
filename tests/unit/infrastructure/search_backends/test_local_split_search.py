@@ -46,6 +46,17 @@ class DummyEmbedder:
         return out
 
 
+def test_sparse_candidate_count_includes_examined_docs_beyond_top_k() -> None:
+    docs = [
+        Document(id=DocId(str(i)), content=f"authentication token example {i}") for i in range(5)
+    ]
+    result = LocalSplitSearchRetriever(doc_repo=DummyDocRepo(docs)).retrieve(
+        RetrievalRequest(query="authentication", top_k=2, mode="sparse")
+    )
+    assert len(result.items) == 2
+    assert result.candidate_count == 5
+
+
 class DummyVectorRepo:
     def __init__(self) -> None:
         self.calls: list[tuple[list[float], int]] = []

@@ -27,10 +27,10 @@ def _run_without_lock(fn: Callable[[], T]) -> T:
 
 def ensure_sqlite_schema_for_cli() -> None:
     """
-    Ensure SQLite schema is compatible with the current ORM mappings.
+    Ensure the current SQLite ORM schema exists.
 
     CLI commands can be run without starting the FastAPI server, so they must
-    apply the same best-effort SQLite migrations that the app does at startup.
+    apply the same fresh-schema bootstrap that the app does at startup.
     """
     if settings.persistence_backend == "elasticsearch":
         return
@@ -38,9 +38,7 @@ def ensure_sqlite_schema_for_cli() -> None:
     from local_rag_backend.infrastructure.persistence.sql import base as db_base
 
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    db_base.ensure_sqlite_schema_compatible(
-        engine_to_use=db_base.engine, id_map_path=str(settings.id_map_path)
-    )
+    db_base.ensure_sqlite_schema_current(engine_to_use=db_base.engine)
 
 
 def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:

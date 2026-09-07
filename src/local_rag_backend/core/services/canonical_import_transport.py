@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from local_rag_backend.core.services.external_canonical import normalize_external_canonical_payload
 from local_rag_backend.core.use_cases.docs_import_canonical import (
@@ -37,10 +37,21 @@ class CanonicalImportDocumentPayload(BaseModel):
         return value2
 
 
+class CanonicalImportStats(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    failed_files: int = Field(default=0, ge=0, strict=True)
+
+
 class CanonicalImportPayload(BaseModel):
+    # Retain producer identity and failure evidence when passing a validated payload on.
+    model_config = ConfigDict(extra="allow")
+
     scope: str = Field(..., min_length=1, max_length=512)
     snapshot_id: str = Field(..., min_length=1, max_length=512)
     replace_scope: StrictBool = True
+    stats: CanonicalImportStats | None = None
+    failures: list[dict[str, Any]] | None = None
     documents: list[CanonicalImportDocumentPayload] = Field(
         default_factory=list, min_length=1, max_length=5000
     )
@@ -80,9 +91,20 @@ def resolve_canonical_import_replace_scope(
     *,
     replace_scope_override: bool | None = None,
 ) -> bool:
-    if replace_scope_override is not None:
-        return bool(replace_scope_override)
-    return bool(payload.replace_scope)
+    replace_scope = (
+        bool(replace_scope_override)
+        if replace_scope_override is not None
+        else bool(payload.replace_scope)
+    )
+    if replace_scope and (
+        (payload.stats is not None and payload.stats.failed_files > 0) or payload.failures
+    ):
+        raise ValueError(
+            "Partial canonical exports cannot replace a scope. "
+            "Use explicit upsert-only mode (replace_scope=false or --upsert-only) "
+            "to preserve documents absent from this export."
+        )
+    return replace_scope
 
 
 def build_canonical_import_request_input(

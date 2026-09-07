@@ -170,9 +170,7 @@ def run_sample_data_ingestion(
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     try:
-        db_base.ensure_sqlite_schema_compatible(
-            engine_to_use=engine, id_map_path=str(settings_obj.id_map_path)
-        )
+        db_base.ensure_sqlite_schema_current(engine_to_use=engine)
     except Exception as e:
         if schema_error_message:
             raise RuntimeError(schema_error_message) from e

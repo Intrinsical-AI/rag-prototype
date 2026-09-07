@@ -12,7 +12,7 @@ from local_rag_backend.settings import settings
 async def test_post_docs_sparse_and_list(asgi_client, in_memory_sqlite, monkeypatch):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     payload = {"texts": ["  First  ", "", "Second"]}
-    r = await asgi_client.post("/api/docs", json=payload)
+    r = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r.status_code == 200
     data = r.json()
     assert data["count"] == 2
@@ -91,7 +91,7 @@ async def test_post_docs_sparse_various_inputs(
     asgi_client, in_memory_sqlite, monkeypatch, texts, expected
 ):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    r = await asgi_client.post("/api/docs", json={"texts": texts})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": texts})
     assert r.status_code == 200
     data = r.json()
     assert data["count"] == expected
@@ -124,7 +124,7 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
     monkeypatch.setattr(factory, "VectorStorage", lambda **k: dummy_vec)
 
     payload = {"texts": ["X", "Y"]}
-    r = await asgi_client.post("/api/docs", json=payload)
+    r = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r.status_code == 200
     data = r.json()
     assert data["count"] == 2
@@ -138,7 +138,7 @@ async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlit
     monkeypatch.setattr(settings, "ingest_chunker_version", "v1", raising=False)
 
     payload = {"texts": ["  DU P  ", "du p", "DU P"]}
-    r1 = await asgi_client.post("/api/docs", json=payload)
+    r1 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r1.status_code == 200
     ids1 = r1.json()["ids"]
     assert len(ids1) == 1
@@ -146,7 +146,7 @@ async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlit
     docs1 = SqlDocumentStorage().get_all_documents()
     assert len(docs1) == 1
 
-    r2 = await asgi_client.post("/api/docs", json=payload)
+    r2 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r2.status_code == 200
     ids2 = r2.json()["ids"]
     assert ids2 == ids1
@@ -162,13 +162,13 @@ async def test_post_docs_sparse_chunker_version_change_inserts_new(
     monkeypatch.setattr(settings, "ingest_chunker_version", "v1", raising=False)
     payload = {"texts": ["hello world"]}
 
-    r1 = await asgi_client.post("/api/docs", json=payload)
+    r1 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r1.status_code == 200
     assert r1.json()["count"] == 1
     assert len(SqlDocumentStorage().get_all_documents()) == 1
 
     monkeypatch.setattr(settings, "ingest_chunker_version", "v2", raising=False)
-    r2 = await asgi_client.post("/api/docs", json=payload)
+    r2 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r2.status_code == 200
     assert r2.json()["count"] == 1
     assert len(SqlDocumentStorage().get_all_documents()) == 2

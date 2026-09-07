@@ -51,7 +51,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Ensure the data directory exists (SQLite cannot create parent directories).
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
-    db_base.ensure_sqlite_schema_compatible(engine_to_use=db_base.engine)
+    db_base.ensure_sqlite_schema_current(engine_to_use=db_base.engine)
     if settings.mutation_recovery_enabled:
         try:
             repaired = get_app_context().container.recover_incomplete_doc_mutations(limit=200)
@@ -138,6 +138,10 @@ def _get_frontend_asset(asset_path: str) -> tuple[bytes, str]:
     try:
         pkg_root = resources.files("local_rag_backend.frontend")
         pkg_file = pkg_root.joinpath(*posix.parts)
+        if isinstance(pkg_root, Path) and isinstance(pkg_file, Path):
+            pkg_file = pkg_file.resolve()
+            if not pkg_file.is_relative_to(pkg_root.resolve()):
+                raise NotFoundError("Asset not found.")
         if pkg_file.is_file():
             data = pkg_file.read_bytes()
             mt = mimetypes.guess_type(posix.name)[0] or "application/octet-stream"

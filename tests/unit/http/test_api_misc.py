@@ -52,8 +52,16 @@ async def test_public_healthz_endpoint(asgi_client):
     assert r.json().get("status") == "healthy"
 
 
-async def test_legacy_api_health_and_ready_endpoints_are_removed(asgi_client):
+async def test_removed_api_health_and_ready_endpoints_return_not_found(asgi_client):
     r1 = await asgi_client.get("/api/health")
     r2 = await asgi_client.get("/api/ready")
     assert r1.status_code == 404
     assert r2.status_code == 404
+
+
+async def test_unscoped_document_write_endpoints_are_removed(asgi_client):
+    ingest = await asgi_client.post("/api/docs", json={"texts": ["x"]})
+    import_response = await asgi_client.post("/api/docs/import")
+
+    assert ingest.status_code == 404
+    assert import_response.status_code == 404

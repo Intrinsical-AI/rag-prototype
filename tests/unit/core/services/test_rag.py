@@ -1,5 +1,8 @@
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.core.domain.retrieval import RetrievalRequest
+from local_rag_backend.core.domain.retrieval import (
+    RetrievalRequest,
+    retrieval_result_from_pairs,
+)
 from local_rag_backend.core.services.rag_runtime import NO_DOCS_ANSWER, RagService
 
 
@@ -8,9 +11,14 @@ class DummyRetriever:
         self._docs, self._scores = docs, scores
         self.last_query = None
 
-    def retrieve(self, query, k=3):
-        self.last_query = query
-        return self._docs[:k], self._scores[:k]
+    def retrieve(self, request):
+        self.last_query = request
+        return retrieval_result_from_pairs(
+            docs=self._docs[: request.top_k],
+            scores=self._scores[: request.top_k],
+            mode_used=request.mode,
+            backend_used="test",
+        )
 
 
 class DummyGenerator:

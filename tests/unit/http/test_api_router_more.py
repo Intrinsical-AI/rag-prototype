@@ -180,7 +180,8 @@ async def test_metrics_endpoint_disabled(asgi_client, monkeypatch):
 
 async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite, monkeypatch):
     class _FailingService:
-        def ask(self, question, top_k=3):
+        def ask(self, question, top_k=3, *, filters=(), retrieval_mode="sparse"):
+            _ = (question, top_k, filters, retrieval_mode)
             raise LLMTimeoutError("provider timeout")
 
     async def _override():

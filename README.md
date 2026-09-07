@@ -1,5 +1,58 @@
 # Stateful RAG Platform: A Port & Adapters Modular Approach
 
+<!-- repo-ledger:start -->
+
+## Repository Contract
+
+**Profile:** `python-service`<br>
+**Status:** `active`<br>
+**Surfaces:** `cli`, `http`, `mcp`, `library`
+
+### Overview
+
+Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, and MCP surfaces.
+
+### Surfaces & Features
+
+- `retrieval-backend-matrix` — Sparse BM25, dense, hybrid, and selectable persistence backends. (`implemented`; `library`, `http`)
+- `canonical-import` — Validated canonical document import for external producers such as RepoGPT. (`implemented`; `cli`, `library`)
+- `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
+- `mcp-server` — MCP server surface for exposing retrieval operations to tool clients. (`implemented`; `mcp`)
+
+### Commands
+
+- `make check` — Run format, lint, architecture, type, and test gates. (`make`)
+- `rag-import-canonical` — Import a canonical external document export. (`console-script`)
+- `rag-server` — Start the FastAPI service. (`console-script`)
+- `rag-mcp` — Start the MCP server. (`mcp`)
+- `make contract-check` — Validate the workspace contract and generated README block. (`make`)
+- `make smoke-embedding-api-wheel` — Build and install a wheel outside the checkout and exercise the typed embedding API. (`make`)
+
+### Stack & Dependencies
+
+- Declared languages: `Python`
+- Observed languages: `Python`
+- Runtimes: `Python >=3.11,<3.13`
+- Package managers: `uv`
+- Frameworks: `FastAPI`, `FAISS`, `Pydantic`, `SQLAlchemy`
+
+### Validation & Artifacts
+
+- `make check`
+- `make pre-commit`
+- `make build`
+- `make smoke-embedding-api-wheel`
+
+### Integrations & Relations
+
+- No integration hint declared; graph relations remain centralized.
+
+### Status & Limitations
+
+- External model providers and heavy dense extras are optional runtime dependencies.
+
+<!-- repo-ledger:end -->
+
 [![Python 3.11-3.12](https://img.shields.io/badge/python-3.11--3.12-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -205,6 +258,46 @@ for batch-spec examples and compare-mode usage.
 
 `rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
 
+Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
+a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP
+`replace_scope: false`, or the MCP `replace_scope_override: false` option to import
+the available documents while preserving absent ones. Overrides are checked before
+any writes. RepoGPT needs its own environment: run `uv sync --frozen --extra dev`
+in its checkout before running the producer-to-RAG E2E; RAG's interpreter is not a fallback.
+
+Empty snapshots are rejected before writes on CLI, HTTP and MCP, including
+upsert-only mode. RepoGPT v4 can emit `documents: []` with zero files, failures
+and emitted documents (for example after removing the last exportable file),
+but RAG reports `RepoGPT canonical payloads must include a non-empty documents list.`
+An empty export with failures is also rejected. Neither case clears the existing
+scope. Authoritative empty replacement needs a separate explicit clearing policy.
+
+Explicit deletion is available through `POST /api/docs/mutate` and
+`rag-mutate-docs --json ...`, using `delete_ids` or `delete_external_ids` (at most
+2,048 of each per request). These mutations create tombstones, so they are not
+equivalent to an empty canonical replacement. Enumerate documents with filtered,
+paginated `/api/docs/query` requests (`limit` at most 1,000, plus `offset`); the
+frontend's first 100 documents do not represent an entire scope.
+
+Scope cleanup in `local_split` uses one SQL transaction through vector deletion.
+A vector failure rolls SQL back, but the two vector files are not a single atomic
+write. If the vector write or final SQL commit fails, the command/API reports that
+`rag-rebuild-index` (or `POST /api/index/rebuild`) is required before retrying.
+Rebuild reads canonical SQL and recreates the index. Elasticsearch deletes the
+document and its colocated embedding together and reports bulk item failures.
+These guarantees cover stale-document cleanup, not whole-import batch atomicity
+or process-crash recovery.
+
+The included frontend uses `POST /api/docs/ingest` and `POST /api/docs/query` with
+`{"limit": 100, "offset": 0}`; the latter still returns an array of documents.
+Clients must migrate from the removed `/api/docs` routes. Other removed aliases
+are replaced by `make type`, the `performance` extra, and boolean `debug` values.
+Retrievers return `RetrievalResult`; diagnostic backend names are now
+`local_bm25`, `local_vector`, and `local_hybrid`. Evaluation uses the single
+`retrieve_ranked_items` callback, returning IDs or `(external_id, score)` pairs.
+Embeddings consumers use `local_rag_backend.integrations.embeddings`, rather than
+the removed composition wrapper.
+
 Offline evaluation uses dataset-scoped workspaces under `<data_dir>/_eval_workspaces/`.
 That runtime stays isolated from the main index, but it is no longer purely ephemeral:
 
@@ -235,7 +328,6 @@ Optional: performance extras (`torch` + `orjson` for faster JSON serialization):
 
 ```bash
 uv sync --frozen --extra performance      # torch + orjson (CPU)
-uv sync --frozen --extra performance-cpu  # alias, identical to performance
 ```
 
 These extras are included in `all` but are **not required** for sparse or dense retrieval. Install only when you have profiled a serialization or inference bottleneck that justifies the `torch` dependency weight.
@@ -351,9 +443,9 @@ docker compose up -d
 
 * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
-* `POST /api/docs` (ingest texts)
+* `POST /api/docs/ingest` (ingest texts)
 * `POST /api/docs/query` (list/query documents with structured filters)
-* `POST /api/docs/import` (ingest conversations from ChatGPT/Gemini export JSON)
+* `POST /api/docs/import-conversations` (ingest ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
 * `POST /api/index/rebuild` (idempotent rebuild of retrieval state from the canonical document store; dense/dual/hybrid only)
@@ -499,12 +591,20 @@ sequenceDiagram
 ## Tests
 
 ```bash
-UV_CACHE_DIR=.uv_cache uv sync --frozen --group test --group lint --extra server --no-default-groups
-UV_CACHE_DIR=.uv_cache uv run --active --no-sync pytest -q
-UV_CACHE_DIR=.uv_cache uv run --active --no-sync ruff check src tests
-PYTHONPATH=src UV_CACHE_DIR=.uv_cache uv run --active --no-sync lint-imports
-uv run pre-commit run --all-files
+make sync
+make check
+make pre-commit
+make smoke-embedding-api-wheel
+make smoke-frontend
 ```
+
+The frontend smoke reuses the workspace's installed Playwright and Chromium
+from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`
+path outside this workspace. It checks accepted Elasticsearch IDs with a local
+HTTP storage double, and real browser add/list/query plus visibility using
+temporary SQLite data and a loopback Ollama response double. It needs permission
+to launch Chromium and bind loopback ports; it does not contact an external LLM
+or Elasticsearch service. Temporary evidence is printed under `/tmp`.
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 
@@ -518,12 +618,13 @@ Current CI gates include:
 - architecture guardrails: `pytest -q -o addopts='' tests/architecture/test_*.py`
 - `lint-imports` (macro architecture contracts via `.importlinter`)
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
-- security scan job (`bandit` + `safety` report generation)
+- strict, locked security gate (`bandit` + `safety` over runtime/server dependencies)
 - Docker build for `--target production` on `main/master`
 
-Workflow trigger note:
-- PRs/commits that only change docs (`**/*.md`, `docs/**`) do not trigger CI due to `paths-ignore` in `.github/workflows/ci.yml`.
-- Run local validation manually for doc-only changes when they alter architecture/API/operations guidance.
+Workflow trigger note: documentation-only changes run CI because docs describe
+executable setup, gate, and operational contracts.
+- Run local validation before pushing doc-only changes that alter
+  architecture/API/operations guidance.
 
 For local parity, use:
 

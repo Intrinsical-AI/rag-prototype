@@ -66,6 +66,14 @@ class ServiceUnavailableError(AppError):
     default_detail = "Service unavailable."
 
 
+class IndexRebuildRequiredError(ServiceUnavailableError):
+    default_detail = (
+        "Canonical scope deletion did not complete; the vector index may have changed. "
+        "Rebuild from SQL with `rag-rebuild-index` or POST /api/index/rebuild "
+        "before retrying."
+    )
+
+
 class GatewayTimeoutError(AppError):
     status_code = 504
     default_detail = "Gateway timeout."

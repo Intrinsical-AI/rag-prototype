@@ -497,6 +497,13 @@ Reranker opcional (mejora de calidad medible con `rag-eval`):
 # reranker_candidate_k: 20
 ```
 
-Las notas internas de `synergy` y los packs de demo/evaluación específicos de ese workspace
-se movieron a [`docs/internal-synergy.md`](./internal-synergy.md) para mantener esta guía
-centrada en el flujo de uso avanzado del proyecto.
+### Optional external E2E fixtures
+
+Cross-repository E2E tests do not assume a particular workspace layout. They
+are skipped when their explicit inputs are not configured:
+
+- RepoGPT: `REPOGPT_ROOT` and `REPOGPT_FIXTURE_REPO`.
+- Vulnerability pilot: `VULN_PILOT_PREPARED` and `VULNS_INGEST_SCRIPT`.
+
+An unset input skips the corresponding optional test. A configured path that
+does not exist fails collection with an actionable error.

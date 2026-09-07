@@ -1,4 +1,4 @@
-"""Tests for POST /api/docs/import endpoint."""
+"""Tests for POST /api/docs/import-conversations endpoint."""
 
 import io
 import json
@@ -54,7 +54,7 @@ async def test_import_chatgpt_export_sparse(asgi_client, in_memory_sqlite, monke
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 200
     data = r.json()
@@ -93,7 +93,7 @@ async def test_import_gemini_export_sparse(asgi_client, in_memory_sqlite, monkey
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 200
     data = r.json()
@@ -115,7 +115,7 @@ async def test_import_unknown_format_returns_422(asgi_client, in_memory_sqlite, 
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 422
     assert "Could not detect" in r.json()["detail"]
@@ -132,7 +132,7 @@ async def test_import_empty_file_returns_422(asgi_client, in_memory_sqlite, monk
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 422
     assert "empty" in r.json()["detail"].lower()
@@ -149,7 +149,7 @@ async def test_import_invalid_json_returns_422(asgi_client, in_memory_sqlite, mo
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 422
 
@@ -189,7 +189,7 @@ async def test_import_empty_conversations_returns_zero_count(
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 200
     data = r.json()
@@ -203,7 +203,7 @@ async def test_import_missing_file_field_returns_422(asgi_client, in_memory_sqli
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
     # Send request without 'file' field
-    r = await asgi_client.post("/api/docs/import")
+    r = await asgi_client.post("/api/docs/import-conversations")
 
     assert r.status_code == 422
 
@@ -238,7 +238,7 @@ async def test_import_file_too_large_returns_413(asgi_client, in_memory_sqlite, 
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 413
     assert "too large" in r.json()["detail"].lower()
@@ -288,7 +288,7 @@ async def test_import_chatgpt_filters_non_text(asgi_client, in_memory_sqlite, mo
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 200
     data = r.json()
@@ -328,7 +328,7 @@ async def test_import_response_includes_all_fields(asgi_client, in_memory_sqlite
             "application/json",
         )
     }
-    r = await asgi_client.post("/api/docs/import", files=files)
+    r = await asgi_client.post("/api/docs/import-conversations", files=files)
 
     assert r.status_code == 200
     data = r.json()

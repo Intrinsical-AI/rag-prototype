@@ -2,7 +2,11 @@
 
 > Scope: validated hotspots in `core/services`, `core/use_cases`, `cli_commands`, plus selected repo-level seams in `composition` and `infrastructure` when they materially affect runtime behavior
 >
-> Status: current as of 2026-04-08, based on code inspection and targeted unit tests
+> Status: banner refreshed 2026-07-24 against package `2.1.0`; hotspot inventory
+> still rooted in the 2026-04-08 inspection plus later embedding-consumer work.
+> Re-verify mutation/eval rows before large refactors. See also
+> [`embedding_integration.md`](./embedding_integration.md) for the installed
+> embeddings consumer surface (not treated as primary debt).
 
 ## Summary
 
@@ -84,24 +88,26 @@ Recommended direction:
 - Split saga internals into explicit phases: profile checks, journal lifecycle, SQL phase, vector phase, recovery.
 - Keep behavior stable first; do not combine this with transport or feature work.
 
-### 2. Canonical import semantics are still transport-fragile
+### 2. Canonical scope cleanup has bounded consistency guarantees
 
 Validated points:
 
-- CLI and HTTP now default `replace_scope` to `True` when omitted in canonical import.
+- CLI, HTTP and MCP share typed validation and default `replace_scope` to `True`.
+- Partial producer exports are rejected before writes unless effective upsert-only mode is explicit.
+- Local scope cleanup binds SQL lookup/deletion and vector delta to the existing SQL unit of work. Vector failure rolls SQL back; vector write or SQL commit failure requires an explicit index rebuild.
+- Elasticsearch deletes the complete document, including its embedding, and bulk item errors are propagated.
 - Scope replacement in [`docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py) still depends on dynamic repo methods such as `list_external_ids_by_scope`, `snapshot_by_external_ids`, and `hard_delete_by_external_ids`.
 
 Why this matters:
 
-- This is both debt and behavior drift.
-- The same business action can still produce different deletion semantics depending on transport.
-- Scope replace is not fully absorbed into the canonical mutation flow; it still leans on repo-specific escape hatches.
+- The transport behavior is aligned. Cleanup remains a bounded use case using repository capabilities.
+- SQL and the two vector files do not share a durable transaction; whole-import batch atomicity and process-crash recovery are not guaranteed.
 
 Recommended direction:
 
 - Keep the shared `replace_scope=true` default stable across transports.
-- Introduce shared typed validation for CLI payloads instead of hand-built dict parsing.
-- Decide whether scope replacement belongs inside canonical mutation or deserves a separate explicit use case.
+- Preserve the documented explicit-rebuild recovery path and its fault-injection tests.
+- Revisit broader transaction coordination only if actual operational requirements demand it.
 
 ### 3. Evaluation is structurally cleaner, but methodologically underpowered
 
@@ -110,7 +116,8 @@ Validated points:
 - Dataset parsing and aggregate metric calculation are correctly centralized in [`load_eval_dataset`](../src/local_rag_backend/core/services/evaluation.py) and `ir_measures`.
 - The evaluation workspace is isolated through [`prepare_eval_workspace`](../src/local_rag_backend/core/use_cases/evaluation.py), so this is not a simple "production index accidentally reused" story.
 - The core evaluator now keeps retrieved IDs not present in the dataset corpus as non-relevant results and emits explicit anomalies.
-- The evaluator now accepts ranked `(external_id, score)` style results while keeping backward compatibility for ID-only callbacks.
+- The evaluator accepts one ranked-item callback. Items may be IDs or
+  `(external_id, score)` pairs; scores are preserved when supplied.
 - [`compare_eval_results`](../src/local_rag_backend/core/services/evaluation.py) still gates on aggregate deltas; detailed reports now expose per-query deltas, but significance testing remains future work.
 
 Why this matters:
@@ -133,7 +140,7 @@ Recommended direction:
 
 Validated points:
 
-- CLI mutation and canonical-import commands still parse JSON manually instead of reusing shared typed validation.
+- Canonical import reads JSON and delegates validation/assembly to the shared typed path; other CLI payloads still have command-specific validation.
 - `replace_scope` semantics are aligned and the typed validation path is now shared across CLI, HTTP, and MCP.
 - `rag-eval-compare` now uses a canonical `--spec` file instead of expanded baseline/candidate flag matrices.
   `rag-eval` and `rag-eval-batch` still need continued payload-validation cleanup.
@@ -288,11 +295,10 @@ Interpretation:
 
 ### P0
 
-- Reuse one shared typed validation path between CLI and HTTP.
-- Introduce shared typed validation for CLI canonical-import and mutation payloads.
+- Shared typed canonical-import validation across CLI, HTTP and MCP is complete; further mutation/evaluation payload consolidation is optional follow-up.
 - Fix evaluation blind spots:
   - stop silently filtering unknown IDs
-  - preserve original retriever scores in the eval callback contract
+  - retain regression coverage for the existing score-preserving ranked-item callback
 - Start CLI / DX normalization:
   - unify validation for `mutate-docs`, `import-canonical`, and `eval-batch`
   - align visible defaults across CLI and HTTP

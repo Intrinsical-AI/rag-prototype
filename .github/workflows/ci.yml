@@ -7,24 +7,12 @@ on:
       - 'master'
       - 'develop'
       - 'release**'
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
-      - 'CHANGELOG*'
   pull_request:
     branches:
       - 'main'
       - 'master'
       - 'develop'
       - 'release**'
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
-      - 'CHANGELOG*'
   workflow_dispatch:
 
 concurrency:
@@ -372,32 +360,10 @@ jobs:
             **/uv.lock
           cache-suffix: security
 
-      - name: Create virtualenv
-        run: uv venv
-
-      - name: Install security tools
-        run: uv pip install "bandit[toml]" "safety<3" "setuptools<81"
-
-      - name: Run security scans (fail on findings)
-        run: |
-          uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
-          if [ -n "${SAFETY_API_KEY:-}" ]; then
-            printf 'y\n' | uv run safety check --output json --save-json safety-report.json --continue-on-error --key "$SAFETY_API_KEY"
-          else
-            printf 'y\n' | uv run safety check --output json --save-json safety-report.json --continue-on-error
-          fi
+      - name: Run locked security gate
+        run: make sec
         env:
           SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
-
-      - name: Upload security reports
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: security-reports
-          path: |
-            bandit-report.json
-            safety-report.json
-          retention-days: 7
 
   docker:
     name: Docker Build

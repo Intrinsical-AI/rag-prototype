@@ -251,7 +251,7 @@ def detect_json_export_format(raw: bytes) -> Detection:
 
     if not isinstance(data, list):
         if data is None:
-            # Keep backward-compatible reason for JSON null payloads.
+            # Keep stable reason for JSON null payloads.
             return Detection("unknown", "not-a-json-array")
         return Detection("unknown", "not-a-list")
 

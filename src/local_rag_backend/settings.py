@@ -463,18 +463,6 @@ class Settings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("debug", mode="before")
-    @classmethod
-    def _normalize_debug_bool(cls, v: Any) -> Any:
-        """Allow friendlier debug aliases from legacy deploy-time sources."""
-        if isinstance(v, str):
-            normalized = v.strip().lower()
-            if normalized in {"debug", "development", "dev"}:
-                return True
-            if normalized in {"release", "production", "prod"}:
-                return False
-        return v
-
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: Any) -> Any:

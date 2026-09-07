@@ -229,6 +229,10 @@ async def import_canonical_docs(
 ) -> CanonicalImportResponse:
     try:
         payload = validate_canonical_import_payload(payload_raw)
+        request = build_canonical_import_request_input(
+            payload,
+            source="api:/docs/import-canonical",
+        )
     except (ValidationError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -238,10 +242,7 @@ async def import_canonical_docs(
 
     def _import_operation() -> CanonicalImportResponse:
         summary = execute_import_canonical_sync(
-            request=build_canonical_import_request_input(
-                payload,
-                source="api:/docs/import-canonical",
-            ),
+            request=request,
             settings_obj=settings_obj,
             ports=mutation_bundle.ports,
         )
@@ -277,7 +278,7 @@ async def import_canonical_docs(
     )
 
 
-@router.post("/docs", response_model=IngestResponse)
+@router.post("/docs/ingest", response_model=IngestResponse)
 async def ingest_docs(
     payload: Annotated[IngestRequest, Body(...)],
     container: AppContainer = Depends(get_app_container_dependency),
@@ -296,7 +297,7 @@ async def ingest_docs(
             texts=texts,
             settings_obj=settings_obj,
             ports=mutation_bundle.ports,
-            source="api:/docs",
+            source="api:/docs/ingest",
         )
 
     ok = False
@@ -313,10 +314,10 @@ async def ingest_docs(
         ok = True
         return IngestResponse(count=len(ids), ids=ids)
     finally:
-        observe_ingest(source="api:/docs", ok=ok, inserted=len(ids))
+        observe_ingest(source="api:/docs/ingest", ok=ok, inserted=len(ids))
         log_event(
             "rag_ingest",
-            source="api:/docs",
+            source="api:/docs/ingest",
             ok=ok,
             input_texts=len(texts),
             inserted=len(ids),
@@ -326,7 +327,7 @@ async def ingest_docs(
         )
 
 
-@router.post("/docs/import", response_model=ImportResponse)
+@router.post("/docs/import-conversations", response_model=ImportResponse)
 async def import_docs(
     file: UploadFile = File(..., description="JSON file exported from ChatGPT or Google Gemini"),
     container: AppContainer = Depends(get_app_container_dependency),
@@ -373,10 +374,14 @@ async def import_docs(
         format_detected = outcome.format_detected if outcome is not None else "unknown"
         inserted = outcome.count if outcome is not None else 0
         input_texts = outcome.input_texts if outcome is not None else 0
-        observe_ingest(source=f"api:/docs/import:{format_detected}", ok=ok, inserted=inserted)
+        observe_ingest(
+            source=f"api:/docs/import-conversations:{format_detected}",
+            ok=ok,
+            inserted=inserted,
+        )
         log_event(
             "rag_ingest",
-            source="api:/docs/import",
+            source="api:/docs/import-conversations",
             format_detected=format_detected,
             ok=ok,
             input_texts=input_texts,

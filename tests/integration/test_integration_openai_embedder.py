@@ -25,8 +25,9 @@ class _DummyEmbeddingsAPI:
 
 
 class _DummyOpenAI:
-    def __init__(self, api_key):
+    def __init__(self, api_key, *, timeout):
         self._api_key = api_key
+        self._timeout = timeout
         self.embeddings = _DummyEmbeddingsAPI(
             {
                 "a": [0.0, 0.0, 0.0, 0.0],
@@ -62,7 +63,8 @@ def test_openai_embedder_empty_input(monkeypatch):
             raise AssertionError("embeddings.create() should not be called for empty input")
 
     class _NoCallOpenAI:
-        def __init__(self, api_key):
+        def __init__(self, api_key, *, timeout):
+            _ = (api_key, timeout)
             self.embeddings = _NoCallEmbeddingsAPI()
 
     monkeypatch.setattr(openai_embedder_mod, "OpenAI", _NoCallOpenAI, raising=True)

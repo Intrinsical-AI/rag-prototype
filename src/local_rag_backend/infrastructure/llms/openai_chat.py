@@ -31,7 +31,7 @@ def create_openai_client(
     client_factory: Callable[..., Any] = OpenAI,
 ) -> Any:
     """
-    Build an OpenAI-compatible client and fallback when `timeout` is unsupported.
+    Build an OpenAI-compatible client with the declared SDK contract.
     """
     kwargs: dict[str, Any] = {"api_key": api_key}
     if base_url is not None:
@@ -40,13 +40,7 @@ def create_openai_client(
         kwargs["default_headers"] = default_headers
     if timeout is not None:
         kwargs["timeout"] = timeout
-    try:
-        return client_factory(**kwargs)
-    except TypeError as e:
-        if "timeout" not in str(e):
-            raise
-        kwargs.pop("timeout", None)
-        return client_factory(**kwargs)
+    return client_factory(**kwargs)
 
 
 class OpenAIGenerator(GeneratorPort):

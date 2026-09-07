@@ -1,3 +1,4 @@
+from local_rag_backend.core.domain.retrieval import retrieval_result_from_pairs
 from local_rag_backend.core.services.rag_runtime import NO_DOCS_ANSWER, RagService
 
 
@@ -6,8 +7,13 @@ class _DummyRetriever:
         self._docs = docs
         self._scores = scores
 
-    def retrieve(self, query, k=5):
-        return self._docs[:k], self._scores[:k]
+    def retrieve(self, request):
+        return retrieval_result_from_pairs(
+            docs=self._docs[: request.top_k],
+            scores=self._scores[: request.top_k],
+            mode_used=request.mode,
+            backend_used="test",
+        )
 
 
 class _DummyGenerator:

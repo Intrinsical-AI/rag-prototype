@@ -75,7 +75,7 @@ async def test_docs_ingest_and_import_endpoints_call_coordinator_execute(
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(docs_ingest, "MutationCoordinator", FakeCoordinator, raising=True)
 
-    ingest_resp = await asgi_client.post("/api/docs", json={"texts": ["hello"]})
+    ingest_resp = await asgi_client.post("/api/docs/ingest", json={"texts": ["hello"]})
     assert ingest_resp.status_code == 200
     assert ingest_resp.json()["count"] >= 1
 
@@ -106,7 +106,7 @@ async def test_docs_ingest_and_import_endpoints_call_coordinator_execute(
             "application/json",
         )
     }
-    import_resp = await asgi_client.post("/api/docs/import", files=files)
+    import_resp = await asgi_client.post("/api/docs/import-conversations", files=files)
     assert import_resp.status_code == 200
     assert import_resp.json()["count"] >= 1
 

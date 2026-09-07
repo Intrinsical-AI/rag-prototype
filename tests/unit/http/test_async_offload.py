@@ -13,7 +13,8 @@ async def test_ask_runs_in_worker_thread(asgi_client, in_memory_sqlite, monkeypa
     seen: dict[str, int] = {}
 
     class DummyService:
-        def ask(self, question: str, top_k: int):
+        def ask(self, question: str, top_k: int, *, filters=(), retrieval_mode="sparse"):
+            _ = (question, top_k, filters, retrieval_mode)
             seen["tid"] = threading.get_ident()
             return {"answer": "ok", "docs": [], "scores": []}
 
@@ -130,6 +131,6 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
     monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
     monkeypatch.setattr(factory, "VectorStorage", lambda **k: DummyVec())
 
-    r = await asgi_client.post("/api/docs", json={"texts": ["X"]})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["X"]})
     assert r.status_code == 200
     assert seen["tid"] != main_tid

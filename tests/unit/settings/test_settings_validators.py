@@ -102,16 +102,6 @@ def test_log_level_is_normalized_to_uppercase():
     assert s.log_level == "DEBUG"
 
 
-def test_debug_accepts_release_alias_from_string():
-    s = Settings(debug="release")
-    assert s.debug is False
-
-
-def test_debug_accepts_development_alias_from_string():
-    s = Settings(debug="development")
-    assert s.debug is True
-
-
 def test_production_cors_rejects_wildcard_origin():
     with pytest.raises(ValueError, match="explicit origins"):
         Settings(debug=False, cors_allow_origins=["*"])

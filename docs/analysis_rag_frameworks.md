@@ -190,7 +190,7 @@ type: project
   - **Fallback if pgvector doesn't cut it**: Switch to Qdrant (modern, battle-tested in 2024, fewer ops surprises than Milvus)
 
 **Scenario 2: Building for billion-scale search (academic + research orgs)**
-- **Choice**: Add Milvus to rag-prototype (keep ES as option for legacy)
+- **Choice**: Add Milvus to rag-prototype
 - **Reasoning**:
   - Milvus is THE distributed vector DB (comparable to ES but vector-native)
   - Hybrid (dense + sparse) retrieval baked in
@@ -335,7 +335,7 @@ START: "I need to build RAG"
 
 ## Summary Recommendation
 
-**For your Synergy project (assuming medium-to-long-term, custom persistence):**
+**For a medium-to-long-term project with custom persistence:**
 → **Start: rag-prototype + local_split (learning phase)**
 → **Graduate: rag-prototype + pgvector (production phase, < 100M docs)**
 → **Scale: Add Qdrant adapter if vector perf matters**

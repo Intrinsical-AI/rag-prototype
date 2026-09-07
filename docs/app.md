@@ -50,7 +50,8 @@ Composition root y lifecycle runtime (transport-neutral):
 
 Adaptadores HTTP por bounded context:
 
-- `docs.py`: `POST /api/docs`, `POST /api/docs/import`, `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- `docs.py`: `POST /api/docs/ingest`, `POST /api/docs/import-conversations`,
+  `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
 - `rag_router.py`: `POST /api/ask`, `POST /api/ask_eval`, `GET /api/history`
 - `index.py`: `POST /api/index/rebuild`
 - `health.py`: `GET /healthz`, `GET /readyz`, `GET /healthz/ollama` (app-level)
@@ -77,8 +78,9 @@ Estas reglas están cubiertas por tests de arquitectura.
 
 ### Entradas
 
-- API canónica/recomendada: `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
-- API de compatibilidad operacional: `POST /api/docs`, `POST /api/docs/import` (también transforman a `MutationIntent`)
+- API identificada: `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- Ingesta de texto: `POST /api/docs/ingest`
+- Import de conversaciones: `POST /api/docs/import-conversations`
 - CLI: `rag-mutate-docs`
 - CLI ingest: internamente transforma a `MutationIntent`
 - CLI bootstrap: `rag-bootstrap` usa `run_sample_data_ingestion` y delega en `MutationCoordinator`
@@ -121,10 +123,12 @@ Los locks de escritura/archivo están en `infrastructure/concurrency/locks/{file
 
 La superficie de mutación habilitada por operación incluye estos endpoints HTTP (todos pasan por `MutationCoordinator`):
 
-- HTTP: `POST /api/docs`, `POST /api/docs/import`, `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
+- HTTP: `POST /api/docs/ingest`, `POST /api/docs/import-conversations`,
+  `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
 - CLI: `rag-mutate-docs`, `rag-import-canonical`
 
-Si necesitas distinguir contratos: `POST /api/docs/mutate` y `POST /api/docs/import-canonical` son los caminos canónicos/recomendados; `POST /api/docs` y `POST /api/docs/import` se mantienen como compatibilidad operacional porque siguen ejecutando el flujo de mutación canónico.
+Cada ruta representa un contrato distinto: ingestión de texto sin identidad externa,
+importación de conversaciones, mutación identificada e importación canónica.
 
 ## Artefactos de evaluación
 

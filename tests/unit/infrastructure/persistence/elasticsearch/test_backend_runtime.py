@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -17,6 +18,11 @@ from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.ports.contracts import DocsMutationPorts
 from local_rag_backend.core.use_cases._atomic_mutation_executor import AtomicMutationExecutor
 from local_rag_backend.core.use_cases._mutation_saga_executor import PreparedMutation
+from local_rag_backend.core.use_cases.docs_import_canonical import (
+    CanonicalImportDocumentInput,
+    CanonicalImportRequestInput,
+    execute_import_canonical_sync,
+)
 from local_rag_backend.core.use_cases.docs_mutation_contracts import (
     MutationIntent,
     MutationUpsertInput,
@@ -105,6 +111,10 @@ class _ElasticTestState:
                     score = 1.0
                     if "match_all" in query:
                         pass
+                    elif "term" in query:
+                        field, value = next(iter(query["term"].items()))
+                        if source.get(field) != value:
+                            continue
                     elif "prefix" in query:
                         field, prefix = next(iter(dict(query["prefix"]).items()))
                         if not str(source.get(str(field)) or doc_id).startswith(str(prefix)):
@@ -239,7 +249,29 @@ class _ElasticTestState:
                     if "update" in op:
                         meta = dict(op["update"])
                         body = dict(ops[i + 1])
-                        doc = self.docs_for(str(meta["_index"])).setdefault(str(meta["_id"]), {})
+                        index = str(meta["_index"])
+                        doc = (
+                            self.docs_for(index).get(str(meta["_id"]))
+                            if index in self.indices
+                            else None
+                        )
+                        if doc is None:
+                            error_type = (
+                                "document_missing_exception"
+                                if index in self.indices
+                                else "index_not_found_exception"
+                            )
+                            items.append(
+                                {
+                                    "update": {
+                                        "_id": str(meta["_id"]),
+                                        "status": 404,
+                                        "error": {"type": error_type},
+                                    }
+                                }
+                            )
+                            i += 2
+                            continue
                         if "script" in body:
                             source = str((body["script"] or {}).get("source") or "")
                             match = re.search(r"remove\('([^']+)'\)", source)
@@ -253,7 +285,8 @@ class _ElasticTestState:
                         i += 2
                         continue
                     raise AssertionError(f"Unexpected bulk op: {op}")
-                return httpx.Response(200, json={"errors": False, "items": items})
+                errors = any(outcome.get("error") for item in items for outcome in item.values())
+                return httpx.Response(200, json={"errors": errors, "items": items})
 
             if method == "POST" and path.endswith("/_search"):
                 index = path.strip("/").split("/")[0]
@@ -488,6 +521,101 @@ def test_document_repository_crud_snapshot_restore_and_scan() -> None:
     repo.upsert_documents_by_external_id(bulk_items)
     all_docs = repo.get_all_documents()
     assert len([doc for doc in all_docs if doc.external_id.startswith("scan-")]) == 505
+
+
+def test_canonical_import_replaces_large_scope_and_retry_is_idempotent(tmp_path) -> None:
+    backend = _build_backend()
+    backend.settings.data_dir = tmp_path
+    backend.settings.mutation_batch_max_wait_ms = 0
+    repo = backend.docs
+    ports = DocsMutationPorts(
+        build_embedder=lambda: SimpleNamespace(
+            embed=lambda texts: [[1.0, 0.0, 0.0] for _ in texts]
+        ),
+        doc_repo_factory=lambda: repo,
+        build_upsert_doc=repo.UpsertDoc,
+        vector_repo_factory=lambda **kwargs: backend.vector,
+        rebuild_fn=lambda **kwargs: 0,
+        write_lock=lambda **kwargs: nullcontext(),
+        mutation_journal_factory=lambda: None,
+        storage_profile_registry=StorageProfileRegistry(),
+    )
+    documents = tuple(
+        CanonicalImportDocumentInput(external_id=f"doc-{i:05d}", content=f"code {i}")
+        for i in range(2503)
+    )
+
+    def run(docs, snapshot):
+        return execute_import_canonical_sync(
+            request=CanonicalImportRequestInput(
+                scope="demo", snapshot_id=snapshot, replace_scope=True, documents=docs
+            ),
+            settings_obj=backend.settings,
+            ports=ports,
+        )
+
+    assert run(documents, "initial").inserted == 2503
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id="foreign", content="preserve other scope", scope="other")]
+    )
+    replaced = run(documents[:1000], "replacement")
+    assert replaced.deleted_sql == replaced.deleted_index == 1503
+    assert replaced.deleted_external_ids == [d.external_id for d in documents[1000:]]
+    retried = run(documents[:1000], "replacement")
+    assert retried.unchanged == 1000
+    assert retried.inserted == retried.updated == retried.deleted_sql == retried.deleted_index == 0
+    assert len(repo.get_all_documents()) == 1001
+    assert backend.vector.ntotal == 1000
+    assert repo.get([DocId("foreign")])[0].content == "preserve other scope"
+    assert not repo.get_tombstoned_external_ids(replaced.deleted_external_ids)
+
+
+def test_vector_delete_only_removes_embedding_and_is_idempotent() -> None:
+    backend = _build_backend()
+    repo = backend.docs
+    repo.upsert_documents_by_external_id(
+        [
+            repo.UpsertDoc(
+                external_id="present",
+                content="preserve",
+                metadata={"keep": True},
+                embedding=[1.0, 0.0, 0.0],
+            ),
+            repo.UpsertDoc(external_id="without-vector", content="also preserve"),
+        ]
+    )
+    before = repo.get([DocId("present"), DocId("without-vector")])
+    assert (
+        backend.vector.delete(
+            [DocId("present"), DocId("missing"), DocId("without-vector"), DocId(" ")]
+        )
+        == 3
+    )
+    assert repo.get([DocId("present"), DocId("without-vector")]) == before
+    assert backend.vector.ntotal == 0
+    assert repo.get([DocId("missing")]) == []
+    assert backend.vector.delete([DocId("missing"), DocId("present")]) == 2
+
+
+def test_vector_delta_allows_only_missing_removal_action() -> None:
+    backend = _build_backend()
+    backend.docs.store_documents(["unrelated"])
+    backend.docs.upsert_documents_by_external_id(
+        [backend.docs.UpsertDoc(external_id="present", content="keep")]
+    )
+    backend.vector.apply_delta_atomic(
+        delete_ids=[DocId("missing")], upserts=[(DocId("present"), [1.0, 0.0, 0.0])]
+    )
+    assert backend.vector.ntotal == 1
+    assert backend.docs.get([DocId("missing")]) == []
+    # The same ID at a later ordinal is an upsert and must remain strict.
+    with pytest.raises(ElasticBackendError, match="update missing: status 404"):
+        backend.vector.apply_delta_atomic(
+            delete_ids=[DocId("missing")], upserts=[(DocId("missing"), [1.0, 0.0, 0.0])]
+        )
+    del backend.state.indices[str(backend.settings.es_docs_index)]
+    with pytest.raises(ElasticBackendError, match="status 404"):
+        backend.vector.delete([DocId("missing")])
 
 
 def test_vector_history_system_and_diagnostics_roundtrip() -> None:

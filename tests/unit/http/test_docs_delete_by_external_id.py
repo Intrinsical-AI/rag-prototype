@@ -12,7 +12,7 @@ async def test_mutate_delete_by_external_id_sparse_creates_tombstone_and_blocks_
 ):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
-    r1 = await asgi_client.post("/api/docs", json={"texts": ["hello world"]})
+    r1 = await asgi_client.post("/api/docs/ingest", json={"texts": ["hello world"]})
     assert r1.status_code == 200
     assert r1.json()["count"] == 1
 
@@ -26,7 +26,7 @@ async def test_mutate_delete_by_external_id_sparse_creates_tombstone_and_blocks_
     assert rd.json()["tombstoned"] == 1
     assert SqlDocumentStorage().get_all_documents() == []
 
-    r2 = await asgi_client.post("/api/docs", json={"texts": ["hello world"]})
+    r2 = await asgi_client.post("/api/docs/ingest", json={"texts": ["hello world"]})
     assert r2.status_code == 200
     assert r2.json()["count"] == 0
     assert SqlDocumentStorage().get_all_documents() == []
@@ -98,7 +98,7 @@ async def test_mutate_delete_by_external_id_dense_is_consistent_and_survives_reb
     )
     monkeypatch.setattr(factory, "VectorStorage", lambda **k: dummy_vec, raising=True)
 
-    r1 = await asgi_client.post("/api/docs", json={"texts": ["alpha", "beta"]})
+    r1 = await asgi_client.post("/api/docs/ingest", json={"texts": ["alpha", "beta"]})
     assert r1.status_code == 200
     assert r1.json()["count"] == 2
     assert len(dummy_vec.ops) == 1
@@ -185,9 +185,11 @@ async def test_mutate_delete_by_external_id_dense_does_not_require_embedder(
     assert embedder_calls == 0
 
 
-async def test_legacy_delete_by_external_id_endpoint_is_removed(asgi_client, in_memory_sqlite):
+async def test_removed_delete_by_external_id_endpoint_returns_not_found(
+    asgi_client, in_memory_sqlite
+):
     rd = await asgi_client.post(
         "/api/docs/delete_by_external_id",
-        json={"external_ids": ["doc-legacy"]},
+        json={"external_ids": ["doc-removed"]},
     )
     assert rd.status_code == 404

@@ -26,7 +26,8 @@ def test_frontend_asset_allows_nested_file(tmp_path, monkeypatch):
     assert "javascript" in media_type
 
 
-def test_frontend_asset_rejects_symlink_escape(tmp_path, monkeypatch):
+@pytest.mark.parametrize("packaged", [False, True])
+def test_frontend_asset_rejects_symlink_escape(tmp_path, monkeypatch, packaged):
     root = tmp_path / "frontend"
     root.mkdir()
     secret = tmp_path / "secret.txt"
@@ -37,6 +38,8 @@ def test_frontend_asset_rejects_symlink_escape(tmp_path, monkeypatch):
     except OSError:
         pytest.skip("Symlinks are unavailable on this platform")
     monkeypatch.setattr(main, "FRONTEND_DIR", root)
+    if packaged:
+        monkeypatch.setattr(main.resources, "files", lambda package: root)
 
     with pytest.raises(NotFoundError):
         main._get_frontend_asset("escape.txt")

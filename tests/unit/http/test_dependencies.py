@@ -120,7 +120,7 @@ async def test_ingest_docs_resets_cached_rag_service(asgi_client, in_memory_sqli
     svc1 = await deps.get_rag_service()
     assert svc1 is calls[0]
 
-    r = await asgi_client.post("/api/docs", json={"texts": ["hello"]})
+    r = await asgi_client.post("/api/docs/ingest", json={"texts": ["hello"]})
     assert r.status_code == 200
     assert r.json()["count"] == 1
 

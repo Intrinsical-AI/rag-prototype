@@ -10,12 +10,13 @@ from local_rag_backend.http.routers import rag_router
 class _MockRagService:
     """Mock RAG service with minimal methods for contract testing."""
 
-    def ask(self, question: str, top_k: int = 3):
+    def ask(self, question: str, top_k: int = 3, *, filters=(), retrieval_mode="sparse"):
         """Mock ask method that returns a minimal valid response.
 
         Must match the real RagService.ask() return structure:
         {"answer": str, "docs": list[Document], "scores": list[float]}
         """
+        _ = (question, top_k, filters, retrieval_mode)
         return {
             "answer": "mock answer",
             "docs": [],

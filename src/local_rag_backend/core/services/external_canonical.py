@@ -21,7 +21,9 @@ def normalize_external_canonical_payload(payload: Mapping[str, Any]) -> dict[str
 
 
 def _looks_like_repogpt_code_units(payload: Mapping[str, Any]) -> bool:
-    return any(marker in payload for marker in _REPOGPT_TOP_LEVEL_MARKERS)
+    return any(
+        marker in payload and payload[marker] is not None for marker in _REPOGPT_TOP_LEVEL_MARKERS
+    )
 
 
 def _validate_repogpt_code_units_payload(payload: Mapping[str, Any]) -> None:

@@ -97,31 +97,21 @@ def calculate_eval_metrics(
 def run_retrieval_eval(
     *,
     dataset: EvalDataset,
-    retrieve_external_ids: Callable[[str, int], Sequence[str]] | None = None,
-    retrieve_ranked_items: Callable[[str, int], Sequence[object]] | None = None,
+    retrieve_ranked_items: Callable[[str, int], Sequence[object]],
     retrieval_mode: EvalRetrievalMode = "sparse",
     k: int = 3,
     reranker_enabled: bool = False,
-    reranker_candidate_k: int = 20,
-    reranker_strategy: str = "overlap_v1",
     max_queries: int | None = None,
     run_out: Path | None = None,
 ) -> EvalResult:
-    # Backward-compatible kwargs retained for callers migrating from the previous
-    # infra-coupled implementation where reranker wiring happened in this layer.
-    _ = (reranker_candidate_k, reranker_strategy)
     if k <= 0:
         raise ValueError("k must be positive")
-    if retrieve_external_ids is not None and retrieve_ranked_items is not None:
-        raise ValueError("Pass only one of retrieve_external_ids or retrieve_ranked_items.")
 
     qs: list[EvalQuery] = list(dataset.queries)
     if max_queries is not None:
         qs = qs[: max(0, int(max_queries))]
     if not qs:
         raise ValueError("No queries to evaluate after max_queries.")
-    if retrieve_external_ids is None and retrieve_ranked_items is None:
-        raise ValueError("retrieve_ranked_items callback is required for offline IR evaluation.")
     known_doc_ids = {
         str(doc.external_id).strip() for doc in dataset.docs if str(doc.external_id).strip()
     }
@@ -145,12 +135,7 @@ def run_retrieval_eval(
         ranked_docs: dict[str, float] = {}
         seen_external_ids: set[str] = set()
         query_run_items: list[EvalRunItem] = []
-        if retrieve_ranked_items is not None:
-            raw_ranked_items = retrieve_ranked_items(q.query, k)
-        elif retrieve_external_ids is not None:
-            raw_ranked_items = retrieve_external_ids(q.query, k)
-        else:  # pragma: no cover - guarded above, keeps type checkers honest
-            raw_ranked_items = ()
+        raw_ranked_items = retrieve_ranked_items(q.query, k)
         for raw_item in _coerce_retrieved_items(raw_ranked_items, k=k):
             normalized_external_id = str(raw_item.external_id).strip()
             if not normalized_external_id:

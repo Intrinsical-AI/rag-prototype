@@ -1,6 +1,7 @@
 const qs = (selector) => document.querySelector(selector);
 const API_URL = '/api/ask';
-const DOCS_URL = '/api/docs';
+const DOCS_INGEST_URL = '/api/docs/ingest';
+const DOCS_QUERY_URL = '/api/docs/query';
 
 // --- DOM Elements ---
 const themeBtn = qs('#themeBtn');
@@ -169,7 +170,7 @@ addDocBtn.addEventListener('click', async () => {
   addDocBtn.disabled = true;
   addDocBtn.textContent = 'Adding...';
   try {
-    const r = await fetch(DOCS_URL, {
+    const r = await fetch(DOCS_INGEST_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ texts: [txt] })
@@ -191,13 +192,38 @@ refreshDocsBtn.addEventListener('click', loadDocs);
 
 async function loadDocs() {
   try {
-    const r = await fetch(DOCS_URL + '?limit=100&offset=0');
+    const r = await fetch(DOCS_QUERY_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({limit: 100, offset: 0})
+    });
     if (!r.ok) throw new Error(await r.text());
     const docs = await r.json();
     renderDocs(docs);
   } catch (e) {
     docsListEl.innerHTML = `<span style="color:crimson">Failed to load docs: ${escapeHTML(String(e))}</span>`;
   }
+}
+
+function documentPreviewBody(doc) {
+  const content = doc.content || '';
+  const md = doc.metadata;
+  // docs_ingest emits this exact header. Require its matching metadata and
+  // chunk identity so canonical frontmatter and ordinary prose remain intact.
+  const fields = ['source', 'input_index', 'chunk_index', 'chunk_start_char',
+    'chunk_end_char', 'chunker_version', 'embedding_model', 'dedup_sha256', 'parent_doc_id'];
+  if (!md || !fields.every(key => Object.hasOwn(md, key)) ||
+      !/^[a-f0-9]{64}$/.test(md.dedup_sha256) ||
+      doc.external_id !== `chunk:${md.dedup_sha256}` ||
+      md.parent_doc_id !== `${md.source}:text=${md.input_index}` ||
+      !['input_index', 'chunk_index', 'chunk_start_char', 'chunk_end_char'].every(
+        key => Number.isInteger(md[key]) && md[key] >= 0) ||
+      !fields.every(key => !/[\r\n]/.test(String(md[key])))) return content;
+  const header = fields.map(key => {
+    const title = key.split('_').map(part => part[0].toUpperCase() + part.slice(1)).join('_');
+    return `${title}: ${md[key]}`;
+  }).join('\n') + '\n\n';
+  return content.startsWith(header) ? content.slice(header.length) : content;
 }
 
 function renderDocs(docs) {
@@ -211,8 +237,11 @@ function renderDocs(docs) {
     div.style.borderBottom = '1px dashed var(--border)';
     div.style.padding = '.35rem 0';
     const p = document.createElement('div');
-    const preview = (d.content || '').slice(0, 160).replace(/\s+/g,' ').trim();
-    p.innerHTML = `<strong>#${d.id}</strong> — ${escapeHTML(preview)}${d.content.length>160?'…':''}`;
+    const body = documentPreviewBody(d);
+    const preview = body.slice(0, 160).replace(/\s+/g,' ').trim();
+    const id = document.createElement('strong');
+    id.textContent = `#${d.id}`;
+    p.append(id, ' — ', preview, body.length > 160 ? '…' : '');
     div.appendChild(p);
     frag.appendChild(div);
   });

@@ -42,17 +42,15 @@ def session_uow(
             _BOUND_SESSION.reset(token)
 
 
-def ensure_sqlite_schema_compatible(
+def ensure_sqlite_schema_current(
     *,
     engine_to_use: Engine | None = None,
-    id_map_path: str | None = None,
 ) -> None:
     """
     Ensure ORM tables for fresh-install runtime contract.
 
-    Legacy schema migration is intentionally out of scope.
+    Schema migration is intentionally out of scope.
     """
-    _ = id_map_path
     eng = engine_to_use or engine
     Base.metadata.create_all(bind=eng)
 

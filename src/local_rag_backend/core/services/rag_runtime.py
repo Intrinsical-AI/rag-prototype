@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING, Any
 from local_rag_backend.core.domain.retrieval import (
     RetrievalFilter,
     RetrievalRequest,
-    RetrievalResult,
-    retrieval_result_from_pairs,
 )
 
 if TYPE_CHECKING:
@@ -37,29 +35,6 @@ class RagService:
         self.generator = generator
         self.history_storage = history_storage
         self.no_docs_answer = no_docs_answer
-
-    def _coerce_retrieval_result(
-        self,
-        raw_result: Any,
-        *,
-        request: RetrievalRequest,
-    ) -> RetrievalResult:
-        if isinstance(raw_result, RetrievalResult):
-            return raw_result
-        if (
-            isinstance(raw_result, tuple)
-            and len(raw_result) == 2
-            and isinstance(raw_result[0], (list, tuple))
-            and isinstance(raw_result[1], (list, tuple))
-        ):
-            docs, scores = raw_result
-            return retrieval_result_from_pairs(
-                docs=docs,
-                scores=scores,
-                mode_used=request.mode,
-                backend_used="tuple_adapter",
-            )
-        raise RuntimeError(f"Unsupported retriever response type: {type(raw_result)!r}")
 
     def ask(
         self,
@@ -88,8 +63,7 @@ class RagService:
             candidate_k=candidate_k,
             dual_candidate_k=dual_candidate_k,
         )
-        raw_result = self.retriever.retrieve(request)
-        retrieval = self._coerce_retrieval_result(raw_result, request=request)
+        retrieval = self.retriever.retrieve(request)
         docs = list(retrieval.documents)
         scores = list(retrieval.scores)
         if len(docs) != len(scores):

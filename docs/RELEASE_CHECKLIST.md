@@ -34,7 +34,34 @@
    - `pre-commit run --all-files`
    - `make smoke-embedding-api-wheel`
 
-## RC Notes: 2026-07-10
+## Release candidate: 3.0.0
+
+The verified remote canonical branch is `master`. Deliver `v3.0.0` from the
+accepted commit after its CI and installed-artifact checks pass. Existing tags
+and published artifacts are immutable.
+
+Breaking changes relative to 2.1.0:
+
+- Move HTTP document ingestion from `POST /api/docs` to
+  `POST /api/docs/ingest`.
+- Move conversation import from `POST /api/docs/import` to
+  `POST /api/docs/import-conversations`.
+- Remove the `performance-cpu` extra; select the current documented extras.
+- Require a boolean `debug` configuration value instead of historical string
+  aliases.
+
+The supported typed embedding integration and MCP entrypoints keep their current
+contracts. Migrate HTTP clients and configuration directly to the documented
+interfaces; no legacy aliases are retained. This release does not introduce a
+new guarantee for migration of historical SQLite databases.
+
+The release also includes the already-implemented canonical import diagnostics,
+HTTP/frontend hardening, and rejection of incomplete Elasticsearch enumeration
+before destructive scope operations. Existing regression suites cover those
+behaviors. Record final gate results, commit, and artifact hashes with the release;
+historical validation results below do not certify this candidate.
+
+## Historical RC Notes: 2026-07-10
 
 Planned release:
 

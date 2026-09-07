@@ -74,11 +74,11 @@ class LocalSplitSearchRetriever:
                 preloaded_docs=docs,
             )
         raw_result = retriever.retrieve(request)
-        legacy_docs = list(raw_result.documents)
-        legacy_scores = list(raw_result.scores)
+        retrieved_docs = list(raw_result.documents)
+        retrieved_scores = list(raw_result.scores)
         return retrieval_result_from_pairs(
-            docs=legacy_docs,
-            scores=legacy_scores,
+            docs=retrieved_docs,
+            scores=retrieved_scores,
             mode_used="sparse",
             backend_used="local_split",
             stage="sparse",

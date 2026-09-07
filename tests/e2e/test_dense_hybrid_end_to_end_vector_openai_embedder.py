@@ -52,7 +52,8 @@ class _DummyEmbeddingsAPI:
 
 
 class _DummyOpenAI:
-    def __init__(self, api_key):
+    def __init__(self, api_key, *, timeout):
+        _ = (api_key, timeout)
         self.embeddings = _DummyEmbeddingsAPI()
 
 

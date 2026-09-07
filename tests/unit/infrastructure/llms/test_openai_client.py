@@ -23,22 +23,20 @@ def test_create_openai_client_omits_none_optional_kwargs() -> None:
     assert captured == {"api_key": "k"}
 
 
-def test_create_openai_client_falls_back_when_timeout_is_unsupported() -> None:
+def test_create_openai_client_rejects_factory_without_timeout_contract() -> None:
     calls: list[dict[str, object]] = []
 
     def _factory(**kwargs):
         calls.append(dict(kwargs))
-        if "timeout" in kwargs:
-            raise TypeError("__init__() got an unexpected keyword argument 'timeout'")
-        return "ok"
+        raise TypeError("__init__() got an unexpected keyword argument 'timeout'")
 
-    out = create_openai_client(
-        api_key="k",
-        timeout=17,
-        client_factory=_factory,
-    )
-    assert out == "ok"
-    assert calls == [{"api_key": "k", "timeout": 17}, {"api_key": "k"}]
+    with pytest.raises(TypeError, match="timeout"):
+        create_openai_client(
+            api_key="k",
+            timeout=17,
+            client_factory=_factory,
+        )
+    assert calls == [{"api_key": "k", "timeout": 17}]
 
 
 def test_create_openai_client_reraises_unrelated_typeerror() -> None:
