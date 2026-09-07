@@ -63,6 +63,11 @@ commands:
     invocation: make contract-check
     purpose: Validate the workspace contract and generated README block.
     evidence: [Makefile]
+  - id: smoke-embedding-api-wheel
+    kind: make
+    invocation: make smoke-embedding-api-wheel
+    purpose: Build and install a wheel outside the checkout and exercise the typed embedding API.
+    evidence: [Makefile, scripts/smoke_embedding_api_wheel.py]
 stack:
   languages: [Python]
   runtimes: ["Python >=3.11,<3.13"]
@@ -73,7 +78,7 @@ stack:
     optional: [fastapi, uvicorn, faiss-cpu, sentence-transformers, torch, langchain-community, prometheus-client]
     dev: [pytest, ruff, mypy, pre-commit, import-linter]
 validation:
-  commands: [make check, make pre-commit, make build]
+  commands: [make check, make pre-commit, make build, make smoke-embedding-api-wheel]
   artifacts: [dist]
 integrations: []
 limitations:

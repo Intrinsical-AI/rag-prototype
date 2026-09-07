@@ -26,6 +26,7 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 - `rag-server` — Start the FastAPI service. (`console-script`)
 - `rag-mcp` — Start the MCP server. (`mcp`)
 - `make contract-check` — Validate the workspace contract and generated README block. (`make`)
+- `make smoke-embedding-api-wheel` — Build and install a wheel outside the checkout and exercise the typed embedding API. (`make`)
 
 ### Stack & Dependencies
 
@@ -40,6 +41,7 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 - `make check`
 - `make pre-commit`
 - `make build`
+- `make smoke-embedding-api-wheel`
 
 ### Integrations & Relations
 
