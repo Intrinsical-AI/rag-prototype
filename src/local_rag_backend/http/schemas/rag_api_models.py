@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator
 
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
+from local_rag_backend.core.services.retrieval_filters import validate_filter_values
 from local_rag_backend.http.schemas.shared import DocumentInDB
 
 
@@ -16,6 +17,11 @@ class QueryResult(BaseModel):
 class RetrievalFilterModel(BaseModel):
     field: str = Field(..., min_length=1, max_length=256)
     values: list[str] = Field(..., min_length=1)
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def _values_are_nonblank_strings(cls, value: object) -> list[str]:
+        return validate_filter_values(value)
 
     @field_validator("field")
     @classmethod

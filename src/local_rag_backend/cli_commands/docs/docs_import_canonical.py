@@ -18,7 +18,7 @@ from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
 )
 from local_rag_backend.core.use_cases.results import CanonicalImportSummary
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
 
 
 def _read_payload(payload_json: Path) -> dict[str, Any]:
@@ -104,7 +104,7 @@ def import_canonical_cmd(payload_json: Path, replace_scope_override: bool | None
         def _run_sync() -> CanonicalImportSummary:
             return execute_import_canonical_sync(
                 request=request,
-                settings_obj=settings,
+                settings_obj=get_settings(),
                 ports=mutation_bundle.ports,
             )
 

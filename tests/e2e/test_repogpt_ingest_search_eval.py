@@ -4,26 +4,19 @@ import copy
 import json
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 from support.repogpt_fixture import (
-    REPOGPT_CLI_AVAILABLE,
-    REPOGPT_FIXTURE_REPO,
-    emit_repogpt_code_units,
+    load_repogpt_payload,
 )
-
-if not REPOGPT_CLI_AVAILABLE or REPOGPT_FIXTURE_REPO is None:
-    pytest.skip(
-        "external RepoGPT fixture unavailable; set REPOGPT_ROOT and REPOGPT_FIXTURE_REPO",
-        allow_module_level=True,
-    )
 
 from local_rag_backend.cli import cli
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.core.services.evaluation import load_eval_dataset
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 DATASET_PATH = Path(__file__).resolve().parents[2] / "datasets" / "repogpt_rag_eval_v1.jsonl"
 
@@ -58,7 +51,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     monkeypatch.setattr(settings, "data_dir", data_dir, raising=False)
 
     payload_path = tmp_path / "repogpt_eval_code_units.json"
-    payload = emit_repogpt_code_units(payload_path=payload_path, repo_path=REPOGPT_FIXTURE_REPO)
+    payload = load_repogpt_payload(payload_path=payload_path)
 
     assert payload["schema_version"] == "4"
     assert payload["replace_scope"] is True
@@ -76,7 +69,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     result = runner.invoke(cli, ["import-canonical", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(in_memory_sqlite)
     docs = list(repo.get_all_documents())
     assert len(docs) == len(list(payload["documents"]))  # type: ignore[arg-type]
     retriever = LocalSplitSearchRetriever(doc_repo=repo)
@@ -137,10 +130,13 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     reduced_payload["snapshot_id"] = f"{payload['snapshot_id']}-reduced"
     reduced_payload["documents"] = [
         document
-        for document in list(payload["documents"])  # type: ignore[index]
+        for document in list(reduced_payload["documents"])  # type: ignore[index]
         if str(document["external_id"]).endswith(":sample.py:function:helper")
         or str(document["external_id"]).endswith(":client.py:function:build_api_client")
     ]
+    for document in reduced_payload["documents"]:
+        document["snapshot_id"] = reduced_payload["snapshot_id"]
+    reduced_payload["stats"]["emitted_documents"] = len(reduced_payload["documents"])
     reduced_payload_path = tmp_path / "repogpt_eval_code_units_reduced.json"
     reduced_payload_path.write_text(
         json.dumps(reduced_payload, ensure_ascii=False, indent=2) + "\n",

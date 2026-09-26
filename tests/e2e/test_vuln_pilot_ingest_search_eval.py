@@ -24,7 +24,9 @@ from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRe
 from local_rag_backend.core.services.evaluation import load_eval_dataset
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 DATASET_PATH = Path(__file__).resolve().parents[2] / "datasets" / "vuln_pilot_rag_eval_v1.jsonl"
 
@@ -87,7 +89,7 @@ def test_vuln_pilot_import_search_eval_and_scope_sync(
     result = runner.invoke(cli, ["import-canonical", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     docs = list(repo.get_all_documents())
     assert len(docs) == len(list(payload["documents"]))  # type: ignore[arg-type]
     retriever = LocalSplitSearchRetriever(doc_repo=repo)

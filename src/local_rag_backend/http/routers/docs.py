@@ -56,7 +56,6 @@ from local_rag_backend.http.schemas.docs import (
     UpsertDocResult,
 )
 from local_rag_backend.http.schemas.shared import DocumentInDB
-from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 from local_rag_backend.infrastructure.observability.observability import (
     Timer,
     log_event,
@@ -117,7 +116,7 @@ async def _run_docs_mutation_operation(
         operation=operation,
         run_locked=(run_locked or (lambda fn: fn())),
         reset_after=reset_rag_service,
-        blocking_executor=container.blocking_executor(run_blocking_fn=run_blocking),
+        blocking_executor=container.blocking_executor(),
         map_error=map_error,
     )
 
@@ -128,7 +127,8 @@ async def query_docs(
     container: AppContainer = Depends(get_app_container_dependency),
 ) -> list[DocumentInDB]:
     docs_reader = container.build_docs_read_port()
-    docs = docs_reader.query_docs(
+    docs = await container.blocking_executor().run_blocking(
+        docs_reader.query_docs,
         limit=payload.limit,
         offset=payload.offset,
         filters=tuple(item.to_domain() for item in payload.filters),
@@ -339,7 +339,10 @@ async def import_docs(
     Accepts multipart/form-data with a single file field named 'file'.
     Detects the export format automatically and ingests each message as a separate document.
     """
-    raw = await _read_upload_with_limit(file=file)
+    try:
+        raw = await _read_upload_with_limit(file=file)
+    except ImportFileTooLargeError as exc:
+        raise PayloadTooLargeError(str(exc)) from exc
     mutation_bundle = container.build_docs_mutation_bundle(
         missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
     )

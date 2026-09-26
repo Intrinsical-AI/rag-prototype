@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 
 from click.testing import CliRunner
+from support.canonical import repogpt_payload
 
 from local_rag_backend.cli import cli
 from local_rag_backend.cli_commands.docs import docs_import_canonical as import_cmd_module
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_cli_import_canonical_syncs_scope(in_memory_sqlite, tmp_path, monkeypatch):
@@ -64,7 +67,10 @@ def test_cli_import_canonical_syncs_scope(in_memory_sqlite, tmp_path, monkeypatc
     assert r2.exit_code == 0, r2.output
     assert "updated=1" in r2.output
     assert "deleted_sql=1" in r2.output
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-2"}
+    assert {
+        doc.external_id
+        for doc in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    } == {"doc-2"}
 
 
 def test_read_payload_rejects_non_object_json(tmp_path) -> None:
@@ -81,44 +87,12 @@ def test_read_payload_rejects_non_object_json(tmp_path) -> None:
 
 def test_read_payload_accepts_repogpt_code_units_v4(tmp_path) -> None:
     payload = tmp_path / "payload.json"
-    payload.write_text(
-        json.dumps(
-            {
-                "schema_version": "4",
-                "kind": "code-units",
-                "repo_key": "demo",
-                "scope": "repogpt:demo",
-                "snapshot_id": "demo-snap",
-                "replace_scope": True,
-                "documents": [
-                    {
-                        "external_id": "repogpt:demo:src/app.py:function:helper",
-                        "source_id": "repogpt:demo:file:src/app.py",
-                        "scope": "repogpt:demo",
-                        "snapshot_id": "demo-snap",
-                        "path": "src/app.py",
-                        "unit_type": "function",
-                        "repo_key": "demo",
-                        "content_hash": "abc123",
-                        "content": "def helper():\n    return 1\n",
-                        "metadata": {
-                            "scope": "repogpt:demo",
-                            "snapshot_id": "demo-snap",
-                            "path": "src/app.py",
-                            "unit_type": "function",
-                            "repo_key": "demo",
-                            "content_hash": "abc123",
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
+    payload.write_text(json.dumps(repogpt_payload()), encoding="utf-8")
     loaded = import_cmd_module._read_payload(payload)
     assert loaded["schema_version"] == "4"
     assert loaded["kind"] == "code-units"
+    request = import_cmd_module._build_request(loaded, replace_scope=True)
+    assert request.documents[0].metadata["path"] == "app.py"
 
 
 def test_read_payload_rejects_repogpt_code_units_v3(tmp_path) -> None:
@@ -271,7 +245,10 @@ def test_cli_import_canonical_honors_payload_replace_scope_false(
     r2 = CliRunner().invoke(cli, ["import-canonical", "--json", str(second)])
     assert r2.exit_code == 0, r2.output
     assert "deleted_sql=0" in r2.output
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {
+    assert {
+        doc.external_id
+        for doc in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    } == {
         "doc-1",
         "doc-2",
     }
@@ -321,7 +298,10 @@ def test_cli_import_canonical_upsert_only_overrides_payload_replace_scope_true(
     )
     assert r2.exit_code == 0, r2.output
     assert "deleted_sql=0" in r2.output
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {
+    assert {
+        doc.external_id
+        for doc in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    } == {
         "doc-1",
         "doc-2",
     }
@@ -371,7 +351,10 @@ def test_cli_import_canonical_replace_scope_overrides_payload_replace_scope_fals
     )
     assert r2.exit_code == 0, r2.output
     assert "deleted_sql=1" in r2.output
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-2"}
+    assert {
+        doc.external_id
+        for doc in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    } == {"doc-2"}
 
 
 def test_cli_import_canonical_reports_invalid_json(tmp_path) -> None:
@@ -424,4 +407,7 @@ def test_cli_import_canonical_rejects_blank_document_without_deleting_scope(
     r2 = CliRunner().invoke(cli, ["import-canonical", "--json", str(invalid)])
     assert r2.exit_code == 1
     assert "content must not be blank" in r2.output
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-1"}
+    assert {
+        doc.external_id
+        for doc in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    } == {"doc-1"}

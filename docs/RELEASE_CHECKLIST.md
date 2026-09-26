@@ -46,7 +46,7 @@ Breaking changes relative to 2.1.0:
   `POST /api/docs/ingest`.
 - Move conversation import from `POST /api/docs/import` to
   `POST /api/docs/import-conversations`.
-- Remove the `performance-cpu` extra; select the current documented extras.
+- Use only the declared extras; `performance` and `performance-cpu` are absent. Monitoring installs Prometheus only.
 - Require a boolean `debug` configuration value instead of historical string
   aliases.
 

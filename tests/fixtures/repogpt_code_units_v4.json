@@ -1,0 +1,641 @@
+{
+  "schema_version": "4",
+  "kind": "code-units",
+  "repo_key": "repogpt_eval_repo",
+  "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+  "scope": "repogpt:repogpt_eval_repo",
+  "replace_scope": true,
+  "stats": {
+    "total_files": 5,
+    "ok_files": 5,
+    "failed_files": 0,
+    "emitted_documents": 14
+  },
+  "failures": [],
+  "documents": [
+    {
+      "external_id": "repogpt:repogpt_eval_repo:README.md:heading:repogpt-eval-repo",
+      "source_id": "repogpt:repogpt_eval_repo:file:README.md",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "README.md",
+      "language": "md",
+      "unit_type": "heading",
+      "unit_level": "container",
+      "symbol": "RepoGPT Eval Repo",
+      "qualified_name": "repogpt-eval-repo",
+      "container_id": "repogpt:repogpt_eval_repo:README.md:module",
+      "depth": 1,
+      "ancestor_path": [
+        "README.md"
+      ],
+      "start_line": 1,
+      "end_line": 11,
+      "content": "# RepoGPT Eval Repo\n\n## Usage\n\n```python\nfrom client import build_api_client\nfrom config import load_config\n\ncfg = load_config({\"TIMEOUT_S\": \"15\"})\nclient = build_api_client(\"https://api.example.com\")\n```\n",
+      "content_hash": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
+          "size": 205
+        },
+        "tags": [],
+        "attributes": {
+          "level": 1
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:README.md:heading:repogpt-eval-repo/usage",
+      "source_id": "repogpt:repogpt_eval_repo:file:README.md",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "README.md",
+      "language": "md",
+      "unit_type": "heading",
+      "unit_level": "container",
+      "symbol": "Usage",
+      "qualified_name": "repogpt-eval-repo/usage",
+      "container_id": "repogpt:repogpt_eval_repo:README.md:heading:repogpt-eval-repo",
+      "depth": 2,
+      "ancestor_path": [
+        "README.md",
+        "repogpt-eval-repo"
+      ],
+      "start_line": 3,
+      "end_line": 11,
+      "content": "## Usage\n\n```python\nfrom client import build_api_client\nfrom config import load_config\n\ncfg = load_config({\"TIMEOUT_S\": \"15\"})\nclient = build_api_client(\"https://api.example.com\")\n```\n",
+      "content_hash": "f18280b22dd29089698f4887daae4af965d8d9bf2544cb1104d4a7ba40db7a91",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
+          "size": 205
+        },
+        "tags": [],
+        "attributes": {
+          "level": 2
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:README.md:code_block:repogpt-eval-repo/usage:1",
+      "source_id": "repogpt:repogpt_eval_repo:file:README.md",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "README.md",
+      "language": "md",
+      "unit_type": "code_block",
+      "unit_level": "symbol",
+      "symbol": "python",
+      "qualified_name": "repogpt-eval-repo/usage/code_block[1]",
+      "container_id": "repogpt:repogpt_eval_repo:README.md:heading:repogpt-eval-repo/usage",
+      "depth": 3,
+      "ancestor_path": [
+        "README.md",
+        "repogpt-eval-repo",
+        "repogpt-eval-repo/usage"
+      ],
+      "start_line": 5,
+      "end_line": 11,
+      "content": "```python\nfrom client import build_api_client\nfrom config import load_config\n\ncfg = load_config({\"TIMEOUT_S\": \"15\"})\nclient = build_api_client(\"https://api.example.com\")\n```\n",
+      "content_hash": "f814b0aa0f4b372fc1e4e80565dcb3ca25c5a3c7a2788085be09af897ac7b78d",
+      "docstring_present": false,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
+          "size": 205
+        },
+        "tags": [],
+        "attributes": {
+          "fence_language": "python"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:auth.py:function:extract_bearer_token",
+      "source_id": "repogpt:repogpt_eval_repo:file:auth.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "auth.py",
+      "language": "py",
+      "unit_type": "function",
+      "unit_level": "symbol",
+      "symbol": "extract_bearer_token",
+      "qualified_name": "extract_bearer_token",
+      "container_id": "repogpt:repogpt_eval_repo:auth.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "auth.py"
+      ],
+      "start_line": 1,
+      "end_line": 8,
+      "content": "def extract_bearer_token(auth_header: str | None) -> str | None:\n    \"\"\"Extract a bearer token from an Authorization header.\"\"\"\n    if not auth_header:\n        return None\n    scheme, _, token = auth_header.partition(\" \")\n    if scheme.lower() != \"bearer\":\n        return None\n    return token.strip() or None\n",
+      "content_hash": "347015ee685ba9aca9ba1564ab814634d06f63dc91ec78fc10f09ac04fc07117",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0",
+          "size": 519
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "auth_header",
+              "kind": "positional",
+              "annotation": "str | None",
+              "default": null
+            }
+          ],
+          "returns": "str | None",
+          "visibility": "public",
+          "signature": "extract_bearer_token(auth_header: str | None) -> str | None"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:auth.py:function:validate_token",
+      "source_id": "repogpt:repogpt_eval_repo:file:auth.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "auth.py",
+      "language": "py",
+      "unit_type": "function",
+      "unit_level": "symbol",
+      "symbol": "validate_token",
+      "qualified_name": "validate_token",
+      "container_id": "repogpt:repogpt_eval_repo:auth.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "auth.py"
+      ],
+      "start_line": 11,
+      "end_line": 14,
+      "content": "def validate_token(token: str) -> bool:\n    \"\"\"Validate an auth token using a signed prefix and minimum length.\"\"\"\n    cleaned = token.strip()\n    return cleaned.startswith(\"signed-\") and len(cleaned) >= 12\n",
+      "content_hash": "faf04f194e35e36b54af46ff269d96617bbfcb5398a527d3e12e4fbf157104a5",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0",
+          "size": 519
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "token",
+              "kind": "positional",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "returns": "bool",
+          "visibility": "public",
+          "signature": "validate_token(token: str) -> bool"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:client.py:class:ApiClient",
+      "source_id": "repogpt:repogpt_eval_repo:file:client.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "client.py",
+      "language": "py",
+      "unit_type": "class",
+      "unit_level": "container",
+      "symbol": "ApiClient",
+      "qualified_name": "ApiClient",
+      "container_id": "repogpt:repogpt_eval_repo:client.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "client.py"
+      ],
+      "start_line": 1,
+      "end_line": 9,
+      "content": "class ApiClient:\n    \"\"\"Tiny API client used for retrieval demos.\"\"\"\n\n    def __init__(self, base_url: str):\n        self.base_url = base_url.rstrip(\"/\")\n\n    def build_request(self, path: str) -> str:\n        \"\"\"Build an API request URL for a resource path.\"\"\"\n        return f\"{self.base_url}/{path.lstrip('/')}\"\n",
+      "content_hash": "b0101208c99f412af3190e249e28159f4e4e51c69ec9d48c52ee865bbd93a728",
+      "docstring_present": true,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
+          "size": 456
+        },
+        "tags": [],
+        "attributes": {
+          "bases": [],
+          "decorators": []
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:client.py:method:ApiClient.__init__",
+      "source_id": "repogpt:repogpt_eval_repo:file:client.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "client.py",
+      "language": "py",
+      "unit_type": "method",
+      "unit_level": "symbol",
+      "symbol": "__init__",
+      "qualified_name": "ApiClient.__init__",
+      "container_id": "repogpt:repogpt_eval_repo:client.py:class:ApiClient",
+      "depth": 2,
+      "ancestor_path": [
+        "client.py",
+        "ApiClient"
+      ],
+      "start_line": 4,
+      "end_line": 5,
+      "content": "    def __init__(self, base_url: str):\n        self.base_url = base_url.rstrip(\"/\")\n",
+      "content_hash": "69a981bcc4641b4505f538c634b02513683b92fed94da369c42caee57cd02d1c",
+      "docstring_present": false,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
+          "size": 456
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "self",
+              "kind": "positional",
+              "annotation": null,
+              "default": null
+            },
+            {
+              "name": "base_url",
+              "kind": "positional",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "returns": null,
+          "visibility": "protected",
+          "signature": "__init__(self, base_url: str)"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:client.py:method:ApiClient.build_request",
+      "source_id": "repogpt:repogpt_eval_repo:file:client.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "client.py",
+      "language": "py",
+      "unit_type": "method",
+      "unit_level": "symbol",
+      "symbol": "build_request",
+      "qualified_name": "ApiClient.build_request",
+      "container_id": "repogpt:repogpt_eval_repo:client.py:class:ApiClient",
+      "depth": 2,
+      "ancestor_path": [
+        "client.py",
+        "ApiClient"
+      ],
+      "start_line": 7,
+      "end_line": 9,
+      "content": "    def build_request(self, path: str) -> str:\n        \"\"\"Build an API request URL for a resource path.\"\"\"\n        return f\"{self.base_url}/{path.lstrip('/')}\"\n",
+      "content_hash": "d39f66759d8cbe2b48796400ea5c92d6b600a09833c94bf427cffce9a5035433",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
+          "size": 456
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "self",
+              "kind": "positional",
+              "annotation": null,
+              "default": null
+            },
+            {
+              "name": "path",
+              "kind": "positional",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "returns": "str",
+          "visibility": "public",
+          "signature": "build_request(self, path: str) -> str"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:client.py:function:build_api_client",
+      "source_id": "repogpt:repogpt_eval_repo:file:client.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "client.py",
+      "language": "py",
+      "unit_type": "function",
+      "unit_level": "symbol",
+      "symbol": "build_api_client",
+      "qualified_name": "build_api_client",
+      "container_id": "repogpt:repogpt_eval_repo:client.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "client.py"
+      ],
+      "start_line": 12,
+      "end_line": 14,
+      "content": "def build_api_client(base_url: str) -> ApiClient:\n    \"\"\"Build the API client configured for a base URL.\"\"\"\n    return ApiClient(base_url)\n",
+      "content_hash": "25ad601b2cd0699c8b44663043fab85b0e3fc7f5d236ad8020569893257d2e87",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
+          "size": 456
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "base_url",
+              "kind": "positional",
+              "annotation": "str",
+              "default": null
+            }
+          ],
+          "returns": "ApiClient",
+          "visibility": "public",
+          "signature": "build_api_client(base_url: str) -> ApiClient"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:config.py:function:parse_timeout",
+      "source_id": "repogpt:repogpt_eval_repo:file:config.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "config.py",
+      "language": "py",
+      "unit_type": "function",
+      "unit_level": "symbol",
+      "symbol": "parse_timeout",
+      "qualified_name": "parse_timeout",
+      "container_id": "repogpt:repogpt_eval_repo:config.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "config.py"
+      ],
+      "start_line": 4,
+      "end_line": 8,
+      "content": "def parse_timeout(raw: str | None) -> int:\n    \"\"\"Parse timeout values from configuration strings.\"\"\"\n    if raw is None or not raw.strip():\n        return 30\n    return max(1, int(raw))\n",
+      "content_hash": "d2e0c2a323797607ad2628b86b4ceaac803da5fcf0cf1ef3f4727c14fbeff0e8",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03",
+          "size": 498
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "raw",
+              "kind": "positional",
+              "annotation": "str | None",
+              "default": null
+            }
+          ],
+          "returns": "int",
+          "visibility": "public",
+          "signature": "parse_timeout(raw: str | None) -> int"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:config.py:function:load_config",
+      "source_id": "repogpt:repogpt_eval_repo:file:config.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "config.py",
+      "language": "py",
+      "unit_type": "function",
+      "unit_level": "symbol",
+      "symbol": "load_config",
+      "qualified_name": "load_config",
+      "container_id": "repogpt:repogpt_eval_repo:config.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "config.py"
+      ],
+      "start_line": 11,
+      "end_line": 16,
+      "content": "def load_config(env: Mapping[str, str]) -> dict[str, int | str]:\n    \"\"\"Load configuration values from environment mappings.\"\"\"\n    return {\n        \"api_url\": env.get(\"API_URL\", \"https://api.example.com\"),\n        \"timeout_s\": parse_timeout(env.get(\"TIMEOUT_S\")),\n    }\n",
+      "content_hash": "56de27ca21e9af5baacd16937e68dbd08225a31b554193a593ad255274f14102",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03",
+          "size": 498
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "env",
+              "kind": "positional",
+              "annotation": "Mapping[str, str]",
+              "default": null
+            }
+          ],
+          "returns": "dict[str, int | str]",
+          "visibility": "public",
+          "signature": "load_config(env: Mapping[str, str]) -> dict[str, int | str]"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:sample.py:class:Demo",
+      "source_id": "repogpt:repogpt_eval_repo:file:sample.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "sample.py",
+      "language": "py",
+      "unit_type": "class",
+      "unit_level": "container",
+      "symbol": "Demo",
+      "qualified_name": "Demo",
+      "container_id": "repogpt:repogpt_eval_repo:sample.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "sample.py"
+      ],
+      "start_line": 1,
+      "end_line": 6,
+      "content": "class Demo:\n    \"\"\"Demo class for simple method retrieval.\"\"\"\n\n    def method(self, value: int) -> int:\n        \"\"\"Increment a value by one.\"\"\"\n        return value + 1\n",
+      "content_hash": "092f27a5654769b946efa224ccdeb92882ea733bf26114459a6e079a5019adc1",
+      "docstring_present": true,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
+          "size": 290
+        },
+        "tags": [],
+        "attributes": {
+          "bases": [],
+          "decorators": []
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:sample.py:method:Demo.method",
+      "source_id": "repogpt:repogpt_eval_repo:file:sample.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "sample.py",
+      "language": "py",
+      "unit_type": "method",
+      "unit_level": "symbol",
+      "symbol": "method",
+      "qualified_name": "Demo.method",
+      "container_id": "repogpt:repogpt_eval_repo:sample.py:class:Demo",
+      "depth": 2,
+      "ancestor_path": [
+        "sample.py",
+        "Demo"
+      ],
+      "start_line": 4,
+      "end_line": 6,
+      "content": "    def method(self, value: int) -> int:\n        \"\"\"Increment a value by one.\"\"\"\n        return value + 1\n",
+      "content_hash": "642a7b0dc306319e8d7d9a00e8b9b6712a89336e7cf3d56588e3acd33c9783bf",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
+          "size": 290
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "self",
+              "kind": "positional",
+              "annotation": null,
+              "default": null
+            },
+            {
+              "name": "value",
+              "kind": "positional",
+              "annotation": "int",
+              "default": null
+            }
+          ],
+          "returns": "int",
+          "visibility": "public",
+          "signature": "method(self, value: int) -> int"
+        },
+        "dependencies": []
+      }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:sample.py:function:helper",
+      "source_id": "repogpt:repogpt_eval_repo:file:sample.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "sample.py",
+      "language": "py",
+      "unit_type": "function",
+      "unit_level": "symbol",
+      "symbol": "helper",
+      "qualified_name": "helper",
+      "container_id": "repogpt:repogpt_eval_repo:sample.py:module",
+      "depth": 1,
+      "ancestor_path": [
+        "sample.py"
+      ],
+      "start_line": 9,
+      "end_line": 11,
+      "content": "def helper(name: str = \"world\") -> str:\n    \"\"\"Return a friendly greeting helper string.\"\"\"\n    return f\"hello {name}\"\n",
+      "content_hash": "44f3d3b458e3a0da8855ff5dce3e5fbc8753c7308cc3344c13a7e5b7cab1f82d",
+      "docstring_present": true,
+      "has_children": false,
+      "metadata": {
+        "file": {
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
+          "size": 290
+        },
+        "tags": [],
+        "attributes": {
+          "is_async": false,
+          "decorators": [],
+          "params": [
+            {
+              "name": "name",
+              "kind": "positional",
+              "annotation": "str",
+              "default": "'world'"
+            }
+          ],
+          "returns": "str",
+          "visibility": "public",
+          "signature": "helper(name: str='world') -> str"
+        },
+        "dependencies": []
+      }
+    }
+  ]
+}

@@ -22,13 +22,6 @@ if TYPE_CHECKING:
     from local_rag_backend.core.domain.entities import Embedding
 
 
-def resolve_embedding_model_key(embedder: EmbedderPort) -> str:
-    backend = "openai" if hasattr(embedder, "client") else "sentence_transformers"
-    model_name = getattr(embedder, "model_name", None) or getattr(embedder, "model", None)
-    model = str(model_name or embedder.__class__.__name__)
-    return f"{backend}:{model}:{int(embedder.dim)}"
-
-
 def resolve_embedding_cache_db_path(
     *, data_dir: Path, configured_path: str | Path | None = None
 ) -> Path:
@@ -112,7 +105,8 @@ class ContentAddressedCachingEmbedder(EmbedderPort):
         self._cache = _SqliteEmbeddingCache(cache_db_path)
         self._disabled = bool(disabled)
         self.dim = base.dim
-        self.model_key = resolve_embedding_model_key(base)
+        self.identity = base.identity
+        self.model_key = self.identity.model_key
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         texts_list = [str(text) for text in texts]

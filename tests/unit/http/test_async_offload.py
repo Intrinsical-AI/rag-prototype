@@ -1,10 +1,14 @@
 import threading
 
 import pytest
+from support.container import override_container
 
 from local_rag_backend.composition import adapters as composition_adapters
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.http.routers import rag_router
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 @pytest.mark.unit
@@ -104,13 +108,12 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
     main_tid = threading.get_ident()
     seen: dict[str, int] = {}
 
-    from local_rag_backend.composition import factory
-
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
 
     class DummyEmbedder:
         dim = 4
+        identity = EmbeddingIdentity(provider="openai", model="test", dimension=dim)
 
         def __init__(self, *a, **k):
             seen["tid"] = threading.get_ident()
@@ -128,9 +131,57 @@ async def test_docs_dense_runs_heavy_path_in_worker_thread(
         def apply_delta_atomic(self, *, delete_ids, upserts):
             return None
 
-    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
-    monkeypatch.setattr(factory, "VectorStorage", lambda **k: DummyVec())
+    override_container(monkeypatch, st_embedder_factory=lambda *a, **k: DummyEmbedder())
+    override_container(monkeypatch, vector_repo_factory=lambda **k: DummyVec())
 
     r = await asgi_client.post("/api/docs/ingest", json={"texts": ["X"]})
     assert r.status_code == 200
     assert seen["tid"] != main_tid
+
+
+@pytest.mark.parametrize("path", ["/api/docs/query", "/api/history"])
+async def test_document_and_history_reads_run_in_worker_thread(asgi_client, monkeypatch, path):
+    from local_rag_backend.http.routers import rag_router
+
+    seen = []
+
+    def read(*args, **kwargs):
+        seen.append(threading.get_ident())
+        return []
+
+    if path == "/api/docs/query":
+        monkeypatch.setattr(composition_adapters._RepoDocsReadPort, "query_docs", read)
+        response = await asgi_client.post(path, json={})
+    else:
+        monkeypatch.setattr(rag_router, "list_history_entries_sync", read)
+        response = await asgi_client.get(path)
+    assert response.status_code == 200
+    assert seen and seen[0] != threading.get_ident()
+
+
+async def test_readiness_and_health_storage_checks_run_in_worker_threads(asgi_client, monkeypatch):
+    from local_rag_backend.http.routers import health
+
+    seen = []
+
+    def check(**kwargs):
+        seen.append(threading.get_ident())
+        return True
+
+    def counts(**kwargs):
+        seen.append(threading.get_ident())
+        return True, 0
+
+    for name in (
+        "check_database",
+        "check_retrieval_index",
+        "check_mutation_journal",
+        "ping_database",
+    ):
+        monkeypatch.setattr(health, name, check)
+    monkeypatch.setattr(health, "check_sql_counts", counts)
+    await asgi_client.get("/readyz")
+    response = await asgi_client.get("/healthz")
+    assert response.status_code == 200
+    assert len(seen) == 5
+    assert all(tid != threading.get_ident() for tid in seen)

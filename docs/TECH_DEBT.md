@@ -2,11 +2,9 @@
 
 > Scope: validated hotspots in `core/services`, `core/use_cases`, `cli_commands`, plus selected repo-level seams in `composition` and `infrastructure` when they materially affect runtime behavior
 >
-> Status: banner refreshed 2026-07-24 against package `2.1.0`; hotspot inventory
-> still rooted in the 2026-04-08 inspection plus later embedding-consumer work.
-> Re-verify mutation/eval rows before large refactors. See also
-> [`embedding_integration.md`](./embedding_integration.md) for the installed
-> embeddings consumer surface (not treated as primary debt).
+> Status: runtime contracts refreshed 2026-09-26 for the local 3.0.0 stabilization
+> changes. Historical remote-release observations below retain their original dates;
+> this update does not verify published artifacts or hosted services.
 
 ## Summary
 
@@ -20,6 +18,9 @@ What changed since the previous revision:
    - canonical import transport now shares one typed validation/assembly path across CLI, HTTP, and MCP
    - `core/use_cases -> infrastructure|composition` import debt is frozen at an explicit zero baseline
    - advanced docs now teach canonical mutation instead of direct storage writes
+   - library imports no longer initialize YAML/SQL; containers own configured runtime resources
+   - HTTP and MCP share strict filter-value validation; MCP schemas are generated from its argument models
+   - unused performance/monitoring dependencies and parallel maintenance write helpers were removed
 2. The evaluation stack should no longer be treated as "bounded cleanup only".
    - It is tested and structurally cleaner than before
    - but it still has methodological blind spots that can hide retrieval defects or overstate candidate quality
@@ -30,7 +31,6 @@ Highest-value active targets:
 2. CLI/API contract alignment for canonical import.
 3. Evaluation methodology and ranking fidelity.
 4. CLI / DX contract consistency.
-5. Multi-store maintenance duplication.
 6. Ingestion planner typing and CLI coupling.
 7. Repository release hygiene, which is lower runtime risk but high operator and consumer confusion.
 
@@ -62,7 +62,6 @@ Interpretation:
 | Canonical import path | Scope-sync still relies on dynamic repo capabilities outside the coordinator; transport validation is now shared, but the write semantics still depend on repo-specific delete hooks | [`src/local_rag_backend/core/use_cases/docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py) | Same business action can still depend on repo capabilities outside the core coordinator | High |
 | Evaluation methodology | Score/unknown-ID handling is fixed; compare gate still needs statistical testing beyond aggregate deltas | [`src/local_rag_backend/core/services/evaluation.py`](../src/local_rag_backend/core/services/evaluation.py), [`src/local_rag_backend/core/use_cases/evaluation.py`](../src/local_rag_backend/core/use_cases/evaluation.py) | Candidate quality can still be overstated without paired significance tests | Medium |
 | CLI / DX contract consistency | Evaluation flags are still powerful and cognitively expensive; some command surfaces remain manually shaped rather than spec-driven | [`src/local_rag_backend/cli_commands/docs/docs_mutate.py`](../src/local_rag_backend/cli_commands/docs/docs_mutate.py), [`src/local_rag_backend/cli_commands/eval.py`](../src/local_rag_backend/cli_commands/eval.py) | Users still have to learn a wide CLI surface | Medium |
-| Maintenance | Two multi-store delete flows are still near-mirror implementations | [`src/local_rag_backend/core/services/maintenance.py`](../src/local_rag_backend/core/services/maintenance.py) | Partial fixes and telemetry drift | Medium |
 | Ingestion planner | Planning, stale detection, batching, mutation execution, and terminal output still live in one module; `items` remains `Any` | [`src/local_rag_backend/cli_commands/docs/_ingestion_planner.py`](../src/local_rag_backend/cli_commands/docs/_ingestion_planner.py) | Reuse is limited; contracts remain implicit | Medium |
 | Elasticsearch system state | `bump_version()` is still read-modify-write without an atomic compare-and-swap or conflict retry loop | [`src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py`](../src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py) | Cross-worker cache invalidation can lose increments under contention | Medium |
 | Release hygiene | Remote tags, GitHub release metadata, package version, and default branch do not describe one coherent release line | Git refs and GitHub release metadata checked on 2026-04-27 | Consumers and maintainers can pick the wrong artifact or branch | Medium |
@@ -73,7 +72,7 @@ Interpretation:
 
 Validated points:
 
-- [`_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) is still 665 lines and carries the durable write flow.
+- [`_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) carries the durable write flow; journal v2 and recovery barriers now make replay/failure behavior explicit.
 - [`docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) still resolves storage profile and execution mode before delegating into saga or atomic execution.
 - Critical paths still depend on optional adapter capabilities and dynamic checks around journal, vector delta, and rollback support.
 
@@ -123,7 +122,7 @@ Validated points:
 Why this matters:
 
 - Unknown retrieved IDs now degrade metrics and are visible in report/anomaly outputs.
-- Score-preserving callback contracts unblock better future analysis.
+- Ranked callbacks accept `EvalRetrievedItem`; ordinal rank determines metric input while reports preserve original scores. Duplicate IDs remain anomalies and are deduplicated before metric calculation.
 - Aggregate-only gates are acceptable as operational guardrails, but not as evidence of statistical superiority.
 
 Nuance:
@@ -159,16 +158,11 @@ Recommended direction:
 - Continue simplifying evaluation entrypoints by reusing the shared eval config validation path.
 - Standardize exit codes and success/error output shape across commands.
 
-### 5. Maintenance still has cheap-to-fix duplication
+### 5. Maintenance surface has been reduced
 
-Validated points:
-
-- [`delete_documents_multi_store`](../src/local_rag_backend/core/services/maintenance.py) and [`delete_external_ids_multi_store`](../src/local_rag_backend/core/services/maintenance.py) still repeat preflight, delete, embedder fallback, rebuild, and consistency-error handling.
-
-Recommended direction:
-
-- Extract one private helper for common multi-store delete orchestration.
-- Preserve the two public result DTOs because caller-visible semantics still differ.
+The unused multi-store delete helpers and parallel dense-upsert helper were removed.
+Document writes continue through the mutation coordinator; maintenance retains the
+explicit index rebuild flow. No compatibility aliases were introduced.
 
 ### 6. Ingestion planner is still CLI-shaped and weakly typed
 
@@ -338,11 +332,12 @@ Interpretation:
 - Do not present aggregate-delta compare gates as statistical significance.
 - Do not move or delete public release tags without an explicit consumer-impact check.
 
-## Validation Notes
+## Historical Validation Notes
 
-The hotspots above were checked against current code and targeted tests.
+The command and result below record an earlier review, not the current stabilization gates.
+Current validation must use the present checkout and its release checklist.
 
-Targeted test command used during this review:
+Historical targeted command:
 
 ```bash
 uv run pytest -q -o addopts='' \

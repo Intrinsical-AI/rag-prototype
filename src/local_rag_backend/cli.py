@@ -19,13 +19,15 @@ from local_rag_backend.cli_commands import (
     server_cmd,
     status_cmd,
 )
+from local_rag_backend.composition.factory import reset_app_context
 
 
 @click.group()
 @click.version_option(version=__version__, prog_name="rag-prototype")
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """Intrinsical RAG Prototype - Production-ready RAG system with hexagonal architecture."""
-    return None
+    ctx.call_on_close(reset_app_context)
 
 
 cli.add_command(server_cmd)

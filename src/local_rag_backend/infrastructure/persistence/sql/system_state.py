@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.sql.sessions import get_session
 
 if TYPE_CHECKING:
@@ -21,8 +20,8 @@ class SystemStateStorage:
     Used by app.factory to invalidate process-local caches across workers/processes.
     """
 
-    def __init__(self, session_factory: sessionmaker[Session] | None = None) -> None:
-        self._session_factory = session_factory or db_base.SessionLocal
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
         self._table_ready = False
         self._table_lock = Lock()
 

@@ -81,10 +81,8 @@ def test_sparse_bm25_retriever_basic():
 
     class DummySparse(SparseBM25Retriever):
         def __init__(self, documents, doc_ids, doc_repo):
-            self.doc_ids = doc_ids
-            self.doc_repo = doc_repo
+            super().__init__(documents, doc_ids, doc_repo)
             self.bm25 = DummyBM25()
-            self.corpus_is_empty = False
 
         @staticmethod
         def _tok(text):
@@ -110,10 +108,8 @@ def test_sparse_bm25_retriever_flat_scores_fall_back_to_zero():
 
     class DummySparse(SparseBM25Retriever):
         def __init__(self, documents, doc_ids, doc_repo):
-            self.doc_ids = doc_ids
-            self.doc_repo = doc_repo
+            super().__init__(documents, doc_ids, doc_repo)
             self.bm25 = DummyBM25()
-            self.corpus_is_empty = False
 
         @staticmethod
         def _tok(text):

@@ -75,17 +75,11 @@ magic = [
   # Optional file type detection via libmagic. Requires system libmagic on many distros.
   "python-magic>=0.4,<1.0"
 ]
-performance = [
-  "torch>=2.0,<3.0",
-  "orjson>=3.10,<4.0"
-]
 monitoring = [
   "prometheus-client>=0.19,<1.0",
-  "structlog>=23.0,<24.0",
-  "sentry-sdk[fastapi]>=1.40,<2.0"
 ]
 all = [
-  "rag-prototype[server,dense,dense-st,loaders,magic,performance,monitoring]",
+  "rag-prototype[server,dense,dense-st,loaders,magic,monitoring]",
 ]
 
 [dependency-groups]

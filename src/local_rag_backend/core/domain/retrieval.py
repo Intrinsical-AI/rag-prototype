@@ -159,7 +159,7 @@ def retrieval_result_from_pairs(
 ) -> RetrievalResult:
     items = tuple(
         RetrievedDoc(document=doc, score=float(score), stage=stage)
-        for doc, score in zip(docs, scores, strict=False)
+        for doc, score in zip(docs, scores, strict=True)
     )
     return RetrievalResult(
         items=items,

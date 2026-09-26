@@ -124,7 +124,9 @@ from local_rag_backend.core.use_cases.docs_mutation import (
     MutationIntent,
     MutationUpsertInput,
 )
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 # 1. Importar Loader (custom)
 from my_custom_loader import DictListLoader
@@ -348,7 +350,9 @@ from local_rag_backend.core.use_cases.docs_mutation import (
 )
 from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
 from local_rag_backend.composition.container import AppContainer
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 container = AppContainer.from_settings(settings)
 ports = container.docs_mutation_ports(
@@ -499,11 +503,14 @@ Reranker opcional (mejora de calidad medible con `rag-eval`):
 
 ### Optional external E2E fixtures
 
-Cross-repository E2E tests do not assume a particular workspace layout. They
-are skipped when their explicit inputs are not configured:
+El gate RepoGPT por defecto usa la fixture canónica versionada
+`tests/fixtures/repogpt_code_units_v4.json`: valida al consumidor RAG sin abrir ni
+modificar otro checkout. Para ejecutar el productor real, configura explícitamente
+`REPOGPT_ROOT`; se usan su intérprete preparado, el código fuente versionado en
+`tests/fixtures/repogpt_eval_repo` y las flags
+`--emit code-units --replace-scope --include-tests --repo-key repogpt_eval_repo`. Los errores configurados fallan,
+no se convierten en skips.
 
-- RepoGPT: `REPOGPT_ROOT` and `REPOGPT_FIXTURE_REPO`.
-- Vulnerability pilot: `VULN_PILOT_PREPARED` and `VULNS_INGEST_SCRIPT`.
-
-An unset input skips the corresponding optional test. A configured path that
-does not exist fails collection with an actionable error.
+La integración opcional del vulnerability pilot usa `VULN_PILOT_PREPARED` y
+`VULNS_INGEST_SCRIPT`; sin esas entradas se omite. Una ruta configurada vacía o
+inexistente produce un error explícito.

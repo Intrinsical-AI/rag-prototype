@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from local_rag_backend.settings import Settings, settings as global_settings
+from local_rag_backend.settings import Settings
 
 
 class ElasticBackendError(RuntimeError):
@@ -19,10 +19,10 @@ class ElasticClient:
     def __init__(
         self,
         *,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
         client: httpx.Client | None = None,
     ) -> None:
-        self._settings = settings_obj or global_settings
+        self._settings = settings_obj
         self._owns_client = client is None
         self._client = client or httpx.Client(
             base_url=str(self._settings.es_base_url or ""),

@@ -230,7 +230,7 @@ def test_config_path_env_allows_import_outside_checkout(tmp_path):
         [
             sys.executable,
             "-c",
-            "from local_rag_backend.settings import settings; print(settings.data_dir)",
+            "from local_rag_backend.settings import get_settings; print(get_settings().data_dir)",
         ],
         cwd=tmp_path,
         env=env,
@@ -254,3 +254,26 @@ def test_load_settings_from_yaml_rejects_non_mapping(tmp_path):
 
     with pytest.raises(ValueError, match="top level"):
         load_settings_from_yaml(config_file)
+
+
+def test_omitted_paths_resolve_from_configuration_directory(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_file = config_dir / "empty.yaml"
+    config_file.write_text("{}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    implicit = load_settings_from_yaml(config_file)
+    config_file.write_text(
+        "data_dir: data\nsqlite_url: sqlite:///./data/app.db\n", encoding="utf-8"
+    )
+    explicit = load_settings_from_yaml(config_file)
+    assert implicit.data_dir == explicit.data_dir == config_dir / "data"
+    assert implicit.sqlite_url == explicit.sqlite_url
+    assert Path(implicit.index_path).is_relative_to(config_dir)
+    assert Path(implicit.id_map_path).is_relative_to(config_dir)
+
+
+def test_memory_sqlite_url_is_preserved(tmp_path):
+    config_file = tmp_path / "memory.yaml"
+    config_file.write_text("sqlite_url: 'sqlite:///:memory:'\n", encoding="utf-8")
+    assert load_settings_from_yaml(config_file).sqlite_url == "sqlite:///:memory:"

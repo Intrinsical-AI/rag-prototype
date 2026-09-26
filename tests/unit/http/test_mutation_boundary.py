@@ -6,7 +6,9 @@ import json
 from local_rag_backend.core.use_cases import docs_ingest
 from local_rag_backend.core.use_cases.results import MutationSummary, UpsertDocResult
 from local_rag_backend.http.routers import docs as docs_router
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_docs_mutate_endpoint_calls_coordinator_execute_once(

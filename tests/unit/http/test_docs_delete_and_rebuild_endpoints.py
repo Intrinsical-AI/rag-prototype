@@ -1,6 +1,10 @@
 import pytest
+from support.container import override_container
 
-from local_rag_backend.settings import settings
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 @pytest.mark.unit
@@ -33,15 +37,14 @@ async def test_rebuild_index_dense_from_db(tmp_path, asgi_client, in_memory_sqli
 
     class DummyEmbedder:
         dim = 2
+        identity = EmbeddingIdentity(
+            provider="sentence_transformers", model=settings.st_embedding_model, dimension=dim
+        )
 
         def embed(self, texts: list[str]) -> list[list[float]]:
             return [[float(len(t)), 0.0] for t in texts]
 
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.SentenceTransformerEmbedder",
-        lambda model_name=None: DummyEmbedder(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=lambda model_name=None: DummyEmbedder())
 
     r = await asgi_client.post("/api/docs/ingest", json={"texts": ["alpha", "beta"]})
     assert r.status_code == 200
@@ -83,16 +86,8 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
             assert len(list(delete_ids)) == 1
             assert list(upserts) == []
 
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.SentenceTransformerEmbedder",
-        _boom_embedder,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.VectorStorage",
-        lambda **_k: DummyVec(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=_boom_embedder)
+    override_container(monkeypatch, vector_repo_factory=lambda **_k: DummyVec())
 
     rd = await asgi_client.post("/api/docs/mutate", json={"delete_ids": [doc_id]})
     assert rd.status_code == 200

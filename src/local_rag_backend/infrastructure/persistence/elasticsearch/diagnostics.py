@@ -13,17 +13,17 @@ from local_rag_backend.infrastructure.persistence.elasticsearch.document_storage
 from local_rag_backend.infrastructure.persistence.elasticsearch.history_storage import (
     ElasticHistoryStorage,
 )
-from local_rag_backend.settings import Settings, settings as global_settings
+from local_rag_backend.settings import Settings
 
 
 class ElasticHealthDiagnostics:
     def __init__(
         self,
         *,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
         client: ElasticClient | None = None,
     ) -> None:
-        self._settings = settings_obj or global_settings
+        self._settings = settings_obj
         self._client = client or ElasticClient(settings_obj=self._settings)
         self._docs = ElasticDocsRepository(settings_obj=self._settings, client=self._client)
         self._vector = ElasticVectorRepo(settings_obj=self._settings, client=self._client)

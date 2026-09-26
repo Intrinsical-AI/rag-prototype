@@ -19,6 +19,10 @@ class WriteLockTimeoutError(RagBaseError, RuntimeError):
     """Multi-store write lock could not be acquired before timeout."""
 
 
+class MutationRecoveryRequiredError(RagBaseError, RuntimeError):
+    """Unresolved journal state prevents further writes until recovery succeeds."""
+
+
 class LLMProviderError(RagBaseError):
     """Base error for LLM/provider integration failures."""
 

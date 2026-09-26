@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 from contextlib import suppress
+from functools import cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -51,7 +52,7 @@ def _resolve_sqlite_url_value(value: Any, *, base_dir: Path) -> str | None:
     if not rendered.startswith(prefix):
         return rendered
     raw_path = rendered[len(prefix) :]
-    if not raw_path:
+    if not raw_path or raw_path == ":memory:":
         return rendered
     path = Path(raw_path).expanduser()
     if path.is_absolute():
@@ -89,6 +90,9 @@ def load_settings_from_yaml(config_path: str | Path | None = None) -> Settings:
     else:
         raise ValueError("Configuration file must contain a YAML mapping at the top level.")
 
+    # Populate defaults before resolving paths so omitted and explicit defaults
+    # have the same meaning regardless of the caller's working directory.
+    data = Settings(**data).model_dump()
     base_dir = path.resolve().parent
     # Benchmark/orchestration runners can redirect perf metrics without editing the
     # repository config.yaml that remains the main runtime source of truth.
@@ -632,5 +636,7 @@ class Settings(BaseModel):
         return data_dir.resolve()
 
 
-# Global settings instance
-settings: Settings = load_settings_from_yaml()
+@cache
+def get_settings() -> Settings:
+    """Load the entrypoint configuration lazily; adapters receive it explicitly."""
+    return load_settings_from_yaml()

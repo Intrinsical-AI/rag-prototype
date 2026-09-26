@@ -1,12 +1,15 @@
 # tests/unit/test_cli_ingest.py
-
 from __future__ import annotations
 
 from click.testing import CliRunner
+from support.container import override_container
 
 from local_rag_backend.cli import cli
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
@@ -30,7 +33,7 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     r1 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert r1.exit_code == 0, r1.output
 
-    docs1 = SqlDocumentStorage().get_all_documents()
+    docs1 = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs1) == 6  # 3 (txt) + 1 (md) + 2 (csv rows)
     assert all(d.external_id and d.external_id.startswith("file:") for d in docs1)
     assert sum(1 for d in docs1 if (d.source_id or "").endswith("a.txt")) == 3
@@ -47,7 +50,7 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     assert "updated=0" in r2.output
     assert "unchanged=6" in r2.output
 
-    docs2 = SqlDocumentStorage().get_all_documents()
+    docs2 = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs2) == 6  # idempotent
 
     # Shrink file so it now produces only 1 chunk; old chunks should be deleted.
@@ -55,7 +58,7 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     r3 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert r3.exit_code == 0, r3.output
 
-    docs3 = SqlDocumentStorage().get_all_documents()
+    docs3 = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs3) == 4  # 1 (txt) + 1 (md) + 2 (csv)
     assert sum(1 for d in docs3 if (d.source_id or "").endswith("a.txt")) == 1
 
@@ -64,6 +67,7 @@ def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
     in_memory_sqlite, tmp_path, monkeypatch
 ):
     class BadEmbedder:
+        identity = EmbeddingIdentity(provider="openai", model="text-embedding-3-small", dimension=4)
         dim = 4
 
         def embed(self, texts):
@@ -84,16 +88,8 @@ def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
-        lambda *a, **k: BadEmbedder(),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.vector.storage.VectorStorage",
-        lambda *a, **k: DummyVec(),
-        raising=True,
-    )
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: BadEmbedder())
+    override_container(monkeypatch, vector_repo_factory=lambda *a, **k: DummyVec())
 
     root = tmp_path / "in"
     root.mkdir()
@@ -102,7 +98,7 @@ def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
     r = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert r.exit_code == 1
     assert "embed fail" in r.output
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []
 
 
 def test_cli_ingest_accepts_utf8_non_ascii_text(in_memory_sqlite, tmp_path, monkeypatch):
@@ -118,6 +114,6 @@ def test_cli_ingest_accepts_utf8_non_ascii_text(in_memory_sqlite, tmp_path, monk
     r = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
     assert r.exit_code == 0, r.output
 
-    docs = SqlDocumentStorage().get_all_documents()
+    docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs) == 1
     assert (docs[0].source_id or "").endswith("es.txt")

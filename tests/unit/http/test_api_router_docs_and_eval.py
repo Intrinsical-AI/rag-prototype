@@ -1,12 +1,15 @@
 # tests/unit/app/test_api_router_docs_and_eval.py
-
 import numpy as np
 import pytest
+from support.container import override_container
 
-from local_rag_backend.composition import adapters as composition_adapters, factory
+from local_rag_backend.composition import adapters as composition_adapters
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.http.routers import health as health_router
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_post_docs_sparse_and_list(asgi_client, in_memory_sqlite, monkeypatch):
@@ -101,6 +104,7 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
     # Dummy embedder/vector store
     class DummyEmbedder:
         dim = 4
+        identity = EmbeddingIdentity(provider="openai", model="test", dimension=dim)
 
         def embed(self, texts):
             return np.zeros((len(texts), self.dim), dtype="float32").tolist()
@@ -119,9 +123,9 @@ async def test_post_docs_dense_uses_etl(asgi_client, in_memory_sqlite, monkeypat
             assert list(delete_ids) == []
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
-    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder())
+    override_container(monkeypatch, st_embedder_factory=lambda *a, **k: DummyEmbedder())
     dummy_vec = DummyVec()
-    monkeypatch.setattr(factory, "VectorStorage", lambda **k: dummy_vec)
+    override_container(monkeypatch, vector_repo_factory=lambda **k: dummy_vec)
 
     payload = {"texts": ["X", "Y"]}
     r = await asgi_client.post("/api/docs/ingest", json=payload)
@@ -143,7 +147,7 @@ async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlit
     ids1 = r1.json()["ids"]
     assert len(ids1) == 1
 
-    docs1 = SqlDocumentStorage().get_all_documents()
+    docs1 = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert len(docs1) == 1
 
     r2 = await asgi_client.post("/api/docs/ingest", json=payload)
@@ -151,7 +155,7 @@ async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlit
     ids2 = r2.json()["ids"]
     assert ids2 == ids1
 
-    docs2 = SqlDocumentStorage().get_all_documents()
+    docs2 = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert len(docs2) == 1
 
 
@@ -165,18 +169,18 @@ async def test_post_docs_sparse_chunker_version_change_inserts_new(
     r1 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r1.status_code == 200
     assert r1.json()["count"] == 1
-    assert len(SqlDocumentStorage().get_all_documents()) == 1
+    assert len(SqlDocumentStorage(in_memory_sqlite).get_all_documents()) == 1
 
     monkeypatch.setattr(settings, "ingest_chunker_version", "v2", raising=False)
     r2 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r2.status_code == 200
     assert r2.json()["count"] == 1
-    assert len(SqlDocumentStorage().get_all_documents()) == 2
+    assert len(SqlDocumentStorage(in_memory_sqlite).get_all_documents()) == 2
 
 
 async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatch):
     # Seed DB with one doc
-    store = SqlDocumentStorage()
+    store = SqlDocumentStorage(in_memory_sqlite)
     ids = store.store_documents(["hello world"])
     assert ids
 
@@ -189,7 +193,7 @@ async def test_ask_eval_sparse_success(asgi_client, in_memory_sqlite, monkeypatc
             return "ans"
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "OpenAIGenerator", lambda **k: DummyGen())
+    override_container(monkeypatch, openai_generator_factory=lambda **k: DummyGen())
 
     payload = {"question": "hello?", "config": {"retrieval_mode": "sparse", "k": 1}}
     r = await asgi_client.post("/api/ask_eval", json=payload)
@@ -232,7 +236,7 @@ async def test_ready_retrieval_index_present(asgi_client, in_memory_sqlite, tmp_
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
     monkeypatch.setattr(settings, "openai_api_key", "x", raising=False)
-    VectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
+    VectorStorage(str(idx), str(id_map), dim=4, settings_obj=settings).rebuild([], [])
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)

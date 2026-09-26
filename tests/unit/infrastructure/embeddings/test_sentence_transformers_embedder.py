@@ -6,6 +6,7 @@ import pytest
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
     SentenceTransformerEmbedder,
 )
+from local_rag_backend.settings import Settings
 
 
 def test_sentence_transformers_missing_dependency_message_mentions_dense_st(monkeypatch):
@@ -18,5 +19,5 @@ def test_sentence_transformers_missing_dependency_message_mentions_dense_st(monk
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(RuntimeError) as exc:
-        SentenceTransformerEmbedder()
+        SentenceTransformerEmbedder(settings_obj=Settings(synthetic_embeddings=False))
     assert "dense-st" in str(exc.value)

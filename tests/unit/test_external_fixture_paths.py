@@ -30,3 +30,10 @@ def test_invalid_explicit_external_path_fails(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(RuntimeError, match="EXTERNAL_FIXTURE must point"):
         configured_file("EXTERNAL_FIXTURE")
+
+
+@pytest.mark.parametrize("value", ["", " "])
+def test_blank_explicit_external_path_fails(monkeypatch, value):
+    monkeypatch.setenv("EXTERNAL_FIXTURE", value)
+    with pytest.raises(RuntimeError, match="EXTERNAL_FIXTURE must point"):
+        configured_directory("EXTERNAL_FIXTURE")

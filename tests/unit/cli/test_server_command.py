@@ -1,7 +1,9 @@
 from click.testing import CliRunner
 
 from local_rag_backend.cli_commands import server as server_module
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_server_command_passes_runtime_settings_to_uvicorn(monkeypatch):

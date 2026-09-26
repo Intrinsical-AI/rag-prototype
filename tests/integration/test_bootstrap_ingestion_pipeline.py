@@ -2,8 +2,11 @@ import csv
 
 import pytest
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_bootstrap_with_canonical_mutation_sparse_mode(tmp_path, monkeypatch, caplog):
@@ -30,7 +33,7 @@ def test_bootstrap_with_canonical_mutation_sparse_mode(tmp_path, monkeypatch, ca
         run_sample_data_ingestion(settings_obj=settings)
 
     assert any("Ingested" in m for m in caplog.messages)
-    assert any("sparse mode" in m for m in caplog.messages)
+    assert any("local_split" in m for m in caplog.messages)
 
     # Verify documents were stored
     from sqlalchemy import create_engine
@@ -56,30 +59,12 @@ def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, cap
 
     class DummyEmbedder:
         dim = 4
+        identity = EmbeddingIdentity(
+            provider="sentence_transformers", model="all-MiniLM-L6-v2", dimension=4
+        )
 
         def embed(self, texts):
             return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
-
-    class DummyVectorIndex:
-        def __init__(self, index_path, id_map_path, dim=None, **_kwargs):
-            self.index_path = index_path
-            self.id_map_path = id_map_path
-            self.dim = 4
-            self.id_map = []
-
-        def add_to_index(self, ids, vecs):
-            self.id_map.extend(ids)
-
-        def apply_delta_atomic(self, *, delete_ids, upserts):
-            delete_set = {str(x) for x in delete_ids}
-            self.id_map = [doc_id for doc_id in self.id_map if str(doc_id) not in delete_set]
-            self.id_map.extend([doc_id for doc_id, _ in upserts])
-
-        def search(self, q, k):
-            return ([0], [0.9])
-
-        def save(self):
-            pass
 
     # Create test CSV
     csv_file = tmp_path / "faq.csv"
@@ -100,14 +85,11 @@ def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, cap
 
     # Mock embedder and FAISS
     monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.sentence_transformers.SentenceTransformerEmbedder",
+        "local_rag_backend.composition.container.SentenceTransformerEmbedder",
         lambda model_name=None, settings_obj=None: DummyEmbedder(),
         raising=True,
     )
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
-        DummyVectorIndex,
-    )
+    monkeypatch.setattr(settings, "vector_backend", "numpy")
 
     import logging
 
@@ -115,7 +97,7 @@ def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, cap
         run_sample_data_ingestion(settings_obj=settings)
 
     assert any("Ingested" in m for m in caplog.messages)
-    assert any("SQL and FAISS" in m for m in caplog.messages)
+    assert any("local_split" in m for m in caplog.messages)
 
 
 def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):

@@ -25,7 +25,6 @@ from local_rag_backend.http.schemas.openrouter import (
     OpenRouterGenerateResponse,
     OpenRouterUsage,
 )
-from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 
 if TYPE_CHECKING:
     from local_rag_backend.composition.container import AppContainer
@@ -68,7 +67,7 @@ async def openrouter_generate(
             openrouter_client=container.build_openrouter_client(),
         )
 
-    out = await run_blocking(_generate_operation, task_type="network")
+    out = await container.blocking_executor().run_blocking(_generate_operation, task_type="network")
     usage = out.usage
     usage_obj = (
         OpenRouterUsage(

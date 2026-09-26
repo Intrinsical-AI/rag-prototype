@@ -1,13 +1,14 @@
 # tests/unit/app/test_api_router_more.py
-
 import pytest
+from support.container import override_container
 
-from local_rag_backend.composition import factory
 from local_rag_backend.core.errors import LLMConfigurationError, LLMConnectionError, LLMTimeoutError
 from local_rag_backend.http import dependencies as deps
 from local_rag_backend.http.routers import health as health_router, rag_router
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_health_endpoint_ok(asgi_client):
@@ -198,14 +199,14 @@ async def test_ask_maps_typed_llm_timeout_to_504(asgi_client, in_memory_sqlite, 
 async def test_ask_eval_maps_typed_llm_connection_error_to_503(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
-    SqlDocumentStorage().store_documents(["hello world"])
+    SqlDocumentStorage(in_memory_sqlite).store_documents(["hello world"])
 
     class _FailingGenerator:
         def generate(self, question, contexts):
             raise LLMConnectionError("provider unreachable")
 
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "OpenAIGenerator", lambda **_k: _FailingGenerator(), raising=True)
+    override_container(monkeypatch, openai_generator_factory=lambda **_k: _FailingGenerator())
 
     r = await asgi_client.post(
         "/api/ask_eval",

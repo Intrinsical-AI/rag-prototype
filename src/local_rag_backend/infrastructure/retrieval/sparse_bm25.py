@@ -20,8 +20,6 @@ from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from numpy.typing import NDArray
-
     from local_rag_backend.core.domain.entities import Document
     from local_rag_backend.core.domain.types import DocId
 
@@ -55,40 +53,6 @@ class SparseBM25Retriever(RetrieverPort):
 
             self.bm25 = BM25Okapi(self._tokenized_corpus)
 
-    def _ensure_docs_cache(self) -> dict[DocId, Document]:
-        docs_by_id = getattr(self, "_docs_by_id", None)
-        if docs_by_id is None:
-            docs_by_id = {doc.id: doc for doc in self.doc_repo.get(self.doc_ids)}
-            self._docs_by_id = docs_by_id
-        return docs_by_id
-
-    def _best_index_for_tied_top_score(
-        self,
-        ranked_indices: NDArray[np.intp],
-        rank_scores: NDArray[np.float32],
-        query_tokens: list[str],
-    ) -> int:
-        best = int(ranked_indices[0])
-        best_score = float(rank_scores[best])
-        tied = [int(i) for i in ranked_indices if float(rank_scores[int(i)]) == best_score]
-        if len(tied) <= 1:
-            return best
-
-        tokenized_corpus = getattr(self, "_tokenized_corpus", [])
-        if not tokenized_corpus:
-            return min(tied)
-
-        query_set = set(query_tokens)
-        best_overlap = -1
-        best_idx = min(tied)
-        for idx in tied:
-            tokens = tokenized_corpus[idx] if idx < len(tokenized_corpus) else []
-            overlap = sum(1 for tok in tokens if tok in query_set)
-            if overlap > best_overlap or (overlap == best_overlap and idx < best_idx):
-                best_overlap = overlap
-                best_idx = idx
-        return best_idx
-
     @staticmethod
     def _tokenize(text: str) -> list[str]:
         """Preprocess and tokenize text for BM25."""
@@ -100,9 +64,7 @@ class SparseBM25Retriever(RetrieverPort):
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         """Retrieve documents using BM25 scores."""
-        if request.top_k <= 0:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
-        if not self.bm25 or not request.query:
+        if self.bm25 is None:
             return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
 
         query_tokens = self._tokenize(request.query)
@@ -113,26 +75,22 @@ class SparseBM25Retriever(RetrieverPort):
         if doc_scores.size == 0:
             return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         k_eff = min(int(request.top_k), int(doc_scores.size))
-        if k_eff <= 0:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         rank_scores = np.nan_to_num(doc_scores, nan=float("-inf"))
-        ranked_indices = np.argsort(-rank_scores, kind="stable")
-        if k_eff == 1:
-            top_indices = np.array(
-                [self._best_index_for_tied_top_score(ranked_indices, rank_scores, query_tokens)],
-                dtype=np.int64,
-            )
-        else:
-            top_indices = ranked_indices[:k_eff]
+        query_set = set(query_tokens)
+        overlaps = [
+            sum(token in query_set for token in tokens) for tokens in self._tokenized_corpus
+        ]
+        top_indices = sorted(
+            range(len(rank_scores)),
+            key=lambda index: (-float(rank_scores[index]), -overlaps[index], index),
+        )[:k_eff]
 
         retrieved_ids = [self.doc_ids[int(i)] for i in top_indices]
         scores = [float(rank_scores[int(i)]) for i in top_indices]
 
-        if not scores:
-            return RetrievalResult(items=(), mode_used="sparse", backend_used="local_bm25")
         normalized_scores = normalize_min_max_scores(scores, flat_value=0.0, singleton_value=1.0)
 
-        docs_by_id = self._ensure_docs_cache()
+        docs_by_id = self._docs_by_id
         ordered_docs = [docs_by_id[doc_id] for doc_id in retrieved_ids if doc_id in docs_by_id]
         score_by_id = {
             doc_id: score

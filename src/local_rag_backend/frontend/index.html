@@ -10,6 +10,12 @@
   <button id="themeBtn" class="theme-btn" aria-label="Switch theme" title="Switch theme">🌙</button>
   <section class="card">
     <h1>Intrinsical RAG Prototype</h1>
+    <details class="api-settings">
+      <summary>API access (optional)</summary>
+      <label for="apiKey">API key</label>
+      <input id="apiKey" type="password" autocomplete="off" spellcheck="false" />
+      <p class="info-note">Only kept until this page reloads. Leave blank for local access without a key.</p>
+    </details>
     <div class="floating-label-input">
       <textarea id="question" placeholder=" " required autofocus></textarea>
       <span class="floating-label">Type your question here…</span>

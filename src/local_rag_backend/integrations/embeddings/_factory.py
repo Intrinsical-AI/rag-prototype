@@ -30,23 +30,15 @@ def _settings_cfg_version(settings_obj: Settings) -> str:
     return str(getattr(settings_obj, "storage_profile", "") or "default")
 
 
-def _runtime_settings(settings_obj: Settings | None) -> Settings:
-    if settings_obj is not None:
-        return settings_obj
-    from local_rag_backend.settings import settings
-
-    return settings
-
-
-def _build_default_openai_embedder(settings_obj: Settings | None = None) -> EmbedderPort:
+def _build_default_openai_embedder(settings_obj: Settings) -> EmbedderPort:
     from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 
-    return OpenAIEmbedder(settings_obj=_runtime_settings(settings_obj))
+    return OpenAIEmbedder(settings_obj=settings_obj)
 
 
 def _build_default_st_embedder(
     model_name: str,
-    settings_obj: Settings | None = None,
+    settings_obj: Settings,
 ) -> EmbedderPort:
     from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
         SentenceTransformerEmbedder,
@@ -54,7 +46,7 @@ def _build_default_st_embedder(
 
     return SentenceTransformerEmbedder(
         model_name=model_name,
-        settings_obj=_runtime_settings(settings_obj),
+        settings_obj=settings_obj,
     )
 
 

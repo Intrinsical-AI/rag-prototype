@@ -7,14 +7,16 @@ from local_rag_backend.infrastructure.persistence.elasticsearch.client import (
     ElasticBackendError,
     ElasticClient,
 )
+from local_rag_backend.settings import Settings
 
 
 def _client(response):
     return ElasticClient(
+        settings_obj=Settings(),
         client=httpx.Client(
             base_url="http://example.test",
             transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)),
-        )
+        ),
     )
 
 

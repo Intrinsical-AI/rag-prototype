@@ -6,12 +6,15 @@ import threading
 import time
 from dataclasses import dataclass
 
-import pytest
+from support.container import override_container
 
 from local_rag_backend.composition import factory
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.http.routers import docs as docs_router
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consistent(
@@ -56,6 +59,11 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
                             "external_id": ext,
                             "content": content,
                             "content_sha256": content_sha256,
+                            "source_id": None,
+                            "scope": None,
+                            "snapshot_id": None,
+                            "chunk_dedup_sha256": None,
+                            "metadata": None,
                         }
                     )
             return snapshots
@@ -115,6 +123,7 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
 
     class FakeEmbedder:
         dim = 1
+        identity = EmbeddingIdentity(provider="openai", model="test", dimension=dim)
 
         def embed(self, texts):
             return [[1.0 if "A" in text else 2.0] for text in texts]
@@ -137,9 +146,9 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
     fake_vec = FakeVec()
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "SqlDocumentStorage", FakeRepo, raising=True)
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: fake_vec, raising=True)
+    override_container(monkeypatch, doc_repo_factory=FakeRepo)
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: FakeEmbedder())
+    override_container(monkeypatch, vector_repo_factory=lambda *a, **k: fake_vec)
     monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     task_a = asyncio.create_task(
@@ -157,8 +166,8 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
     )
     ra, rb = await asyncio.gather(task_a, task_b)
 
-    assert ra.status_code == 200
-    assert rb.status_code == 200
+    assert ra.status_code == 200, ra.text
+    assert rb.status_code == 200, rb.text
     assert FakeRepo._by_external_id["doc-1"][1] == "B"
     assert fake_vec.by_id[1] == [2.0]
 
@@ -175,7 +184,12 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
         return func(*args, **kwargs)
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(docs_router, "run_blocking", _fake_run_blocking, raising=True)
+    monkeypatch.setattr(
+        factory.get_app_context().container.blocking_executor(),
+        "run_blocking",
+        _fake_run_blocking,
+        raising=True,
+    )
     monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     resp = await asgi_client.post("/api/docs/ingest", json={"texts": ["  hello world  "]})
@@ -194,6 +208,7 @@ async def test_mutation_failure_still_invalidates_cached_rag_service(
 ):
     class FakeEmbedder:
         dim = 1
+        identity = EmbeddingIdentity(provider="openai", model="test", dimension=dim)
 
         def embed(self, texts):
             return [[1.0] for _ in texts]
@@ -210,15 +225,15 @@ async def test_mutation_failure_still_invalidates_cached_rag_service(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: FakeEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: FakeEmbedder())
+    override_container(monkeypatch, vector_repo_factory=lambda *a, **k: FailingVec())
     monkeypatch.setattr(docs_router, "reset_rag_service", _count_reset, raising=True)
 
-    with pytest.raises(RuntimeError, match="vec upsert failed"):
-        await asgi_client.post(
-            "/api/docs/mutate",
-            json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
-        )
+    response = await asgi_client.post(
+        "/api/docs/mutate",
+        json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
+    )
+    assert response.status_code == 503  # Compensation cannot rebuild this failing vector double.
 
     assert reset_calls == 1
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(in_memory_sqlite).get_all_documents() == []

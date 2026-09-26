@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from local_rag_backend.infrastructure.observability import metrics_backend as mb
-from local_rag_backend.settings import settings
 
 # Keep stable module-level symbols so tests can monkeypatch middleware directly.
 PROMETHEUS_AVAILABLE: bool
@@ -39,7 +38,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
-        self.is_active = PROMETHEUS_AVAILABLE and settings.enable_monitoring
+        self.is_active = PROMETHEUS_AVAILABLE
         if self.is_active:
             self.requests = Counter(
                 "http_requests_total", "Total HTTP requests", ["method", "path", "status_code"]
@@ -90,8 +89,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def get_metrics() -> tuple[str, str]:
+def get_metrics(*, enabled: bool) -> tuple[str, str]:
     """Get Prometheus metrics in text format if monitoring is active."""
-    if not (PROMETHEUS_AVAILABLE and settings.enable_monitoring):
+    if not (PROMETHEUS_AVAILABLE and enabled):
         return "# Monitoring disabled or prometheus-client not installed\n", "text/plain"
     return generate_latest().decode("utf-8"), CONTENT_TYPE_LATEST

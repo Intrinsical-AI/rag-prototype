@@ -23,7 +23,9 @@ from local_rag_backend.core.use_cases.docs_mutation import (
     MutationUpsertInput,
 )
 from local_rag_backend.infrastructure.ingestion.loaders import LangChainLoader
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 # 1) Wrap any LangChain loader
 lc_loader = WebBaseLoader(["https://example.com"])  # or DirectoryLoader, SitemapLoader, etc.

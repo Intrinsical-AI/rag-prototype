@@ -4,6 +4,7 @@ import json
 
 import pytest
 from click.testing import CliRunner
+from support.canonical import repogpt_failure, repogpt_payload
 
 from local_rag_backend.cli import cli
 from local_rag_backend.core.services.canonical_import_transport import (
@@ -12,36 +13,23 @@ from local_rag_backend.core.services.canonical_import_transport import (
 )
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.mcp_server import tool_import_canonical
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def _payload(*, failed_files=1, failures=None, replace_scope=True):
-    return {
-        "kind": "code-units",
-        "schema_version": "4",
-        "repo_key": "demo",
-        "scope": "repogpt:demo",
-        "snapshot_id": "new",
-        "replace_scope": replace_scope,
-        "stats": {"failed_files": failed_files},
-        "failures": failures or [],
-        "documents": [
-            {
-                "external_id": "new-doc",
-                "content": "new content",
-                "metadata": {
-                    "path": "app.py",
-                    "unit_type": "module",
-                    "repo_key": "demo",
-                    "content_hash": "new-hash",
-                },
-            }
-        ],
-    }
+    return repogpt_payload(
+        external_id="new-doc",
+        content="new content",
+        failed_files=failed_files,
+        failures=failures,
+        replace_scope=replace_scope,
+    )
 
 
 @pytest.mark.parametrize(
-    "evidence", [{"failed_files": 1}, {"failed_files": 0, "failures": [{"path": "bad.py"}]}]
+    "evidence", [{"failed_files": 1}, {"failed_files": 0, "failures": [repogpt_failure("bad.py")]}]
 )
 def test_partial_evidence_survives_validation_and_effective_override(evidence):
     parsed = validate_canonical_import_payload(_payload(**evidence))
@@ -58,10 +46,10 @@ def test_partial_evidence_survives_validation_and_effective_override(evidence):
 
 @pytest.mark.parametrize("transport", ["http", "cli", "mcp"])
 async def test_partial_rejected_without_writes_and_explicit_upsert_preserves_absent(
-    transport, asgi_client, tmp_path, monkeypatch
+    transport, asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse")
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     repo.upsert_documents_by_external_id(
         [repo.UpsertDoc(external_id="absent-doc", content="keep me", scope="repogpt:demo")]
     )
@@ -103,12 +91,12 @@ async def test_partial_rejected_without_writes_and_explicit_upsert_preserves_abs
 @pytest.mark.parametrize("failed_files", [0, 1])
 @pytest.mark.parametrize("upsert_only", [False, True])
 async def test_empty_snapshot_rejected_without_writes(
-    transport, failed_files, upsert_only, asgi_client, tmp_path, monkeypatch
+    transport, failed_files, upsert_only, asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
     from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse")
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     repo.upsert_documents_by_external_id(
         [repo.UpsertDoc(external_id="last-doc", content="keep last document", scope="repogpt:demo")]
     )
@@ -122,7 +110,7 @@ async def test_empty_snapshot_rejected_without_writes(
     payload["documents"] = []
     payload["stats"].update(total_files=failed_files, ok_files=0, emitted_documents=0)
     if failed_files:
-        payload["failures"] = [{"path": "broken.py", "message": "parse failed"}]
+        payload["failures"] = [repogpt_failure()]
     if transport == "http":
         response = await asgi_client.post("/api/docs/import-canonical", json=payload)
         assert response.status_code == 422

@@ -53,7 +53,8 @@ path and need no heavy model or network dependency.
 {
   "provider": "sentence_transformers",
   "model": "all-MiniLM-L6-v2",
-  "model_key": "sentence_transformers:all-MiniLM-L6-v2:384",
+  "model_key": "{\"dimension\":384,\"implementation_version\":\"1\",\"model\":\"all-MiniLM-L6-v2\",\"provider\":\"sentence_transformers\",\"synthetic\":false}",
+  "implementation_version": "1",
   "dimension": 384,
   "synthetic": false,
   "cache_enabled": true,

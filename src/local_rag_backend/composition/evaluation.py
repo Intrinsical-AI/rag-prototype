@@ -41,8 +41,6 @@ from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Ret
 from local_rag_backend.infrastructure.search_backends import LocalSplitSearchRetriever
 from local_rag_backend.integrations.embeddings._factory import (
     DEFAULT_DENSE_BACKEND_MESSAGE,
-    _build_default_openai_embedder,
-    _build_default_st_embedder,
     build_dense_embedder_from_settings,
 )
 
@@ -185,6 +183,7 @@ class _QueryCachingEmbedder(EmbedderPort):
     def __init__(self, base: EmbedderPort) -> None:
         self._base = base
         self.dim = base.dim
+        self.identity = base.identity
         self._cache: dict[str, Any] = {}
 
     def embed(self, texts: Sequence[str]) -> Sequence[Any]:
@@ -206,8 +205,8 @@ class _PreparedEvalWorkspace:
         self,
         *,
         storage: EvalStoragePort,
-        openai_embedder_factory: Callable[[], EmbedderPort],
-        st_embedder_factory: Callable[[str], EmbedderPort],
+        openai_embedder_factory: Callable[[], EmbedderPort] | None,
+        st_embedder_factory: Callable[[str], EmbedderPort] | None,
         dense_retriever_factory: Callable[..., RetrieverPort],
         hybrid_retriever_factory: Callable[..., RetrieverPort],
         vector_repo_factory: Callable[..., Any],
@@ -256,7 +255,9 @@ class _PreparedEvalWorkspace:
             "index_path": str(self._eval_settings.index_path),
             "id_map_path": str(self._eval_settings.id_map_path),
             "vector_backend": str(getattr(self._eval_settings, "vector_backend", "auto")),
-            "vector_manifest_config": expected_manifest_config_from_settings(self._eval_settings),
+            "vector_manifest_config": expected_manifest_config_from_settings(
+                self._eval_settings, embedding_identity=self._dense_embedder().identity
+            ),
         }
 
     def _workspace_manifest_matches(self) -> bool:
@@ -303,6 +304,7 @@ class _PreparedEvalWorkspace:
             dim=embedder.dim,
             backend=getattr(self._eval_settings, "vector_backend", "auto"),
             settings_obj=self._eval_settings,
+            embedding_identity=embedder.identity,
         )
         return self._vector_repo
 
@@ -356,7 +358,11 @@ class _PreparedEvalWorkspace:
             )
 
         dense_retriever = self._cached_dense_retriever()
-        sparse_retriever = self._cached_sparse_retriever()
+        sparse_retriever = LocalSplitSearchRetriever(
+            doc_repo=self._doc_repo,
+            preloaded_docs=self._docs,
+            cached_sparse_retriever=cast("SparseBM25Retriever", self._cached_sparse_retriever()),
+        )
         return self._hybrid_retriever_factory(
             dense=dense_retriever,
             sparse=sparse_retriever,
@@ -429,9 +435,8 @@ class _PreparedEvalWorkspace:
 
 @dataclass(frozen=True)
 class _DefaultEvalRetrieverFactoryPort(EvalRetrieverFactoryPort):
-    openai_embedder_factory: Callable[[], EmbedderPort]
-    st_embedder_factory: Callable[[str], EmbedderPort]
-    sparse_retriever_factory: Callable[..., RetrieverPort]
+    openai_embedder_factory: Callable[[], EmbedderPort] | None
+    st_embedder_factory: Callable[[str], EmbedderPort] | None
     dense_retriever_factory: Callable[..., RetrieverPort]
     hybrid_retriever_factory: Callable[..., RetrieverPort]
     vector_repo_factory: Callable[..., Any]
@@ -475,16 +480,14 @@ def build_eval_retriever_factory_port(
     *,
     openai_embedder_factory: Callable[[], EmbedderPort] | None = None,
     st_embedder_factory: Callable[[str], EmbedderPort] | None = None,
-    sparse_retriever_factory: Callable[..., RetrieverPort] = SparseBM25Retriever,
     dense_retriever_factory: Callable[..., RetrieverPort] = DenseVectorRetriever,
     hybrid_retriever_factory: Callable[..., RetrieverPort] = HybridRetriever,
     vector_repo_factory: Callable[..., Any] = VectorStorage,
     reranker_factory: Callable[..., Any] = RerankingRetriever,
 ) -> EvalRetrieverFactoryPort:
     return _DefaultEvalRetrieverFactoryPort(
-        openai_embedder_factory=openai_embedder_factory or _build_default_openai_embedder,
-        st_embedder_factory=st_embedder_factory or _build_default_st_embedder,
-        sparse_retriever_factory=sparse_retriever_factory,
+        openai_embedder_factory=openai_embedder_factory,
+        st_embedder_factory=st_embedder_factory,
         dense_retriever_factory=dense_retriever_factory,
         hybrid_retriever_factory=hybrid_retriever_factory,
         vector_repo_factory=vector_repo_factory,

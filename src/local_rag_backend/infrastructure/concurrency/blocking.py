@@ -9,7 +9,6 @@ Using a dedicated ThreadPoolExecutor avoids relying on AnyIO's context detection
 from __future__ import annotations
 
 import asyncio
-import atexit
 import functools
 import threading
 import time
@@ -18,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from local_rag_backend.infrastructure.observability.telemetry import get_telemetry
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import Settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,53 +26,7 @@ T = TypeVar("T")
 BlockingTaskType = Literal["default", "mutation", "network", "eval"]
 
 _TASK_TYPES: tuple[BlockingTaskType, ...] = ("default", "mutation", "network", "eval")
-_DEFAULT_WORKERS_BY_TASK: dict[BlockingTaskType, int] = {
-    "default": 8,
-    "mutation": 2,
-    "network": 4,
-    "eval": 2,
-}
-_DEFAULT_QUEUE_LIMIT_BY_TASK: dict[BlockingTaskType, int] = {
-    "default": 64,
-    "mutation": 32,
-    "network": 64,
-    "eval": 32,
-}
-
-_EXECUTOR_STATES: dict[BlockingTaskType, _ExecutorState] = {}
-_EXECUTOR_LOCK = threading.Lock()
 _POLL_INTERVAL_SECONDS = 0.001
-
-
-def _parse_positive_int(raw: str | None, *, fallback: int) -> int:
-    if raw is None:
-        return fallback
-    try:
-        value = int(raw)
-    except ValueError:
-        return fallback
-    return value if value > 0 else fallback
-
-
-def _default_workers() -> int:
-    # Keep conservative by default; these tasks can involve network I/O and CPU.
-    return _parse_positive_int(
-        str(getattr(settings, "blocking_workers", "")), fallback=_DEFAULT_WORKERS_BY_TASK["default"]
-    )
-
-
-def _workers_for_task(task_type: BlockingTaskType) -> int:
-    if task_type == "default":
-        return _default_workers()
-    configured = getattr(settings, f"blocking_workers_{task_type}", None)
-    if configured is not None:
-        return _parse_positive_int(str(configured), fallback=_DEFAULT_WORKERS_BY_TASK[task_type])
-    return _DEFAULT_WORKERS_BY_TASK[task_type]
-
-
-def _queue_limit_for_task(task_type: BlockingTaskType) -> int:
-    configured = getattr(settings, f"blocking_queue_{task_type}", None)
-    return _parse_positive_int(str(configured), fallback=_DEFAULT_QUEUE_LIMIT_BY_TASK[task_type])
 
 
 def _parse_task_type(task_type: str) -> BlockingTaskType:
@@ -110,103 +63,111 @@ class _ExecutorState:
             return int(self.pending)
 
 
-def _get_executor_state(task_type: BlockingTaskType) -> _ExecutorState:
-    parsed = _parse_task_type(task_type)
-    with _EXECUTOR_LOCK:
-        state = _EXECUTOR_STATES.get(parsed)
-        if state is None:
-            workers = _workers_for_task(parsed)
-            queue_limit = _queue_limit_for_task(parsed)
-            state = _ExecutorState(
-                executor=ThreadPoolExecutor(
-                    max_workers=workers,
-                    thread_name_prefix=f"rag-blocking-{parsed}",
-                ),
-                max_pending=max(1, workers + queue_limit),
+class BlockingExecutor:
+    """Bounded worker pools owned by one application container."""
+
+    def __init__(self, *, settings_obj: Settings) -> None:
+        self._settings = settings_obj
+        self._states: dict[BlockingTaskType, _ExecutorState] = {}
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def _get_executor_state(self, task_type: BlockingTaskType) -> _ExecutorState:
+        parsed = _parse_task_type(task_type)
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The application worker executor is closed.")
+            state = self._states.get(parsed)
+            if state is None:
+                suffix = "" if parsed == "default" else f"_{parsed}"
+                workers = int(getattr(self._settings, f"blocking_workers{suffix}"))
+                queue_limit = int(getattr(self._settings, f"blocking_queue_{parsed}"))
+                state = _ExecutorState(
+                    executor=ThreadPoolExecutor(
+                        max_workers=workers, thread_name_prefix=f"rag-blocking-{parsed}"
+                    ),
+                    max_pending=workers + queue_limit,
+                )
+                self._states[parsed] = state
+            return state
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            states = tuple(self._states.values())
+            self._states.clear()
+        for state in states:
+            state.executor.shutdown(wait=True, cancel_futures=True)
+
+    async def run_blocking(
+        self,
+        func: Callable[..., T],
+        /,
+        *args: Any,
+        task_type: BlockingTaskType = "default",
+        **kwargs: Any,
+    ) -> T:
+        """Run a sync callable in a dedicated worker pool partitioned by task type."""
+        telemetry = get_telemetry()
+        call = functools.partial(func, *args, **kwargs)
+        state = self._get_executor_state(task_type)
+        capacity = int(state.max_pending)
+        if not state.try_acquire_slot():
+            telemetry.observe_blocking_queue(
+                task_type=task_type,
+                pending=state.pending_snapshot(),
+                capacity=capacity,
             )
-            _EXECUTOR_STATES[parsed] = state
-        return state
-
-
-@atexit.register
-def _shutdown_executor() -> None:  # pragma: no cover
-    for state in list(_EXECUTOR_STATES.values()):
-        # Best-effort shutdown; don't block interpreter exit.
-        state.executor.shutdown(wait=False, cancel_futures=True)
-
-
-async def run_blocking(
-    func: Callable[..., T],
-    /,
-    *args: Any,
-    task_type: BlockingTaskType = "default",
-    **kwargs: Any,
-) -> T:
-    """Run a sync callable in a dedicated worker pool partitioned by task type."""
-    telemetry = get_telemetry()
-    call = functools.partial(func, *args, **kwargs)
-    state = _get_executor_state(task_type)
-    capacity = int(state.max_pending)
-    if not state.try_acquire_slot():
+            telemetry.observe_blocking_run(task_type=task_type, status="rejected", duration_s=0.0)
+            raise RuntimeError(
+                f"Blocking queue is full for task_type={task_type!r} (max_pending={state.max_pending})"
+            )
         telemetry.observe_blocking_queue(
             task_type=task_type,
-            pending=_pending_snapshot(state),
-            capacity=capacity,
-        )
-        telemetry.observe_blocking_run(task_type=task_type, status="rejected", duration_s=0.0)
-        raise RuntimeError(
-            f"Blocking queue is full for task_type={task_type!r} (max_pending={state.max_pending})"
-        )
-    telemetry.observe_blocking_queue(
-        task_type=task_type,
-        pending=_pending_snapshot(state),
-        capacity=capacity,
-    )
-
-    # Note: `loop.run_in_executor()` / `asyncio.to_thread()` / `asyncio.wrap_future()` rely on
-    # cross-thread wakeups (`loop.call_soon_threadsafe()`), which can deadlock under some
-    # ASGI test harnesses. Polling avoids that class of deadlocks at the cost of a tiny
-    # timer wakeup while the job runs.
-    enqueued_at = time.monotonic()
-    started_at = enqueued_at
-
-    def _instrumented_call() -> T:
-        nonlocal started_at
-        started_at = time.monotonic()
-        telemetry.observe_blocking_queue_wait(
-            task_type=task_type,
-            wait_s=max(0.0, started_at - enqueued_at),
-        )
-        return call()
-
-    fut = None
-    status: Literal["ok", "error", "cancelled"] = "ok"
-    try:
-        fut = state.executor.submit(_instrumented_call)
-        while not fut.done():
-            await asyncio.sleep(_POLL_INTERVAL_SECONDS)
-        return fut.result()
-    except asyncio.CancelledError:  # pragma: no cover
-        status = "cancelled"
-        if fut is not None:
-            fut.cancel()
-        raise
-    except Exception:
-        status = "error"
-        raise
-    finally:
-        telemetry.observe_blocking_run(
-            task_type=task_type,
-            status=status,
-            duration_s=max(0.0, time.monotonic() - started_at),
-        )
-        state.release_slot()
-        telemetry.observe_blocking_queue(
-            task_type=task_type,
-            pending=_pending_snapshot(state),
+            pending=state.pending_snapshot(),
             capacity=capacity,
         )
 
+        # Note: `loop.run_in_executor()` / `asyncio.to_thread()` / `asyncio.wrap_future()` rely on
+        # cross-thread wakeups (`loop.call_soon_threadsafe()`), which can deadlock under some
+        # ASGI test harnesses. Polling avoids that class of deadlocks at the cost of a tiny
+        # timer wakeup while the job runs.
+        enqueued_at = time.monotonic()
+        started_at = enqueued_at
 
-def _pending_snapshot(state: _ExecutorState) -> int:
-    return state.pending_snapshot()
+        def _instrumented_call() -> T:
+            nonlocal started_at
+            started_at = time.monotonic()
+            telemetry.observe_blocking_queue_wait(
+                task_type=task_type,
+                wait_s=max(0.0, started_at - enqueued_at),
+            )
+            return call()
+
+        fut = None
+        status: Literal["ok", "error", "cancelled"] = "ok"
+        try:
+            fut = state.executor.submit(_instrumented_call)
+            while not fut.done():
+                await asyncio.sleep(_POLL_INTERVAL_SECONDS)
+            return fut.result()
+        except asyncio.CancelledError:  # pragma: no cover
+            status = "cancelled"
+            if fut is not None:
+                fut.cancel()
+            raise
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            telemetry.observe_blocking_run(
+                task_type=task_type,
+                status=status,
+                duration_s=max(0.0, time.monotonic() - started_at),
+            )
+            state.release_slot()
+            telemetry.observe_blocking_queue(
+                task_type=task_type,
+                pending=state.pending_snapshot(),
+                capacity=capacity,
+            )

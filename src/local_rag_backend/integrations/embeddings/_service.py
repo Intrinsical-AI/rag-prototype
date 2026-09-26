@@ -12,7 +12,6 @@ from local_rag_backend.infrastructure.embeddings.cached import resolve_embedding
 from local_rag_backend.integrations.embeddings._contracts import (
     DEFAULT_EMBEDDING_LIMITS,
     EmbeddingLimits,
-    EmbeddingProvider,
     EmbeddingService,
     EmbeddingStatus,
 )
@@ -32,26 +31,18 @@ class _ConfiguredEmbeddingService:
     ) -> None:
         self._embedder = embedder
         self._limits = limits
-        provider: EmbeddingProvider = (
-            "openai" if settings_obj.openai_api_key else "sentence_transformers"
-        )
-        model = (
-            str(settings_obj.openai_embedding_model)
-            if provider == "openai"
-            else str(settings_obj.st_embedding_model)
-        )
+        identity = embedder.identity
         cache_db_path = resolve_embedding_cache_db_path(
             data_dir=Path(settings_obj.data_dir),
             configured_path=settings_obj.embedding_cache_db_path,
         )
         self._status: EmbeddingStatus = {
-            "provider": provider,
-            "model": model,
-            "model_key": str(getattr(embedder, "model_key", f"{provider}:{model}:{embedder.dim}")),
-            "dimension": int(embedder.dim),
-            "synthetic": bool(
-                provider == "sentence_transformers" and settings_obj.synthetic_embeddings
-            ),
+            "provider": identity.provider,
+            "model": identity.model,
+            "model_key": identity.model_key,
+            "dimension": identity.dimension,
+            "synthetic": identity.synthetic,
+            "implementation_version": identity.implementation_version,
             "cache_enabled": not bool(settings_obj.disable_embedding_cache),
             "cache_db_path": str(cache_db_path),
             "limits": {
@@ -69,6 +60,7 @@ class _ConfiguredEmbeddingService:
             "model_key": self._status["model_key"],
             "dimension": self._status["dimension"],
             "synthetic": self._status["synthetic"],
+            "implementation_version": self._status["implementation_version"],
             "cache_enabled": self._status["cache_enabled"],
             "cache_db_path": self._status["cache_db_path"],
             "limits": {

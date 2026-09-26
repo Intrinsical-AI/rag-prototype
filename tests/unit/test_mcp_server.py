@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,9 @@ from local_rag_backend import mcp_server
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.mcp_server import handle_request
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def _extract_content_text(response: dict[str, object]) -> dict[str, object]:
@@ -20,8 +23,20 @@ def _extract_content_text(response: dict[str, object]) -> dict[str, object]:
 
 
 def test_mcp_initialize_and_list_tools() -> None:
-    initialize = handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    initialize = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"},
+            },
+        }
+    )
     assert initialize["result"]["serverInfo"]["name"] == "rag-prototype"  # type: ignore[index]
+    assert initialize["result"]["protocolVersion"] == "2024-11-05"
 
     listed = handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     names = {tool["name"] for tool in listed["result"]["tools"]}  # type: ignore[index]
@@ -114,7 +129,8 @@ def test_mcp_ask_rejects_invalid_k() -> None:
     )
 
     assert "error" in response
-    assert "k must be between 1 and 10" in response["error"]["message"]  # type: ignore[index]
+    assert response["error"]["code"] == -32602
+    assert "k" in response["error"]["message"]
 
 
 @pytest.mark.parametrize("invalid_k", [True, "1", 1.0])
@@ -132,7 +148,8 @@ def test_mcp_ask_rejects_non_integer_k(invalid_k) -> None:
     )
 
     assert "error" in response
-    assert "k must be an integer" in response["error"]["message"]  # type: ignore[index]
+    assert response["error"]["code"] == -32602
+    assert "integer" in response["error"]["message"]
 
 
 def test_mcp_ask_rejects_question_over_schema_limit() -> None:
@@ -149,7 +166,8 @@ def test_mcp_ask_rejects_question_over_schema_limit() -> None:
     )
 
     assert "error" in response
-    assert "question must not exceed 4096 characters" in response["error"]["message"]  # type: ignore[index]
+    assert response["error"]["code"] == -32602
+    assert "4096" in response["error"]["message"]
 
 
 def test_mcp_ask_rejects_non_string_question() -> None:
@@ -163,7 +181,8 @@ def test_mcp_ask_rejects_non_string_question() -> None:
     )
 
     assert "error" in response
-    assert "question must be a string" in response["error"]["message"]  # type: ignore[index]
+    assert response["error"]["code"] == -32602
+    assert "string" in response["error"]["message"]
 
 
 def test_mcp_ask_rejects_malformed_service_result(monkeypatch) -> None:
@@ -193,12 +212,10 @@ def test_mcp_ask_rejects_malformed_service_result(monkeypatch) -> None:
         }
     )
 
-    assert "error" in response
+    assert response["result"]["isError"] is True
     assert (
         "RAG service contract violated: 1 docs != 0 scores"
-        in response["error"][  # type: ignore[index]
-            "message"
-        ]
+        in response["result"]["content"][0]["text"]
     )
 
 
@@ -236,7 +253,9 @@ def test_mcp_import_canonical_and_status(in_memory_sqlite, tmp_path, monkeypatch
     payload = _extract_content_text(response)
     assert payload["inserted"] == 1
     assert payload["replace_scope"] is True
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-1"}
+    assert {
+        doc.external_id for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    } == {"doc-1"}
 
     status = handle_request(
         {
@@ -299,8 +318,8 @@ def test_mcp_import_canonical_rejects_repogpt_schema_v3(
         }
     )
 
-    assert "error" in response
-    assert "schema_version='4'" in response["error"]["message"]  # type: ignore[index]
+    assert response["result"]["isError"] is True
+    assert "schema_version='4'" in response["result"]["content"][0]["text"]
 
 
 def test_mcp_eval_supports_filters(in_memory_sqlite, tmp_path, monkeypatch) -> None:
@@ -335,3 +354,118 @@ def test_mcp_eval_supports_filters(in_memory_sqlite, tmp_path, monkeypatch) -> N
     assert payload["queries"] > 0
     assert set(payload["metrics"]) == {"nDCG@1", "MAP@1", "MRR@1", "P@1", "Recall@1"}
     assert payload["filters"] == [{"field": "source_id", "values": ["eval:repogpt:v1"]}]
+
+
+@pytest.mark.parametrize("values", ["demo", [], [" "], ["", "demo"], [1], [None], {"demo": True}])
+def test_mcp_invalid_filter_values_are_protocol_argument_errors(values):
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 30,
+            "method": "tools/call",
+            "params": {
+                "name": "rag_ask",
+                "arguments": {
+                    "question": "hello",
+                    "filters": [{"field": "scope", "values": values}],
+                },
+            },
+        }
+    )
+    assert response["error"]["code"] == -32602
+
+
+def test_mcp_filter_values_trim_without_splitting_strings():
+    filters = mcp_server._parse_filters([{"field": "scope", "values": [" demo "]}])
+    assert filters[0].values == ("demo",)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        None,
+        [],
+        7,
+        {},
+        {"jsonrpc": "1.0", "id": 1, "method": "ping"},
+        {"jsonrpc": "2.0", "id": None, "method": "ping"},
+        {"jsonrpc": "2.0", "id": True, "method": "ping"},
+        {"jsonrpc": "2.0", "id": [], "method": "ping"},
+        {"jsonrpc": "2.0", "id": 1, "method": []},
+    ],
+)
+def test_mcp_invalid_request_envelopes(message):
+    assert handle_request(message)["error"]["code"] == -32600
+
+
+def test_mcp_notifications_have_no_reply_and_ping_is_supported():
+    assert handle_request({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    assert (
+        handle_request(
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}
+        )
+        is None
+    )
+    assert handle_request({"jsonrpc": "2.0", "id": "p", "method": "ping"}) == {
+        "jsonrpc": "2.0",
+        "id": "p",
+        "result": {},
+    }
+
+
+def test_mcp_malformed_call_names_and_arguments_are_recoverable():
+    for params in (
+        [],
+        {"name": []},
+        {"name": "missing"},
+        {"name": "rag_status", "arguments": {"unknown": 1}},
+    ):
+        response = handle_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params}
+        )
+        assert response["error"]["code"] == -32602
+
+
+def test_mcp_stdio_recovers_after_bad_json_and_suppresses_notifications(monkeypatch):
+    source = io.StringIO(
+        '{broken\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n'
+        '{"jsonrpc":"2.0","id":2,"method":"ping"}\n'
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(mcp_server.sys, "stdin", source)
+    monkeypatch.setattr(mcp_server.sys, "stdout", output)
+    mcp_server.main()
+    replies = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert len(replies) == 2
+    assert replies[0]["error"]["code"] == -32700
+    assert replies[1] == {"jsonrpc": "2.0", "id": 2, "result": {}}
+
+
+def test_mcp_broken_output_is_fatal(monkeypatch):
+    class BrokenOutput:
+        def write(self, value):
+            raise BrokenPipeError("closed")
+
+    monkeypatch.setattr(
+        mcp_server.sys, "stdin", io.StringIO('{"jsonrpc":"2.0","id":1,"method":"ping"}\n')
+    )
+    monkeypatch.setattr(mcp_server.sys, "stdout", BrokenOutput())
+    with pytest.raises(BrokenPipeError):
+        mcp_server.main()
+
+
+def test_mcp_recovery_failure_is_a_tool_error(monkeypatch):
+    from local_rag_backend.core.errors import MutationRecoveryRequiredError
+
+    def fail():
+        raise MutationRecoveryRequiredError(
+            "journal.jsonl op_id=op-1 state=pending requires recovery"
+        )
+
+    monkeypatch.setitem(mcp_server.TOOLS["rag_status"], "handler", fail)
+    response = handle_request(
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "rag_status"}}
+    )
+    assert "error" not in response
+    assert response["result"]["isError"] is True
+    assert "op-1" in response["result"]["content"][0]["text"]

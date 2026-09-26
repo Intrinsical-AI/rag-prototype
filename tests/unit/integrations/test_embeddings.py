@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 
 import local_rag_backend.integrations.embeddings as embedding_api
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.integrations.embeddings import (
     EmbeddingLimits,
     EmbeddingsBackendUnavailableError,
@@ -73,9 +74,12 @@ def test_explicit_config_builds_json_safe_cached_synthetic_service(tmp_path: Pat
     assert status == {
         "provider": "sentence_transformers",
         "model": "synthetic-test-model",
-        "model_key": "sentence_transformers:synthetic-test-model:6",
+        "model_key": EmbeddingIdentity(
+            "sentence_transformers", "synthetic-test-model", 6, synthetic=True
+        ).model_key,
         "dimension": 6,
         "synthetic": True,
+        "implementation_version": "1",
         "cache_enabled": True,
         "cache_db_path": str((config_path.parent / "data/embedding-cache.sqlite3").resolve()),
         "limits": {
@@ -177,6 +181,7 @@ def test_service_rejects_malformed_provider_output(
 ) -> None:
     class MalformedEmbedder:
         dim = 2
+        identity = EmbeddingIdentity("sentence_transformers", "malformed", 2, synthetic=True)
 
         def embed(self, _texts: object) -> list[list[object]]:
             return raw_vectors

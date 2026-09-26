@@ -16,7 +16,9 @@ from local_rag_backend.infrastructure.persistence.shared.mutation_journal import
     FileMutationJournal,
 )
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def _journal_for_coordination_dir(coordination_dir: Path) -> FileMutationJournal:
@@ -38,10 +40,13 @@ async def test_startup_recovery_rolls_back_sql_committed_record_with_file_journa
     reset_app_context()
 
     external_id = "doc:e2e:startup-recovery"
-    SqlDocumentStorage().upsert_documents_by_external_id(
+    SqlDocumentStorage(session_factory=in_memory_sqlite).upsert_documents_by_external_id(
         [SqlDocumentStorage.UpsertDoc(external_id=external_id, content="payload")]
     )
-    assert any(d.external_id == external_id for d in SqlDocumentStorage().get_all_documents())
+    assert any(
+        d.external_id == external_id
+        for d in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    )
 
     op_id = "mut:e2e:startup-recovery"
     intent = intent_to_dict(
@@ -64,7 +69,10 @@ async def test_startup_recovery_rolls_back_sql_committed_record_with_file_journa
     async with app.router.lifespan_context(app):
         pass
 
-    assert all(d.external_id != external_id for d in SqlDocumentStorage().get_all_documents())
+    assert all(
+        d.external_id != external_id
+        for d in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    )
     recovered = journal.get(op_id)
     assert recovered is not None
     assert recovered.state == "ROLLED_BACK"
@@ -95,7 +103,7 @@ async def test_startup_recovery_persists_failed_needs_recovery_when_rollback_fai
     reset_app_context()
 
     external_id = "doc:e2e:startup-recovery-fail"
-    SqlDocumentStorage().upsert_documents_by_external_id(
+    SqlDocumentStorage(session_factory=in_memory_sqlite).upsert_documents_by_external_id(
         [SqlDocumentStorage.UpsertDoc(external_id=external_id, content="payload")]
     )
 
@@ -121,7 +129,10 @@ async def test_startup_recovery_persists_failed_needs_recovery_when_rollback_fai
         pass
 
     # Rollback failed, so the SQL row remains and journal records failed recovery.
-    assert any(d.external_id == external_id for d in SqlDocumentStorage().get_all_documents())
+    assert any(
+        d.external_id == external_id
+        for d in SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    )
     recovered = journal.get(op_id)
     assert recovered is not None
     assert recovered.state == "FAILED_NEEDS_RECOVERY"
