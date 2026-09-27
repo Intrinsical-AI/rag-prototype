@@ -7,7 +7,9 @@ from click.testing import CliRunner
 from local_rag_backend.cli import cli
 from local_rag_backend.cli_commands.docs import docs_ingest, docs_mutate
 from local_rag_backend.core.use_cases.results import MutationSummary
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_cli_mutate_docs_calls_coordinator_execute_once(in_memory_sqlite, tmp_path, monkeypatch):

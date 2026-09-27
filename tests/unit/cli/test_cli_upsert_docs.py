@@ -1,10 +1,14 @@
 import json
 
 from click.testing import CliRunner
+from support.container import override_container
 
 from local_rag_backend.cli import cli
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_cli_mutate_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch):
@@ -26,7 +30,7 @@ def test_cli_mutate_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch)
     assert r.exit_code == 0, r.output
     assert "inserted=2" in r.output
 
-    docs = SqlDocumentStorage().get_all_documents()
+    docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs) == 2
     assert {d.external_id for d in docs} == {"doc-1", "doc-2"}
 
@@ -35,6 +39,7 @@ def test_cli_mutate_docs_dense_embed_failure_does_not_persist_sql(
     in_memory_sqlite, tmp_path, monkeypatch
 ):
     class BadEmbedder:
+        identity = EmbeddingIdentity(provider="openai", model="text-embedding-3-small", dimension=4)
         dim = 4
 
         def embed(self, texts):
@@ -42,11 +47,7 @@ def test_cli_mutate_docs_dense_embed_failure_does_not_persist_sql(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
-        lambda *a, **k: BadEmbedder(),
-        raising=True,
-    )
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: BadEmbedder())
 
     p = tmp_path / "mutate_dense_fail.json"
     p.write_text(
@@ -56,13 +57,14 @@ def test_cli_mutate_docs_dense_embed_failure_does_not_persist_sql(
     r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
     assert r.exit_code == 1
     assert "embed fail" in r.output
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []
 
 
 def test_cli_mutate_docs_failure_still_invalidates_cached_rag_service(
     in_memory_sqlite, tmp_path, monkeypatch
 ):
     class BadEmbedder:
+        identity = EmbeddingIdentity(provider="openai", model="text-embedding-3-small", dimension=4)
         dim = 4
 
         def embed(self, texts):
@@ -76,11 +78,7 @@ def test_cli_mutate_docs_failure_still_invalidates_cached_rag_service(
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
-        lambda *a, **k: BadEmbedder(),
-        raising=True,
-    )
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: BadEmbedder())
     monkeypatch.setattr(
         "local_rag_backend.cli_commands.runtime._reset_rag_service_best_effort",
         _count_reset,
@@ -102,6 +100,7 @@ def test_cli_mutate_docs_rejects_duplicate_external_id_before_embedding(
     in_memory_sqlite, tmp_path, monkeypatch
 ):
     class CountingEmbedder:
+        identity = EmbeddingIdentity(provider="openai", model="text-embedding-3-small", dimension=4)
         dim = 4
 
         def __init__(self):
@@ -114,11 +113,7 @@ def test_cli_mutate_docs_rejects_duplicate_external_id_before_embedding(
     embedder = CountingEmbedder()
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.embeddings.openai.OpenAIEmbedder",
-        lambda *a, **k: embedder,
-        raising=True,
-    )
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: embedder)
 
     p = tmp_path / "dup_docs.json"
     p.write_text(
@@ -137,4 +132,4 @@ def test_cli_mutate_docs_rejects_duplicate_external_id_before_embedding(
     assert r.exit_code == 1
     assert "external_id values in upserts must be unique" in r.output
     assert embedder.calls == 0
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []

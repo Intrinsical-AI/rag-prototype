@@ -411,10 +411,11 @@ def test_bulk_reports_individual_failures_even_when_http_succeeds(errors):
         ],
     }
     client = ElasticClient(
+        settings_obj=Settings(),
         client=httpx.Client(
             base_url="http://example.test",
             transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)),
-        )
+        ),
     )
     with pytest.raises(ElasticBackendError, match="delete bad: status 429"):
         client.bulk(
@@ -427,6 +428,7 @@ def test_bulk_reports_individual_failures_even_when_http_succeeds(errors):
 
 def test_bulk_delete_absent_document_is_idempotent():
     client = ElasticClient(
+        settings_obj=Settings(),
         client=httpx.Client(
             base_url="http://example.test",
             transport=httpx.MockTransport(
@@ -440,7 +442,7 @@ def test_bulk_delete_absent_document_is_idempotent():
                     },
                 )
             ),
-        )
+        ),
     )
     assert not client.bulk([{"delete": {"_index": "docs", "_id": "missing"}}])["errors"]
 

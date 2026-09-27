@@ -7,9 +7,9 @@ from pathlib import Path
 
 from support.external_paths import configured_directory
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-REPOGPT_ROOT = Path(os.environ.get("REPOGPT_ROOT", WORKSPACE_ROOT / "RepoGPT"))
-REPOGPT_FIXTURE_REPO = configured_directory("REPOGPT_FIXTURE_REPO")
+REPOGPT_ROOT = configured_directory("REPOGPT_ROOT")
+CANONICAL_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/repogpt_code_units_v4.json"
+REPOGPT_SOURCE_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/repogpt_eval_repo"
 
 
 def _preparation_message(root: Path) -> str:
@@ -19,30 +19,24 @@ def _preparation_message(root: Path) -> str:
     )
 
 
-def resolve_repogpt_python(root: Path, *, configured: bool) -> Path | None:
-    if not root.exists() and not configured:
-        return None
+def resolve_repogpt_python(root: Path) -> Path:
     python_executable = root / ".venv" / "bin" / "python"
     if not root.is_dir() or not os.access(python_executable, os.X_OK):
         raise RuntimeError(_preparation_message(root))
     return python_executable
 
 
-# Skip only an absent, unconfigured optional integration. Broken installations must fail.
-REPOGPT_CLI_AVAILABLE = (
-    resolve_repogpt_python(REPOGPT_ROOT, configured="REPOGPT_ROOT" in os.environ) is not None
-)
-
-
-def emit_repogpt_code_units(
+def load_repogpt_payload(
     *,
     payload_path: Path,
-    repo_path: Path | None = REPOGPT_FIXTURE_REPO,
+    repo_path: Path = REPOGPT_SOURCE_FIXTURE,
 ) -> dict[str, object]:
-    if repo_path is None:
-        raise RuntimeError("REPOGPT_FIXTURE_REPO is required for this external E2E fixture")
+    if REPOGPT_ROOT is None:
+        raw = CANONICAL_FIXTURE.read_text(encoding="utf-8")
+        payload_path.write_text(raw, encoding="utf-8")
+        return json.loads(raw)
     preparation = _preparation_message(REPOGPT_ROOT)
-    python_executable = resolve_repogpt_python(REPOGPT_ROOT, configured=True)
+    python_executable = resolve_repogpt_python(REPOGPT_ROOT)
     env = dict(os.environ)
     repogpt_src = REPOGPT_ROOT / "src"
     existing_pythonpath = env.get("PYTHONPATH")
@@ -59,6 +53,10 @@ def emit_repogpt_code_units(
                 "repogpt.app.cli",
                 "--emit",
                 "code-units",
+                "--repo-key",
+                "repogpt_eval_repo",
+                "--replace-scope",
+                "--include-tests",
                 "-o",
                 str(payload_path),
                 str(repo_path),

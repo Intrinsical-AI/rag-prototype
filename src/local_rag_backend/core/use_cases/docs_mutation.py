@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from local_rag_backend.core.domain.profiles import StorageCapability
+from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.use_cases._atomic_mutation_executor import AtomicMutationExecutor
 from local_rag_backend.core.use_cases._batch_coordinator import (
     MutationBatchCoordinator,
@@ -71,18 +72,17 @@ class MutationCoordinator:
         journal = None
         if not use_atomic:
             journal = build_journal(ports=self.ports)
-            replay = self._saga.get_committed_replay_summary(journal=journal, intent=normalized)
-            if replay is not None:
-                return replay
+            if journal.get(normalized.op_id) is not None:
+                with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
+                    replay = self._saga.get_committed_replay_summary(
+                        journal=journal, intent=normalized
+                    )
+                    if replay is not None:
+                        return replay
 
-        precomputed_vectors = self._saga.precompute_vectors_for_intent(
+        prepared = self._saga.prepare(
             intent=normalized,
             vector_mode_enabled=vector_mode_enabled,
-        )
-        prepared = PreparedMutation(
-            intent=normalized,
-            vector_mode_enabled=vector_mode_enabled,
-            precomputed_vectors_by_external_id=precomputed_vectors,
         )
 
         return cast(
@@ -133,8 +133,11 @@ class MutationCoordinator:
         use_atomic: bool,
     ) -> None:
         with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
+            blocked: MutationRecoveryRequiredError | None = None
             for item in batch:
                 try:
+                    if blocked is not None:
+                        raise blocked
                     if use_atomic:
                         item.result = self._atomic.execute_locked(
                             prepared=cast("PreparedMutation", item.payload)
@@ -150,6 +153,15 @@ class MutationCoordinator:
                         )
                 except Exception as exc:
                     item.error = exc
+                    if journal is not None and blocked is None:
+                        try:
+                            if journal.list_incomplete(limit=1):
+                                blocked = MutationRecoveryRequiredError(
+                                    "A preceding mutation needs recovery; remaining batch "
+                                    "operations were not applied."
+                                )
+                        except MutationRecoveryRequiredError as journal_error:
+                            blocked = journal_error
                 finally:
                     item.done.set()
 

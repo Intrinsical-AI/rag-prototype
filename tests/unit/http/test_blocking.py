@@ -5,54 +5,40 @@ from concurrent.futures import Future
 import pytest
 
 from local_rag_backend.infrastructure.concurrency import blocking
+from local_rag_backend.settings import Settings
 
 
-@pytest.fixture(autouse=True)
-def _reset_blocking_state() -> None:
-    blocking._shutdown_executor()
-    blocking._EXECUTOR_STATES.clear()
-    yield
-    blocking._shutdown_executor()
-    blocking._EXECUTOR_STATES.clear()
+@pytest.fixture
+def executor():
+    instance = blocking.BlockingExecutor(settings_obj=Settings())
+    yield instance
+    instance.close()
 
 
-def test_default_workers_uses_valid_positive_config(monkeypatch):
-    monkeypatch.setattr(blocking.settings, "blocking_workers", 12, raising=False)
-    assert blocking._default_workers() == 12
-
-
-def test_default_workers_falls_back_on_invalid_or_non_positive_config(monkeypatch):
-    monkeypatch.setattr(blocking.settings, "blocking_workers", "abc", raising=False)
-    assert blocking._default_workers() == 8
-
-    monkeypatch.setattr(blocking.settings, "blocking_workers", "0", raising=False)
-    assert blocking._default_workers() == 8
-
-    monkeypatch.setattr(blocking.settings, "blocking_workers", "-3", raising=False)
-    assert blocking._default_workers() == 8
-
-
-def test_workers_for_task_prefers_task_specific_config(monkeypatch):
-    monkeypatch.setattr(blocking.settings, "blocking_workers_mutation", 5, raising=False)
-    assert blocking._workers_for_task("mutation") == 5
-
-
-def test_executor_state_uses_workers_and_queue_limits(monkeypatch):
-    monkeypatch.setattr(blocking.settings, "blocking_workers_mutation", 3, raising=False)
-    monkeypatch.setattr(blocking.settings, "blocking_queue_mutation", 9, raising=False)
-
-    state = blocking._get_executor_state("mutation")
-    assert state.max_pending == 12
+def test_executor_workers_and_capacity_are_instance_owned():
+    first = blocking.BlockingExecutor(
+        settings_obj=Settings(blocking_workers_mutation=3, blocking_queue_mutation=9)
+    )
+    second = blocking.BlockingExecutor(
+        settings_obj=Settings(blocking_workers_mutation=1, blocking_queue_mutation=2)
+    )
+    try:
+        assert first._get_executor_state("mutation").max_pending == 12
+        assert second._get_executor_state("mutation").max_pending == 3
+        assert first._get_executor_state("mutation") is not second._get_executor_state("mutation")
+    finally:
+        first.close()
+        second.close()
 
 
 @pytest.mark.unit
-async def test_run_blocking_returns_result():
-    out = await blocking.run_blocking(lambda x, y: x + y, 2, 3)
+async def test_run_blocking_returns_result(executor):
+    out = await executor.run_blocking(lambda x, y: x + y, 2, 3)
     assert out == 5
 
 
 @pytest.mark.unit
-async def test_run_blocking_routes_task_type_and_releases_slot(monkeypatch):
+async def test_run_blocking_routes_task_type_and_releases_slot(monkeypatch, executor):
     seen_task_types: list[str] = []
 
     class _FakeExecutor:
@@ -87,9 +73,9 @@ async def test_run_blocking_routes_task_type_and_releases_slot(monkeypatch):
         seen_task_types.append(task_type)
         return state
 
-    monkeypatch.setattr(blocking, "_get_executor_state", _fake_get_executor_state, raising=True)
+    monkeypatch.setattr(executor, "_get_executor_state", _fake_get_executor_state, raising=True)
 
-    out = await blocking.run_blocking(lambda: "ok", task_type="mutation")
+    out = await executor.run_blocking(lambda: "ok", task_type="mutation")
     assert out == "ok"
     assert seen_task_types == ["mutation"]
     assert state.acquired == 1
@@ -97,7 +83,7 @@ async def test_run_blocking_routes_task_type_and_releases_slot(monkeypatch):
 
 
 @pytest.mark.unit
-async def test_run_blocking_raises_when_queue_full(monkeypatch):
+async def test_run_blocking_raises_when_queue_full(monkeypatch, executor):
     class _FakeTelemetry:
         def __init__(self) -> None:
             self.queue: list[tuple[str, int, int]] = []
@@ -133,17 +119,17 @@ async def test_run_blocking_raises_when_queue_full(monkeypatch):
         def pending_snapshot(self) -> int:
             return 0
 
-    monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: _FullState(), raising=True)
+    monkeypatch.setattr(executor, "_get_executor_state", lambda _task: _FullState(), raising=True)
 
     with pytest.raises(RuntimeError, match="queue is full"):
-        await blocking.run_blocking(lambda: 1, task_type="eval")
+        await executor.run_blocking(lambda: 1, task_type="eval")
 
     assert telemetry.queue == [("eval", 0, 1)]
     assert telemetry.runs == [("eval", "rejected")]
 
 
 @pytest.mark.unit
-async def test_run_blocking_releases_slot_when_sync_callable_raises(monkeypatch):
+async def test_run_blocking_releases_slot_when_sync_callable_raises(monkeypatch, executor):
     class _FakeExecutor:
         def submit(self, call):
             fut: Future[object] = Future()
@@ -171,19 +157,19 @@ async def test_run_blocking_releases_slot_when_sync_callable_raises(monkeypatch)
             return 0
 
     state = _FakeState()
-    monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: state, raising=True)
+    monkeypatch.setattr(executor, "_get_executor_state", lambda _task: state, raising=True)
 
     def _boom():
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
-        await blocking.run_blocking(_boom, task_type="network")
+        await executor.run_blocking(_boom, task_type="network")
 
     assert state.released == 1
 
 
 @pytest.mark.unit
-async def test_run_blocking_reports_queue_saturation_and_wait(monkeypatch):
+async def test_run_blocking_reports_queue_saturation_and_wait(monkeypatch, executor):
     class _FakeTelemetry:
         def __init__(self) -> None:
             self.queue: list[tuple[str, int, int]] = []
@@ -225,9 +211,9 @@ async def test_run_blocking_reports_queue_saturation_and_wait(monkeypatch):
             return self.pending
 
     state = _FakeState()
-    monkeypatch.setattr(blocking, "_get_executor_state", lambda _task: state, raising=True)
+    monkeypatch.setattr(executor, "_get_executor_state", lambda _task: state, raising=True)
 
-    out = await blocking.run_blocking(lambda: "ok", task_type="mutation")
+    out = await executor.run_blocking(lambda: "ok", task_type="mutation")
     assert out == "ok"
     assert telemetry.queue[0] == ("mutation", 1, 5)
     assert telemetry.queue[-1] == ("mutation", 0, 5)
@@ -236,6 +222,6 @@ async def test_run_blocking_reports_queue_saturation_and_wait(monkeypatch):
 
 
 @pytest.mark.unit
-async def test_run_blocking_rejects_unknown_task_type():
+async def test_run_blocking_rejects_unknown_task_type(executor):
     with pytest.raises(ValueError, match="Unsupported blocking task_type"):
-        await blocking.run_blocking(lambda: 1, task_type="invalid")  # type: ignore[arg-type]
+        await executor.run_blocking(lambda: 1, task_type="invalid")  # type: ignore[arg-type]

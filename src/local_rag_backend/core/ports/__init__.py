@@ -10,8 +10,13 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+    from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
     from local_rag_backend.core.domain.entities import Document, Embedding, LoadedItem
-    from local_rag_backend.core.domain.retrieval import RetrievalRequest, RetrievalResult
+    from local_rag_backend.core.domain.retrieval import (
+        RetrievalFilter,
+        RetrievalRequest,
+        RetrievalResult,
+    )
     from local_rag_backend.core.domain.types import DocId
 
 
@@ -21,6 +26,7 @@ class EmbedderPort(Protocol):
     """Interface for embedding text into vector representations."""
 
     dim: int
+    identity: EmbeddingIdentity
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]: ...
 
@@ -47,6 +53,9 @@ class DocumentRepoPort(Protocol):
     def delete_documents(self, ids: Sequence[DocId]) -> None: ...
     def get(self, ids: Sequence[DocId]) -> Sequence[Document]: ...
     def get_all_documents(self) -> Sequence[Document]: ...
+    def query_documents(
+        self, *, limit: int, offset: int, filters: tuple[RetrievalFilter, ...] = ()
+    ) -> list[Document]: ...
 
 
 @runtime_checkable

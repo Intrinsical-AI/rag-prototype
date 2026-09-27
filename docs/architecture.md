@@ -99,7 +99,7 @@
 | Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag-rebuild-index` |
 | Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, ES mappings | `/healthz`, `/readyz`, `rag-status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
-| Composition Runtime | Dependency wiring + runtime cache invalidation | No | settings + adapters | DI factory/container |
+| Composition Runtime | Settings-bound SQL runtime, executor, locks, providers, cache invalidation | No | settings + adapters | DI factory/container |
 
 ### 2.3 Entities & value objects
 
@@ -224,14 +224,14 @@
 
 ### 4.3 Failure semantics
 - Validation errors: mapped to `AppError` hierarchy (`400/401/404/409/413/422/5xx`).
-- Idempotency: `op_id` in mutation intent guarantees replay-safe behavior.
-- Retry safety: incomplete mutation records are recoverable at startup/background intervals.
+- Idempotency: local journal v2 stores the committed outcome for exact `op_id` replay. Elasticsearch bulk execution has no cross-document transaction or local saga journal.
+- Retry safety: incomplete local journal v2 records are recovered under the write lock. Unreadable/older records and failed recovery block new writes. SQL compensation is followed by one rebuild only when a persisted vector attempt requires it; rebuild alone never repairs a journal.
 - Embedding failures are pre-lock failures: they must not leave partial SQL/vector state.
 - Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id`; journal state transitions apply only to `DURABLE_SAGA` backends.
 - Consistency model per operation:
   - SQL-only operations: atomic per DB transaction (owned session) or per explicit unit-of-work (shared session).
   - `local_split` SQL + vector mutations: `DURABLE_SAGA` with compensation/recovery.
-  - `elasticsearch` unified mutations: `ATOMIC` backend path with no local journal recovery loop.
+  - `elasticsearch` unified mutations: `ATOMIC` execution profile with per-document storage of content and embedding, no multi-item/document-tombstone transaction, and no local journal recovery loop.
 
 ---
 
@@ -457,7 +457,7 @@ Key mutation/UoW characterization tests:
 - Environments: local dev, CI, containerized runtime.
 - Config strategy: single-file `config.yaml` loaded at startup, validated by Pydantic, and used as the sole runtime source of truth.
 - Migrations:
-  - Fresh SQLite tables are created at startup/CLI bootstrap; existing-schema migration is not provided.
+  - Fresh SQLite tables are created at explicit local runtime bootstrap; Elasticsearch startup does not initialize SQLite. Existing-schema migration is not provided. Library imports do not read YAML or connect to SQL.
   - D1 allows breaking schema/contracts if required for decoupling.
 - Rollback plan:
   - code rollback via git release tags

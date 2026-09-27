@@ -14,7 +14,9 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
     read_manifest,
     write_manifest,
 )
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import Settings
+
+settings = Settings()
 
 
 def test_read_manifest_empty_raises(tmp_path: Path) -> None:

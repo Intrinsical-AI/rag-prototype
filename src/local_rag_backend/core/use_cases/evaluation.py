@@ -38,7 +38,6 @@ from local_rag_backend.core.services.evaluation_validation import (
     eval_compare_config_to_retrieval_config,
     validate_eval_retrieval_config,
 )
-from local_rag_backend.core.services.retrieval_coercion import coerce_retrieval_result
 
 
 @dataclass(frozen=True)
@@ -113,7 +112,7 @@ def _run_eval_with_retriever(
             dual_candidate_k=(int(dual_candidate_k) if dual_candidate_k is not None else None),
             filters=filters,
         )
-        retrieval = coerce_retrieval_result(retriever.retrieve(request), request=request)
+        retrieval = retriever.retrieve(request)
         return _ranked_items_from_retrieval(retrieval)
 
     return run_retrieval_eval_core(

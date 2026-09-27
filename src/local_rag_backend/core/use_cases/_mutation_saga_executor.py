@@ -3,25 +3,29 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from local_rag_backend.core.domain.profiles import StorageCapability
 from local_rag_backend.core.domain.types import DocId
+from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.ports.contracts import MutationRecord
-from local_rag_backend.core.services.dense_upsert import precompute_vectors_for_changed_items
+from local_rag_backend.core.services.dense_upsert import precompute_vectors
 from local_rag_backend.core.use_cases.docs_mutation_contracts import (
     MutationIntent,
     canonical_intent_payload,
     intent_to_dict,
     normalize_str_items,
+    summary_from_record,
     summary_to_payload,
 )
 from local_rag_backend.core.use_cases.results import MutationSummary, UpsertDocResult
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
 
+    from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
     from local_rag_backend.core.ports.contracts import (
         DocsMutationPorts,
         MutationJournalPort,
@@ -118,6 +122,7 @@ class PreparedMutation:
     intent: MutationIntent
     vector_mode_enabled: bool
     precomputed_vectors_by_external_id: dict[str, list[float]]
+    embedding_identity: EmbeddingIdentity | None = None
 
 
 class MutationSagaExecutor:
@@ -135,36 +140,23 @@ class MutationSagaExecutor:
         if existing is None:
             return None
         self._assert_replay_compatible(existing_intent=existing.intent, intent=intent)
-        return None
+        return _committed_summary(existing) if existing.state == "COMMITTED" else None
 
-    def precompute_vectors_for_intent(
+    def prepare(
         self,
         *,
         intent: MutationIntent,
         vector_mode_enabled: bool,
-    ) -> dict[str, list[float]]:
+    ) -> PreparedMutation:
         if not vector_mode_enabled or not intent.upserts:
-            return {}
-
+            return PreparedMutation(intent, vector_mode_enabled, {})
         embedder = self.ports.build_embedder()
-        doc_repo = self.ports.doc_repo_factory()
-
-        if hasattr(doc_repo, "get_existing_doc_states_by_external_id"):
-            return precompute_vectors_for_changed_items(
-                items=intent.upserts,
-                doc_repo=cast("Any", doc_repo),
-                embedder=embedder,
-            )
-
-        inputs = [item.content.strip() for item in intent.upserts]
-        vectors = embedder.embed(inputs)
-        if len(vectors) != len(inputs):
-            raise RuntimeError(
-                f"Embedder returned {len(vectors)} vectors for {len(inputs)} documents."
-            )
-        return {
-            item.external_id: list(vec) for item, vec in zip(intent.upserts, vectors, strict=False)
-        }
+        return PreparedMutation(
+            intent,
+            vector_mode_enabled,
+            precompute_vectors(items=intent.upserts, embedder=embedder),
+            embedder.identity,
+        )
 
     def execute_locked(
         self,
@@ -173,20 +165,19 @@ class MutationSagaExecutor:
         journal: MutationJournalPort,
     ) -> MutationSummary:
         normalized = prepared.intent
+        replay = self.get_committed_replay_summary(journal=journal, intent=normalized)
+        if replay is not None:
+            return replay
 
-        existing = journal.get(normalized.op_id)
-        if existing is not None:
-            self._assert_replay_compatible(existing_intent=existing.intent, intent=normalized)
-            if existing.state != "COMMITTED":
-                _recover_record(
-                    journal=journal,
-                    record=existing,
-                    rollback_sql_fn=self._rollback_sql_with_uow,
-                    doc_repo_factory=self.ports.doc_repo_factory,
-                )
-                existing = journal.get(normalized.op_id)
-                if existing is not None and existing.state == "COMMITTED":
-                    existing = None
+        # One barrier per intent, including each independent op_id in a coalesced batch.
+        self.recover_incomplete_locked(journal=journal)
+        if journal.list_incomplete(limit=1):
+            raise MutationRecoveryRequiredError(
+                "Mutation recovery backlog remains; no new document writes were attempted."
+            )
+        replay = self.get_committed_replay_summary(journal=journal, intent=normalized)
+        if replay is not None:
+            return replay
 
         doc_repo = self.ports.doc_repo_factory()
         before_image = _capture_before_image(doc_repo=doc_repo, intent=normalized)
@@ -197,90 +188,82 @@ class MutationSagaExecutor:
             intent=normalized,
             before_image=before_image,
         )
+        vector_attempted = False
 
-        with mutation_uow_context(ports=self.ports):
-            sql_outcome = _apply_sql_mutation(
-                doc_repo=doc_repo,
+        def before_vector_write() -> None:
+            nonlocal vector_attempted
+            # Persist before calling the adapter: a crash after this point is ambiguous.
+            _upsert_journal_record(
+                journal=journal,
+                op_id=normalized.op_id,
+                state="SQL_COMMITTED",
                 intent=normalized,
-                build_upsert_doc=self.ports.build_upsert_doc,
+                before_image=before_image,
+                vector_attempted=True,
             )
-        _upsert_journal_record(
-            journal=journal,
-            op_id=normalized.op_id,
-            state="SQL_COMMITTED",
-            intent=normalized,
-            before_image=before_image,
-        )
+            vector_attempted = True
 
-        deleted_index: int | None = None
-        index_doc_count: int | None = None
         try:
+            with mutation_uow_context(ports=self.ports):
+                sql_outcome = _apply_sql_mutation(
+                    doc_repo=doc_repo,
+                    intent=normalized,
+                    build_upsert_doc=self.ports.build_upsert_doc,
+                )
+            _upsert_journal_record(
+                journal=journal,
+                op_id=normalized.op_id,
+                state="SQL_COMMITTED",
+                intent=normalized,
+                before_image=before_image,
+            )
+            deleted_index = None
+            index_doc_count = None
             if prepared.vector_mode_enabled:
                 deleted_index, index_doc_count = _apply_vector_delta(
                     sql_outcome=sql_outcome,
                     doc_repo=doc_repo,
                     settings_obj=self.settings_obj,
                     ports=self.ports,
-                    vector_mode_enabled=prepared.vector_mode_enabled,
                     vectors_by_external_id=prepared.precomputed_vectors_by_external_id,
+                    before_apply=before_vector_write,
+                    embedding_identity=prepared.embedding_identity,
                 )
+            summary = MutationSummary(
+                op_id=normalized.op_id,
+                inserted=sql_outcome.inserted,
+                updated=sql_outcome.updated,
+                unchanged=sql_outcome.unchanged,
+                deleted_sql=sql_outcome.deleted_sql,
+                deleted_index=deleted_index,
+                tombstoned=sql_outcome.tombstoned,
+                missing_external_ids=list(sql_outcome.missing_external_ids),
+                index_rebuilt=False,
+                index_doc_count=index_doc_count,
+                results=list(sql_outcome.results),
+            )
+            if prepared.vector_mode_enabled:
                 _upsert_journal_record(
                     journal=journal,
                     op_id=normalized.op_id,
                     state="VECTOR_COMMITTED",
                     intent=normalized,
                     before_image=before_image,
+                    outcome=summary,
+                    vector_attempted=vector_attempted,
                 )
-        except Exception as vector_err:
-            _upsert_journal_record(
-                journal=journal,
-                op_id=normalized.op_id,
-                state="COMPENSATING",
-                intent=normalized,
-                before_image=before_image,
-                error=str(vector_err),
-            )
-            try:
-                self._rollback_sql_with_uow(
-                    doc_repo=doc_repo,
-                    intent=intent_to_dict(normalized),
-                    before_image=before_image,
-                )
-                _upsert_journal_record(
-                    journal=journal,
-                    op_id=normalized.op_id,
-                    state="ROLLED_BACK",
-                    intent=normalized,
-                    before_image=before_image,
-                    error=str(vector_err),
-                )
-            except Exception as rollback_err:
-                _upsert_journal_record(
-                    journal=journal,
-                    op_id=normalized.op_id,
-                    state="FAILED_NEEDS_RECOVERY",
-                    intent=normalized,
-                    before_image=before_image,
-                    error=f"vector={vector_err}; rollback={rollback_err}",
-                )
-                raise RuntimeError(
-                    "Mutation failed after SQL commit and rollback did not complete."
-                ) from rollback_err
+        except Exception as mutation_err:
+            existing = journal.get(normalized.op_id)
+            if existing is None:
+                raise MutationRecoveryRequiredError(
+                    f"Mutation {normalized.op_id!r} lost its recovery record."
+                ) from mutation_err
+            pending = replace(existing, error=str(mutation_err))
+            _write_journal_record(journal=journal, record=pending)
+            self._recover_records_locked(journal=journal, records=[pending])
             raise
 
-        summary = MutationSummary(
-            op_id=normalized.op_id,
-            inserted=sql_outcome.inserted,
-            updated=sql_outcome.updated,
-            unchanged=sql_outcome.unchanged,
-            deleted_sql=sql_outcome.deleted_sql,
-            deleted_index=deleted_index,
-            tombstoned=sql_outcome.tombstoned,
-            missing_external_ids=list(sql_outcome.missing_external_ids),
-            index_rebuilt=False,
-            index_doc_count=index_doc_count,
-            results=list(sql_outcome.results),
-        )
+        # A failed final journal write leaves VECTOR_COMMITTED with the exact outcome.
         _upsert_journal_record(
             journal=journal,
             op_id=normalized.op_id,
@@ -288,42 +271,86 @@ class MutationSagaExecutor:
             intent=normalized,
             before_image=before_image,
             outcome=summary,
+            vector_attempted=vector_attempted,
         )
         return summary
 
     def recover_incomplete(self, *, limit: int = 100) -> int:
         journal = build_journal(ports=self.ports)
-        records = journal.list_incomplete(limit=limit)
-        if not records:
-            return 0
-
-        repaired = 0
         with write_lock_context(settings_obj=self.settings_obj, ports=self.ports):
-            for record in records:
-                _recover_record(
-                    journal=journal,
-                    record=record,
-                    rollback_sql_fn=self._rollback_sql_with_uow,
-                    doc_repo_factory=self.ports.doc_repo_factory,
+            return self.recover_incomplete_locked(journal=journal, limit=limit)
+
+    def recover_incomplete_locked(self, *, journal: MutationJournalPort, limit: int = 100) -> int:
+        """Enumerate and resolve records while the caller holds the shared write lock."""
+        records = journal.list_incomplete(limit=limit)
+        return self._recover_records_locked(journal=journal, records=records)
+
+    def _recover_records_locked(
+        self, *, journal: MutationJournalPort, records: list[MutationRecord]
+    ) -> int:
+        rollbacks: list[MutationRecord] = []
+        commits: list[MutationRecord] = []
+        for record in records:
+            if record.state in {"COMMITTED", "ROLLED_BACK"}:
+                continue
+            if record.state == "VECTOR_COMMITTED":
+                # Invalid commit evidence must remain untouched, not become a rollback.
+                _committed_summary(record)
+                commits.append(record)
+                continue
+            try:
+                record.validate_before_image()
+            except (TypeError, ValueError) as exc:
+                raise MutationRecoveryRequiredError(
+                    f"Mutation {record.op_id!r} in state {record.state} "
+                    f"has an invalid before_image: {exc}"
+                ) from exc
+            try:
+                pending = _clone_record(record=record, state="COMPENSATING")
+                _write_journal_record(journal=journal, record=pending)
+                self._rollback_sql_with_uow(
+                    doc_repo=self.ports.doc_repo_factory(),
+                    intent=record.intent,
+                    before_image=cast("dict[str, Any]", record.before_image),
                 )
-                repaired += 1
-            if repaired:
-                self._reconcile_vector_from_sql()
-        return repaired
+                rollbacks.append(pending)
+            except Exception as exc:
+                self._fail_recovery(journal=journal, records=[record], cause=exc)
 
-    def _reconcile_vector_from_sql(self) -> None:
-        if not uses_vector_index(settings_obj=self.settings_obj):
-            return
+        try:
+            if any(record.vector_attempted for record in rollbacks):
+                self.ports.reconcile_index()
+        except Exception as exc:
+            self._fail_recovery(journal=journal, records=rollbacks, cause=exc)
 
-        embedder = self.ports.build_embedder()
-        vec_repo = self.ports.vector_repo_factory(
-            index_path=self.settings_obj.index_path,
-            id_map_path=self.settings_obj.id_map_path,
-            dim=int(embedder.dim),
-            backend=getattr(self.settings_obj, "vector_backend", "auto"),
-        )
-        doc_repo = self.ports.doc_repo_factory()
-        self.ports.rebuild_fn(doc_repo=doc_repo, vec_repo=vec_repo, embedder=embedder)
+        # No terminal rollback until every SQL rollback and the single rebuild completed.
+        for record in rollbacks:
+            _write_journal_record(
+                journal=journal, record=_clone_record(record=record, state="ROLLED_BACK")
+            )
+        for record in commits:
+            _write_journal_record(
+                journal=journal, record=_clone_record(record=record, state="COMMITTED", error=None)
+            )
+        return len(rollbacks) + len(commits)
+
+    @staticmethod
+    def _fail_recovery(
+        *, journal: MutationJournalPort, records: list[MutationRecord], cause: Exception
+    ) -> None:
+        for record in records:
+            _write_journal_record(
+                journal=journal,
+                record=_clone_record(
+                    record=record,
+                    state="FAILED_NEEDS_RECOVERY",
+                    error=f"{record.error}; recovery={cause}" if record.error else str(cause),
+                ),
+            )
+        identities = ", ".join(f"{r.op_id!r} ({r.state})" for r in records)
+        raise MutationRecoveryRequiredError(
+            f"Mutation recovery did not complete for {identities}: {cause}"
+        ) from cause
 
     def _rollback_sql_with_uow(
         self,
@@ -355,6 +382,7 @@ def _upsert_journal_record(
     before_image: dict[str, Any] | None = None,
     outcome: MutationSummary | None = None,
     error: str | None = None,
+    vector_attempted: bool = False,
 ) -> None:
     previous = journal.get(op_id)
     attempts = int(previous.attempts) + 1 if previous is not None else 1
@@ -368,8 +396,19 @@ def _upsert_journal_record(
         attempts=attempts,
         created_at=previous.created_at if previous is not None else 0.0,
         updated_at=0.0,
+        vector_attempted=vector_attempted,
     )
-    journal.upsert(record)
+    _write_journal_record(journal=journal, record=record)
+
+
+def _write_journal_record(*, journal: MutationJournalPort, record: MutationRecord) -> None:
+    try:
+        journal.upsert(record)
+    except Exception as exc:
+        raise MutationRecoveryRequiredError(
+            f"Cannot persist mutation {record.op_id!r} in state {record.state}: {exc}. "
+            "Existing recovery evidence was retained."
+        ) from exc
 
 
 def _capture_before_image(*, doc_repo: Any, intent: MutationIntent) -> dict[str, Any]:
@@ -503,11 +542,10 @@ def _apply_vector_delta(
     doc_repo: Any,
     settings_obj: Settings,
     ports: DocsMutationPorts,
-    vector_mode_enabled: bool,
-    vectors_by_external_id: dict[str, list[float]] | None = None,
-) -> tuple[int | None, int | None]:
-    if not vector_mode_enabled:
-        return None, None
+    vectors_by_external_id: dict[str, list[float]],
+    before_apply: Callable[[], None],
+    embedding_identity: EmbeddingIdentity | None,
+) -> tuple[int, int | None]:
 
     delete_ids = [
         DocId(str(x))
@@ -528,6 +566,8 @@ def _apply_vector_delta(
         id_map_path=settings_obj.id_map_path,
         dim=dim,
         backend=getattr(settings_obj, "vector_backend", "auto"),
+        settings_obj=settings_obj,
+        embedding_identity=embedding_identity,
     )
 
     upsert_vectors: list[tuple[DocId, list[float]]] = []
@@ -563,7 +603,9 @@ def _apply_vector_delta(
         raise RuntimeError(
             "Vector adapter must implement apply_delta_atomic for DURABLE_SAGA mutations."
         )
-    apply_delta(delete_ids=delete_ids, upserts=upsert_vectors)
+    if delete_ids or upsert_vectors:
+        before_apply()
+        apply_delta(delete_ids=delete_ids, upserts=upsert_vectors)
 
     index_doc_count = (
         len(list(doc_repo.get_all_documents())) if hasattr(doc_repo, "get_all_documents") else None
@@ -590,43 +632,14 @@ def _rollback_sql(*, doc_repo: Any, intent: dict[str, Any], before_image: dict[s
             doc_repo.delete_tombstones(created_now)
 
 
-def _recover_record(
-    *,
-    journal: MutationJournalPort,
-    record: MutationRecord,
-    rollback_sql_fn: Any,
-    doc_repo_factory: Any,
-) -> None:
-    if record.state in {"COMMITTED", "ROLLED_BACK"}:
-        return
-    if record.state == "VECTOR_COMMITTED":
-        committed = _clone_record(record=record, state="COMMITTED")
-        journal.upsert(committed)
-        journal.delete(record.op_id)
-        return
-
-    doc_repo = doc_repo_factory()
-    if record.before_image is None:
-        rolled_back = _clone_record(
-            record=record,
-            state="ROLLED_BACK",
-            before_image=None,
-            error=record.error or "No before_image was available; record marked as rolled back.",
-        )
-        journal.upsert(rolled_back)
-        return
-
-    compensating = _clone_record(record=record, state="COMPENSATING")
-    journal.upsert(compensating)
+def _committed_summary(record: MutationRecord) -> MutationSummary:
     try:
-        rollback_sql_fn(doc_repo=doc_repo, intent=record.intent, before_image=record.before_image)
-        rolled_back = _clone_record(record=record, state="ROLLED_BACK")
-        journal.upsert(rolled_back)
-    except Exception as rollback_err:
-        failed = _clone_record(
-            record=record, state="FAILED_NEEDS_RECOVERY", error=str(rollback_err)
-        )
-        journal.upsert(failed)
+        record.validate_outcome()
+        return summary_from_record(record)
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise MutationRecoveryRequiredError(
+            f"Mutation {record.op_id!r} in state {record.state} has an invalid outcome: {exc}"
+        ) from exc
 
 
 def _clone_record(
@@ -650,6 +663,7 @@ def _clone_record(
         attempts=int(record.attempts) + 1,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        vector_attempted=record.vector_attempted,
     )
 
 

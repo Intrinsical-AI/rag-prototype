@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
     RetrievalResult,
-    retrieval_result_from_pairs,
+    RetrievedDoc,
+    document_matches_filters,
 )
 from local_rag_backend.core.ports import (
     DocumentRepoPort,
@@ -13,6 +16,10 @@ from local_rag_backend.core.ports import (
     RetrieverPort,
     VectorRepoPort,
 )
+
+if TYPE_CHECKING:
+    from local_rag_backend.core.domain.entities import Document
+    from local_rag_backend.core.domain.types import DocId
 
 
 class DenseVectorRetriever(RetrieverPort):
@@ -26,26 +33,36 @@ class DenseVectorRetriever(RetrieverPort):
         self.doc_repo = doc_repo
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
-        if request.top_k <= 0:
-            return RetrievalResult(items=(), mode_used="dense", backend_used="local_vector")
-
         query_embedding = self.embedder.embed([request.query])[0]
-        id_score_pairs = self.vector_repo.similar(query_embedding, request.top_k)
-        if not id_score_pairs:
-            return RetrievalResult(items=(), mode_used="dense", backend_used="local_vector")
+        window = max(request.top_k, request.candidate_k or request.top_k)
+        docs_by_id: dict[DocId, Document] = {}
+        examined_ids: set[DocId] = set()
+        while True:
+            pairs = self.vector_repo.similar(query_embedding, window)
+            new_ids = [doc_id for doc_id, _score in pairs if doc_id not in examined_ids]
+            if new_ids:
+                docs_by_id.update((doc.id, doc) for doc in self.doc_repo.get(new_ids))
+                examined_ids.update(new_ids)
+            eligible = [
+                RetrievedDoc(document=doc, score=float(score), stage="dense")
+                for doc_id, score in pairs
+                if (doc := docs_by_id.get(doc_id)) is not None
+                and document_matches_filters(doc, request.filters)
+            ]
+            if len(eligible) >= request.top_k or len(pairs) < window:
+                break
+            total = self.vector_repo.ntotal
+            if window >= total:
+                break
+            window = min(window * 2, total)
 
-        doc_ids, scores = zip(*id_score_pairs, strict=False)
-        docs = self.doc_repo.get(list(doc_ids))
-
-        docs_by_id = {doc.id: doc for doc in docs}
-        ordered_pairs = list(zip(doc_ids, scores, strict=False))
-        ordered_docs = [docs_by_id[doc_id] for doc_id, _ in ordered_pairs if doc_id in docs_by_id]
-        ordered_scores = [score for doc_id, score in ordered_pairs if doc_id in docs_by_id]
-
-        return retrieval_result_from_pairs(
-            docs=ordered_docs,
-            scores=ordered_scores,
+        # Scores belong to the final candidate window. Thresholds must not trigger
+        # further overfetch: min-max normalization itself depends on that window.
+        if request.min_score is not None:
+            eligible = [item for item in eligible if item.score >= request.min_score]
+        return RetrievalResult(
+            items=tuple(eligible[: request.top_k]),
             mode_used="dense",
             backend_used="local_vector",
-            stage="dense",
+            candidate_count=len(pairs),
         )

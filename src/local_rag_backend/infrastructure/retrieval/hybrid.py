@@ -5,6 +5,8 @@ Hybrid retriever using dense and sparse retrieval methods.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
     RetrievalResult,
@@ -20,6 +22,7 @@ def combine_hybrid_results(
     sparse_result: RetrievalResult,
     alpha: float,
     top_k: int,
+    min_score: float | None = None,
 ) -> RetrievalResult:
     """Combine dense and sparse results using already-normalized scores."""
     dense_docs = list(dense_result.documents)
@@ -51,7 +54,9 @@ def combine_hybrid_results(
         combined_results.append((doc, hybrid_score))
 
     combined_results.sort(key=lambda item: item[1], reverse=True)
-    top_k_results = combined_results[:top_k]
+    top_k_results = [
+        item for item in combined_results if min_score is None or item[1] >= min_score
+    ][:top_k]
 
     if not top_k_results:
         return RetrievalResult(items=(), mode_used="hybrid", backend_used="local_hybrid")
@@ -81,11 +86,12 @@ class HybridRetriever(RetrieverPort):
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalResult:
         """Retrieve documents by combining dense and sparse scores."""
-        raw_dense = self.dense.retrieve(request)
-        raw_sparse = self.sparse.retrieve(request)
+        raw_dense = self.dense.retrieve(replace(request, mode="dense", min_score=None))
+        raw_sparse = self.sparse.retrieve(replace(request, mode="sparse", min_score=None))
         return combine_hybrid_results(
             dense_result=raw_dense,
             sparse_result=raw_sparse,
             alpha=self.alpha,
             top_k=request.top_k,
+            min_score=request.min_score,
         )

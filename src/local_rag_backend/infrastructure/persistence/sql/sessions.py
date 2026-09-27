@@ -51,7 +51,7 @@ def get_managed_session(
     session_factory: sessionmaker[Session],
 ) -> Generator[tuple[Session, bool], None, None]:
     """Yield (session, owns_session) honoring an active SQL unit-of-work if present."""
-    bound = db_base.get_bound_session()
+    bound = db_base.get_bound_session(session_factory)
     if bound is not None:
         yield bound, False
         return

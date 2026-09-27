@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,6 +19,7 @@ from local_rag_backend.core.domain.retrieval import (
     retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
+from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 
@@ -88,29 +90,14 @@ class LocalSplitSearchRetriever:
     def _retrieve_dense(self, request: RetrievalRequest) -> RetrievalResult:
         if self._embedder is None or self._vector_repo is None:
             raise RuntimeError("Dense retrieval requires embedder and vector_repo")
-        query_embedding = self._embedder.embed([request.query])[0]
-        candidate_k = max(request.top_k, int(request.candidate_k or request.top_k))
-        id_score_pairs = self._vector_repo.similar(query_embedding, candidate_k)
-        if not id_score_pairs:
-            return RetrievalResult(items=(), mode_used="dense", backend_used="local_split")
-        doc_ids = [doc_id for doc_id, _score in id_score_pairs]
-        docs = self._doc_repo.get(doc_ids)
-        docs_by_id = {doc.id: doc for doc in docs}
-        items: list[RetrievedDoc] = []
-        for doc_id, score in id_score_pairs:
-            doc = docs_by_id.get(doc_id)
-            if doc is None or not document_matches_filters(doc, request.filters):
-                continue
-            if request.min_score is not None and float(score) < float(request.min_score):
-                continue
-            items.append(RetrievedDoc(document=doc, score=float(score), stage="dense"))
-            if len(items) >= request.top_k:
-                break
-        return RetrievalResult(
-            items=tuple(items),
-            mode_used="dense",
+        result = DenseVectorRetriever(
+            embedder=self._embedder,
+            vector_repo=self._vector_repo,
+            doc_repo=self._doc_repo,
+        ).retrieve(request)
+        return replace(
+            result,
             backend_used="local_split",
-            candidate_count=len(id_score_pairs),
         )
 
     def _retrieve_dual(self, request: RetrievalRequest) -> RetrievalResult:

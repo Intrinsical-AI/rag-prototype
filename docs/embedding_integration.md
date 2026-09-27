@@ -53,7 +53,8 @@ path and need no heavy model or network dependency.
 {
   "provider": "sentence_transformers",
   "model": "all-MiniLM-L6-v2",
-  "model_key": "sentence_transformers:all-MiniLM-L6-v2:384",
+  "model_key": "{\"dimension\":384,\"implementation_version\":\"1\",\"model\":\"all-MiniLM-L6-v2\",\"provider\":\"sentence_transformers\",\"synthetic\":false}",
+  "implementation_version": "1",
   "dimension": 384,
   "synthetic": false,
   "cache_enabled": true,
@@ -65,6 +66,12 @@ path and need no heavy model or network dependency.
   }
 }
 ```
+
+In the 4.0.0 candidate, `model_key` is the opaque serialized identity shown above,
+replacing the colon-delimited key from 3.0.0. Compare complete keys rather than
+parsing them; `implementation_version` distinguishes provider implementations.
+The factory signature and service methods remain unchanged. This metadata change
+does not publish a release or migrate existing cache/index data.
 
 `embed()` preserves input order and returns plain Python floats. It rejects strings passed in place
 of a sequence, non-string or blank items, oversized items/batches, non-finite vectors, wrong vector

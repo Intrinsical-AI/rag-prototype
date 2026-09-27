@@ -5,7 +5,9 @@ from starlette.requests import Request
 from local_rag_backend.core.use_cases.errors import UnauthorizedError
 from local_rag_backend.http.main import app
 from local_rag_backend.http.security import require_api_key
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 @pytest.mark.unit

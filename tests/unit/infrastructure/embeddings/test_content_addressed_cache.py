@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.embeddings.cached import (
     ContentAddressedCachingEmbedder,
     resolve_embedding_cache_db_path,
-    resolve_embedding_model_key,
 )
 from local_rag_backend.infrastructure.observability.perf import (
     dump_perf_metrics_if_configured,
     reset_perf_metrics,
     snapshot_perf_metrics,
 )
-from local_rag_backend.settings import settings
 
 
 class _Embedder:
     dim = 2
     model_name = "toy-model"
+    identity = EmbeddingIdentity(provider="sentence_transformers", model="toy-model", dimension=2)
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
@@ -55,8 +56,7 @@ def test_perf_metrics_dump_aggregates_process_payloads(monkeypatch, tmp_path: Pa
     cached.embed(["alpha", "alpha"])
 
     out = tmp_path / "perf.json"
-    monkeypatch.setattr(settings, "perf_metrics_out_path", str(out), raising=False)
-    dump_perf_metrics_if_configured()
+    dump_perf_metrics_if_configured(out)
 
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["processes"]
@@ -64,17 +64,19 @@ def test_perf_metrics_dump_aggregates_process_payloads(monkeypatch, tmp_path: Pa
     assert payload["summary"]["embedding_cache"]["embedded_vectors"] >= 1
 
 
-def test_resolve_embedding_model_key_is_explicit() -> None:
-    assert resolve_embedding_model_key(_Embedder()) == "sentence_transformers:toy-model:2"
-
-
-def test_resolve_embedding_model_key_detects_openai_like_embedder() -> None:
-    class _OpenAIEmbedder:
-        dim = 3
-        model = "text-embedding-3-small"
-        client = object()
-
-    assert resolve_embedding_model_key(_OpenAIEmbedder()) == "openai:text-embedding-3-small:3"
+def test_cache_separates_real_synthetic_and_implementation_versions(tmp_path: Path) -> None:
+    synthetic, real, revised = _Embedder(), _Embedder(), _Embedder()
+    synthetic.identity = replace(synthetic.identity, synthetic=True)
+    revised.identity = replace(revised.identity, implementation_version="2")
+    cached = [
+        ContentAddressedCachingEmbedder(base=base, cache_db_path=tmp_path / "cache.sqlite3")
+        for base in (synthetic, real, revised)
+    ]
+    for embedder in cached:
+        embedder.embed(["same text"])
+        embedder.embed(["same text"])
+    assert len({embedder.model_key for embedder in cached}) == 3
+    assert all(base.calls == [["same text"]] for base in (synthetic, real, revised))
 
 
 def test_resolve_embedding_cache_db_path_honors_override(tmp_path: Path) -> None:

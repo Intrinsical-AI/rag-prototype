@@ -12,10 +12,9 @@ from local_rag_backend.composition.adapters import (
     build_eval_retriever_factory_port,
     build_eval_storage_port,
 )
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.domain.retrieval import (
     RetrievalRequest,
-    RetrievalResult,
-    retrieval_result_from_pairs,
 )
 from local_rag_backend.core.ports import EvalDatasetDocInput
 from local_rag_backend.core.services.evaluation import (
@@ -36,11 +35,20 @@ from local_rag_backend.core.use_cases.evaluation import (
     run_retrieval_eval,
     run_retrieval_eval_batch,
 )
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import Settings
+
+settings = Settings()
+
+
+@pytest.fixture(autouse=True)
+def isolated_eval_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "embedding_cache_db_path", str(tmp_path / "cache.sqlite3"))
 
 
 class DummyEmbedder:
     dim = 2
+    identity = EmbeddingIdentity("sentence_transformers", "test-model", 2)
 
     def embed(self, texts):
         out = []
@@ -53,18 +61,6 @@ class DummyEmbedder:
             else:
                 out.append([0.5, 0.5])
         return out
-
-
-def _coerce_retrieval_result(raw_result: Any, *, request: RetrievalRequest) -> RetrievalResult:
-    if isinstance(raw_result, RetrievalResult):
-        return raw_result
-    docs, scores = raw_result
-    return retrieval_result_from_pairs(
-        docs=docs,
-        scores=scores,
-        mode_used=request.mode,
-        backend_used="test_backend",
-    )
 
 
 def _eval_settings():
@@ -146,7 +142,7 @@ def test_run_retrieval_eval_app_service_matches_core_semantics() -> None:
 
     def _retrieve_ranked_items(query: str, top_k: int) -> list[EvalRetrievedItem]:
         request = RetrievalRequest(query=query, top_k=top_k, mode="sparse")
-        retrieval = _coerce_retrieval_result(retriever.retrieve(request), request=request)
+        retrieval = retriever.retrieve(request)
         return [
             EvalRetrievedItem(external_id=str(external_id), score=float(item.score))
             for item, external_id in (

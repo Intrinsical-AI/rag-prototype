@@ -26,8 +26,7 @@ from local_rag_backend.http.exception_handlers import register_exception_handler
 from local_rag_backend.http.middleware import MetricsMiddleware, get_metrics
 from local_rag_backend.http.routers.health import router as health_router
 from local_rag_backend.http.security import enforce_safe_bind_config, require_api_key
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
 
     from local_rag_backend.settings import Settings
 
+settings = get_settings()
 _LOG_LEVEL = getattr(logging, settings.log_level, logging.INFO)
 logging.basicConfig(level=_LOG_LEVEL, stream=sys.stdout)
 logger = logging.getLogger(__name__)
@@ -47,61 +47,64 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown events."""
     logger.info("Initializing RAG service...")
-    enforce_safe_bind_config()
-    # Ensure the data directory exists (SQLite cannot create parent directories).
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    # Use the module reference so tests can monkeypatch `db_base.engine` / `db_base.SessionLocal`.
-    db_base.ensure_sqlite_schema_current(engine_to_use=db_base.engine)
-    if settings.mutation_recovery_enabled:
-        try:
-            repaired = get_app_context().container.recover_incomplete_doc_mutations(limit=200)
-            if repaired:
-                logger.warning("Recovered %s incomplete mutation journal records.", repaired)
-        except Exception as e:
-            logger.warning("Mutation journal recovery failed (continuing startup): %s", e)
+    container = get_app_context().container
     recovery_task = None
-    if settings.mutation_recovery_enabled:
-
-        async def _mutation_recovery_loop() -> None:
-            base_interval = float(settings.mutation_recovery_interval_s)
-            delay_s = base_interval
-            while True:
-                try:
-                    await asyncio.sleep(delay_s)
-                    repaired = await asyncio.to_thread(
-                        get_app_context().container.recover_incomplete_doc_mutations,
-                        limit=200,
-                    )
-                    if repaired:
-                        logger.warning(
-                            "Recovered %s incomplete mutation journal records (background).",
-                            repaired,
-                        )
-                        delay_s = max(1.0, base_interval / 2.0)
-                    else:
-                        delay_s = base_interval
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.warning("Background mutation recovery attempt failed: %s", e)
-                    delay_s = min(delay_s * 2.0, 300.0)
-
-        recovery_task = asyncio.create_task(_mutation_recovery_loop())
-    # Best-effort preload: don't prevent the API from starting just because an LLM
-    # provider isn't configured yet (readiness endpoint should report not_ready).
     try:
-        await get_rag_service()
-    except Exception as e:
-        logger.warning("RAG service preload failed (will initialize lazily): %s", e)
-        # Avoid caching a half-initialized runtime context after preload failures.
+        settings = container.settings_obj
+        enforce_safe_bind_config(settings)
+        await container.blocking_executor().run_blocking(container.initialize)
+        if settings.mutation_recovery_enabled:
+            try:
+                repaired = await container.blocking_executor().run_blocking(
+                    container.recover_incomplete_doc_mutations, limit=200, task_type="mutation"
+                )
+                if repaired:
+                    logger.warning("Recovered %s incomplete mutation journal records.", repaired)
+            except Exception as e:
+                logger.warning("Mutation journal recovery failed (continuing startup): %s", e)
+        if settings.mutation_recovery_enabled:
+
+            async def _mutation_recovery_loop() -> None:
+                base_interval = float(settings.mutation_recovery_interval_s)
+                delay_s = base_interval
+                while True:
+                    try:
+                        await asyncio.sleep(delay_s)
+                        repaired = await container.blocking_executor().run_blocking(
+                            container.recover_incomplete_doc_mutations,
+                            limit=200,
+                        )
+                        if repaired:
+                            logger.warning(
+                                "Recovered %s incomplete mutation journal records (background).",
+                                repaired,
+                            )
+                            delay_s = max(1.0, base_interval / 2.0)
+                        else:
+                            delay_s = base_interval
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.warning("Background mutation recovery attempt failed: %s", e)
+                        delay_s = min(delay_s * 2.0, 300.0)
+
+            recovery_task = asyncio.create_task(_mutation_recovery_loop())
+        # Best-effort preload: don't prevent the API from starting just because an LLM
+        # provider isn't configured yet (readiness endpoint should report not_ready).
+        try:
+            await get_rag_service()
+        except Exception as e:
+            logger.warning("RAG service preload failed (will initialize lazily): %s", e)
+            container.clear_local_rag_service_cache()
+        logger.info("Service initialized.")
+        yield
+    finally:
+        if recovery_task is not None:
+            recovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await recovery_task
         reset_app_context()
-    logger.info("Service initialized.")
-    yield
-    if recovery_task is not None:
-        recovery_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await recovery_task
-    logger.info("Shutting down.")
+        logger.info("Shutting down.")
 
 
 def get_frontend_path() -> Traversable | Path | None:
@@ -196,7 +199,7 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)
 )
 async def metrics_endpoint() -> PlainTextResponse:
     """Prometheus metrics endpoint."""
-    content, content_type = get_metrics()
+    content, content_type = get_metrics(enabled=get_app_context().settings.enable_monitoring)
     return PlainTextResponse(content=content, media_type=content_type)
 
 

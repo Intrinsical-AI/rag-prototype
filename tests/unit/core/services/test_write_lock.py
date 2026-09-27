@@ -41,15 +41,9 @@ def test_multi_store_write_lock_uses_coordination_dir(tmp_path, monkeypatch):
         captured.append(path)
         yield
 
-    monkeypatch.setattr(
-        write_lock,
-        "settings",
-        SimpleNamespace(get_coordination_dir=lambda: tmp_path),
-        raising=True,
-    )
     monkeypatch.setattr(write_lock, "_exclusive_file_lock", _fake_lock, raising=True)
 
-    with write_lock.multi_store_write_lock():
+    with write_lock.multi_store_write_lock(coordination_dir=tmp_path):
         pass
 
     assert captured == [tmp_path / ".rag_multi_store_write.lock"]
@@ -64,17 +58,11 @@ def test_multi_store_write_lock_records_wait_and_hold_metrics(tmp_path, monkeypa
         yield
 
     mono = iter([10.0, 10.2, 10.2, 10.7])
-    monkeypatch.setattr(
-        write_lock,
-        "settings",
-        SimpleNamespace(get_coordination_dir=lambda: tmp_path, lock_metrics_path=str(metrics_path)),
-        raising=True,
-    )
     monkeypatch.setattr(write_lock, "_exclusive_file_lock", _fake_lock, raising=True)
     monkeypatch.setattr(write_lock.time, "monotonic", lambda: next(mono), raising=True)
     monkeypatch.setattr(write_lock.time, "time", lambda: 123.0, raising=True)
 
-    with write_lock.multi_store_write_lock():
+    with write_lock.multi_store_write_lock(coordination_dir=tmp_path, metrics_path=metrics_path):
         pass
 
     rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines()]
@@ -92,17 +80,14 @@ def test_multi_store_write_lock_records_released_and_failed_on_exception(tmp_pat
         yield
 
     mono = iter([1.0, 1.1, 1.1, 1.6, 1.8])
-    monkeypatch.setattr(
-        write_lock,
-        "settings",
-        SimpleNamespace(get_coordination_dir=lambda: tmp_path, lock_metrics_path=str(metrics_path)),
-        raising=True,
-    )
     monkeypatch.setattr(write_lock, "_exclusive_file_lock", _fake_lock, raising=True)
     monkeypatch.setattr(write_lock.time, "monotonic", lambda: next(mono), raising=True)
     monkeypatch.setattr(write_lock.time, "time", lambda: 321.0, raising=True)
 
-    with pytest.raises(RuntimeError, match="boom"), write_lock.multi_store_write_lock():
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        write_lock.multi_store_write_lock(coordination_dir=tmp_path, metrics_path=metrics_path),
+    ):
         raise RuntimeError("boom")
 
     rows = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines()]

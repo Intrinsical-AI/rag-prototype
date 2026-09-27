@@ -7,9 +7,12 @@ from pathlib import Path
 import pytest
 
 from local_rag_backend.composition import factory
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.errors import WriteLockTimeoutError
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_mutate_dense_vector_failure_rolls_back_sql(
@@ -17,18 +20,23 @@ async def test_mutate_dense_vector_failure_rolls_back_sql(
 ):
     class DummyEmbedder:
         dim = 1
+        identity = EmbeddingIdentity("openai", "test", 1)
 
         def embed(self, texts):
             return [[1.0] for _ in texts]
 
     class FailingVec:
+        def rebuild(self, ids, vectors):
+            return None
+
         def apply_delta_atomic(self, *, delete_ids, upserts):
             raise RuntimeError("vec upsert fail")
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    container = factory.get_app_context().container
+    monkeypatch.setattr(container, "openai_embedder_factory", lambda: DummyEmbedder())
+    monkeypatch.setattr(container, "vector_repo_factory", lambda **kwargs: FailingVec())
 
     with pytest.raises(RuntimeError, match="vec upsert fail"):
         await asgi_client.post(
@@ -36,7 +44,7 @@ async def test_mutate_dense_vector_failure_rolls_back_sql(
             json={"upserts": [{"external_id": "doc-1", "content": "hello"}]},
         )
 
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []
 
 
 async def test_mutation_fails_when_write_lock_unavailable_returns_503(
@@ -48,8 +56,7 @@ async def test_mutation_fails_when_write_lock_unavailable_returns_503(
         yield
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(factory, "multi_store_write_lock", _broken_lock, raising=True)
-    factory.reset_app_context()
+    monkeypatch.setattr(factory.get_app_context().container, "write_lock", _broken_lock)
 
     try:
         resp = await asgi_client.post(
@@ -59,7 +66,7 @@ async def test_mutation_fails_when_write_lock_unavailable_returns_503(
         assert resp.status_code == 503
         assert resp.json()["detail"] == "Service unavailable."
         assert "lock unavailable" not in resp.text
-        assert SqlDocumentStorage().get_all_documents() == []
+        assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []
     finally:
         factory.reset_app_context()
 
@@ -69,18 +76,23 @@ async def test_vector_failure_persists_rolled_back_journal_record(
 ):
     class DummyEmbedder:
         dim = 1
+        identity = EmbeddingIdentity("openai", "test", 1)
 
         def embed(self, texts):
             return [[1.0] for _ in texts]
 
     class FailingVec:
+        def rebuild(self, ids, vectors):
+            return None
+
         def apply_delta_atomic(self, *, delete_ids, upserts):
             raise RuntimeError("vec upsert fail")
 
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: DummyEmbedder(), raising=True)
-    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: FailingVec(), raising=True)
+    container = factory.get_app_context().container
+    monkeypatch.setattr(container, "openai_embedder_factory", lambda: DummyEmbedder())
+    monkeypatch.setattr(container, "vector_repo_factory", lambda **kwargs: FailingVec())
 
     journal_dir = Path(settings.get_coordination_dir()) / ".mutation_journal"
     before = sorted(journal_dir.glob("*.json")) if journal_dir.is_dir() else []

@@ -2925,7 +2925,7 @@ wheels = [
 
 [[package]]
 name = "rag-prototype"
-version = "3.0.0"
+version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -2945,14 +2945,10 @@ all = [
     { name = "faiss-cpu" },
     { name = "fastapi" },
     { name = "langchain-community" },
-    { name = "orjson" },
     { name = "prometheus-client" },
     { name = "python-magic" },
     { name = "python-multipart" },
     { name = "sentence-transformers" },
-    { name = "sentry-sdk", extra = ["fastapi"] },
-    { name = "structlog" },
-    { name = "torch" },
     { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -2971,12 +2967,6 @@ magic = [
 ]
 monitoring = [
     { name = "prometheus-client" },
-    { name = "sentry-sdk", extra = ["fastapi"] },
-    { name = "structlog" },
-]
-performance = [
-    { name = "orjson" },
-    { name = "torch" },
 ]
 server = [
     { name = "fastapi" },
@@ -3033,24 +3023,20 @@ requires-dist = [
     { name = "langchain-community", marker = "extra == 'loaders'", specifier = ">=0.2,<1.0" },
     { name = "numpy", specifier = ">=2.0,<2.3" },
     { name = "openai", specifier = ">=1.24,<2.0" },
-    { name = "orjson", marker = "extra == 'performance'", specifier = ">=3.10,<4.0" },
     { name = "prometheus-client", marker = "extra == 'monitoring'", specifier = ">=0.19,<1.0" },
     { name = "pydantic", specifier = ">=2.0,<3.0" },
     { name = "python-magic", marker = "extra == 'magic'", specifier = ">=0.4,<1.0" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9,<1.0" },
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
-    { name = "rag-prototype", extras = ["server", "dense", "dense-st", "loaders", "magic", "performance", "monitoring"], marker = "extra == 'all'" },
+    { name = "rag-prototype", extras = ["server", "dense", "dense-st", "loaders", "magic", "monitoring"], marker = "extra == 'all'" },
     { name = "rank-bm25", specifier = ">=0.2,<1.0" },
     { name = "rich", specifier = ">=13.0,<14.0" },
     { name = "sentence-transformers", marker = "extra == 'dense-st'", specifier = ">=2.7,<3.0" },
-    { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'monitoring'", specifier = ">=1.40,<2.0" },
     { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
-    { name = "structlog", marker = "extra == 'monitoring'", specifier = ">=23.0,<24.0" },
-    { name = "torch", marker = "extra == 'performance'", specifier = ">=2.0,<3.0" },
     { name = "trafilatura", marker = "extra == 'loaders'", specifier = ">=1.8,<2.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.29,<1.0" },
 ]
-provides-extras = ["server", "dense", "dense-st", "loaders", "magic", "performance", "monitoring", "all"]
+provides-extras = ["server", "dense", "dense-st", "loaders", "magic", "monitoring", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3466,24 +3452,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sentry-sdk"
-version = "1.45.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "certifi" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/28/02c0cd9184f9108e3c52519f9628b215077a3854240e0b17ae845e664855/sentry_sdk-1.45.1.tar.gz", hash = "sha256:a16c997c0f4e3df63c0fc5e4207ccb1ab37900433e0f72fef88315d317829a26", size = 244774, upload-time = "2024-07-26T13:48:32.375Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/9f/105366a122efa93f0cb1914f841747d160788e4d022d0488d2d44c2ba26c/sentry_sdk-1.45.1-py2.py3-none-any.whl", hash = "sha256:608887855ccfe39032bfd03936e3a1c4f4fc99b3a4ac49ced54a4220de61c9c1", size = 267163, upload-time = "2024-07-26T13:48:29.38Z" },
-]
-
-[package.optional-dependencies]
-fastapi = [
-    { name = "fastapi" },
-]
-
-[[package]]
 name = "setuptools"
 version = "82.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3589,15 +3557,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/6d/90764092216fa560f6587f83bb70113a8ba510ba436c6476a2b47359057c/stevedore-5.7.0.tar.gz", hash = "sha256:31dd6fe6b3cbe921e21dcefabc9a5f1cf848cf538a1f27543721b8ca09948aa3", size = 516200, upload-time = "2026-02-20T13:27:06.765Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/69/06/36d260a695f383345ab5bbc3fd447249594ae2fa8dfd19c533d5ae23f46b/stevedore-5.7.0-py3-none-any.whl", hash = "sha256:fd25efbb32f1abb4c9e502f385f0018632baac11f9ee5d1b70f88cc5e22ad4ed", size = 54483, upload-time = "2026-02-20T13:27:05.561Z" },
-]
-
-[[package]]
-name = "structlog"
-version = "23.3.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/44/30/1f73c8813fa47208cf17dc1239c148298ffafb11301b18071b8c6ba19f37/structlog-23.3.0.tar.gz", hash = "sha256:24b42b914ac6bc4a4e6f716e82ac70d7fb1e8c3b1035a765591953bfc37101a5", size = 1340937, upload-time = "2023-12-29T14:02:33.487Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/5d/8afc87f72e8ba11001c0122e62fc1e19f580f8607f9d1078012cf1492325/structlog-23.3.0-py3-none-any.whl", hash = "sha256:d6922a88ceabef5b13b9eda9c4043624924f60edbb00397f4d193bd754cde60a", size = 66004, upload-time = "2023-12-29T14:02:31.501Z" },
 ]
 
 [[package]]

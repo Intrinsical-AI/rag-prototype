@@ -1,5 +1,7 @@
 from local_rag_backend.http.routers import health as health_router
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_health_db_failure(asgi_client, monkeypatch):

@@ -3,13 +3,11 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.sql.models import Document as DbDocument
 
 
 def test_chunk_dedup_unique_index_enforced(in_memory_sqlite):
-    SessionLocal = db_base.SessionLocal
-    s = SessionLocal()
+    s = in_memory_sqlite()
     try:
         s.add(
             DbDocument(

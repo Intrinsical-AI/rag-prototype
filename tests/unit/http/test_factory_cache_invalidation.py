@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from local_rag_backend.composition import factory
+from local_rag_backend.composition.container import AppContainer
+from local_rag_backend.composition.context import AppContext
 from local_rag_backend.infrastructure.persistence.sql import SystemStateStorage
+from local_rag_backend.settings import Settings
 
 
 @pytest.mark.unit
@@ -17,7 +20,6 @@ async def test_get_rag_service_cache_is_invalidated_by_system_state_version(
     """
     state = SystemStateStorage(session_factory=in_memory_sqlite)
     factory.reset_app_context()
-    monkeypatch.setattr(factory, "SystemStateStorage", lambda: state, raising=True)
 
     built: list[object] = []
 
@@ -47,7 +49,6 @@ async def test_get_rag_service_cache_is_invalidated_by_system_state_version(
 def test_reset_rag_service_bumps_system_state_version(in_memory_sqlite, monkeypatch) -> None:
     state = SystemStateStorage(session_factory=in_memory_sqlite)
     factory.reset_app_context()
-    monkeypatch.setattr(factory, "SystemStateStorage", lambda: state, raising=True)
     _ = factory.get_app_context()
 
     assert state.get_version(factory.AppContainer.RAG_SERVICE_STATE_KEY) == 0
@@ -56,3 +57,26 @@ def test_reset_rag_service_bumps_system_state_version(in_memory_sqlite, monkeypa
 
     factory.reset_rag_service()
     assert state.get_version(factory.AppContainer.RAG_SERVICE_STATE_KEY) == 2
+
+
+def test_reset_rag_service_keeps_owned_memory_database(monkeypatch, tmp_path, reset_app_context):
+    settings = Settings(sqlite_url="sqlite:///:memory:", data_dir=tmp_path)
+    created = []
+
+    def build_context():
+        container = AppContainer.from_settings(settings)
+        container.initialize()
+        created.append(container)
+        return AppContext(settings_obj=settings, container=container)
+
+    monkeypatch.setattr(factory, "_build_app_context", build_context)
+    first = factory.get_app_context()
+    first.container.doc_repo_factory().store_documents(["keep this document"])
+    factory.reset_rag_service()
+    second = factory.get_app_context()
+    assert second is first
+    assert created == [first.container]
+    assert [doc.content for doc in second.container.doc_repo_factory().get_all_documents()] == [
+        "keep this document"
+    ]
+    assert second.container.read_rag_service_version() == 1

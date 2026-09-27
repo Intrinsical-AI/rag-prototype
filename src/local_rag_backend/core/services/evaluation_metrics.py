@@ -28,33 +28,6 @@ from local_rag_backend.core.services.evaluation_models import (
 from local_rag_backend.core.services.evaluation_serialization import write_eval_run_jsonl
 
 
-def _coerce_retrieved_item(raw_item: object, *, rank: int, k: int) -> EvalRetrievedItem:
-    fallback_score = float(max(int(k) - int(rank) + 1, 1))
-    if isinstance(raw_item, EvalRetrievedItem):
-        return raw_item
-    if isinstance(raw_item, str):
-        return EvalRetrievedItem(external_id=raw_item, score=fallback_score)
-    if isinstance(raw_item, tuple) and raw_item:
-        external_id = str(raw_item[0])
-        raw_score = raw_item[1] if len(raw_item) > 1 else fallback_score
-        return EvalRetrievedItem(external_id=external_id, score=float(raw_score))
-    if isinstance(raw_item, dict):
-        external_id = str(raw_item.get("external_id") or raw_item.get("id") or "")
-        raw_score = raw_item.get("score", fallback_score)
-        return EvalRetrievedItem(external_id=external_id, score=float(raw_score))
-    external_id = str(raw_item)
-    return EvalRetrievedItem(external_id=external_id, score=fallback_score)
-
-
-def _coerce_retrieved_items(
-    raw_items: Sequence[object], *, k: int
-) -> tuple[EvalRetrievedItem, ...]:
-    return tuple(
-        _coerce_retrieved_item(raw_item, rank=rank, k=k)
-        for rank, raw_item in enumerate(raw_items, start=1)
-    )
-
-
 def _query_qrels_dict(query: EvalQuery) -> dict[str, int]:
     return {
         qrel.external_id: int(qrel.relevance)
@@ -97,7 +70,7 @@ def calculate_eval_metrics(
 def run_retrieval_eval(
     *,
     dataset: EvalDataset,
-    retrieve_ranked_items: Callable[[str, int], Sequence[object]],
+    retrieve_ranked_items: Callable[[str, int], Sequence[EvalRetrievedItem]],
     retrieval_mode: EvalRetrievalMode = "sparse",
     k: int = 3,
     reranker_enabled: bool = False,
@@ -136,7 +109,9 @@ def run_retrieval_eval(
         seen_external_ids: set[str] = set()
         query_run_items: list[EvalRunItem] = []
         raw_ranked_items = retrieve_ranked_items(q.query, k)
-        for raw_item in _coerce_retrieved_items(raw_ranked_items, k=k):
+        for raw_item in raw_ranked_items:
+            if not isinstance(raw_item, EvalRetrievedItem):
+                raise TypeError("Evaluation retrievers must return EvalRetrievedItem values")
             normalized_external_id = str(raw_item.external_id).strip()
             if not normalized_external_id:
                 anomalies.append(
@@ -172,7 +147,9 @@ def run_retrieval_eval(
             score = float(
                 raw_item.score if raw_item.score is not None else max(k - len(ranked_docs), 1)
             )
-            ranked_docs[normalized_external_id] = score
+            # IR libraries sort by score and can break ties differently per metric.
+            # Evaluate the supplied ranking; retain original scores in the audit rows.
+            ranked_docs[normalized_external_id] = float(k - len(ranked_docs))
             query_run_items.append(
                 EvalRunItem(
                     external_id=normalized_external_id,

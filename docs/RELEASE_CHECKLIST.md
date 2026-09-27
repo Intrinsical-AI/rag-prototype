@@ -34,11 +34,43 @@
    - `pre-commit run --all-files`
    - `make smoke-embedding-api-wheel`
 
-## Release candidate: 3.0.0
+## Candidate: 4.0.0
 
-The verified remote canonical branch is `master`. Deliver `v3.0.0` from the
-accepted commit after its CI and installed-artifact checks pass. Existing tags
-and published artifacts are immutable.
+The current package metadata identifies the next breaking candidate. This local
+stabilization does not publish a tag, release, or package, and does not execute
+data migrations. Existing `v3.0.0` tags and artifacts remain immutable.
+
+Breaking changes relative to `v3.0.0`:
+
+- The documented `performance` extra is removed. Select the declared extras;
+  `monitoring` now installs Prometheus only. `dense-st` remains the optional
+  SentenceTransformers extra.
+- MCP requires a valid initialize request and strict tool arguments. Invalid
+  arguments return JSON-RPC `-32602`; execution failures return tool content with
+  `isError: true` instead of JSON-RPC `-32000`. Notifications have no response.
+  Consumers must inspect the tool result as well as protocol errors.
+- The typed embedding API retains its factory and service methods, but
+  `model_key` now encodes the full embedding identity as a JSON string, and
+  status includes `implementation_version`. Treat the key as opaque; do not
+  parse the former colon-delimited representation. See
+  [the installed API contract](embedding_integration.md).
+- Library examples use `get_settings()` instead of importing a global
+  `settings` instance. Imports no longer read YAML or initialize the database;
+  explicit containers own their runtime resources and must be closed.
+- Mutation journal v2 rejects older, corrupt, or unresolved records and blocks
+  writes until their state is resolved. There is no automatic migration or
+  compatibility alias, and rebuilding an index does not repair the journal.
+  Existing data must be reviewed separately before changing its runtime; this
+  candidate does not authorize deleting or rewriting it.
+
+HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
+also recovers from JSON decoder `ValueError`, including integer literals beyond
+Python's configured digit limit, so the next MCP request remains processable.
+The canonical import contract remains compatible with RepoGPT code-units v4 and
+the generic rag-adapters payload; installed-artifact receipts establish the
+specific tested producer combination.
+
+## Historical boundary: 3.0.0
 
 Breaking changes relative to 2.1.0:
 
@@ -46,20 +78,21 @@ Breaking changes relative to 2.1.0:
   `POST /api/docs/ingest`.
 - Move conversation import from `POST /api/docs/import` to
   `POST /api/docs/import-conversations`.
-- Remove the `performance-cpu` extra; select the current documented extras.
+- Remove the `performance-cpu` extra; the `performance` extra still existed at
+  the `v3.0.0` boundary and is removed by the candidate above.
 - Require a boolean `debug` configuration value instead of historical string
   aliases.
 
-The supported typed embedding integration and MCP entrypoints keep their current
-contracts. Migrate HTTP clients and configuration directly to the documented
-interfaces; no legacy aliases are retained. This release does not introduce a
-new guarantee for migration of historical SQLite databases.
+At that boundary the typed embedding integration and MCP entrypoints retained
+their preceding contracts. The 4.0.0 changes above supersede that compatibility
+statement. No legacy aliases or new migration guarantee for historical SQLite
+databases were introduced by 3.0.0.
 
 The release also includes the already-implemented canonical import diagnostics,
 HTTP/frontend hardening, and rejection of incomplete Elasticsearch enumeration
 before destructive scope operations. Existing regression suites cover those
-behaviors. Record final gate results, commit, and artifact hashes with the release;
-historical validation results below do not certify this candidate.
+behaviors. Historical validation results below do not certify the current
+candidate; record its exact commit, gates, and artifact hashes separately.
 
 ## Historical RC Notes: 2026-07-10
 

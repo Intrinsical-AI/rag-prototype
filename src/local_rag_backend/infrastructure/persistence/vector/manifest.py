@@ -16,13 +16,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from local_rag_backend.core.domain.embeddings import (
+    EMBEDDING_IMPLEMENTATION_VERSION,
+    EmbeddingIdentity,
+)
 from local_rag_backend.infrastructure.persistence.shared.atomic_io import atomic_write_text
-from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 
 
 def manifest_path_for(index_path: str | Path) -> Path:
@@ -58,31 +61,41 @@ def build_expected_manifest_config(
     embedding_model: str,
     chunker_strategy: str,
     chunker_version: str,
-) -> dict[str, str]:
+    synthetic: bool = False,
+    implementation_version: str = EMBEDDING_IMPLEMENTATION_VERSION,
+) -> dict[str, Any]:
     return {
         "embedding_backend": str(embedding_backend),
         "embedding_model": str(embedding_model),
         "chunker_strategy": str(chunker_strategy),
         "chunker_version": str(chunker_version),
+        "synthetic": bool(synthetic),
+        "implementation_version": implementation_version,
     }
 
 
-def expected_manifest_config_from_settings(cfg: Settings = settings) -> dict[str, str]:
+def expected_manifest_config_from_settings(
+    cfg: Settings, *, embedding_identity: EmbeddingIdentity | None = None
+) -> dict[str, Any]:
     embedding_backend = "openai" if bool(cfg.openai_api_key) else "sentence_transformers"
     embedding_model = (
         cfg.openai_embedding_model if bool(cfg.openai_api_key) else cfg.st_embedding_model
     )
-    return build_expected_manifest_config(
+    config = build_expected_manifest_config(
         embedding_backend=embedding_backend,
         embedding_model=embedding_model,
         chunker_strategy=cfg.ingest_chunk_strategy,
         chunker_version=cfg.ingest_chunker_version,
+        synthetic=bool(not cfg.openai_api_key and cfg.synthetic_embeddings),
     )
+    if embedding_identity is not None:
+        config.update(embedding_identity.manifest_fields())
+    return config
 
 
 def build_manifest(
     *,
-    expected: dict[str, str],
+    expected: dict[str, Any],
     dimension: int,
     index_backend: str,
     created_at: str | None = None,
@@ -102,7 +115,7 @@ def build_manifest(
 def create_manifest_if_missing_for_settings(
     *,
     index_path: str | Path,
-    expected: dict[str, str],
+    expected: dict[str, Any],
     dimension: int,
     index_backend: str,
 ) -> Path:
@@ -123,12 +136,16 @@ def create_manifest_if_missing_for_settings(
 def overwrite_manifest_for_settings(
     *,
     index_path: str | Path,
-    expected: dict[str, str],
+    expected: dict[str, Any],
     dimension: int,
     index_backend: str,
 ) -> Path:
     mpath = manifest_path_for(index_path)
-    existing = read_manifest(mpath)
+    try:
+        existing = read_manifest(mpath)
+    except (OSError, ValueError):
+        # An explicit rebuild replaces an invalid manifest as well as the index.
+        existing = None
     created_at = None
     if isinstance(existing, dict):
         ca = existing.get("created_at")
@@ -156,7 +173,7 @@ class ManifestMismatch:
 def validate_manifest(
     *,
     manifest: dict[str, Any],
-    expected_config: dict[str, str] | None,
+    expected_config: dict[str, Any] | None,
     actual_dimension: int,
     actual_index_backend: str,
 ) -> tuple[list[ManifestMismatch], list[str]]:

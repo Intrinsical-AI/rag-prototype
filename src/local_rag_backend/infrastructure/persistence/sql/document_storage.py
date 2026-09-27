@@ -7,10 +7,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
+
 from local_rag_backend.core.domain.entities import Document as DomainDocument
+from local_rag_backend.core.domain.retrieval import RetrievalFilter, document_matches_filters
 from local_rag_backend.core.domain.types import DocId, new_doc_id
 from local_rag_backend.core.ports import DocumentRepoPort
-from local_rag_backend.infrastructure.persistence.sql import base as db_base
 from local_rag_backend.infrastructure.persistence.sql.crud import add_documents, delete_documents
 from local_rag_backend.infrastructure.persistence.sql.models import (
     Document as DbDocument,
@@ -72,8 +74,8 @@ def _to_domain_document(d: DbDocument) -> DomainDocument:
 class SqlDocumentStorage(DocumentRepoPort):
     """SQL-based implementation of the document repository port."""
 
-    def __init__(self, session_factory: sessionmaker[Session] | None = None):
-        self._session_factory = session_factory or db_base.SessionLocal
+    def __init__(self, session_factory: sessionmaker[Session]):
+        self._session_factory = session_factory
 
     def store_documents(self, texts: Sequence[str]) -> list[DocId]:
         """Store documents in the database."""
@@ -101,6 +103,50 @@ class SqlDocumentStorage(DocumentRepoPort):
         with get_managed_session(self._session_factory) as (session, _owns_session):
             db_docs = session.query(DbDocument).order_by(DbDocument.doc_id).all()
             return [_to_domain_document(d) for d in db_docs]
+
+    def query_documents(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        filters: tuple[RetrievalFilter, ...] = (),
+    ) -> list[DomainDocument]:
+        """Page by unique ID; evaluate metadata with the shared retrieval semantics.
+
+        Filtered reads scan bounded SQL pages, including arbitrary nested metadata,
+        without materializing the corpus or reproducing filter coercions in SQL.
+        """
+        if limit < 1 or offset < 0:
+            raise ValueError("limit must be positive and offset non-negative")
+        ordered = select(DbDocument).order_by(DbDocument.doc_id)
+        with get_managed_session(self._session_factory) as (session, _owns_session):
+            if not filters:
+                return [
+                    _to_domain_document(row)
+                    for row in session.scalars(ordered.limit(limit).offset(offset))
+                ]
+            page: list[DomainDocument] = []
+            cursor: str | None = None
+            remaining_offset = offset
+            while len(page) < limit:
+                stmt = ordered.limit(256)
+                if cursor is not None:
+                    stmt = stmt.where(DbDocument.doc_id > cursor)
+                rows = list(session.scalars(stmt))
+                if not rows:
+                    break
+                cursor = rows[-1].doc_id
+                for row in rows:
+                    doc = _to_domain_document(row)
+                    if not document_matches_filters(doc, filters):
+                        continue
+                    if remaining_offset:
+                        remaining_offset -= 1
+                    else:
+                        page.append(doc)
+                        if len(page) == limit:
+                            return page
+            return page
 
     @dataclass(frozen=True)
     class UpsertDoc:

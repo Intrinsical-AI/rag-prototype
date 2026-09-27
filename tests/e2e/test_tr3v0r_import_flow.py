@@ -12,7 +12,9 @@ from local_rag_backend.cli import cli
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 TR3V0R_SRC = WORKSPACE_ROOT / "tr3v0r" / "src"
@@ -170,7 +172,7 @@ def test_tr3v0r_canonical_import_preserves_net_node_sensor_ids_and_retrieves_by_
     result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     docs = list(repo.get_all_documents())
     assert len(docs) == 6
 

@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.services.maintenance import rebuild_index_from_db
 from local_rag_backend.core.use_cases.docs_import_canonical import _delete_stale_scope_documents
 from local_rag_backend.core.use_cases.errors import IndexRebuildRequiredError
@@ -26,7 +27,7 @@ def deletion_state(in_memory_sqlite, tmp_path):
         index_path=str(tmp_path / "index.npz"),
         id_map_path=str(tmp_path / "ids.json"),
     )
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     rows, _, _ = repo.upsert_documents_by_external_id(
         [repo.UpsertDoc(external_id=key, content=key, scope="demo") for key in ["keep", "stale"]]
     )
@@ -37,7 +38,7 @@ def deletion_state(in_memory_sqlite, tmp_path):
     ports = SimpleNamespace(
         doc_repo_factory=lambda: repo,
         vector_repo_factory=lambda **kwargs: vector,
-        mutation_uow_factory=db_base.session_uow,
+        mutation_uow_factory=lambda: db_base.session_uow(session_factory=in_memory_sqlite),
     )
     return cfg, repo, vector, ports
 
@@ -118,7 +119,9 @@ def test_failed_delta_or_final_commit_rolls_back_sql_and_can_rebuild(
                 pass
 
             event.listen(FailingCommitSession, "before_commit", fail)
-            factory = sessionmaker(bind=db_base.engine, class_=FailingCommitSession)
+            factory = sessionmaker(bind=in_memory_sqlite.kw["bind"], class_=FailingCommitSession)
+            failing_repo = SqlDocumentStorage(session_factory=factory)
+            fault.setattr(ports, "doc_repo_factory", lambda: failing_repo)
             fault.setattr(
                 ports, "mutation_uow_factory", lambda: db_base.session_uow(session_factory=factory)
             )
@@ -145,7 +148,14 @@ def test_failed_delta_or_final_commit_rolls_back_sql_and_can_rebuild(
             ports=SimpleNamespace(
                 doc_repo_factory=lambda: repo,
                 build_embedder=lambda: SimpleNamespace(
-                    dim=2, embed=lambda texts: [[1.0, 0.0] for _ in texts]
+                    dim=2,
+                    embed=lambda texts: [[1.0, 0.0] for _ in texts],
+                    identity=EmbeddingIdentity(
+                        "sentence_transformers",
+                        cfg.st_embedding_model,
+                        2,
+                        synthetic=cfg.synthetic_embeddings,
+                    ),
                 ),
                 purge_index_artifacts_fn=purge_index_artifacts,
                 vector_repo_factory=new_vector,
@@ -162,6 +172,6 @@ def test_failed_delta_or_final_commit_rolls_back_sql_and_can_rebuild(
         ports=SimpleNamespace(
             doc_repo_factory=lambda: repo,
             vector_repo_factory=lambda **kwargs: rebuilt[0],
-            mutation_uow_factory=db_base.session_uow,
+            mutation_uow_factory=lambda: db_base.session_uow(session_factory=in_memory_sqlite),
         ),
     ) == (["stale"], 1, 1)

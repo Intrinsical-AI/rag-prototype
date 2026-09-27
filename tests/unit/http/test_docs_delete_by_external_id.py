@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
+from support.container import override_container
 
-from local_rag_backend.composition import factory
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_mutate_delete_by_external_id_sparse_creates_tombstone_and_blocks_reingest(
@@ -16,7 +19,7 @@ async def test_mutate_delete_by_external_id_sparse_creates_tombstone_and_blocks_
     assert r1.status_code == 200
     assert r1.json()["count"] == 1
 
-    doc = SqlDocumentStorage().get_all_documents()[0]
+    doc = SqlDocumentStorage(in_memory_sqlite).get_all_documents()[0]
     rd = await asgi_client.post(
         "/api/docs/mutate",
         json={"delete_external_ids": [doc.external_id]},
@@ -24,12 +27,12 @@ async def test_mutate_delete_by_external_id_sparse_creates_tombstone_and_blocks_
     assert rd.status_code == 200
     assert rd.json()["deleted_sql"] == 1
     assert rd.json()["tombstoned"] == 1
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(in_memory_sqlite).get_all_documents() == []
 
     r2 = await asgi_client.post("/api/docs/ingest", json={"texts": ["hello world"]})
     assert r2.status_code == 200
     assert r2.json()["count"] == 0
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(in_memory_sqlite).get_all_documents() == []
 
 
 async def test_mutate_upsert_rejects_tombstoned_external_id(
@@ -57,7 +60,7 @@ async def test_mutate_upsert_rejects_tombstoned_external_id(
     )
     assert r3.status_code == 400
     assert "tombstoned" in r3.json()["detail"].lower()
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(in_memory_sqlite).get_all_documents() == []
 
 
 async def test_mutate_delete_by_external_id_dense_is_consistent_and_survives_rebuild(
@@ -70,6 +73,7 @@ async def test_mutate_delete_by_external_id_dense_is_consistent_and_survives_reb
 
     class DummyEmbedder:
         dim = 2
+        identity = EmbeddingIdentity(provider="openai", model="test", dimension=dim)
 
         def embed(self, texts):
             return np.zeros((len(texts), self.dim), dtype="float32").tolist()
@@ -93,17 +97,15 @@ async def test_mutate_delete_by_external_id_dense_is_consistent_and_survives_reb
             return []
 
     dummy_vec = DummyVec()
-    monkeypatch.setattr(
-        factory, "SentenceTransformerEmbedder", lambda **k: DummyEmbedder(), raising=True
-    )
-    monkeypatch.setattr(factory, "VectorStorage", lambda **k: dummy_vec, raising=True)
+    override_container(monkeypatch, st_embedder_factory=lambda *a, **k: DummyEmbedder())
+    override_container(monkeypatch, vector_repo_factory=lambda **k: dummy_vec)
 
     r1 = await asgi_client.post("/api/docs/ingest", json={"texts": ["alpha", "beta"]})
     assert r1.status_code == 200
     assert r1.json()["count"] == 2
     assert len(dummy_vec.ops) == 1
 
-    docs = SqlDocumentStorage().get_all_documents()
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     ext_to_id = {d.external_id: str(d.id) for d in docs}
     victim_ext = next(iter(ext_to_id.keys()))
     victim_id = ext_to_id[victim_ext]
@@ -118,7 +120,7 @@ async def test_mutate_delete_by_external_id_dense_is_consistent_and_survives_reb
 
     rr = await asgi_client.post("/api/index/rebuild", json={})
     assert rr.status_code == 200
-    remaining = SqlDocumentStorage().get_all_documents()
+    remaining = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert len(remaining) == 1
     assert str(remaining[0].id) in dummy_vec.ids
     assert victim_id not in dummy_vec.ids
@@ -170,8 +172,8 @@ async def test_mutate_delete_by_external_id_dense_does_not_require_embedder(
             assert len(list(delete_ids)) == 1
             assert list(upserts) == []
 
-    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", _boom_embedder, raising=True)
-    monkeypatch.setattr(factory, "VectorStorage", lambda **_k: DummyVec(), raising=True)
+    override_container(monkeypatch, st_embedder_factory=_boom_embedder)
+    override_container(monkeypatch, vector_repo_factory=lambda **_k: DummyVec())
 
     rd = await asgi_client.post(
         "/api/docs/mutate",

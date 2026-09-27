@@ -11,13 +11,14 @@ from local_rag_backend.cli_commands.runtime import (
     get_cli_container,
     run_cli_mutation,
 )
+from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.use_cases.docs_mutation import (
     MutationCoordinator,
     MutationIntent,
     MutationUpsertInput,
 )
 from local_rag_backend.core.use_cases.results import MutationSummary
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
 
 
 def _read_payload(payload_json: Path) -> dict[str, Any]:
@@ -85,7 +86,7 @@ def mutate_docs_cmd(payload_json: Path) -> None:
         mutation_bundle = container.build_docs_mutation_bundle(
             build_embedder=build_dense_embedder,
         )
-        coordinator = MutationCoordinator(settings_obj=settings, ports=mutation_bundle.ports)
+        coordinator = MutationCoordinator(settings_obj=get_settings(), ports=mutation_bundle.ports)
 
         def _run_sync() -> MutationSummary:
             return coordinator.execute(intent)
@@ -97,6 +98,9 @@ def mutate_docs_cmd(payload_json: Path) -> None:
             f"unchanged={summary.unchanged} deleted_sql={summary.deleted_sql} "
             f"deleted_index={summary.deleted_index} tombstoned={summary.tombstoned}"
         )
+    except MutationRecoveryRequiredError as exc:
+        click.echo(f"[ERROR] Mutation requires recovery: {exc}", err=True)
+        raise SystemExit(1) from None
     except Exception as e:
         click.echo(f"[ERROR] Error running docs mutation: {e}", err=True)
         raise SystemExit(1)

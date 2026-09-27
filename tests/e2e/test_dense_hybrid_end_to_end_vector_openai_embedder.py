@@ -16,7 +16,9 @@ from local_rag_backend.infrastructure.persistence.vector.storage import VectorSt
 from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
 from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def _get_corpus_and_ids(doc_repo):
@@ -88,9 +90,13 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
     doc_repo = SqlDocumentStorage(session_factory=SessionLocal)
     history_repo = HistorySqlStorage(session_factory=SessionLocal)
 
-    embedder = OpenAIEmbedder(model="dummy-4")
+    embedder = OpenAIEmbedder(settings_obj=settings, model="dummy-4")
     vec_repo = VectorStorage(
-        index_path=str(index_path), id_map_path=str(id_map_path), dim=embedder.dim
+        settings_obj=settings,
+        embedding_identity=embedder.identity,
+        index_path=str(index_path),
+        id_map_path=str(id_map_path),
+        dim=embedder.dim,
     )
 
     etl = ETLService(doc_repo, vec_repo, embedder)

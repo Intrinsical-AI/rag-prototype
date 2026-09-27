@@ -19,7 +19,7 @@ from openai import OpenAI
 from local_rag_backend.core.errors import LLMConfigurationError, LLMResponseError
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.core.services.prompting import render_prompt_template
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import Settings
 
 
 def create_openai_client(
@@ -48,6 +48,7 @@ class OpenAIGenerator(GeneratorPort):
 
     def __init__(
         self,
+        settings_obj: Settings,
         model: str | None = None,
         temperature: float | None = None,
         top_p: float | None = None,
@@ -57,21 +58,23 @@ class OpenAIGenerator(GeneratorPort):
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
     ):
-        resolved_key = api_key or settings.openai_api_key
+        resolved_key = api_key or settings_obj.openai_api_key
         if not resolved_key:
             raise LLMConfigurationError("OPENAI_API_KEY is required to use the OpenAI generator.")
 
-        self.model = model or settings.openai_model
-        self.temperature = temperature if temperature is not None else settings.openai_temperature
-        self.top_p = top_p if top_p is not None else settings.openai_top_p
-        self.max_tokens = max_tokens if max_tokens is not None else settings.openai_max_tokens
-        self.prompt_template = prompt_template or settings.openai_prompt_template
+        self.model = model or settings_obj.openai_model
+        self.temperature = (
+            temperature if temperature is not None else settings_obj.openai_temperature
+        )
+        self.top_p = top_p if top_p is not None else settings_obj.openai_top_p
+        self.max_tokens = max_tokens if max_tokens is not None else settings_obj.openai_max_tokens
+        self.prompt_template = prompt_template or settings_obj.openai_prompt_template
 
         self.client = create_openai_client(
             api_key=resolved_key,
             base_url=base_url,
             default_headers=extra_headers,
-            timeout=settings.openai_request_timeout,
+            timeout=settings_obj.openai_request_timeout,
             client_factory=OpenAI,
         )
 

@@ -14,7 +14,12 @@ from local_rag_backend.core.services.evaluation import (
     load_eval_dataset,
     run_retrieval_eval,
 )
-from local_rag_backend.core.services.evaluation_models import EvalResult
+from local_rag_backend.core.services.evaluation_models import (
+    EvalDoc,
+    EvalQuery,
+    EvalResult,
+    EvalRetrievedItem,
+)
 
 
 def test_load_eval_dataset_missing_file_raises(tmp_path: Path) -> None:
@@ -203,17 +208,17 @@ def test_run_retrieval_eval_max_queries_zero_raises() -> None:
 def test_run_retrieval_eval_reports_standard_ir_metrics_for_perfect_run() -> None:
     ds = load_eval_dataset()
 
-    def _retrieve_ranked_items(query: str, top_k: int) -> tuple[str, ...]:
+    def _retrieve_ranked_items(query: str, top_k: int) -> tuple[EvalRetrievedItem, ...]:
         if "France" in query:
-            return ("doc:paris",)
+            return (EvalRetrievedItem("doc:paris"),)
         if "Spain" in query:
-            return ("doc:madrid",)
+            return (EvalRetrievedItem("doc:madrid"),)
         if "Germany" in query:
-            return ("doc:berlin",)
+            return (EvalRetrievedItem("doc:berlin"),)
         if "Portugal" in query:
-            return ("doc:lisbon",)
+            return (EvalRetrievedItem("doc:lisbon"),)
         if "Italy" in query:
-            return ("doc:rome",)
+            return (EvalRetrievedItem("doc:rome"),)
         return ()
 
     res = run_retrieval_eval(
@@ -244,11 +249,11 @@ def test_run_retrieval_eval_keeps_unknown_ids_as_non_relevant_and_reports_anomal
         ),
     )
 
-    def _retrieve_ranked_items(query: str, top_k: int) -> tuple[str, ...]:
+    def _retrieve_ranked_items(query: str, top_k: int) -> tuple[EvalRetrievedItem, ...]:
         if "France" in query:
-            return ("doc:unknown", "doc:unknown", "doc:paris")
+            return tuple(EvalRetrievedItem(x) for x in ("doc:unknown", "doc:unknown", "doc:paris"))
         if "Spain" in query:
-            return ("doc:paris", "doc:madrid")
+            return (EvalRetrievedItem("doc:paris"), EvalRetrievedItem("doc:madrid"))
         return ()
 
     res = run_retrieval_eval(
@@ -277,7 +282,7 @@ def test_run_retrieval_eval_preserves_retriever_scores_in_run_output(tmp_path: P
 
     res = run_retrieval_eval(
         dataset=ds,
-        retrieve_ranked_items=lambda _query, _top_k: ({"external_id": "doc:paris", "score": 0.42},),
+        retrieve_ranked_items=lambda _query, _top_k: (EvalRetrievedItem("doc:paris", 0.42),),
         retrieval_mode="sparse",
         k=1,
         max_queries=1,
@@ -288,11 +293,47 @@ def test_run_retrieval_eval_preserves_retriever_scores_in_run_output(tmp_path: P
     assert '"score": 0.42' in run_out.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(
+    "order, expected_mrr, expected_ndcg",
+    [
+        (("a", "z"), 1.0, 1.0),
+        (("z", "a"), 0.5, 0.6309297535714575),
+    ],
+)
+def test_eval_metrics_follow_published_ranking_with_tied_scores(order, expected_mrr, expected_ndcg):
+    dataset = EvalDataset(
+        dataset_id="ties",
+        schema_version=1,
+        docs=(EvalDoc("a", "alpha"), EvalDoc("z", "zeta")),
+        queries=(EvalQuery("alpha", ("a",)),),
+    )
+    result = run_retrieval_eval(
+        dataset=dataset,
+        retrieve_ranked_items=lambda _query, _k: [
+            EvalRetrievedItem(doc_id, 0.0) for doc_id in order
+        ],
+        k=2,
+    )
+    assert result.mrr_at_k == pytest.approx(expected_mrr)
+    assert result.ndcg_at_k == pytest.approx(expected_ndcg)
+    assert tuple(row.external_id for row in result.per_query[0].ranked_docs) == order
+    assert all(row.score == 0.0 for row in result.per_query[0].ranked_docs)
+
+
+def test_eval_rejects_untyped_retrieval_outputs():
+    with pytest.raises(TypeError, match="EvalRetrievedItem"):
+        run_retrieval_eval(
+            dataset=load_eval_dataset(),
+            retrieve_ranked_items=lambda _query, _k: ["doc:paris"],
+            k=1,
+        )
+
+
 def test_eval_result_report_and_anomalies_json_include_audit_details() -> None:
     ds = load_eval_dataset()
     res = run_retrieval_eval(
         dataset=ds,
-        retrieve_ranked_items=lambda _query, _top_k: ("doc:unknown",),
+        retrieve_ranked_items=lambda _query, _top_k: (EvalRetrievedItem("doc:unknown"),),
         retrieval_mode="sparse",
         k=1,
         max_queries=1,

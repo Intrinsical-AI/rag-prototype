@@ -5,17 +5,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from local_rag_backend.infrastructure.persistence.elasticsearch.client import ElasticClient
-from local_rag_backend.settings import Settings, settings as global_settings
+from local_rag_backend.settings import Settings
 
 
 class ElasticSystemStateStorage:
     def __init__(
         self,
         *,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
         client: ElasticClient | None = None,
     ) -> None:
-        self._settings = settings_obj or global_settings
+        self._settings = settings_obj
         self._client = client or ElasticClient(settings_obj=self._settings)
         self._client.ensure_indices(embed_dim=None)
 

@@ -9,7 +9,9 @@ from typing import Any
 
 import pytest
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.domain.profiles import StorageProfileRegistry
+from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.ports.contracts import DocsMutationPorts, MutationRecord
 from local_rag_backend.core.use_cases.docs_mutation import (
     MutationCoordinator,
@@ -61,7 +63,13 @@ class _MemoryJournal:
             self._records.pop(op_id, None)
 
     def list_incomplete(self, *, limit: int = 100) -> list[MutationRecord]:
-        states = {"PREPARED", "SQL_COMMITTED", "COMPENSATING", "FAILED_NEEDS_RECOVERY"}
+        states = {
+            "PREPARED",
+            "SQL_COMMITTED",
+            "VECTOR_COMMITTED",
+            "COMPENSATING",
+            "FAILED_NEEDS_RECOVERY",
+        }
         with self._lock:
             return [r for r in self._records.values() if r.state in states][:limit]
 
@@ -144,6 +152,7 @@ class _FailingVectorRepo:
 
 class _DenseEmbedder:
     dim = 1
+    identity = EmbeddingIdentity("sentence_transformers", "test", 1, synthetic=True)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [[1.0] for _ in texts]
@@ -247,7 +256,7 @@ def _build_ports(
         doc_repo_factory=lambda: doc_repo,
         build_upsert_doc=lambda **kwargs: dict(kwargs),
         vector_repo_factory=(vector_repo_factory or (lambda **kwargs: object())),
-        rebuild_fn=lambda **kwargs: 0,
+        reconcile_index=lambda: 0,
         write_lock=_noop_write_lock,
         mutation_journal_factory=lambda: journal,
         storage_profile_registry=StorageProfileRegistry(),
@@ -355,7 +364,7 @@ def test_vector_and_rollback_failure_mark_failed_needs_recovery() -> None:
 
     with pytest.raises(
         RuntimeError,
-        match=r"Mutation failed after SQL commit and rollback did not complete\.",
+        match="Mutation recovery did not complete",
     ):
         coordinator.execute(
             MutationIntent(
@@ -368,8 +377,8 @@ def test_vector_and_rollback_failure_mark_failed_needs_recovery() -> None:
     assert record is not None
     assert record.state == "FAILED_NEEDS_RECOVERY"
     assert record.error is not None
-    assert "vector=vector fails" in record.error
-    assert "rollback=rollback fails" in record.error
+    assert "vector fails" in record.error
+    assert "rollback fails" in record.error
 
 
 def test_recover_incomplete_keeps_failed_state_when_rollback_still_fails() -> None:
@@ -388,15 +397,15 @@ def test_recover_incomplete_keeps_failed_state_when_rollback_still_fails() -> No
         )
     )
 
-    repaired = coordinator.recover_incomplete(limit=10)
-    assert repaired == 1
+    with pytest.raises(MutationRecoveryRequiredError, match="rollback fails"):
+        coordinator.recover_incomplete(limit=10)
     recovered = journal.get(intent.op_id)
     assert recovered is not None
     assert recovered.state == "FAILED_NEEDS_RECOVERY"
     assert recovered.error == "rollback fails"
 
 
-def test_recover_incomplete_without_before_image_marks_rolled_back() -> None:
+def test_recover_incomplete_without_before_image_fails_closed() -> None:
     coordinator, journal = _build_ports(doc_repo=_DocRepoSparseStub())
 
     intent = MutationIntent(
@@ -412,13 +421,11 @@ def test_recover_incomplete_without_before_image_marks_rolled_back() -> None:
         )
     )
 
-    repaired = coordinator.recover_incomplete(limit=10)
-    assert repaired == 1
+    with pytest.raises(MutationRecoveryRequiredError, match="invalid before_image"):
+        coordinator.recover_incomplete(limit=10)
     recovered = journal.get(intent.op_id)
     assert recovered is not None
-    assert recovered.state == "ROLLED_BACK"
-    assert recovered.error is not None
-    assert "No before_image was available" in recovered.error
+    assert recovered.state == "SQL_COMMITTED"
 
 
 def test_recover_incomplete_dense_reconciles_vector_index_with_sql_state() -> None:
@@ -440,7 +447,9 @@ def test_recover_incomplete_dense_reconciles_vector_index_with_sql_state() -> No
         doc_repo_factory=lambda: doc_repo,
         build_upsert_doc=lambda **kwargs: dict(kwargs),
         vector_repo_factory=lambda **kwargs: vec_repo,
-        rebuild_fn=_rebuild_from_sql,
+        reconcile_index=lambda: _rebuild_from_sql(
+            doc_repo=doc_repo, vec_repo=vec_repo, embedder=_DenseEmbedder()
+        ),
         write_lock=_noop_write_lock,
         mutation_journal_factory=lambda: journal,
         storage_profile_registry=StorageProfileRegistry(),
@@ -456,6 +465,7 @@ def test_recover_incomplete_dense_reconciles_vector_index_with_sql_state() -> No
         MutationRecord(
             op_id=intent.op_id,
             state="SQL_COMMITTED",
+            vector_attempted=True,
             intent=intent_to_dict(intent),
             before_image={"docs": [], "existing_tombstones": []},
         )
@@ -486,6 +496,7 @@ def test_dense_embeddings_are_precomputed_outside_write_lock() -> None:
 
     class _Embedder:
         dim = 1
+        identity = _DenseEmbedder.identity
 
         def __init__(self) -> None:
             self.calls = 0
@@ -514,7 +525,7 @@ def test_dense_embeddings_are_precomputed_outside_write_lock() -> None:
         doc_repo_factory=lambda: _DenseDocRepo(),
         build_upsert_doc=lambda **kwargs: dict(kwargs),
         vector_repo_factory=lambda **kwargs: _Vec(),
-        rebuild_fn=lambda **kwargs: 0,
+        reconcile_index=lambda: 0,
         write_lock=_write_lock,
         mutation_journal_factory=lambda: journal,
         storage_profile_registry=StorageProfileRegistry(),
@@ -674,7 +685,7 @@ def test_stale_precompute_is_safe_when_document_changes_before_lock() -> None:
         doc_repo_factory=lambda: repo,
         build_upsert_doc=lambda **kwargs: dict(kwargs),
         vector_repo_factory=lambda **kwargs: _VecRepo(),
-        rebuild_fn=lambda **kwargs: 0,
+        reconcile_index=lambda: 0,
         write_lock=_noop_write_lock,
         mutation_journal_factory=lambda: journal,
         storage_profile_registry=StorageProfileRegistry(),
@@ -687,7 +698,7 @@ def test_stale_precompute_is_safe_when_document_changes_before_lock() -> None:
         op_id="mut:stale-precompute",
         upserts=(MutationUpsertInput(external_id="doc-1", content="v0"),),
     )
-    stale_precomputed = saga.precompute_vectors_for_intent(
+    stale_prepared = saga.prepare(
         intent=stale_intent,
         vector_mode_enabled=True,
     )
@@ -696,23 +707,17 @@ def test_stale_precompute_is_safe_when_document_changes_before_lock() -> None:
         op_id="mut:first-update",
         upserts=(MutationUpsertInput(external_id="doc-1", content="v1"),),
     )
-    first_precomputed = saga.precompute_vectors_for_intent(
+    first_prepared = saga.prepare(
         intent=first_intent,
         vector_mode_enabled=True,
     )
 
-    class _Prepared:
-        def __init__(self, *, intent, vectors):
-            self.intent = intent
-            self.vector_mode_enabled = True
-            self.precomputed_vectors_by_external_id = vectors
-
     saga.execute_locked(
-        prepared=_Prepared(intent=first_intent, vectors=first_precomputed),
+        prepared=first_prepared,
         journal=file_journal,
     )
     saga.execute_locked(
-        prepared=_Prepared(intent=stale_intent, vectors=stale_precomputed),
+        prepared=stale_prepared,
         journal=file_journal,
     )
 
@@ -790,7 +795,7 @@ def test_batch_drain_acquires_lock_once_for_two_concurrent_mutations() -> None:
         doc_repo_factory=lambda: repo,
         build_upsert_doc=lambda **kwargs: dict(kwargs),
         vector_repo_factory=lambda **kwargs: object(),
-        rebuild_fn=lambda **kwargs: 0,
+        reconcile_index=lambda: 0,
         write_lock=_write_lock,
         mutation_journal_factory=lambda: journal,
         storage_profile_registry=StorageProfileRegistry(),
