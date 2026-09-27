@@ -1,5 +1,3 @@
-from contextlib import suppress
-
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,8 +9,13 @@ _ = _models
 
 
 @pytest.fixture()
-def in_memory_sqlite(monkeypatch):
-    """Create an isolated in-memory SQLite DB and patch the global session factory."""
+def in_memory_sqlite(monkeypatch, tmp_path):
+    """Inject an isolated database into the entrypoint's application context."""
+    from local_rag_backend.composition import factory
+    from local_rag_backend.composition.container import AppContainer
+    from local_rag_backend.composition.context import AppContext
+    from local_rag_backend.settings import get_settings
+
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -21,13 +24,22 @@ def in_memory_sqlite(monkeypatch):
     testing_session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     db_base.Base.metadata.create_all(bind=engine)
 
-    monkeypatch.setattr(db_base, "engine", engine)
-    monkeypatch.setattr(db_base, "SessionLocal", testing_session_local)
+    factory.reset_app_context()
+    settings_obj = get_settings()
+    monkeypatch.setattr(settings_obj, "data_dir", tmp_path / "data")
+    monkeypatch.setattr(settings_obj, "index_path", str(tmp_path / "index.faiss"))
+    monkeypatch.setattr(settings_obj, "id_map_path", str(tmp_path / "index.ids.json"))
+    monkeypatch.setattr(settings_obj, "embedding_cache_db_path", tmp_path / "embeddings.sqlite")
+
+    def build_context():
+        container = AppContainer.from_settings(settings_obj, session_factory=testing_session_local)
+        return AppContext(settings_obj=settings_obj, container=container)
+
+    monkeypatch.setattr(factory, "_build_app_context", build_context)
     try:
         yield testing_session_local
     finally:
-        with suppress(Exception):
-            testing_session_local.close_all_sessions()
+        factory.reset_app_context()
         engine.dispose()
 
 
@@ -50,11 +62,11 @@ async def asgi_client(reset_app_context, in_memory_sqlite, monkeypatch, tmp_path
     import httpx
 
     from local_rag_backend.http.main import app
-    from local_rag_backend.settings import settings
+    from local_rag_backend.settings import get_settings
 
     isolated_data_dir = tmp_path / "data"
     isolated_data_dir.mkdir()
-    monkeypatch.setattr(settings, "data_dir", isolated_data_dir)
+    monkeypatch.setattr(get_settings(), "data_dir", isolated_data_dir)
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)

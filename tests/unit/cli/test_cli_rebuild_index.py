@@ -3,7 +3,9 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from local_rag_backend.cli_commands import index as index_cmd_module
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:

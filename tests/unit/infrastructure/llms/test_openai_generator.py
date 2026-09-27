@@ -4,7 +4,9 @@ import pytest
 
 from local_rag_backend.core.errors import LLMConfigurationError, LLMResponseError
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 # --------------------------------------------------------------------------- #
@@ -38,7 +40,7 @@ def test_generate_success(monkeypatch):
     monkeypatch.setattr(
         "local_rag_backend.infrastructure.llms.openai_chat.OpenAI", make_dummy_openai()
     )
-    gen = OpenAIGenerator()
+    gen = OpenAIGenerator(settings_obj=settings)
     out = gen.generate("hola", ["ctx"])
     assert out == "OK"
 
@@ -50,7 +52,7 @@ def test_generate_api_error(monkeypatch):
         "local_rag_backend.infrastructure.llms.openai_chat.OpenAI",
         make_dummy_openai(should_raise=True),
     )
-    gen = OpenAIGenerator()
+    gen = OpenAIGenerator(settings_obj=settings)
     with pytest.raises(LLMResponseError) as exc:
         gen.generate("fallará", ["ctx"])
     assert "OpenAI API error" in str(exc.value)
@@ -59,7 +61,7 @@ def test_generate_api_error(monkeypatch):
 def test_generator_requires_api_key(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     with pytest.raises(LLMConfigurationError, match="OPENAI_API_KEY"):
-        OpenAIGenerator()
+        OpenAIGenerator(settings_obj=settings)
 
 
 def test_generator_passes_configured_timeout(monkeypatch):
@@ -92,7 +94,7 @@ def test_generator_passes_configured_timeout(monkeypatch):
     monkeypatch.setattr(settings, "openai_request_timeout", 23, raising=False)
     monkeypatch.setattr("local_rag_backend.infrastructure.llms.openai_chat.OpenAI", _dummy_openai)
 
-    gen = OpenAIGenerator()
+    gen = OpenAIGenerator(settings_obj=settings)
     out = gen.generate("q", ["ctx"])
     assert out == "ok"
     assert captured.get("timeout") == 23

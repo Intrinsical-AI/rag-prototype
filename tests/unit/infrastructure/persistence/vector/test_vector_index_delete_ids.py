@@ -1,4 +1,5 @@
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
+from local_rag_backend.settings import Settings
 
 
 def test_vector_index_delete_ids_removes_vectors(tmp_path):
@@ -9,7 +10,9 @@ def test_vector_index_delete_ids_removes_vectors(tmp_path):
     idx_path = tmp_path / "idx.npy"
     map_path = tmp_path / "id_map.json"
 
-    st = VectorStorage(index_path=str(idx_path), id_map_path=str(map_path), dim=2)
+    st = VectorStorage(
+        index_path=str(idx_path), id_map_path=str(map_path), dim=2, settings_obj=Settings()
+    )
     st.upsert([1, 2, 3], [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]])
 
     # Delete the "closest" vector to the query; ensure it no longer appears.
@@ -27,7 +30,9 @@ def test_delete_is_idempotent(tmp_path):
     idx_path = tmp_path / "idx.npy"
     map_path = tmp_path / "id_map.json"
 
-    st = VectorStorage(index_path=str(idx_path), id_map_path=str(map_path), dim=2)
+    st = VectorStorage(
+        index_path=str(idx_path), id_map_path=str(map_path), dim=2, settings_obj=Settings()
+    )
     st.upsert([1], [[0.0, 0.0]])
     st.delete([999])  # no-op
     st.delete([1])

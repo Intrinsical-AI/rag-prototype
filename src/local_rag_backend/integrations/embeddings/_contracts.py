@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol, TypedDict, runtime_checkable
+from typing import Protocol, TypedDict, runtime_checkable
 
-EmbeddingProvider = Literal["openai", "sentence_transformers"]
+from local_rag_backend.core.domain.embeddings import EmbeddingProvider
 
 
 class EmbeddingLimitStatus(TypedDict):
@@ -25,6 +25,7 @@ class EmbeddingStatus(TypedDict):
     model_key: str
     dimension: int
     synthetic: bool
+    implementation_version: str
     cache_enabled: bool
     cache_db_path: str
     limits: EmbeddingLimitStatus

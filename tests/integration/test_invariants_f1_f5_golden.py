@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from support.container import override_container
+
 from local_rag_backend.composition import factory
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.http.routers import health as health_router, rag_router
 from local_rag_backend.infrastructure.persistence.sql import HistorySqlStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_golden_f1_f2_docs_mutation_ingest_and_list(
@@ -140,7 +145,7 @@ async def test_golden_f3_query_eval_and_history_contract(
     assert isinstance(p2.get("latency_ms"), int)
     assert isinstance(p2["sources"], list) and len(p2["sources"]) == 1
 
-    HistorySqlStorage().save("q-golden", "a-golden", ["doc:1"])
+    HistorySqlStorage(session_factory=in_memory_sqlite).save("q-golden", "a-golden", ["doc:1"])
     r3 = await asgi_client.get("/api/history?limit=1")
     assert r3.status_code == 200
     rows = r3.json()
@@ -163,6 +168,7 @@ async def test_golden_f4_f5_rebuild_and_readiness(
     )
 
     class _DummyEmbedder:
+        identity = EmbeddingIdentity(provider="openai", model="text-embedding-3-small", dimension=4)
         dim = 4
 
         def embed(self, texts: list[str]) -> list[list[float]]:
@@ -171,7 +177,7 @@ async def test_golden_f4_f5_rebuild_and_readiness(
     async def _ready_service_override() -> object:
         return object()
 
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: _DummyEmbedder(), raising=True)
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: _DummyEmbedder())
     monkeypatch.setattr(health_router, "get_rag_service", _ready_service_override, raising=True)
     factory.reset_app_context()
 

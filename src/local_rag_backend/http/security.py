@@ -12,8 +12,9 @@ import hmac
 
 from fastapi import Request
 
+from local_rag_backend.composition.factory import get_app_context
 from local_rag_backend.core.use_cases.errors import UnauthorizedError
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import Settings
 
 API_KEY_HEADER = "X-API-Key"
 _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -81,7 +82,7 @@ def _extract_forwarded_for_hosts(header_value: str) -> list[str]:
     return hosts
 
 
-def enforce_safe_bind_config() -> None:
+def enforce_safe_bind_config(settings: Settings) -> None:
     """
     Refuse to start with a public bind without an API key.
 
@@ -111,6 +112,7 @@ async def require_api_key(request: Request) -> None:
 
     If no API key is configured, this dependency is a no-op (dev-friendly default).
     """
+    settings = get_app_context().settings
     expected = settings.api_key
     if not expected:
         if not getattr(settings, "public_bind_requires_api_key", True):

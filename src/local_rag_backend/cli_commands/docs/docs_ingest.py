@@ -16,7 +16,7 @@ from local_rag_backend.cli_commands.runtime import (
     run_cli_mutation,
 )
 from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
 
 
 @click.command("ingest")
@@ -64,9 +64,9 @@ def ingest_cmd(
     try:
         from local_rag_backend.core.services.ingestion import build_preprocess_fn_from_settings
 
-        preprocess_fn = build_preprocess_fn_from_settings(settings)
+        preprocess_fn = build_preprocess_fn_from_settings(get_settings())
         delimiter_opt, has_header = resolve_loader_options(
-            settings_obj=settings,
+            settings_obj=get_settings(),
             csv_delimiter=csv_delimiter,
             csv_has_header=csv_has_header,
         )
@@ -93,7 +93,7 @@ def ingest_cmd(
             files=files,
             preprocess_fn=preprocess_fn,
             build_upsert_doc=ports.build_upsert_doc,
-            settings_obj=settings,
+            settings_obj=get_settings(),
             sniff_bytes=sniff_bytes,
             use_magic=use_magic,
             delimiter_opt=delimiter_opt,
@@ -109,14 +109,14 @@ def ingest_cmd(
             return
 
         doc_repo = ports.doc_repo_factory()
-        coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
+        coordinator = MutationCoordinator(settings_obj=get_settings(), ports=ports)
 
         def _ingest_sync() -> tuple[int, int, int, int, bool]:
             return execute_ingest_batches(
                 ingest_plans=ingest_plans,
                 doc_repo=doc_repo,
                 coordinator=coordinator,
-                settings_obj=settings,
+                settings_obj=get_settings(),
             )
 
         total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any = (

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from local_rag_backend.core.domain.entities import Document as DomainDocument
+from local_rag_backend.core.domain.retrieval import RetrievalFilter, document_matches_filters
 from local_rag_backend.core.domain.types import DocId, new_doc_id
 from local_rag_backend.core.ports import DocumentRepoPort, VectorRepoPort
 from local_rag_backend.infrastructure.persistence.elasticsearch.client import (
@@ -16,7 +17,7 @@ from local_rag_backend.infrastructure.persistence.elasticsearch.client import (
     ElasticClient,
 )
 from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
-from local_rag_backend.settings import Settings, settings as global_settings
+from local_rag_backend.settings import Settings
 
 
 def _utc_now_iso() -> str:
@@ -79,14 +80,15 @@ class ElasticDocsRepository(DocumentRepoPort):
         snapshot_id: str | None
         metadata: dict[str, Any] | None
         chunk_dedup_sha256: str | None
+        source: dict[str, Any]
 
     def __init__(
         self,
         *,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
         client: ElasticClient | None = None,
     ) -> None:
-        self._settings = settings_obj or global_settings
+        self._settings = settings_obj
         self._client = client or ElasticClient(settings_obj=self._settings)
         self._client.ensure_indices(embed_dim=None)
 
@@ -122,6 +124,65 @@ class ElasticDocsRepository(DocumentRepoPort):
 
     def get_all_documents(self) -> Sequence[DomainDocument]:
         return self._scan_documents()
+
+    def query_documents(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        filters: tuple[RetrievalFilter, ...] = (),
+    ) -> list[DomainDocument]:
+        """Page matching documents in external-ID order with bounded memory.
+
+        Source filtering preserves the domain's scalar/array/nested metadata semantics
+        independently of dynamic Elasticsearch mappings. Offset is not a snapshot token
+        across requests; concurrent writes can change subsequent pages.
+        """
+        if limit <= 0 or offset < 0:
+            raise ValueError("limit must be positive and offset must be non-negative")
+        results: list[DomainDocument] = []
+        search_after: list[str] | None = None
+        skipped = 0
+        while len(results) < limit:
+            body: dict[str, Any] = {
+                "size": min(256, limit + offset),
+                "query": {"match_all": {}},
+                "sort": [{"external_id": "asc"}],
+            }
+            if search_after is not None:
+                body["search_after"] = search_after
+            data = self._client.search(
+                index=str(self._settings.es_docs_index),
+                body=body,
+                params=_STRICT_SEARCH_PARAMS,
+            )
+            _require_complete_search(data, "document pagination")
+            hits = (data.get("hits") or {}).get("hits")
+            if not isinstance(hits, list):
+                raise ElasticBackendError("Incomplete Elasticsearch document pagination response")
+            for hit in hits:
+                doc = self._to_domain_document(hit)
+                if not document_matches_filters(doc, filters):
+                    continue
+                if skipped < offset:
+                    skipped += 1
+                else:
+                    results.append(doc)
+                    if len(results) == limit:
+                        return results
+            if len(hits) < body["size"]:
+                return results
+            token = hits[-1].get("sort")
+            if (
+                not isinstance(token, list)
+                or len(token) != 1
+                or not isinstance(token[0], str)
+                or not token[0]
+                or (search_after is not None and token[0] <= search_after[0])
+            ):
+                raise ElasticBackendError("Missing or non-advancing document pagination token")
+            search_after = token
+        return results
 
     def get_existing_doc_states_by_external_id(
         self, external_ids: Sequence[str]
@@ -162,6 +223,7 @@ class ElasticDocsRepository(DocumentRepoPort):
                     if source.get("chunk_dedup_sha256") is not None
                     else None
                 ),
+                source=source,
             )
         return out
 
@@ -224,12 +286,15 @@ class ElasticDocsRepository(DocumentRepoPort):
                     action = "unchanged"
 
             if action != "unchanged":
-                body: dict[str, Any] = {
-                    "external_id": external_id,
-                    str(self._settings.es_content_field): content,
-                    "content_sha256": content_sha,
-                    "updated_at": _utc_now_iso(),
-                }
+                body: dict[str, Any] = dict(existing_doc.source) if existing_doc is not None else {}
+                body.update(
+                    {
+                        "external_id": external_id,
+                        str(self._settings.es_content_field): content,
+                        "content_sha256": content_sha,
+                        "updated_at": _utc_now_iso(),
+                    }
+                )
                 if existing_doc is None:
                     body["created_at"] = body["updated_at"]
                 if item.source_id is not None:
@@ -537,12 +602,12 @@ class ElasticVectorRepo(VectorRepoPort):
     def __init__(
         self,
         *,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
         client: ElasticClient | None = None,
         dim: int | None = None,
         **_: Any,
     ) -> None:
-        self._settings = settings_obj or global_settings
+        self._settings = settings_obj
         self._client = client or ElasticClient(settings_obj=self._settings)
         self._client.ensure_indices(embed_dim=dim)
 

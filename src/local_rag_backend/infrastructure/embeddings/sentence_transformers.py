@@ -11,9 +11,9 @@ import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.errors import LLMResponseError, LLMTimeoutError
 from local_rag_backend.core.ports import EmbedderPort
-from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
@@ -28,9 +28,9 @@ class SentenceTransformerEmbedder(EmbedderPort):
         self,
         model_name: str = "all-MiniLM-L6-v2",
         *,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
     ):
-        configured_settings = settings_obj or settings
+        configured_settings = settings_obj
         self.model_name = model_name
         self._synthetic = bool(configured_settings.synthetic_embeddings)
         # nosec S311: intentional non-cryptographic RNG for synthetic stress-mode jitter/failures.
@@ -51,6 +51,12 @@ class SentenceTransformerEmbedder(EmbedderPort):
         self.model = None
 
         if self._synthetic:
+            self.identity = EmbeddingIdentity(
+                provider="sentence_transformers",
+                model=self.model_name,
+                dimension=self.dim,
+                synthetic=True,
+            )
             return
 
         try:
@@ -63,6 +69,9 @@ class SentenceTransformerEmbedder(EmbedderPort):
 
         self.model = SentenceTransformer(model_name)
         self.dim = cast("int", self.model.get_sentence_embedding_dimension())
+        self.identity = EmbeddingIdentity(
+            provider="sentence_transformers", model=self.model_name, dimension=self.dim
+        )
 
     def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
         """Embeds a sequence of texts into a sequence of vector embeddings."""

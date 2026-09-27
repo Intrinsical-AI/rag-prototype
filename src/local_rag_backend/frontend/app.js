@@ -19,6 +19,28 @@ const docTextEl = qs('#docText');
 const addDocBtn = qs('#addDocBtn');
 const refreshDocsBtn = qs('#refreshDocsBtn');
 const docsListEl = qs('#docsList');
+const apiKeyEl = qs('#apiKey');
+// Credentials belong only to this page lifetime, never browser storage.
+apiKeyEl.value = '';
+
+async function requestJSON(url, payload) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKeyEl.value) headers['X-API-Key'] = apiKeyEl.value;
+  const response = await fetch(url, {
+    method: 'POST', headers, body: JSON.stringify(payload)
+  });
+  const raw = await response.text();
+  let body;
+  try { body = JSON.parse(raw); } catch { body = null; }
+  if (!response.ok) {
+    const detail = body?.detail;
+    const message = typeof detail === 'string' ? detail :
+      detail ? JSON.stringify(detail) : raw || `HTTP error ${response.status}`;
+    throw new Error(message.slice(0, 500), { cause: response.status });
+  }
+  if (body === null) throw new Error(`Invalid JSON response (HTTP ${response.status})`);
+  return body;
+}
 
 statusEl.hidden = true;
 
@@ -67,20 +89,7 @@ askBtn.addEventListener('click', async () => {
   let errorMsg = '';
 
   try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, k })
-    });
-
-    if (!response.ok) {
-      let errorData;
-      try { errorData = await response.json(); } catch (e) { errorData = { detail: await response.text() || `HTTP error ${response.status}`}; }
-      const message = errorData.detail || (typeof errorData === 'string' ? errorData : 'Unknown error');
-      throw new Error(message, {cause: response.status});
-    }
-
-    const json = await response.json();
+    const json = await requestJSON(API_URL, { question, k });
     answer = json.answer || '(No answer received)';
     sources = Array.isArray(json.sources) ? json.sources : [];
   } catch (err) {
@@ -170,13 +179,7 @@ addDocBtn.addEventListener('click', async () => {
   addDocBtn.disabled = true;
   addDocBtn.textContent = 'Adding...';
   try {
-    const r = await fetch(DOCS_INGEST_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ texts: [txt] })
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const j = await r.json();
+    const j = await requestJSON(DOCS_INGEST_URL, { texts: [txt] });
     docTextEl.value = '';
     await loadDocs();
     toast(`✅ Ingested ${j.count} document${j.count===1?'':'s'}`);
@@ -192,13 +195,7 @@ refreshDocsBtn.addEventListener('click', loadDocs);
 
 async function loadDocs() {
   try {
-    const r = await fetch(DOCS_QUERY_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({limit: 100, offset: 0})
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const docs = await r.json();
+    const docs = await requestJSON(DOCS_QUERY_URL, { limit: 100, offset: 0 });
     renderDocs(docs);
   } catch (e) {
     docsListEl.innerHTML = `<span style="color:crimson">Failed to load docs: ${escapeHTML(String(e))}</span>`;

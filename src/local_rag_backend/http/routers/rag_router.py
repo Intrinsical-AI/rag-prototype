@@ -27,7 +27,6 @@ from local_rag_backend.http.schemas.rag_api_models import (
     HistoryItem,
     QueryResult,
 )
-from local_rag_backend.infrastructure.concurrency.blocking import run_blocking
 from local_rag_backend.infrastructure.observability.observability import (
     Timer,
     fingerprint_question,
@@ -58,6 +57,7 @@ def _to_document_in_db(doc: Any) -> DocumentInDB:
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
 async def ask(
     request: AskRequest,
+    container: AppContainer = Depends(get_app_container_dependency),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> AskResponse:
     """Ask a question using Retrieval-Augmented Generation."""
@@ -65,7 +65,7 @@ async def ask(
     t = Timer()
     ok = False
     try:
-        rag_result = await run_blocking(
+        rag_result = await container.blocking_executor().run_blocking(
             lambda: service.ask(
                 request.question,
                 top_k=int(request.k),
@@ -112,7 +112,8 @@ async def history(
 ) -> list[HistoryItem]:
     """Retrieve historical Q&A pairs from the database."""
     history_reader = container.build_history_read_port()
-    history_entries = list_history_entries_sync(
+    history_entries = await container.blocking_executor().run_blocking(
+        list_history_entries_sync,
         history_reader=history_reader,
         limit=limit,
         offset=offset,
@@ -150,7 +151,7 @@ async def ask_eval(
         raise BadRequestError(f"Invalid config: {'; '.join(validation_errors)}")
 
     try:
-        outcome = await run_blocking(
+        outcome = await container.blocking_executor().run_blocking(
             execute_ask_eval_sync,
             question=payload.question,
             cfg=cfg,

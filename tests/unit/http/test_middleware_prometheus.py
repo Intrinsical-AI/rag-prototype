@@ -4,7 +4,9 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from local_rag_backend.http import middleware as mw
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_get_metrics_enabled(monkeypatch):
@@ -20,7 +22,7 @@ def test_get_metrics_enabled(monkeypatch):
     monkeypatch.setattr(mw, "generate_latest", lambda: Dummy())
     monkeypatch.setattr(mw, "CONTENT_TYPE_LATEST", "text/plain; version=0.0.4; charset=utf-8")
 
-    text, content_type = mw.get_metrics()
+    text, content_type = mw.get_metrics(enabled=True)
     assert text == "ok-metrics"
     assert content_type.startswith("text/plain")
 

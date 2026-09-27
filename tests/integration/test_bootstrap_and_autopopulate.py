@@ -1,7 +1,9 @@
 import csv
 
 from local_rag_backend.scripts.sample_data_ingestion import run_sample_data_ingestion
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_bootstrap_ingests_data(tmp_path, monkeypatch, caplog):

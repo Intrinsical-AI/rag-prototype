@@ -3,7 +3,9 @@
 from click.testing import CliRunner
 
 from local_rag_backend import cli as cli_module
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_cli_status(monkeypatch, tmp_path):

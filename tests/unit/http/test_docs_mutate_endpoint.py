@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_docs_mutate_sparse_upsert_and_delete_by_external_id(
@@ -34,11 +36,9 @@ async def test_docs_mutate_sparse_upsert_and_delete_by_external_id(
     )
     assert r2.status_code == 200
     p2 = r2.json()
-    assert p2["inserted"] == 0
-    assert p2["updated"] == 0
-    assert p2["unchanged"] == 1
+    assert p2 == p1  # An op_id replay returns the stored original outcome.
 
-    docs = SqlDocumentStorage().get_all_documents()
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert len(docs) == 1
 
     r3 = await asgi_client.post(
@@ -53,7 +53,7 @@ async def test_docs_mutate_sparse_upsert_and_delete_by_external_id(
     assert p3["deleted_sql"] == 1
     assert p3["tombstoned"] == 1
 
-    assert SqlDocumentStorage().get_all_documents() == []
+    assert SqlDocumentStorage(in_memory_sqlite).get_all_documents() == []
 
 
 async def test_docs_mutate_rejects_conflicting_upsert_and_delete_external_id(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.ports import VectorRepoPort
 from local_rag_backend.infrastructure.persistence.vector.index import VectorIndex
@@ -16,13 +17,14 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
     validate_manifest,
 )
 from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max_scores
-from local_rag_backend.settings import Settings, settings as _global_settings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import numpy as np
     from numpy.typing import NDArray
+
+    from local_rag_backend.settings import Settings
 
 
 class VectorStorage(VectorRepoPort):
@@ -35,9 +37,15 @@ class VectorStorage(VectorRepoPort):
         dim: int | None = 384,
         *,
         backend: str | None = None,
-        settings_obj: Settings | None = None,
+        settings_obj: Settings,
+        embedding_identity: EmbeddingIdentity | None = None,
     ):
-        self._settings = settings_obj if settings_obj is not None else _global_settings
+        self._settings = settings_obj
+        self._embedding_identity = embedding_identity
+        if embedding_identity is not None:
+            if dim is not None and dim != embedding_identity.dimension:
+                raise ValueError("Embedding identity dimension does not match vector dimension")
+            dim = embedding_identity.dimension
         resolved_backend = str(backend or self._settings.vector_backend)
         self.vector_index = VectorIndex(
             index_path,
@@ -46,19 +54,16 @@ class VectorStorage(VectorRepoPort):
             backend=resolved_backend,
         )
 
-    def _expected_manifest_config(self) -> dict[str, str]:
-        return expected_manifest_config_from_settings(self._settings)
+    def _expected_manifest_config(self) -> dict[str, object]:
+        return expected_manifest_config_from_settings(
+            self._settings, embedding_identity=self._embedding_identity
+        )
 
-    def _ensure_manifest(self, *, overwrite: bool) -> None:
-        idx_path = getattr(self.vector_index, "index_path", None)
-        dim_attr = getattr(self.vector_index, "dim", None)
-        backend_attr = getattr(self.vector_index, "backend", None)
-        if idx_path is None or dim_attr is None or backend_attr is None:
-            return
-
+    def _ensure_manifest(self, *, overwrite: bool, create: bool = True) -> None:
+        idx_path = self.vector_index.index_path
         expected = self._expected_manifest_config()
-        dim = int(dim_attr)
-        backend = str(backend_attr)
+        dim = self.vector_index.dim
+        backend = self.vector_index.backend
 
         if overwrite:
             overwrite_manifest_for_settings(
@@ -70,27 +75,28 @@ class VectorStorage(VectorRepoPort):
             return
 
         manifest_path = manifest_path_for(idx_path)
-        manifest = read_manifest(manifest_path)
+        try:
+            manifest = read_manifest(manifest_path)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("Index manifest invalid; rebuild is required.") from exc
         if manifest is None:
-            vectors = int(getattr(self.vector_index, "ntotal", 0) or 0)
-            id_map = getattr(self.vector_index, "id_map", [])
-            id_map_len = len(id_map) if isinstance(id_map, list) else 0
-            if vectors > 0 or id_map_len > 0:
+            if self.vector_index.ntotal > 0 or self.vector_index.id_map:
                 raise RuntimeError(
                     "Index manifest missing for a non-empty index; rebuild is required "
                     "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
                 )
 
-        create_manifest_if_missing_for_settings(
-            index_path=idx_path,
-            expected=expected,
-            dimension=dim,
-            index_backend=backend,
-        )
-
-        manifest = read_manifest(manifest_path)
-        if manifest is None:  # pragma: no cover
-            raise RuntimeError("Index manifest is missing after creation attempt.")
+            if not create:
+                return
+            create_manifest_if_missing_for_settings(
+                index_path=idx_path,
+                expected=expected,
+                dimension=dim,
+                index_backend=backend,
+            )
+            manifest = read_manifest(manifest_path)
+            if manifest is None:  # pragma: no cover
+                raise RuntimeError("Index manifest is missing after creation attempt.")
         mismatches, errors = validate_manifest(
             manifest=manifest,
             expected_config=expected,
@@ -108,7 +114,9 @@ class VectorStorage(VectorRepoPort):
         return self.vector_index.ntotal
 
     def upsert(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
-        self._ensure_manifest(overwrite=False)
+        self._ensure_manifest(overwrite=False, create=bool(ids))
+        if not ids and not vectors:
+            return
         self.vector_index.add_to_index(list(ids), list(vectors))
 
     def apply_delta_atomic(
@@ -117,11 +125,11 @@ class VectorStorage(VectorRepoPort):
         delete_ids: Sequence[DocId],
         upserts: Sequence[tuple[DocId, Sequence[float]]],
     ) -> None:
-        self._ensure_manifest(overwrite=False)
+        self._ensure_manifest(overwrite=False, create=bool(upserts))
         self.vector_index.apply_delta_atomic(delete_ids=delete_ids, upserts=upserts)
 
     def delete(self, ids: Sequence[DocId]) -> int:
-        self._ensure_manifest(overwrite=False)
+        self._ensure_manifest(overwrite=False, create=False)
         return self.vector_index.delete_ids(list(ids))
 
     def rebuild(self, ids: Sequence[DocId], vectors: Sequence[Sequence[float]]) -> None:
@@ -138,15 +146,12 @@ class VectorStorage(VectorRepoPort):
     def search(
         self, query_vector: Sequence[float], k: int
     ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
+        self._ensure_manifest(overwrite=False, create=False)
         return self.vector_index.search(query_vector, k)
 
     def similar(self, vector: Sequence[float], k: int) -> list[tuple[DocId, float]]:
-        search_with_snapshot = getattr(self.vector_index, "search_with_snapshot", None)
-        if callable(search_with_snapshot):
-            indices, distances, id_map = search_with_snapshot(vector, k)
-        else:
-            indices, distances = self.search(vector, k)
-            id_map = list(self.vector_index.id_map)
+        self._ensure_manifest(overwrite=False, create=False)
+        indices, distances, id_map = self.vector_index.search_with_snapshot(vector, k)
         valid_results = [
             (id_map[i], float(d))
             for i, d in zip(indices, distances, strict=False)

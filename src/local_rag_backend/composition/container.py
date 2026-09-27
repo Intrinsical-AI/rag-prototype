@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import partial
+from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import QueuePool
+
 from local_rag_backend.composition.adapters import (
     DEFAULT_DENSE_BACKEND_MESSAGE,
-    build_blocking_executor,
     build_dense_embedder_from_settings,
     build_docs_import_loader_port,
     build_docs_read_port,
@@ -34,6 +39,8 @@ from local_rag_backend.core.services.prompting import PromptTemplateError, valid
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.core.services.reranking import RerankingRetriever
 from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
+from local_rag_backend.core.use_cases.index import rebuild_index_sync
+from local_rag_backend.infrastructure.concurrency.blocking import BlockingExecutor
 from local_rag_backend.infrastructure.concurrency.locks.write_lock import multi_store_write_lock
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
@@ -41,7 +48,9 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
+from local_rag_backend.infrastructure.observability.perf import configure_perf_metrics
 from local_rag_backend.infrastructure.persistence.elasticsearch import (
+    ElasticClient,
     ElasticDocsRepository,
     ElasticHistoryStorage,
     ElasticSystemStateStorage,
@@ -59,10 +68,9 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import purge_i
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
-from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Callable, Sequence
 
     from local_rag_backend.core.domain.entities import Document as DomainDocument
     from local_rag_backend.core.ports import (
@@ -110,164 +118,16 @@ class EvalExecutionBundle:
     reranker_strategy: str
 
 
-@dataclass(frozen=True)
-class _StorageBackendBundle:
-    doc_repo_factory: Callable[[], DocumentRepoPort]
-    build_upsert_doc: Any
-    history_repo_factory: Callable[[], QAHistoryPort]
-    system_state_factory: Callable[[], SystemStateStorage]
-
-
-@dataclass(frozen=True)
-class _RetrieverBackendBundle:
-    vector_repo_factory: Callable[..., VectorRepoPort]
-    purge_index_artifacts_fn: Callable[..., None]
-
-
 class AppContainer:
-    """Centralized composition for adapters/use-cases in the app layer."""
+    """Own settings, persistence resources and injectable runtime factories."""
 
     RAG_SERVICE_STATE_KEY = "rag_service"
-
-    @classmethod
-    def _compute_default_components(cls) -> dict[str, Any]:
-        """Return the canonical default wiring map for runtime composition."""
-        return cls.runtime_wiring_defaults()
-
-    @classmethod
-    def runtime_wiring_defaults(cls) -> dict[str, Any]:
-        """Single source of truth for runtime adapter wiring defaults."""
-        return {
-            "openai_embedder_factory": OpenAIEmbedder,
-            "st_embedder_factory": cls._default_st_embedder_factory,
-            "openai_generator_factory": OpenAIGenerator,
-            "ollama_generator_factory": OllamaGenerator,
-            "doc_repo_factory": SqlDocumentStorage,
-            "build_upsert_doc": SqlDocumentStorage.UpsertDoc,
-            "history_repo_factory": HistorySqlStorage,
-            "sparse_retriever_factory": SparseBM25Retriever,
-            "dense_retriever_factory": DenseVectorRetriever,
-            "hybrid_retriever_factory": HybridRetriever,
-            "vector_repo_factory": VectorStorage,
-            "reranker_factory": RerankingRetriever,
-            "rebuild_fn": rebuild_index_from_db,
-            "purge_index_artifacts_fn": purge_index_artifacts,
-            "write_lock": multi_store_write_lock,
-            "rag_service_factory": RagService,
-            "system_state_factory": SystemStateStorage,
-        }
-
-    def _uses_elasticsearch_backend(self) -> bool:
-        return self.settings_obj.persistence_backend == "elasticsearch"
-
-    def _build_storage_backend(
-        self,
-        *,
-        defaults: dict[str, Any],
-        doc_repo_factory: Callable[[], DocumentRepoPort] | None,
-        build_upsert_doc: Any | None,
-        history_repo_factory: Callable[[], QAHistoryPort] | None,
-        system_state_factory: Callable[[], SystemStateStorage] | None,
-    ) -> _StorageBackendBundle:
-        use_elasticsearch = self._uses_elasticsearch_backend()
-        default_doc_repo_factory = cast(
-            "Callable[[], DocumentRepoPort]", defaults["doc_repo_factory"]
-        )
-        resolved_doc_repo_factory = doc_repo_factory or default_doc_repo_factory
-        if use_elasticsearch and resolved_doc_repo_factory == default_doc_repo_factory:
-
-            def _elastic_doc_repo_factory() -> DocumentRepoPort:
-                return ElasticDocsRepository(settings_obj=self.settings_obj)
-
-            _elastic_doc_repo_factory.__name__ = "<lambda>"
-            resolved_doc_repo_factory = _elastic_doc_repo_factory
-
-        default_build_upsert_doc = defaults["build_upsert_doc"]
-        resolved_build_upsert_doc = build_upsert_doc or default_build_upsert_doc
-        if use_elasticsearch and resolved_build_upsert_doc == default_build_upsert_doc:
-            resolved_build_upsert_doc = ElasticDocsRepository.UpsertDoc
-
-        default_history_repo_factory = cast(
-            "Callable[[], QAHistoryPort]", defaults["history_repo_factory"]
-        )
-        resolved_history_repo_factory = history_repo_factory or default_history_repo_factory
-        if use_elasticsearch and resolved_history_repo_factory == default_history_repo_factory:
-
-            def _elastic_history_repo_factory() -> QAHistoryPort:
-                return ElasticHistoryStorage(settings_obj=self.settings_obj)
-
-            _elastic_history_repo_factory.__name__ = "<lambda>"
-            resolved_history_repo_factory = _elastic_history_repo_factory
-
-        default_system_state_factory = cast(
-            "Callable[[], SystemStateStorage]", defaults["system_state_factory"]
-        )
-        resolved_system_state_factory = system_state_factory or default_system_state_factory
-        if use_elasticsearch and resolved_system_state_factory == default_system_state_factory:
-
-            def _elastic_system_state_factory() -> SystemStateStorage:
-                return cast(
-                    "SystemStateStorage",
-                    ElasticSystemStateStorage(settings_obj=self.settings_obj),
-                )
-
-            _elastic_system_state_factory.__name__ = "<lambda>"
-            resolved_system_state_factory = _elastic_system_state_factory
-
-        return _StorageBackendBundle(
-            doc_repo_factory=resolved_doc_repo_factory,
-            build_upsert_doc=resolved_build_upsert_doc,
-            history_repo_factory=resolved_history_repo_factory,
-            system_state_factory=resolved_system_state_factory,
-        )
-
-    def _build_retriever_backend(
-        self,
-        *,
-        defaults: dict[str, Any],
-        vector_repo_factory: Callable[..., VectorRepoPort] | None,
-        purge_index_artifacts_fn: Callable[..., None] | None,
-    ) -> _RetrieverBackendBundle:
-        use_elasticsearch = self._uses_elasticsearch_backend()
-        default_vector_repo_factory = cast(
-            "Callable[..., VectorRepoPort]", defaults["vector_repo_factory"]
-        )
-        resolved_vector_repo_factory = vector_repo_factory or default_vector_repo_factory
-        if use_elasticsearch and resolved_vector_repo_factory == default_vector_repo_factory:
-
-            def _elastic_vector_repo_factory(**kwargs: Any) -> VectorRepoPort:
-                return cast(
-                    "VectorRepoPort",
-                    ElasticVectorRepo(
-                        settings_obj=kwargs.pop("settings_obj", self.settings_obj),
-                        **kwargs,
-                    ),
-                )
-
-            _elastic_vector_repo_factory.__name__ = "<lambda>"
-            resolved_vector_repo_factory = _elastic_vector_repo_factory
-
-        default_purge_index_artifacts_fn = cast(
-            "Callable[..., None]", defaults["purge_index_artifacts_fn"]
-        )
-        resolved_purge_index_artifacts_fn = (
-            purge_index_artifacts_fn or default_purge_index_artifacts_fn
-        )
-        if (
-            use_elasticsearch
-            and resolved_purge_index_artifacts_fn == default_purge_index_artifacts_fn
-        ):
-            resolved_purge_index_artifacts_fn = purge_index_artifacts_noop
-
-        return _RetrieverBackendBundle(
-            vector_repo_factory=resolved_vector_repo_factory,
-            purge_index_artifacts_fn=resolved_purge_index_artifacts_fn,
-        )
 
     def __init__(
         self,
         *,
         settings_obj: Settings,
+        session_factory: sessionmaker[Session] | None = None,
         openai_embedder_factory: Callable[[], EmbedderPort] | None = None,
         st_embedder_factory: Callable[[str], EmbedderPort] | None = None,
         openai_generator_factory: Callable[..., GeneratorPort] | None = None,
@@ -275,7 +135,6 @@ class AppContainer:
         doc_repo_factory: Callable[[], DocumentRepoPort] | None = None,
         build_upsert_doc: Any | None = None,
         history_repo_factory: Callable[[], QAHistoryPort] | None = None,
-        sparse_retriever_factory: Callable[..., RetrieverPort] | None = None,
         dense_retriever_factory: Callable[..., RetrieverPort] | None = None,
         hybrid_retriever_factory: Callable[..., RetrieverPort] | None = None,
         vector_repo_factory: Callable[..., VectorRepoPort] | None = None,
@@ -289,76 +148,119 @@ class AppContainer:
         rag_service_factory: Callable[..., RagService] | None = None,
         system_state_factory: Callable[[], SystemStateStorage] | None = None,
     ) -> None:
-        defaults = self._compute_default_components()
         self.settings_obj = settings_obj
-        self.openai_embedder_factory = openai_embedder_factory or cast(
-            "Callable[[], EmbedderPort]", defaults["openai_embedder_factory"]
+        self._blocking_executor = BlockingExecutor(settings_obj=settings_obj)
+        self.engine = None
+        self._elastic_client: ElasticClient | None = None
+        self.session_factory = session_factory
+        self._owns_engine = session_factory is None
+        default_doc_factory: Callable[[], DocumentRepoPort]
+        default_history_factory: Callable[[], QAHistoryPort]
+        default_state_factory: Callable[[], SystemStateStorage | ElasticSystemStateStorage]
+        default_vector_factory: Callable[..., VectorRepoPort]
+        default_upsert_doc: Any
+        use_es = settings_obj.persistence_backend == "elasticsearch"
+        if use_es:
+            self._elastic_client = ElasticClient(settings_obj=settings_obj)
+            default_doc_factory = partial(
+                ElasticDocsRepository, settings_obj=settings_obj, client=self._elastic_client
+            )
+            default_history_factory = partial(
+                ElasticHistoryStorage, settings_obj=settings_obj, client=self._elastic_client
+            )
+            default_state_factory = partial(
+                ElasticSystemStateStorage, settings_obj=settings_obj, client=self._elastic_client
+            )
+            default_vector_factory = partial(ElasticVectorRepo, client=self._elastic_client)
+            default_upsert_doc = ElasticDocsRepository.UpsertDoc
+        else:
+            if self.session_factory is None:
+                engine_options: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
+                if settings_obj.sqlite_url in {"sqlite://", "sqlite:///:memory:"}:
+                    engine_options.update(poolclass=QueuePool, pool_size=1, max_overflow=0)
+                self.engine = create_engine(settings_obj.sqlite_url, **engine_options)
+                self.session_factory = sessionmaker(
+                    bind=self.engine, autocommit=False, autoflush=False
+                )
+            else:
+                self.engine = self.session_factory.kw["bind"]
+            default_doc_factory = partial(SqlDocumentStorage, session_factory=self.session_factory)
+            default_history_factory = partial(
+                HistorySqlStorage, session_factory=self.session_factory
+            )
+            default_state_factory = partial(
+                SystemStateStorage, session_factory=self.session_factory
+            )
+            default_vector_factory = VectorStorage
+            default_upsert_doc = SqlDocumentStorage.UpsertDoc
+        self.openai_embedder_factory = openai_embedder_factory or partial(
+            OpenAIEmbedder, settings_obj=settings_obj
         )
-        self.st_embedder_factory = st_embedder_factory or cast(
-            "Callable[[str], EmbedderPort]", defaults["st_embedder_factory"]
-        )
-        self.openai_generator_factory = openai_generator_factory or cast(
-            "Callable[..., GeneratorPort]", defaults["openai_generator_factory"]
-        )
-        self.ollama_generator_factory = ollama_generator_factory or cast(
-            "Callable[..., GeneratorPort]", defaults["ollama_generator_factory"]
-        )
-        storage_backend = self._build_storage_backend(
-            defaults=defaults,
-            doc_repo_factory=doc_repo_factory,
-            build_upsert_doc=build_upsert_doc,
-            history_repo_factory=history_repo_factory,
-            system_state_factory=system_state_factory,
-        )
-        self.doc_repo_factory = storage_backend.doc_repo_factory
-        self.build_upsert_doc = storage_backend.build_upsert_doc
-        self.history_repo_factory = storage_backend.history_repo_factory
-        self.sparse_retriever_factory = sparse_retriever_factory or cast(
-            "Callable[..., RetrieverPort]", defaults["sparse_retriever_factory"]
-        )
-        self.dense_retriever_factory = dense_retriever_factory or cast(
-            "Callable[..., RetrieverPort]", defaults["dense_retriever_factory"]
-        )
-        self.hybrid_retriever_factory = hybrid_retriever_factory or cast(
-            "Callable[..., RetrieverPort]", defaults["hybrid_retriever_factory"]
-        )
-        retriever_backend = self._build_retriever_backend(
-            defaults=defaults,
-            vector_repo_factory=vector_repo_factory,
-            purge_index_artifacts_fn=purge_index_artifacts_fn,
-        )
-        self.vector_repo_factory = retriever_backend.vector_repo_factory
-        self.reranker_factory = reranker_factory or cast(
-            "Callable[..., RetrieverPort]", defaults["reranker_factory"]
-        )
-        self.rebuild_fn = rebuild_fn or cast("Callable[..., int]", defaults["rebuild_fn"])
-        self.purge_index_artifacts_fn = retriever_backend.purge_index_artifacts_fn
-        self.write_lock = write_lock or cast("Callable[..., Any]", defaults["write_lock"])
-        self.mutation_journal_factory = mutation_journal_factory or (
-            lambda: FileMutationJournal(
-                self.settings_obj.get_coordination_dir() / ".mutation_journal"
+        self.st_embedder_factory = st_embedder_factory or (
+            lambda model_name: SentenceTransformerEmbedder(
+                model_name=model_name, settings_obj=settings_obj
             )
         )
-        self.mutation_uow_factory = mutation_uow_factory
-        self.storage_profile_registry = storage_profile_registry or StorageProfileRegistry()
-        self.rag_service_factory = rag_service_factory or cast(
-            "Callable[..., RagService]", defaults["rag_service_factory"]
+        self.openai_generator_factory = openai_generator_factory or partial(
+            OpenAIGenerator, settings_obj=settings_obj
         )
-        self._system_state = storage_backend.system_state_factory()
+        self.ollama_generator_factory = ollama_generator_factory or partial(
+            OllamaGenerator, settings_obj=settings_obj
+        )
+        self.doc_repo_factory = doc_repo_factory or default_doc_factory
+        self.build_upsert_doc = build_upsert_doc or default_upsert_doc
+        self.history_repo_factory = history_repo_factory or default_history_factory
+        self.dense_retriever_factory = dense_retriever_factory or DenseVectorRetriever
+        self.hybrid_retriever_factory = hybrid_retriever_factory or HybridRetriever
+        self.vector_repo_factory = vector_repo_factory or default_vector_factory
+        self.reranker_factory = reranker_factory or RerankingRetriever
+        self.rebuild_fn = rebuild_fn or rebuild_index_from_db
+        self.purge_index_artifacts_fn = purge_index_artifacts_fn or (
+            purge_index_artifacts_noop if use_es else purge_index_artifacts
+        )
+        self.write_lock = write_lock or partial(
+            multi_store_write_lock,
+            coordination_dir=settings_obj.get_coordination_dir(),
+            timeout_s=settings_obj.write_lock_timeout_s,
+            poll_s=settings_obj.write_lock_poll_s,
+            metrics_path=settings_obj.lock_metrics_path,
+        )
+        self.mutation_journal_factory = mutation_journal_factory or (
+            lambda: FileMutationJournal(settings_obj.get_coordination_dir() / ".mutation_journal")
+        )
+        self.mutation_uow_factory = mutation_uow_factory or (
+            partial(db_base.session_uow, session_factory=self.session_factory)
+            if self.session_factory is not None
+            else None
+        )
+        self.storage_profile_registry = storage_profile_registry or StorageProfileRegistry()
+        self.rag_service_factory = rag_service_factory or RagService
+        self._system_state = (system_state_factory or default_state_factory)()
         self._rag_service_cache_lock = Lock()
         self._rag_service_cache: RagService | None = None
         self._rag_service_cache_version: int | None = None
 
     @classmethod
     def from_settings(cls, settings_obj: Settings, **overrides: Any) -> AppContainer:
-        """Preferred constructor for runtime wiring while preserving injectable __init__."""
-        resolved = cls.runtime_wiring_defaults()
-        resolved.update(overrides)
-        return cls(settings_obj=settings_obj, **resolved)
+        return cls(settings_obj=settings_obj, **overrides)
 
-    @staticmethod
-    def _default_st_embedder_factory(model_name: str) -> EmbedderPort:
-        return SentenceTransformerEmbedder(model_name=model_name)
+    def initialize(self) -> None:
+        """Create resources explicitly at the entrypoint, never on module import."""
+        configure_perf_metrics(self.settings_obj.perf_metrics_out_path)
+        Path(self.settings_obj.data_dir).mkdir(parents=True, exist_ok=True)
+        if self.engine is not None:
+            database = self.engine.url.database
+            if database and database != ":memory:":
+                Path(database).parent.mkdir(parents=True, exist_ok=True)
+            db_base.ensure_sqlite_schema_current(engine_to_use=self.engine)
+
+    def close(self) -> None:
+        self._blocking_executor.close()
+        self.clear_local_rag_service_cache()
+        if self.engine is not None and self._owns_engine:
+            self.engine.dispose()
+        if self._elastic_client is not None:
+            self._elastic_client.close()
 
     def validate_rag_config(self, config: AskEvalConfigLike) -> list[str]:
         errors = []
@@ -421,12 +323,14 @@ class AppContainer:
         return build_history_read_port(
             settings_obj=self.settings_obj,
             history_repo_factory=self.history_repo_factory,
+            session_factory=self.session_factory,
         )
 
     def build_health_diagnostics_port(self, *, engine: Any | None = None) -> HealthDiagnosticsPort:
         return build_health_diagnostics_port(
             settings_obj=self.settings_obj,
-            engine=(engine if engine is not None else db_base.engine),
+            engine=(engine if engine is not None else self.engine),
+            elastic_client=self._elastic_client,
         )
 
     def build_health_readiness_bundle(self, *, engine: Any | None = None) -> HealthReadinessBundle:
@@ -455,14 +359,8 @@ class AppContainer:
             import_loader=self.build_docs_import_loader_port(),
         )
 
-    def blocking_executor(
-        self,
-        *,
-        run_blocking_fn: Callable[..., Awaitable[Any]] | None = None,
-    ) -> BlockingExecutorPort:
-        if run_blocking_fn is None:
-            return build_blocking_executor()
-        return build_blocking_executor(run_blocking_fn=run_blocking_fn)
+    def blocking_executor(self) -> BlockingExecutorPort:
+        return self._blocking_executor
 
     def build_openrouter_client(self) -> OpenRouterClientPort:
         return build_openrouter_client_from_settings(settings_obj=self.settings_obj)
@@ -486,7 +384,6 @@ class AppContainer:
         return build_eval_retriever_factory_port(
             openai_embedder_factory=self.openai_embedder_factory,
             st_embedder_factory=self.st_embedder_factory,
-            sparse_retriever_factory=self.sparse_retriever_factory,
             dense_retriever_factory=self.dense_retriever_factory,
             hybrid_retriever_factory=self.hybrid_retriever_factory,
             vector_repo_factory=VectorStorage,
@@ -515,15 +412,14 @@ class AppContainer:
             doc_repo_factory=cast("Any", self.doc_repo_factory),
             build_upsert_doc=self.build_upsert_doc,
             vector_repo_factory=self.vector_repo_factory,
-            rebuild_fn=self.rebuild_fn,
+            reconcile_index=lambda: rebuild_index_sync(
+                settings_obj=self.settings_obj,
+                ports=self.index_mutation_ports(build_embedder=resolved_embedder_builder),
+            ),
             write_lock=self.write_lock,
             mutation_journal_factory=self.mutation_journal_factory,
             storage_profile_registry=self.storage_profile_registry,
-            mutation_uow_factory=(
-                None
-                if self.settings_obj.persistence_backend == "elasticsearch"
-                else (self.mutation_uow_factory or db_base.session_uow)
-            ),
+            mutation_uow_factory=self.mutation_uow_factory,
         )
 
     def index_mutation_ports(
@@ -570,7 +466,6 @@ class AppContainer:
             enable_reranker=self.settings_obj.enable_reranker,
             reranker_candidate_k=self.settings_obj.reranker_candidate_k,
             reranker_strategy=self.settings_obj.reranker_strategy,
-            sparse_retriever_factory=self.sparse_retriever_factory,
             dense_retriever_factory=self.dense_retriever_factory,
             hybrid_retriever_factory=self.hybrid_retriever_factory,
             vector_repo_factory=self.vector_repo_factory,
@@ -600,7 +495,6 @@ class AppContainer:
             doc_repo=doc_repo,
             openai_embedder_factory=self.openai_embedder_factory,
             st_embedder_factory=self.st_embedder_factory,
-            sparse_retriever_factory=self.sparse_retriever_factory,
             dense_retriever_factory=self.dense_retriever_factory,
             hybrid_retriever_factory=self.hybrid_retriever_factory,
             vector_repo_factory=self.vector_repo_factory,

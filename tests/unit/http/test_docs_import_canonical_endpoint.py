@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_import_canonical_upsert_only_and_reimport_is_unchanged(
@@ -37,7 +39,7 @@ async def test_import_canonical_upsert_only_and_reimport_is_unchanged(
     assert body2["updated"] == 0
     assert body2["unchanged"] == 1
 
-    docs = SqlDocumentStorage().get_all_documents()
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert len(docs) == 1
     assert docs[0].external_id == "doc-1"
     assert docs[0].metadata == {
@@ -74,7 +76,9 @@ async def test_import_canonical_defaults_replace_scope_true(
     body2 = r2.json()
     assert body2["replace_scope"] is True
     assert body2["deleted_sql"] == 1
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {"doc-2"}
+    assert {
+        doc.external_id for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    } == {"doc-2"}
 
 
 async def test_import_canonical_replace_scope_hard_deletes_stale_docs(
@@ -125,7 +129,7 @@ async def test_import_canonical_replace_scope_hard_deletes_stale_docs(
     assert body2["deleted_sql"] == 1
     assert body2["deleted_external_ids"] == ["doc-1"]
 
-    docs = SqlDocumentStorage().get_all_documents()
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert {doc.external_id for doc in docs} == {"doc-2"}
 
     third = {
@@ -144,7 +148,9 @@ async def test_import_canonical_replace_scope_hard_deletes_stale_docs(
     r3 = await asgi_client.post("/api/docs/import-canonical", json=third)
     assert r3.status_code == 200
     assert r3.json()["inserted"] == 1
-    assert {doc.external_id for doc in SqlDocumentStorage().get_all_documents()} == {
+    assert {
+        doc.external_id for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    } == {
         "doc-1",
         "doc-2",
     }

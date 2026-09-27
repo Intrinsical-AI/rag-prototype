@@ -1,5 +1,7 @@
 # tests/unit/app/test_api_misc.py
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_cors_preflight_options(asgi_client):

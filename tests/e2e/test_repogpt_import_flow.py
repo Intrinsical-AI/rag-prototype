@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import pytest
 from click.testing import CliRunner
-from support.repogpt_fixture import REPOGPT_CLI_AVAILABLE, emit_repogpt_code_units
-
-if not REPOGPT_CLI_AVAILABLE:
-    pytest.skip(
-        "cross-repo RepoGPT checkout not available",
-        allow_module_level=True,
-    )
+from support.repogpt_fixture import load_repogpt_payload
 
 from local_rag_backend.cli import cli
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_repogpt_emit_code_units_imports_and_retrieves_by_queryable_metadata(
@@ -38,7 +33,7 @@ def test_repogpt_emit_code_units_imports_and_retrieves_by_queryable_metadata(
         "    return name\n",
         encoding="utf-8",
     )
-    payload = emit_repogpt_code_units(payload_path=payload_path, repo_path=repo_path)
+    payload = load_repogpt_payload(payload_path=payload_path, repo_path=repo_path)
 
     assert payload["schema_version"] == "4"
     assert payload["replace_scope"] is True
@@ -46,7 +41,7 @@ def test_repogpt_emit_code_units_imports_and_retrieves_by_queryable_metadata(
     result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(in_memory_sqlite)
     docs = list(repo.get_all_documents())
     assert docs
 

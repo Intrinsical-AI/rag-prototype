@@ -8,12 +8,14 @@ from click.testing import CliRunner
 from local_rag_backend.cli import cli
 from local_rag_backend.cli_commands import index as index_cmd_module
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_rag_status_reports_document_count(in_memory_sqlite, monkeypatch):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    SqlDocumentStorage().store_documents(["a", "b"])
+    SqlDocumentStorage(session_factory=in_memory_sqlite).store_documents(["a", "b"])
 
     r = CliRunner().invoke(cli, ["status"])
     assert r.exit_code == 0, r.output

@@ -13,7 +13,9 @@ from typing import Any
 import httpx
 import pytest
 
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.domain.profiles import StorageProfileRegistry
+from local_rag_backend.core.domain.retrieval import RetrievalFilter
 from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.ports.contracts import DocsMutationPorts
 from local_rag_backend.core.use_cases._atomic_mutation_executor import AtomicMutationExecutor
@@ -530,12 +532,13 @@ def test_canonical_import_replaces_large_scope_and_retry_is_idempotent(tmp_path)
     repo = backend.docs
     ports = DocsMutationPorts(
         build_embedder=lambda: SimpleNamespace(
-            embed=lambda texts: [[1.0, 0.0, 0.0] for _ in texts]
+            embed=lambda texts: [[1.0, 0.0, 0.0] for _ in texts],
+            identity=EmbeddingIdentity("sentence_transformers", "test", 3, synthetic=True),
         ),
         doc_repo_factory=lambda: repo,
         build_upsert_doc=repo.UpsertDoc,
         vector_repo_factory=lambda **kwargs: backend.vector,
-        rebuild_fn=lambda **kwargs: 0,
+        reconcile_index=lambda: 0,
         write_lock=lambda **kwargs: nullcontext(),
         mutation_journal_factory=lambda: None,
         storage_profile_registry=StorageProfileRegistry(),
@@ -735,17 +738,16 @@ def test_atomic_mutation_executor_handles_unified_elastic_mutation_flow() -> Non
     repo.upsert_documents_by_external_id(
         [
             ElasticDocsRepository.UpsertDoc(external_id="doc-delete", content="delete me"),
-            ElasticDocsRepository.UpsertDoc(external_id="doc-tombstone", content="old"),
+            ElasticDocsRepository.UpsertDoc(external_id="doc-existing", content="old"),
         ]
     )
-    repo.delete_by_external_ids(["doc-tombstone"])
 
     ports = DocsMutationPorts(
         build_embedder=lambda: None,  # type: ignore[arg-type]
         doc_repo_factory=lambda: repo,
         build_upsert_doc=ElasticDocsRepository.UpsertDoc,
         vector_repo_factory=lambda **kwargs: backend.vector,
-        rebuild_fn=lambda **kwargs: 0,
+        reconcile_index=lambda: 0,
         write_lock=lambda **kwargs: nullcontext(),
         mutation_journal_factory=lambda: None,  # type: ignore[arg-type]
         storage_profile_registry=StorageProfileRegistry(),
@@ -763,7 +765,7 @@ def test_atomic_mutation_executor_handles_unified_elastic_mutation_flow() -> Non
                     metadata={"tier": "gold"},
                 ),
                 MutationUpsertInput(
-                    external_id="doc-tombstone",
+                    external_id="doc-existing",
                     content="restored",
                     source_id="src-restore",
                 ),
@@ -775,23 +777,132 @@ def test_atomic_mutation_executor_handles_unified_elastic_mutation_flow() -> Non
         vector_mode_enabled=True,
         precomputed_vectors_by_external_id={
             "doc-new": [1.0, 0.0, 0.0],
-            "doc-tombstone": [0.5, 0.5, 0.0],
+            "doc-existing": [0.5, 0.5, 0.0],
         },
     )
 
     summary = executor.execute_locked(prepared=prepared)
 
     assert summary.op_id == "op-1"
-    assert summary.inserted == 2
-    assert summary.updated == 0
+    assert summary.inserted == 1
+    assert summary.updated == 1
     assert summary.unchanged == 0
     assert summary.deleted_sql == 1
     assert summary.deleted_index == 1
     assert summary.tombstoned == 1
     assert summary.missing_external_ids == ["missing-doc"]
     assert summary.index_doc_count == 2
-    assert [row.external_id for row in list(summary.results or [])] == ["doc-new", "doc-tombstone"]
-    assert repo.get_tombstoned_external_ids(["doc-tombstone", "missing-doc"]) == {"missing-doc"}
-    docs = repo.get([DocId("doc-new"), DocId("doc-tombstone"), DocId("doc-delete")])
-    assert [doc.external_id for doc in docs] == ["doc-new", "doc-tombstone"]
+    assert [row.external_id for row in list(summary.results or [])] == ["doc-new", "doc-existing"]
+    assert repo.get_tombstoned_external_ids(["doc-existing", "missing-doc"]) == {"missing-doc"}
+    docs = repo.get([DocId("doc-new"), DocId("doc-existing"), DocId("doc-delete")])
+    assert [doc.external_id for doc in docs] == ["doc-new", "doc-existing"]
     assert executor.recover_incomplete() == 0
+
+
+def test_atomic_upsert_rejects_tombstones_before_any_write():
+    backend = _build_backend()
+    repo = backend.docs
+    repo.delete_by_external_ids(["gone"])
+    ports = DocsMutationPorts(
+        build_embedder=lambda: None,
+        doc_repo_factory=lambda: repo,
+        build_upsert_doc=repo.UpsertDoc,
+        vector_repo_factory=lambda **kwargs: backend.vector,
+        reconcile_index=lambda: 0,
+        write_lock=lambda **kwargs: nullcontext(),
+        mutation_journal_factory=lambda: None,
+        storage_profile_registry=StorageProfileRegistry(),
+    )
+    executor = AtomicMutationExecutor(settings_obj=backend.settings, ports=ports)
+    with pytest.raises(ValueError, match="tombstoned"):
+        executor.execute_locked(
+            prepared=PreparedMutation(
+                intent=MutationIntent(
+                    op_id="blocked",
+                    upserts=(
+                        MutationUpsertInput(external_id="new", content="new"),
+                        MutationUpsertInput(external_id="gone", content="resurrect"),
+                    ),
+                ),
+                vector_mode_enabled=False,
+                precomputed_vectors_by_external_id={},
+            )
+        )
+    assert repo.get_all_documents() == []
+    assert repo.get_tombstoned_external_ids(["gone"]) == {"gone"}
+
+
+def test_elastic_content_update_preserves_omitted_fields_and_replaces_metadata():
+    backend = _build_backend()
+    repo = backend.docs
+    original = repo.UpsertDoc(
+        external_id="document",
+        content="v1",
+        source_id="file.py",
+        scope="repo",
+        snapshot_id="s1",
+        metadata={"keep": "yes", "remove": "old"},
+        chunk_dedup_sha256="dedup",
+        embedding=[1.0, 0.0, 0.0],
+    )
+    repo.upsert_documents_by_external_id([original])
+    before = dict(backend.state.docs_for(backend.settings.es_docs_index)["document"])
+    repo.upsert_documents_by_external_id([repo.UpsertDoc(external_id="document", content="v2")])
+    after = backend.state.docs_for(backend.settings.es_docs_index)["document"]
+    for field in (
+        "source_id",
+        "scope",
+        "snapshot_id",
+        "metadata",
+        "created_at",
+        "embedding",
+        "chunk_dedup_sha256",
+    ):
+        assert after[field] == before[field]
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id="document", content="v2", metadata={"keep": "updated"})]
+    )
+    assert backend.state.docs_for(backend.settings.es_docs_index)["document"]["metadata"] == {
+        "keep": "updated"
+    }
+
+
+def test_query_documents_streams_bounded_pages_with_domain_filters(monkeypatch):
+    backend = _build_backend()
+    repo = backend.docs
+    repo.upsert_documents_by_external_id(
+        [
+            repo.UpsertDoc(
+                external_id=f"doc-{i:04}",
+                content=f"document {i}",
+                scope="scope",
+                metadata={
+                    "nested": {"tags": ["python", "rag"]} if i >= 260 else {"tags": ["other"]}
+                },
+            )
+            for i in range(270)
+        ]
+    )
+    queries = []
+    search = backend.client.search
+
+    def tracked_search(**kwargs):
+        queries.append(kwargs["body"])
+        return search(**kwargs)
+
+    monkeypatch.setattr(backend.client, "search", tracked_search)
+    docs = repo.query_documents(
+        limit=2,
+        offset=1,
+        filters=(
+            RetrievalFilter(field="scope", values=("scope",)),
+            RetrievalFilter(field="metadata.nested.tags", values=("python", "missing")),
+            RetrievalFilter(field="metadata.nested.tags", values=("rag",)),
+        ),
+    )
+    assert [doc.external_id for doc in docs] == ["doc-0261", "doc-0262"]
+    assert all(query["size"] <= 256 for query in queries)
+    assert all("search_after" in query for query in queries[1:])
+    assert [doc.external_id for doc in repo.query_documents(limit=2)] == ["doc-0000", "doc-0001"]
+    with pytest.raises(ValueError):
+        repo.query_documents(limit=0)

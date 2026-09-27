@@ -2,7 +2,9 @@ import pytest
 
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 class _DummyEmbeddingItem:
@@ -43,7 +45,7 @@ def test_openai_embedder_returns_vectors(monkeypatch):
     monkeypatch.setattr(openai_embedder_mod, "_MODEL_DIM", {"dummy-4": 4}, raising=False)
     monkeypatch.setattr(openai_embedder_mod, "OpenAI", _DummyOpenAI, raising=True)
 
-    emb = OpenAIEmbedder(model="dummy-4")
+    emb = OpenAIEmbedder(settings_obj=settings, model="dummy-4")
     out = emb.embed(["a", "b"])
     assert isinstance(out, list)
     assert len(out) == 2
@@ -69,5 +71,5 @@ def test_openai_embedder_empty_input(monkeypatch):
 
     monkeypatch.setattr(openai_embedder_mod, "OpenAI", _NoCallOpenAI, raising=True)
 
-    emb = OpenAIEmbedder(model="dummy-4")
+    emb = OpenAIEmbedder(settings_obj=settings, model="dummy-4")
     assert emb.embed([]) == []

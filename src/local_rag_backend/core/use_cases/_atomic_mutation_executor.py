@@ -31,9 +31,13 @@ class AtomicMutationExecutor:
         results: list[UpsertDocResult] = []
 
         if intent.upserts:
-            delete_tombstones = getattr(doc_repo, "delete_tombstones", None)
-            if callable(delete_tombstones):
-                delete_tombstones([u.external_id for u in intent.upserts])
+            tombstoned_ids = sorted(
+                doc_repo.get_tombstoned_external_ids([u.external_id for u in intent.upserts])
+            )
+            if tombstoned_ids:
+                raise ValueError(
+                    "Cannot upsert tombstoned external_id values: " + ", ".join(tombstoned_ids[:10])
+                )
 
             items = [
                 self.ports.build_upsert_doc(

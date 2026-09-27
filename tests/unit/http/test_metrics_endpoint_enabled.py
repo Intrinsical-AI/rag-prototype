@@ -1,7 +1,9 @@
 # tests/unit/app/test_metrics_endpoint_enabled.py
 
 from local_rag_backend.http import middleware as mw
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_metrics_endpoint_enabled_returns_metrics(asgi_client, monkeypatch):

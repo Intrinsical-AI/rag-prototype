@@ -17,12 +17,11 @@ from local_rag_backend.core.errors import (
 )
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.core.services.prompting import render_prompt_template
-from local_rag_backend.settings import (
-    settings,  # settings.ollama_base_url y settings.ollama_request_timeout exists
-)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from local_rag_backend.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +34,14 @@ class OllamaGenerator(GeneratorPort):
         model: str | None = None,
         prompt_template: str | None = None,
         temperature: float | None = None,
+        *,
+        settings_obj: Settings,
     ):
-        self.model = model or settings.ollama_model
-        self.prompt_template = prompt_template or settings.ollama_prompt_template
+        self.model = model or settings_obj.ollama_model
+        self.prompt_template = prompt_template or settings_obj.ollama_prompt_template
         self.temperature = temperature
-        self.api_url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
+        self.timeout = settings_obj.ollama_request_timeout
+        self.api_url = f"{settings_obj.ollama_base_url.rstrip('/')}/api/generate"
 
     def generate(self, question: str, contexts: Sequence[str]) -> str:
         """Generate a response from the Ollama server."""
@@ -53,9 +55,7 @@ class OllamaGenerator(GeneratorPort):
             payload["options"] = {"temperature": self.temperature}
 
         try:
-            response = httpx.post(
-                self.api_url, json=payload, timeout=settings.ollama_request_timeout
-            )
+            response = httpx.post(self.api_url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             response_data = response.json()
 

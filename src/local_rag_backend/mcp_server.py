@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from local_rag_backend import __version__
 from local_rag_backend.cli_commands.runtime import (
@@ -18,8 +17,9 @@ from local_rag_backend.cli_commands.runtime import (
     get_cli_runtime_snapshot,
     run_cli_mutation,
 )
+from local_rag_backend.composition.factory import reset_app_context
 from local_rag_backend.core.domain.entities import Document
-from local_rag_backend.core.domain.retrieval import RetrievalFilter
+from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
 from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input_from_raw,
 )
@@ -28,6 +28,7 @@ from local_rag_backend.core.services.evaluation import (
     eval_result_to_json,
     load_eval_dataset,
 )
+from local_rag_backend.core.services.retrieval_filters import validate_filter_values
 from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
 )
@@ -39,27 +40,57 @@ logger = logging.getLogger("rag_prototype_mcp")
 MAX_ASK_QUESTION_CHARS = 4096
 
 
+class _Arguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class _FilterArguments(_Arguments):
+    field: str = Field(min_length=1, max_length=256)
+    values: list[str] = Field(min_length=1)
+
+    @field_validator("field")
+    @classmethod
+    def _supported_field(cls, value: str) -> str:
+        return normalize_filter_field(value)
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def _nonblank_values(cls, value: object) -> list[str]:
+        return validate_filter_values(value)
+
+
+class _AskArguments(_Arguments):
+    question: str = Field(min_length=1, max_length=MAX_ASK_QUESTION_CHARS)
+    k: int = Field(default=3, ge=1, le=10)
+    filters: list[_FilterArguments] = Field(default_factory=list)
+
+    @field_validator("question")
+    @classmethod
+    def _nonblank_question(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value.strip()
+
+
+class _ImportArguments(_Arguments):
+    payload: dict[str, Any]
+    replace_scope_override: bool | None = None
+
+
+class _EvalArguments(_Arguments):
+    dataset_path: str | None = None
+    retrieval_mode: Literal["sparse", "dense", "dual", "hybrid"] | None = None
+    k: int = Field(default=3, ge=1)
+    filters: list[_FilterArguments] = Field(default_factory=list)
+
+
 def _parse_filters(raw_filters: object | None) -> tuple[RetrievalFilter, ...]:
     if raw_filters is None:
         return ()
-    if not isinstance(raw_filters, Sequence) or isinstance(raw_filters, str | bytes):
-        raise ValueError("filters must be a list of {field, values} objects.")
-
-    parsed: list[RetrievalFilter] = []
-    for idx, item in enumerate(raw_filters):
-        if not isinstance(item, Mapping):
-            raise ValueError(f"filters[{idx}] must be an object.")
-        parsed.append(
-            RetrievalFilter(
-                field=str(item.get("field") or "").strip(),
-                values=tuple(
-                    str(value).strip()
-                    for value in cast("Sequence[object]", item.get("values") or ())
-                    if str(value).strip()
-                ),
-            )
-        )
-    return tuple(parsed)
+    if not isinstance(raw_filters, list):
+        raise ValueError("filters must be an array of {field, values} objects")
+    parsed = [_FilterArguments.model_validate(item) for item in raw_filters]
+    return tuple(RetrievalFilter(field=item.field, values=tuple(item.values)) for item in parsed)
 
 
 def tool_status() -> dict[str, object]:
@@ -261,102 +292,75 @@ def tool_eval(
 TOOLS: dict[str, dict[str, Any]] = {
     "rag_status": {
         "description": "Return structured runtime status, counts, and index diagnostics.",
-        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "arguments": _Arguments,
         "handler": tool_status,
     },
     "rag_ask": {
         "description": "Ask a question using the configured RAG runtime.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": MAX_ASK_QUESTION_CHARS,
-                },
-                "k": {"type": "integer", "minimum": 1, "maximum": 10},
-                "filters": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "field": {"type": "string"},
-                            "values": {"type": "array", "items": {"type": "string"}},
-                        },
-                        "required": ["field", "values"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "required": ["question"],
-            "additionalProperties": False,
-        },
+        "arguments": _AskArguments,
         "handler": tool_ask,
     },
     "rag_import_canonical": {
         "description": "Import canonical documents via the native scope/snapshot sync flow.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "payload": {"type": "object", "description": "Canonical import payload."},
-                "replace_scope_override": {
-                    "type": "boolean",
-                    "description": "Optional override for replace_scope.",
-                },
-            },
-            "required": ["payload"],
-            "additionalProperties": False,
-        },
+        "arguments": _ImportArguments,
         "handler": tool_import_canonical,
     },
     "rag_rebuild_index": {
         "description": "Rebuild the dense/dual/hybrid retrieval index.",
-        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "arguments": _Arguments,
         "handler": tool_rebuild_index,
     },
     "rag_eval": {
         "description": "Run offline retrieval evaluation with optional retrieval filters.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "dataset_path": {"type": "string"},
-                "retrieval_mode": {"type": "string"},
-                "k": {"type": "integer"},
-                "filters": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "field": {"type": "string"},
-                            "values": {"type": "array", "items": {"type": "string"}},
-                        },
-                        "required": ["field", "values"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "additionalProperties": False,
-        },
+        "arguments": _EvalArguments,
         "handler": tool_eval,
     },
 }
 
+PROTOCOL_VERSION = "2024-11-05"
 
-def handle_request(request: dict[str, Any]) -> dict[str, Any]:
+
+def _protocol_error(req_id: object, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+
+
+def handle_request(request: object) -> dict[str, Any] | None:
+    """Handle one MCP message; notifications deliberately produce no response."""
+    if not isinstance(request, dict):
+        return _protocol_error(None, -32600, "Request must be a JSON object")
     req_id = request.get("id")
     method = request.get("method")
+    if (
+        request.get("jsonrpc") != "2.0"
+        or not isinstance(method, str)
+        or not method
+        or ("id" in request and type(req_id) not in (int, str))
+    ):
+        return _protocol_error(None, -32600, "Invalid JSON-RPC request")
+    if "id" not in request:
+        return None
     params = request.get("params", {})
+    if not isinstance(params, dict):
+        return _protocol_error(req_id, -32602, "params must be an object")
 
     if method == "initialize":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "serverInfo": {"name": "rag-prototype", "version": __version__},
-                "capabilities": {"tools": {}},
-            },
+        if (
+            not isinstance(params.get("protocolVersion"), str)
+            or not isinstance(params.get("capabilities"), dict)
+            or not isinstance(params.get("clientInfo"), dict)
+            or not isinstance(params["clientInfo"].get("name"), str)
+            or not isinstance(params["clientInfo"].get("version"), str)
+        ):
+            return _protocol_error(req_id, -32602, "Invalid initialize parameters")
+        result = {
+            "protocolVersion": PROTOCOL_VERSION,
+            "serverInfo": {"name": "rag-prototype", "version": __version__},
+            "capabilities": {"tools": {}},
         }
+        return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
 
     if method == "tools/list":
         return {
@@ -367,73 +371,52 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any]:
                     {
                         "name": name,
                         "description": spec["description"],
-                        "inputSchema": spec["input_schema"],
+                        "inputSchema": spec["arguments"].model_json_schema(),
                     }
                     for name, spec in TOOLS.items()
                 ]
             },
         }
 
-    if method == "tools/call":
-        if not isinstance(params, Mapping):
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32602, "message": "params must be an object"},
-            }
-        tool_name = params.get("name")
-        tool_args = params.get("arguments", {})
-        if tool_name not in TOOLS:
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
-            }
-        if not isinstance(tool_args, Mapping):
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32602, "message": "tool arguments must be an object"},
-            }
-        try:
-            result = TOOLS[str(tool_name)]["handler"](**dict(tool_args))
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
-            }
-        except Exception as exc:
-            logger.error("Tool error in %s: %s", tool_name, exc)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32000, "message": str(exc)},
-            }
-
-    return {
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "error": {"code": -32601, "message": f"Unknown method: {method}"},
-    }
+    if method != "tools/call":
+        return _protocol_error(req_id, -32601, f"Unknown method: {method}")
+    tool_name = params.get("name")
+    if not isinstance(tool_name, str) or tool_name not in TOOLS:
+        return _protocol_error(req_id, -32602, f"Unknown tool: {tool_name}")
+    spec = TOOLS[tool_name]
+    try:
+        arguments = spec["arguments"].model_validate(params.get("arguments", {}))
+    except ValidationError as exc:
+        return _protocol_error(req_id, -32602, str(exc))
+    try:
+        result = spec["handler"](**arguments.model_dump())
+        tool_result: dict[str, Any] = {
+            "content": [{"type": "text", "text": json.dumps(result, indent=2)}]
+        }
+    except Exception as exc:
+        logger.error("Tool error in %s: %s", tool_name, exc)
+        tool_result = {"isError": True, "content": [{"type": "text", "text": str(exc)}]}
+    return {"jsonrpc": "2.0", "id": req_id, "result": tool_result}
 
 
 def main() -> None:
     logger.info("rag-prototype MCP Server starting...")
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            request = json.loads(line)
-            response = handle_request(request)
-            print(json.dumps(response), flush=True)
-        except Exception as exc:  # pragma: no cover - defensive stdio guard
-            error_response = {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32700, "message": f"Parse error: {exc}"},
-            }
-            print(json.dumps(error_response), flush=True)
+    response: dict[str, Any] | None
+    try:
+        for line in sys.stdin:
+            if not line.strip():
+                continue
+            try:
+                request = json.loads(line)
+            except ValueError as exc:
+                response = _protocol_error(None, -32700, f"Parse error: {exc}")
+            else:
+                response = handle_request(request)
+            if response is not None:
+                # Broken streams are fatal. Continuing cannot deliver a response and can spin.
+                print(json.dumps(response), flush=True)
+    finally:
+        reset_app_context()
 
 
 if __name__ == "__main__":

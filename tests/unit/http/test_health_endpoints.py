@@ -1,6 +1,8 @@
 # tests/unit/app/test_health_endpoints.py
 from local_rag_backend.http.routers import health as health_router
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 class _DummyRag:
@@ -71,12 +73,12 @@ async def test_ready_endpoint_503_when_dense_index_drifts_from_sql(
 
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
-    VectorStorage(str(idx), str(id_map), dim=4).rebuild([], [])
+    VectorStorage(str(idx), str(id_map), dim=4, settings_obj=settings).rebuild([], [])
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)
     monkeypatch.setattr(settings, "id_map_path", str(id_map), raising=False)
 
     # Seed DB with one document, but keep the index empty => drift.
-    SqlDocumentStorage().store_documents(["hello"])
+    SqlDocumentStorage(in_memory_sqlite).store_documents(["hello"])
 
     async def _override():
         return _DummyRag()
@@ -103,12 +105,12 @@ async def test_ready_endpoint_503_when_dense_index_id_set_mismatch(
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
 
     # DB has ids {doc_a, doc_b}
-    doc_ids = SqlDocumentStorage().store_documents(["d1", "d2"])
+    doc_ids = SqlDocumentStorage(in_memory_sqlite).store_documents(["d1", "d2"])
 
     # Index has ids {doc_a, doc:stale} (same count, different set)
     idx = tmp_path / "index.faiss"
     id_map = tmp_path / "id_map.json"
-    VectorStorage(str(idx), str(id_map), dim=4).rebuild(
+    VectorStorage(str(idx), str(id_map), dim=4, settings_obj=settings).rebuild(
         [doc_ids[0], "doc:stale"], [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]
     )
     monkeypatch.setattr(settings, "index_path", str(idx), raising=False)

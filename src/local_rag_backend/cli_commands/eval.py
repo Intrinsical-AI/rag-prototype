@@ -7,7 +7,7 @@ import click
 
 from local_rag_backend.cli_commands.runtime import get_cli_container
 from local_rag_backend.core.services.evaluation_models import EvalResult
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
 
 
 def _is_contract_error(exc: Exception) -> bool:
@@ -15,7 +15,7 @@ def _is_contract_error(exc: Exception) -> bool:
 
 
 def _resolve_eval_dataset_path(dataset: Path | None) -> Path | str:
-    return dataset if dataset is not None else settings.eval_dataset_path
+    return dataset if dataset is not None else get_settings().eval_dataset_path
 
 
 def _write_json_output(path: Path | None, payload: object) -> None:

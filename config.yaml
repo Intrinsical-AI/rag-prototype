@@ -71,6 +71,8 @@ write_lock_timeout_s: 30.0
 write_lock_poll_s: 0.05
 mutation_batch_max_size: 32
 mutation_batch_max_wait_ms: 50
+# Background recovery policy; unreadable or unresolved journal records still block writes.
+# Local journal v2 has no automatic migration; an index rebuild does not repair journal state.
 mutation_recovery_enabled: true
 mutation_recovery_interval_s: 30.0
 

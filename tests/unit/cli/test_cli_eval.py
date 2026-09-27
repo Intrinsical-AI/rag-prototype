@@ -1,16 +1,22 @@
 # tests/unit/test_cli_eval.py
-
 import json
 from pathlib import Path
 
 from click.testing import CliRunner
+from support.container import override_container
 
 from local_rag_backend.cli import cli
 from local_rag_backend.composition import factory
-from local_rag_backend.settings import settings
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 class DummyEmbedder:
+    identity = EmbeddingIdentity(
+        provider="sentence_transformers", model="all-MiniLM-L6-v2", dimension=2
+    )
     dim = 2
 
     def embed(self, texts):
@@ -171,12 +177,7 @@ def test_rag_eval_dense_mode_uses_isolated_runtime_and_json_out(
 
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "vector_backend", "numpy", raising=False)
-    monkeypatch.setattr(
-        factory,
-        "SentenceTransformerEmbedder",
-        lambda model_name=None: DummyEmbedder(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=lambda model_name=None: DummyEmbedder())
     factory.reset_app_context()
 
     r = CliRunner().invoke(
@@ -223,7 +224,7 @@ def test_rag_eval_dense_mode_reports_missing_embeddings_backend_cleanly(
         raise RuntimeError("backend unavailable")
 
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
-    monkeypatch.setattr(factory, "SentenceTransformerEmbedder", _st_fail, raising=True)
+    override_container(monkeypatch, st_embedder_factory=_st_fail)
     factory.reset_app_context()
 
     r = CliRunner().invoke(
@@ -303,12 +304,7 @@ def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) ->
 
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "vector_backend", "numpy", raising=False)
-    monkeypatch.setattr(
-        factory,
-        "SentenceTransformerEmbedder",
-        lambda model_name=None: DummyEmbedder(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=lambda model_name=None: DummyEmbedder())
     factory.reset_app_context()
 
     r = CliRunner().invoke(
@@ -463,12 +459,7 @@ def test_rag_eval_batch_runs_multiple_specs_and_writes_json(tmp_path: Path, monk
 
     monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
     monkeypatch.setattr(settings, "vector_backend", "numpy", raising=False)
-    monkeypatch.setattr(
-        factory,
-        "SentenceTransformerEmbedder",
-        lambda model_name=None: DummyEmbedder(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=lambda model_name=None: DummyEmbedder())
     factory.reset_app_context()
 
     r = CliRunner().invoke(

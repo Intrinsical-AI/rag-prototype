@@ -1,8 +1,11 @@
 import numpy as np
+from support.container import override_container
 
-from local_rag_backend.composition import factory
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_mutate_upsert_sparse_is_idempotent(asgi_client, in_memory_sqlite, monkeypatch):
@@ -36,7 +39,7 @@ async def test_mutate_upsert_sparse_is_idempotent(asgi_client, in_memory_sqlite,
     assert data3["unchanged"] == 0
     assert data3["results"][0]["id"] == doc_id
 
-    doc = SqlDocumentStorage().get([doc_id])[0]
+    doc = SqlDocumentStorage(in_memory_sqlite).get([doc_id])[0]
     assert doc.content == "hello2"
 
 
@@ -59,6 +62,7 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
 ):
     class DummyEmbedder:
         dim = 4
+        identity = EmbeddingIdentity(provider="openai", model="test", dimension=dim)
 
         def __init__(self):
             self.calls = 0
@@ -91,8 +95,8 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
     dummy_embedder = DummyEmbedder()
     dummy_vec = DummyVec()
 
-    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda *a, **k: dummy_embedder)
-    monkeypatch.setattr(factory, "VectorStorage", lambda *a, **k: dummy_vec)
+    override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: dummy_embedder)
+    override_container(monkeypatch, vector_repo_factory=lambda *a, **k: dummy_vec)
 
     payload = {"upserts": [{"external_id": "doc-1", "content": "hello"}]}
     r1 = await asgi_client.post("/api/docs/mutate", json=payload)
@@ -108,9 +112,7 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
     # The dense embedder is wrapped by the persistent content-addressed cache, so
     # unchanged content should not hit the underlying provider twice.
     assert dummy_embedder.calls == 1
-    assert len(dummy_vec.calls) == 2
-    assert dummy_vec.calls[1]["delete_ids"] == []
-    assert dummy_vec.calls[1]["upsert_ids"] == []
+    assert len(dummy_vec.calls) == 1  # No vector work for an unchanged mutation.
 
     r3 = await asgi_client.post(
         "/api/docs/mutate",
@@ -119,9 +121,9 @@ async def test_mutate_upsert_dense_updates_only_changed_content(
     assert r3.status_code == 200
     assert r3.json()["results"][0]["id"] == doc_id
     assert dummy_embedder.calls == 2
-    assert len(dummy_vec.calls) == 3
-    assert dummy_vec.calls[2]["delete_ids"] == [doc_id]
-    assert dummy_vec.calls[2]["upsert_ids"] == [doc_id]
+    assert len(dummy_vec.calls) == 2
+    assert dummy_vec.calls[1]["delete_ids"] == [doc_id]
+    assert dummy_vec.calls[1]["upsert_ids"] == [doc_id]
 
 
 async def test_removed_upsert_endpoint_returns_not_found(asgi_client, in_memory_sqlite):

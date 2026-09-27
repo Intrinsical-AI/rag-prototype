@@ -3,7 +3,9 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from local_rag_backend.cli_commands.docs import docs_bootstrap as bootstrap_cmd_module
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_bootstrap_cli_runs_sample_data_ingestion(monkeypatch) -> None:

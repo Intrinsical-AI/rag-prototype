@@ -6,10 +6,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
 from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.ingestion import (
@@ -24,16 +20,13 @@ from local_rag_backend.core.use_cases.docs_mutation import (
 )
 from local_rag_backend.infrastructure.ingestion.loaders.csv_loader import CSVLoader
 from local_rag_backend.infrastructure.persistence.sql import (
-    SqlDocumentStorage,
-    SystemStateStorage,
-    base as db_base,
     models as _models,
 )
-from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
-from local_rag_backend.settings import settings as default_settings
+from local_rag_backend.settings import get_settings
 
 if TYPE_CHECKING:
     from local_rag_backend.core.ports.contracts import DocsMutationPorts
+    from local_rag_backend.settings import Settings
 
 DELIMITER = ";"
 _ = _models
@@ -49,27 +42,6 @@ def _resolve_csv_path(*, csv_path: str | Path | None, settings_obj: Any) -> Path
     raise FileNotFoundError(
         f"{source_name} must point to an existing CSV file: {csv_path_obj}. "
         "Update FAQ_CSV or pass a valid path explicitly."
-    )
-
-
-def _build_bootstrap_container(
-    *,
-    settings_obj: Any,
-    session_local: sessionmaker[Any],
-) -> AppContainer:
-    # Import at runtime so tests can monkeypatch lock behavior.
-    from local_rag_backend.infrastructure.concurrency.locks.write_lock import (
-        multi_store_write_lock,
-    )
-
-    return AppContainer.from_settings(
-        settings_obj,
-        doc_repo_factory=lambda: SqlDocumentStorage(session_factory=session_local),
-        build_upsert_doc=SqlDocumentStorage.UpsertDoc,
-        vector_repo_factory=lambda **kwargs: VectorStorage(settings_obj=settings_obj, **kwargs),
-        mutation_uow_factory=lambda: db_base.session_uow(session_factory=session_local),
-        system_state_factory=lambda: SystemStateStorage(session_factory=session_local),
-        write_lock=multi_store_write_lock,
     )
 
 
@@ -157,7 +129,7 @@ def _build_bootstrap_mutation_intent(
 def run_sample_data_ingestion(
     csv_path: str | Path | None = None,
     *,
-    settings_obj: Any = default_settings,
+    settings_obj: Settings | None = None,
     schema_error_message: str | None = None,
 ) -> int:
     """
@@ -165,39 +137,29 @@ def run_sample_data_ingestion(
 
     Returns the number of processed chunks (inserted + updated + unchanged).
     """
-    settings_obj.data_dir.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(settings_obj.sqlite_url, connect_args={"check_same_thread": False})
-    session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
+    settings_obj = settings_obj if settings_obj is not None else get_settings()
+    container = AppContainer.from_settings(settings_obj)
     try:
-        db_base.ensure_sqlite_schema_current(engine_to_use=engine)
-    except Exception as e:
-        if schema_error_message:
-            raise RuntimeError(schema_error_message) from e
-        raise
-
-    csv_path_obj = _resolve_csv_path(csv_path=csv_path, settings_obj=settings_obj)
-    container = _build_bootstrap_container(settings_obj=settings_obj, session_local=session_local)
-    mutation_bundle = container.build_docs_mutation_bundle(
-        build_embedder=lambda: build_dense_embedder_from_settings(settings_obj=settings_obj),
-    )
-
-    intent = _build_bootstrap_mutation_intent(
-        csv_path_obj=csv_path_obj,
-        settings_obj=settings_obj,
-        ports=mutation_bundle.ports,
-    )
-    if not intent.upserts and not intent.delete_ids:
-        return 0
-
-    summary = MutationCoordinator(settings_obj=settings_obj, ports=mutation_bundle.ports).execute(
-        intent
-    )
-    processed = int(summary.inserted + summary.updated + summary.unchanged)
-
-    if settings_obj.retrieval_mode in ("dense", "dual", "hybrid"):
-        logger.info("Ingested %d docs into SQL and FAISS.", processed)
-    else:
-        logger.info("Ingested %d docs into SQL only (sparse mode).", processed)
-
-    return processed
+        try:
+            container.initialize()
+        except Exception as exc:
+            if schema_error_message:
+                raise RuntimeError(schema_error_message) from exc
+            raise
+        csv_path_obj = _resolve_csv_path(csv_path=csv_path, settings_obj=settings_obj)
+        mutation_bundle = container.build_docs_mutation_bundle()
+        intent = _build_bootstrap_mutation_intent(
+            csv_path_obj=csv_path_obj,
+            settings_obj=settings_obj,
+            ports=mutation_bundle.ports,
+        )
+        if not intent.upserts and not intent.delete_ids:
+            return 0
+        summary = MutationCoordinator(
+            settings_obj=settings_obj, ports=mutation_bundle.ports
+        ).execute(intent)
+        processed = int(summary.inserted + summary.updated + summary.unchanged)
+        logger.info("Ingested %d documents using %s.", processed, settings_obj.persistence_backend)
+        return processed
+    finally:
+        container.close()

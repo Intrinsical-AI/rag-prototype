@@ -1,22 +1,26 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from functools import partial
+from typing import Any
+
+import pytest
 
 from local_rag_backend.composition.container import AppContainer
-from local_rag_backend.settings import settings
+from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
+from local_rag_backend.settings import Settings
 
-if TYPE_CHECKING:
-    import pytest
+settings = Settings(sqlite_url="sqlite:///:memory:")
 
 
 class DummyEmbedder:
     dim = 4
+    identity = EmbeddingIdentity("sentence_transformers", "test", 4, synthetic=True)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [[0.0, 0.0, 0.0, 0.0] for _ in texts]
 
 
-def test_docs_mutation_ports_use_injected_dependencies() -> None:
+def test_docs_mutation_ports_use_injected_dependencies(tmp_path) -> None:
     def _doc_repo_factory() -> object:
         return object()
 
@@ -31,7 +35,9 @@ def test_docs_mutation_ports_use_injected_dependencies() -> None:
         return 7
 
     container = AppContainer(
-        settings_obj=settings,
+        settings_obj=settings.model_copy(
+            update={"index_path": str(tmp_path / "index"), "id_map_path": str(tmp_path / "ids")}
+        ),
         doc_repo_factory=_doc_repo_factory,
         build_upsert_doc=_UpsertDoc,
         vector_repo_factory=_vec_factory,
@@ -43,11 +49,14 @@ def test_docs_mutation_ports_use_injected_dependencies() -> None:
     assert ports.doc_repo_factory is _doc_repo_factory
     assert ports.build_upsert_doc is _UpsertDoc
     assert ports.vector_repo_factory is _vec_factory
-    assert ports.rebuild_fn is _rebuild
+    assert ports.reconcile_index() == 7
 
 
 def test_docs_mutation_ports_defaults_are_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     class DummySqlRepo:
+        def __init__(self, *, session_factory):
+            self.session_factory = session_factory
+
         class UpsertDoc:
             pass
 
@@ -65,6 +74,9 @@ def test_docs_mutation_ports_defaults_are_loaded(monkeypatch: pytest.MonkeyPatch
 
 def test_index_mutation_ports_defaults_and_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     class DummySqlRepo:
+        def __init__(self, *, session_factory):
+            self.session_factory = session_factory
+
         class UpsertDoc:
             pass
 
@@ -152,6 +164,14 @@ def test_elasticsearch_defaults_bind_elastic_runtime() -> None:
 
     assert ports.build_upsert_doc.__qualname__.endswith("ElasticDocsRepository.UpsertDoc")
     assert ports.mutation_uow_factory is None
-    assert container.doc_repo_factory.__name__ == "<lambda>"
-    assert container.history_repo_factory.__name__ == "<lambda>"
-    assert container.vector_repo_factory.__name__ == "<lambda>"
+    assert isinstance(container.doc_repo_factory, partial)
+    assert container.doc_repo_factory.keywords["settings_obj"] is es_settings
+    assert isinstance(container.history_repo_factory, partial)
+    assert isinstance(container.vector_repo_factory, partial)
+    assert container.vector_repo_factory.func.__name__ == "ElasticVectorRepo"
+    assert (
+        container.vector_repo_factory.keywords["client"]
+        is container.doc_repo_factory.keywords["client"]
+        is container.history_repo_factory.keywords["client"]
+    )
+    container.close()

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar, cast
 
-from local_rag_backend.composition.adapters import build_dense_embedder_from_settings
 from local_rag_backend.composition.runtime import RuntimeSnapshot, build_runtime_snapshot
-from local_rag_backend.settings import settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,22 +30,11 @@ def ensure_sqlite_schema_for_cli() -> None:
     CLI commands can be run without starting the FastAPI server, so they must
     apply the same fresh-schema bootstrap that the app does at startup.
     """
-    if settings.persistence_backend == "elasticsearch":
-        return
-
-    from local_rag_backend.infrastructure.persistence.sql import base as db_base
-
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    db_base.ensure_sqlite_schema_current(engine_to_use=db_base.engine)
+    get_cli_container().initialize()
 
 
 def _run_with_multi_store_write_lock(operation: Callable[[], T]) -> T:
-    from local_rag_backend.infrastructure.concurrency.locks.write_lock import (
-        multi_store_write_lock,
-    )
-
-    with multi_store_write_lock():
-        return operation()
+    return cast(T, get_cli_container().run_multi_store_write_locked(operation))
 
 
 def _reset_rag_service_best_effort() -> None:
@@ -68,7 +55,7 @@ def get_cli_container() -> AppContainer:
 
 def get_cli_runtime_snapshot() -> RuntimeSnapshot:
     """Return the current CLI runtime snapshot without exposing raw Settings."""
-    return build_runtime_snapshot(settings)
+    return build_runtime_snapshot(get_cli_container().settings_obj)
 
 
 def run_cli_mutation(
@@ -97,7 +84,7 @@ def run_cli_mutation(
 
 def build_dense_embedder() -> EmbedderPort:
     """Build the dense/hybrid embedder based on current settings."""
-    return build_dense_embedder_from_settings(settings_obj=settings)
+    return get_cli_container().build_dense_embedder()
 
 
 __all__ = [

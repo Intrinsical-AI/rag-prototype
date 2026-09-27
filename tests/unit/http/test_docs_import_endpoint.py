@@ -7,7 +7,9 @@ import pytest
 
 from local_rag_backend.core.use_cases.docs_import import ImportFileTooLargeError
 from local_rag_backend.http.routers import docs as docs_router
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 async def test_import_chatgpt_export_sparse(asgi_client, in_memory_sqlite, monkeypatch):
@@ -357,3 +359,22 @@ async def test_read_upload_with_limit_stops_early_on_oversize_chunk():
     with pytest.raises(ImportFileTooLargeError):
         await docs_router._read_upload_with_limit(file=fake, max_bytes=1024, chunk_bytes=128)
     assert fake.calls == 1
+
+
+async def test_import_upload_reader_limit_returns_413(asgi_client, monkeypatch):
+    from local_rag_backend.http.routers import docs as docs_router
+
+    original = docs_router._read_upload_with_limit
+
+    async def read_with_small_limit(*, file):
+        return await original(file=file, max_bytes=32, chunk_bytes=16)
+
+    monkeypatch.setattr(docs_router, "_read_upload_with_limit", read_with_small_limit)
+    response = await asgi_client.post(
+        "/api/docs/import-conversations",
+        files={
+            "file": ("large.json", b"x" * 33, "application/json"),
+        },
+    )
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"].lower()

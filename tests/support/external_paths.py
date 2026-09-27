@@ -12,8 +12,10 @@ def _configured_path(
     expected_kind: str,
 ) -> Path | None:
     value = os.environ.get(variable)
-    if not value:
+    if value is None:
         return None
+    if not value.strip():
+        raise RuntimeError(f"{variable} must point to an existing {expected_kind}: empty value")
     path = Path(value).expanduser()
     if not predicate(path):
         raise RuntimeError(f"{variable} must point to an existing {expected_kind}: {path}")

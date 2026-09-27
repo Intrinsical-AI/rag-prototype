@@ -4,10 +4,13 @@ import json
 from contextlib import contextmanager
 
 from click.testing import CliRunner
+from support.container import override_container
 
 from local_rag_backend.cli import cli
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 def test_cli_mutate_docs_runs_under_multi_store_lock(in_memory_sqlite, tmp_path, monkeypatch):
@@ -52,7 +55,7 @@ def test_cli_mutate_delete_ids_runs_under_multi_store_lock(in_memory_sqlite, tmp
         raising=True,
     )
 
-    doc_id = SqlDocumentStorage().store_documents(["to-delete"])[0]
+    doc_id = SqlDocumentStorage(session_factory=in_memory_sqlite).store_documents(["to-delete"])[0]
     payload = tmp_path / "mutate_delete_ids_lock.json"
     payload.write_text(json.dumps({"delete_ids": [str(doc_id)]}), encoding="utf-8")
 
@@ -110,18 +113,12 @@ def test_cli_mutate_delete_ids_dense_does_not_require_embedder_when_no_upserts(
             assert list(upserts) == []
             return None
 
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.SentenceTransformerEmbedder",
-        _boom_embedder,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.VectorStorage",
-        lambda *_a, **_k: DummyVec(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=_boom_embedder)
+    override_container(monkeypatch, vector_repo_factory=lambda *_a, **_k: DummyVec())
 
-    doc_id = SqlDocumentStorage().store_documents(["to-delete-dense"])[0]
+    doc_id = SqlDocumentStorage(session_factory=in_memory_sqlite).store_documents(
+        ["to-delete-dense"]
+    )[0]
     payload = tmp_path / "mutate_delete_dense_ids.json"
     payload.write_text(json.dumps({"delete_ids": [str(doc_id)]}), encoding="utf-8")
     result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
@@ -150,18 +147,10 @@ def test_cli_mutate_delete_external_ids_dense_does_not_require_embedder_when_no_
             assert list(upserts) == []
             return None
 
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.SentenceTransformerEmbedder",
-        _boom_embedder,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        "local_rag_backend.composition.factory.VectorStorage",
-        lambda *_a, **_k: DummyVec(),
-        raising=True,
-    )
+    override_container(monkeypatch, st_embedder_factory=_boom_embedder)
+    override_container(monkeypatch, vector_repo_factory=lambda *_a, **_k: DummyVec())
 
-    repo = SqlDocumentStorage()
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     repo.upsert_documents_by_external_id(
         [SqlDocumentStorage.UpsertDoc(external_id="doc-ext-ok", content="to-delete-dense")]
     )

@@ -1,6 +1,8 @@
 import pytest
 
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 
 @pytest.mark.unit

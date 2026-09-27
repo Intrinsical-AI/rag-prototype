@@ -10,7 +10,6 @@ from local_rag_backend.composition.factory import (
     get_runtime_snapshot as _get_runtime_snapshot,
     reset_rag_service,
 )
-from local_rag_backend.infrastructure.persistence.sql.base import get_db
 
 if TYPE_CHECKING:
     from local_rag_backend.composition.container import AppContainer
@@ -41,7 +40,6 @@ async def get_runtime_snapshot_dependency() -> RuntimeSnapshot:
 __all__ = [
     "get_app_container_dependency",
     "get_app_context",
-    "get_db",
     "get_rag_service",
     "get_runtime_snapshot_dependency",
     "get_settings_dependency",

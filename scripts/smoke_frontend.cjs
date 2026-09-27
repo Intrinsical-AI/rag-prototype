@@ -218,3 +218,53 @@ test('real HTTP and SQLite add/list/query, status and history lifecycle', async 
     await fs.writeFile(path.join(root, 'server.log'), serverLogs);
   }
 });
+
+test('optional API key authorizes every UI request and is cleared on reload', async () => {
+  const page = await staticPage([]);
+  const calls = [];
+  const key = 'temporary-ui-key';
+  await page.route('**/api/**', route => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    const suppliedKey = request.headers()['x-api-key'];
+    calls.push({ pathname, suppliedKey });
+    if (suppliedKey !== key) return route.fulfill({ status: 401, json: { detail: 'Unauthorized' } });
+    if (pathname === '/api/docs/query') return route.fulfill({ json: [{ id: 'secure', content: 'Authorized document' }] });
+    if (pathname === '/api/docs/ingest') return route.fulfill({ json: { count: 1, ids: ['secure'] } });
+    return route.fulfill({ json: { answer: 'Authorized answer', sources: [] } });
+  });
+  try {
+    await page.locator('#refreshDocsBtn').click();
+    await expect(page.locator('#docsList')).toContainText('Unauthorized');
+    await page.locator('.api-settings summary').click();
+    await page.locator('#apiKey').fill(key);
+    await page.locator('#refreshDocsBtn').click();
+    await expect(page.locator('#docsList')).toContainText('Authorized document');
+    await page.locator('#docText').fill('New protected document');
+    await page.locator('#addDocBtn').click();
+    await expect(page.locator('#docText')).toHaveValue('');
+    await page.locator('#question').fill('Protected question');
+    await page.locator('#askBtn').click();
+    await expect(page.locator('#answerBox')).toHaveText('Authorized answer');
+    for (const pathname of ['/api/ask', '/api/docs/ingest', '/api/docs/query']) {
+      assert(calls.some(call => call.pathname === pathname && call.suppliedKey === key));
+    }
+    assert.equal(await page.evaluate(value =>
+      [...Object.values(localStorage), ...Object.values(sessionStorage)].includes(value), key), false);
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(page.locator('#apiKey')).toHaveValue('');
+    await expect(page.locator('#docsList')).toContainText('Unauthorized');
+  } finally { await page.close(); }
+});
+
+test('non-JSON HTTP errors remain readable after a single body read', async () => {
+  const page = await staticPage([]);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 502, contentType: 'text/plain', body: 'Upstream temporarily unavailable',
+  }));
+  try {
+    await page.locator('#question').fill('A question');
+    await page.locator('#askBtn').click();
+    await expect(page.locator('#answerBox')).toHaveText('Error: Upstream temporarily unavailable');
+  } finally { await page.close(); }
+});

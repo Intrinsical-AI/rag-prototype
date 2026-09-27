@@ -7,7 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
-from local_rag_backend.core.services.external_canonical import normalize_external_canonical_payload
+from local_rag_backend.core.services.external_canonical import (
+    normalize_external_canonical_payload,
+    repogpt_document_metadata,
+)
 from local_rag_backend.core.use_cases.docs_import_canonical import (
     CanonicalImportDocumentInput,
     CanonicalImportRequestInput,
@@ -15,6 +18,9 @@ from local_rag_backend.core.use_cases.docs_import_canonical import (
 
 
 class CanonicalImportDocumentPayload(BaseModel):
+    # Producer fields must survive validation/serialization until the DTO projection.
+    model_config = ConfigDict(extra="allow")
+
     external_id: str = Field(..., min_length=1, max_length=512)
     content: str = Field(..., min_length=1, max_length=20000)
     source_id: str | None = Field(default=None, max_length=1024)
@@ -125,7 +131,11 @@ def build_canonical_import_request_input(
                 external_id=item.external_id,
                 content=item.content,
                 source_id=item.source_id,
-                metadata=item.metadata,
+                metadata=(
+                    repogpt_document_metadata(item.model_dump())
+                    if (payload.model_extra or {}).get("kind") == "code-units"
+                    else item.metadata
+                ),
             )
             for item in payload.documents
         ),

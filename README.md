@@ -66,6 +66,11 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 > Stateful RAG platform with a hexagonal architecture (Ports & Adapters), FastAPI, canonical mutation flows, and offline evaluation gates. It supports four retrieval modes (BM25, dense vector, dual, hybrid) plus swappable LLM connectors (OpenAI, OpenRouter, Ollama).
 > Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/dual/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend. The write-path is intentionally stateful: canonical mutations, rebuilds, and recovery are first-class.
 
+The working tree is the **4.0.0 candidate**, with breaking changes from `v3.0.0`
+described in the [compatibility notes](docs/RELEASE_CHECKLIST.md#candidate-400).
+Changing package metadata does not publish a tag, release, or package. Existing
+tags and artifacts remain unchanged.
+
 ---
 
 ## Key Features
@@ -176,9 +181,12 @@ list empty to disable cross-origin access. Debug mode keeps the permissive
 wildcard policy for local development.
 Set `RAG_CONFIG_PATH=/absolute/path/to/runtime.yaml` when an installed console script, including
 `rag-mcp`, runs outside the checkout. The selected YAML remains the single runtime source of truth,
-and relative paths inside it resolve against that file's directory. An explicit path passed to
+and relative paths, including omitted path defaults, resolve against that file's directory. An explicit path passed to
 `load_settings_from_yaml(...)` takes precedence over the environment variable. The process fails
 fast if the selected file is missing or invalid.
+Library imports do not load YAML or open a database. Entry points call `get_settings()`;
+`AppContainer.from_settings(settings_obj)` owns the SQL runtime, executor, locks, and
+provider configuration for that settings instance. Close containers after use.
 See [`config.example.yaml`](./config.example.yaml) for the canonical template.
 
 `RAG_PERF_METRICS_OUT` remains a narrow runtime override for `perf_metrics_out_path`; when both
@@ -221,13 +229,14 @@ If you change any of these settings, `/readyz` and `rag-status` will report drif
 The backend matrix above is authoritative. The common runtime routes are:
 
 * `local_split` + `local_split`:
-  `SparseBM25Retriever`, `DenseVectorRetriever`, or `HybridRetriever(DenseVectorRetriever, SparseBM25Retriever, alpha)`.
+  `LocalSplitSearchRetriever` orchestrates sparse, dense, dual, and hybrid strategies.
+  Hybrid branches receive their own retrieval mode and apply the score threshold after fusion.
 * `local_split` + `elasticsearch` or `opensearch`:
   `ElasticLikeSearchRetriever` for `sparse`, `dense`, or `dual`.
 * `local_split` + `solr`:
   `SolrSearchRetriever` for `sparse` only.
 * `elasticsearch` + `elasticsearch`:
-  `ElasticLikeSearchRetriever` for `sparse`/`dense`, and `HybridRetriever(DenseVectorRetriever, Elastic lexical retriever, alpha)` for `hybrid`.
+  `ElasticLikeSearchRetriever` for `sparse`/`dense`, and `HybridRetriever(Elastic dense retriever, Elastic lexical retriever, alpha)` for `hybrid`.
 * `elasticsearch` + `local_split`:
   `LocalSplitSearchRetriever`-style orchestration over ES-backed persistence for `dense`/`dual`/`hybrid`.
 * `elasticsearch` + `opensearch`:
@@ -290,8 +299,7 @@ or process-crash recovery.
 
 The included frontend uses `POST /api/docs/ingest` and `POST /api/docs/query` with
 `{"limit": 100, "offset": 0}`; the latter still returns an array of documents.
-Clients must migrate from the removed `/api/docs` routes. Other removed aliases
-are replaced by `make type`, the `performance` extra, and boolean `debug` values.
+Use `make type` for type checking and boolean `debug` values in YAML.
 Retrievers return `RetrievalResult`; diagnostic backend names are now
 `local_bm25`, `local_vector`, and `local_hybrid`. Evaluation uses the single
 `retrieve_ranked_items` callback, returning IDs or `(external_id, score)` pairs.
@@ -303,7 +311,7 @@ That runtime stays isolated from the main index, but it is no longer purely ephe
 
 * dense eval workspaces reuse the persisted local index when the dataset signature and vector manifest still match
 * changing the dense backend, embedding model, or other vector manifest inputs invalidates the cached eval workspace and rebuilds it
-* dense rebuilds happen in bounded batches to reduce memory spikes on larger evaluation corpora
+* dense rebuilds bound each embedding call by batch size; the current index rebuild still accumulates vectors in memory
 * `RAG_PERF_METRICS_OUT=/abs/path.json` can override `perf_metrics_out_path` for benchmark wrappers without editing `config.yaml`
 
 Optional: better file type detection (best-effort) using `python-magic`:
@@ -323,14 +331,6 @@ uv sync --frozen --extra monitoring
 # then set `enable_monitoring: true` in config.yaml
 rag-server
 ```
-
-Optional: performance extras (`torch` + `orjson` for faster JSON serialization):
-
-```bash
-uv sync --frozen --extra performance      # torch + orjson (CPU)
-```
-
-These extras are included in `all` but are **not required** for sparse or dense retrieval. Install only when you have profiled a serialization or inference bottleneck that justifies the `torch` dependency weight.
 
 Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 
@@ -354,6 +354,12 @@ Tools:
 * `rag_rebuild_index`
 * `rag_eval`
 * `rag_status`
+
+The stdio server announces MCP `2024-11-05`, accepts `ping`, and does not reply to
+notifications. Invalid JSON lines return a parse error and leave the next line
+processable; a broken input/output stream terminates the server. Invalid tool
+arguments return JSON-RPC `-32602`; execution failures return tool content with
+`isError: true`.
 
 `rag_ask` is the narrow query/status integration surface used by the sibling
 `event-based-agent-runtime` repo. The runtime calls it over stdio MCP and keeps
@@ -444,7 +450,7 @@ docker compose up -d
 * Response: list of `{ id, question, answer, created_at, source_ids[] }` where `source_ids` are string document IDs
 * FastAPI docs: `GET /docs` and `GET /openapi.json`
 * `POST /api/docs/ingest` (ingest texts)
-* `POST /api/docs/query` (list/query documents with structured filters)
+* `POST /api/docs/query` (list/query documents with structured filters and bounded pages)
 * `POST /api/docs/import-conversations` (ingest ChatGPT/Gemini export JSON)
 * `POST /api/docs/mutate` (canonical unified docs mutation: upserts, delete_ids, delete_external_ids)
 * `POST /api/docs/import-canonical` (scope/snapshot import for external producers such as RepoGPT)
@@ -466,7 +472,12 @@ Notes:
 * `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
 * In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
-* For public/proxy deployments, set `api_key` in `config.yaml` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy.
+* For public/proxy deployments, set `api_key` in `config.yaml` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy. The UI's optional **API access** field sends this key with all API calls and keeps it only until the page reloads.
+* Filter `values` must be a nonempty array of nonblank strings. Values are trimmed; strings, numbers, and blank items are rejected (`422` in HTTP, `-32602` in MCP).
+* Document/history reads and readiness I/O run through the container's worker executor. Document pagination does not provide a stable snapshot across separate requests.
+* Conversation uploads exceeding 50 MiB return `413` before parsing or mutation.
+* Local mutation journal v2 preserves committed outcomes for exact `op_id` replay. Corrupt, older, or unresolved journal records block writes with `MutationRecoveryRequiredError`: HTTP returns a generic `503`, while CLI/MCP provide an operator diagnostic. Rebuilding the vector index does not repair the journal.
+* Elasticsearch keeps each document and embedding together. Its `ATOMIC` execution profile does not promise a transaction across bulk items or document/tombstone operations; partial failures remain visible.
 
 Example:
 
@@ -499,7 +510,8 @@ flowchart TD
 
     BRS --> COMP[build_retriever_with_default_embedder_from_settings\ncomposition/adapters.py]
     COMP --> RP[core/ports::RetrieverPort]
-    RP --> SBR[infrastructure/retrieval/sparse_bm25.py::SparseBM25Retriever]
+    RP --> LSR[infrastructure/search_backends/local_split.py::LocalSplitSearchRetriever]
+    LSR --> SBR[infrastructure/retrieval/sparse_bm25.py::SparseBM25Retriever]
     RP --> DFR[infrastructure/retrieval/dense_vector.py::DenseVectorRetriever]
     RP --> HR[infrastructure/retrieval/hybrid.py::HybridRetriever]
     COMP --> RER[core/services/reranking.py::RerankingRetriever]
@@ -512,7 +524,7 @@ flowchart TD
     BRS --> HP[core/ports::QAHistoryPort]
     HP --> HSQL[infrastructure/persistence/sql/history_storage.py::HistorySqlStorage]
 
-    RR --> RB[infrastructure/concurrency/blocking.py::run_blocking]
+    RR --> RB[infrastructure/concurrency/blocking.py::BlockingExecutor.run_blocking]
     RB --> RS
     RS --> RP
     RS --> GP
@@ -545,11 +557,11 @@ sequenceDiagram
     Factory-->>Dep: RagService
     Dep-->>Router: RagService
 
-    Router->>RagService: run_blocking(service.ask, question, k)
-    RagService->>Retriever: retrieve(question, k)
-    Retriever->>InfraRet: SparseBM25Retriever OR DenseVectorRetriever OR HybridRetriever
-    InfraRet-->>Retriever: (docs, scores)
-    Retriever-->>RagService: (docs, scores)
+    Router->>RagService: container.blocking_executor().run_blocking(service.ask)
+    RagService->>Retriever: retrieve(RetrievalRequest)
+    Retriever->>InfraRet: configured local or remote strategy
+    InfraRet-->>Retriever: RetrievalResult
+    Retriever-->>RagService: RetrievalResult
 
     RagService->>Gen: generate(question, contexts)
     Gen-->>RagService: answer
@@ -577,13 +589,13 @@ sequenceDiagram
 ## Current limitations
 
 * Synchronous LLM clients (httpx/OpenAI SDK); migration to async is straightforward but not included.
-* Minimal UI without front-end tests.
+* Minimal UI with browser smoke coverage for add/list/ask, authentication, visibility, and error responses.
 * Minimal API-key auth is available via `api_key` in `config.yaml`, but there is no user/role authZ or rate limiting.
 * When using the FAISS backend, the index type is `IndexFlatL2` (simple). For large volumes, consider IVF/HNSW or other backends.
 
 ## Runtime considerations
 
-* **Singleton per process**: `RagService` is initialized as a singleton in `composition/factory`. With `uvicorn --workers N`, each process loads its own instance (and its retrieval/index adapters). Align deployment and warm-up as needed.
+* **Runtime ownership**: each `AppContainer` owns its cached `RagService` and runtime resources. HTTP/CLI/MCP use one default context per process; explicit containers can use independent settings. With `uvicorn --workers N`, each worker owns its own runtime.
 * **Cross-process coordination files**: multi-store write lock and RAG reload token are stored in a shared coordination directory (`Settings.get_coordination_dir()`), preferring explicit absolute `data_dir`; when `data_dir` is relative/default and `sqlite_url` resolves to an absolute SQLite path, it uses the DB parent directory to keep workers/CLI aligned.
 * **Metrics**: if `enable_monitoring: true` and `prometheus-client` is installed, `/metrics` provides Prometheus format.
 * **Dense/Hybrid**: must use the same embedding model for indexing and querying (`st_embedding_model`).
@@ -601,10 +613,15 @@ make smoke-frontend
 The frontend smoke reuses the workspace's installed Playwright and Chromium
 from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`
 path outside this workspace. It checks accepted Elasticsearch IDs with a local
-HTTP storage double, and real browser add/list/query plus visibility using
+HTTP storage double, API-key forwarding and non-JSON failures, and real browser add/list/query plus visibility using
 temporary SQLite data and a loopback Ollama response double. It needs permission
 to launch Chromium and bind loopback ports; it does not contact an external LLM
 or Elasticsearch service. Temporary evidence is printed under `/tmp`.
+
+The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v4.json`.
+It requires no sibling checkout. Live producer coverage is explicit: set `REPOGPT_ROOT`; the helper uses the
+versioned source fixture and passes `--replace-scope --include-tests --repo-key repogpt_eval_repo`.
+Invalid configured paths or producer failures fail the test.
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 
@@ -659,7 +676,9 @@ from local_rag_backend.core.use_cases.docs_mutation import (
     MutationUpsertInput,
 )
 from local_rag_backend.infrastructure.ingestion.loaders import LangChainLoader
-from local_rag_backend.settings import settings
+from local_rag_backend.settings import get_settings
+
+settings = get_settings()
 
 # 1) Wrap any LangChain loader
 lc_loader = WebBaseLoader(["https://example.com"])  # or DirectoryLoader, SitemapLoader, etc.
