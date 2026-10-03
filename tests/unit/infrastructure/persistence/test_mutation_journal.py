@@ -286,6 +286,8 @@ def test_terminal_legacy_records_are_parsed_only_once(tmp_path, monkeypatch):
 def test_done_receipts_expire_by_age_and_size(tmp_path, monkeypatch):
     import local_rag_backend.infrastructure.persistence.shared.mutation_journal as journal_module
 
+    # Exercise a fresh CI runner whose monotonic clock is below the hourly interval.
+    monkeypatch.setattr(journal_module.time, "monotonic", lambda: 120.0)
     journal = FileMutationJournal(tmp_path)
     for index in range(3):
         op_id = f"mut:retention:{index}"
@@ -294,13 +296,13 @@ def test_done_receipts_expire_by_age_and_size(tmp_path, monkeypatch):
         )
     old = _record_path_for(tmp_path / "done", "mut:retention:0")
     os.utime(old, (time.time() - 31 * 86400, time.time() - 31 * 86400))
-    journal._last_sweep_monotonic = 0.0
+    journal._last_sweep_monotonic = float("-inf")
     assert journal.list_incomplete() == []
     assert not old.exists()
 
     kept = _record_path_for(tmp_path / "done", "mut:retention:2")
     monkeypatch.setattr(journal_module, "_DONE_MAX_BYTES", kept.stat().st_size)
-    journal._last_sweep_monotonic = 0.0
+    journal._last_sweep_monotonic = float("-inf")
     assert journal.list_incomplete() == []
     assert kept.is_file()
     assert not _record_path_for(tmp_path / "done", "mut:retention:1").exists()

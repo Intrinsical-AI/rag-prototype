@@ -428,7 +428,7 @@ def test_corrupt_record_preserves_journal_and_corpus(runtime, state, entrypoint)
     path.write_bytes(content)
     if state == "COMMITTED":
         # Completed receipts are checked for replay and during the hourly sweep.
-        runtime.journal._last_sweep_monotonic = 0.0
+        runtime.journal._last_sweep_monotonic = float("-inf")
 
     with pytest.raises(MutationRecoveryRequiredError) as error:
         if entrypoint == "execute":
