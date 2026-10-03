@@ -45,6 +45,38 @@ async def test_ready_endpoint_200_with_openai(asgi_client, monkeypatch):
     assert r.json()["status"] == "ready"
 
 
+async def test_ready_endpoint_503_when_mutation_recovery_is_pending(
+    asgi_client, tmp_path, monkeypatch
+):
+    from local_rag_backend.core.ports.contracts import MutationRecord
+    from local_rag_backend.infrastructure.persistence.shared.mutation_journal import (
+        FileMutationJournal,
+    )
+
+    monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "data_dir", tmp_path, raising=False)
+    FileMutationJournal(tmp_path / ".mutation_journal").upsert(
+        MutationRecord(
+            op_id="mut:readiness-pending",
+            state="PREPARED",
+            intent={},
+            before_image={"docs": [], "existing_tombstones": []},
+        )
+    )
+
+    async def _override():
+        return _DummyRag()
+
+    monkeypatch.setattr(health_router, "get_rag_service", _override, raising=True)
+    response = await asgi_client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json()["checks"]["mutation_journal"] == {
+        "status": "failed",
+        "incomplete_records": 1,
+    }
+
+
 async def test_ready_endpoint_503_when_dense_index_missing(asgi_client, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)

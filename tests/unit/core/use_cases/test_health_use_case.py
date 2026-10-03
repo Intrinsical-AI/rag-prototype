@@ -23,7 +23,7 @@ def test_check_sql_counts_marks_documents_failure_without_failing_history() -> N
     assert checks["history"] == {"count": 5}
 
 
-def test_check_retrieval_index_skips_non_dense_or_non_local_backends() -> None:
+def test_check_retrieval_index_skips_non_dense_modes() -> None:
     checks: dict[str, object] = {}
 
     class _Diagnostics:
@@ -34,16 +34,7 @@ def test_check_retrieval_index_skips_non_dense_or_non_local_backends() -> None:
         health.check_retrieval_index(
             checks=checks,
             docs_count=1,
-            settings_obj=SimpleNamespace(retrieval_mode="sparse", search_backend="local_split"),
-            diagnostics=_Diagnostics(),
-        )
-        is True
-    )
-    assert (
-        health.check_retrieval_index(
-            checks=checks,
-            docs_count=1,
-            settings_obj=SimpleNamespace(retrieval_mode="dense", search_backend="solr"),
+            settings_obj=SimpleNamespace(retrieval_mode="sparse"),
             diagnostics=_Diagnostics(),
         )
         is True
@@ -53,7 +44,6 @@ def test_check_retrieval_index_skips_non_dense_or_non_local_backends() -> None:
 def test_check_retrieval_index_handles_count_mismatch_and_id_drift_errors() -> None:
     settings_obj = SimpleNamespace(
         retrieval_mode="dense",
-        search_backend="local_split",
         index_path="index.faiss",
         id_map_path="id_map.json",
         vector_backend="numpy",
@@ -116,30 +106,24 @@ def test_check_retrieval_index_handles_count_mismatch_and_id_drift_errors() -> N
     )
 
 
-def test_check_mutation_journal_reports_not_applicable_warning_and_failure() -> None:
-    checks: dict[str, object] = {}
-    health.check_mutation_journal(
-        checks=checks,
-        settings_obj=SimpleNamespace(persistence_backend="elasticsearch"),
-        diagnostics=SimpleNamespace(),
-    )
-    assert checks["mutation_journal"] == {"status": "not_applicable"}
-
-    class _WarningDiagnostics:
+def test_check_mutation_journal_blocks_readiness_on_pending_or_unreadable_records() -> None:
+    class _PendingDiagnostics:
         def get_incomplete_mutation_records_count(self, *, coordination_dir):
             assert coordination_dir == "/coord"
             return 2
 
     checks = {}
-    health.check_mutation_journal(
-        checks=checks,
-        settings_obj=SimpleNamespace(
-            persistence_backend="sqlite",
-            get_coordination_dir=lambda: "/coord",
-        ),
-        diagnostics=_WarningDiagnostics(),
+    assert (
+        health.check_mutation_journal(
+            checks=checks,
+            settings_obj=SimpleNamespace(
+                get_coordination_dir=lambda: "/coord",
+            ),
+            diagnostics=_PendingDiagnostics(),
+        )
+        is False
     )
-    assert checks["mutation_journal"] == {"status": "warning", "incomplete_records": 2}
+    assert checks["mutation_journal"] == {"status": "failed", "incomplete_records": 2}
 
     class _FailingDiagnostics:
         def get_incomplete_mutation_records_count(self, *, coordination_dir):
@@ -147,12 +131,14 @@ def test_check_mutation_journal_reports_not_applicable_warning_and_failure() -> 
             raise RuntimeError("journal unavailable")
 
     checks = {}
-    health.check_mutation_journal(
-        checks=checks,
-        settings_obj=SimpleNamespace(
-            persistence_backend="sqlite",
-            get_coordination_dir=lambda: "/coord",
-        ),
-        diagnostics=_FailingDiagnostics(),
+    assert (
+        health.check_mutation_journal(
+            checks=checks,
+            settings_obj=SimpleNamespace(
+                get_coordination_dir=lambda: "/coord",
+            ),
+            diagnostics=_FailingDiagnostics(),
+        )
+        is False
     )
     assert checks["mutation_journal"] == {"status": "failed"}

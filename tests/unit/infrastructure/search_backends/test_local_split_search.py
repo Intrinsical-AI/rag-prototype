@@ -236,7 +236,7 @@ def test_dual_reranks_only_sparse_candidates() -> None:
     assert result.candidate_count == 2
 
 
-def test_dense_applies_filters_min_score_and_candidate_k_floor() -> None:
+def test_dense_applies_filters_and_candidate_k_floor() -> None:
     docs = [
         Document(
             id=DocId("doc-auth"),
@@ -265,7 +265,6 @@ def test_dense_applies_filters_min_score_and_candidate_k_floor() -> None:
             top_k=2,
             candidate_k=1,
             mode="dense",
-            min_score=0.5,
             filters=(RetrievalFilter(field="metadata.language", values=("python",)),),
         )
     )

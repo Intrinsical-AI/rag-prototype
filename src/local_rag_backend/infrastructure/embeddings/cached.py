@@ -112,53 +112,58 @@ class ContentAddressedCachingEmbedder(EmbedderPort):
         texts_list = [str(text) for text in texts]
         if not texts_list or self._disabled:
             return self._base.embed(texts_list)
-        try:
-            hashes_in_order: list[str] = []
-            by_hash: dict[str, str] = {}
-            for text in texts_list:
-                content_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
-                hashes_in_order.append(content_sha)
-                by_hash.setdefault(content_sha, text)
 
+        hashes_in_order: list[str] = []
+        by_hash: dict[str, str] = {}
+        for text in texts_list:
+            content_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            hashes_in_order.append(content_sha)
+            by_hash.setdefault(content_sha, text)
+
+        try:
             lookup_start = time.perf_counter()
             cached = self._cache.get_many(
                 model_key=self.model_key,
                 content_hashes=tuple(by_hash),
             )
-            lookup_seconds = time.perf_counter() - lookup_start
-            misses = [content_sha for content_sha in by_hash if content_sha not in cached]
-            record_embedding_cache_lookup(
-                hits=len(by_hash) - len(misses),
-                misses=len(misses),
-                seconds=lookup_seconds,
-            )
-
-            if misses:
-                miss_texts = [by_hash[content_sha] for content_sha in misses]
-                embed_start = time.perf_counter()
-                embedded = self._base.embed(miss_texts)
-                embed_seconds = time.perf_counter() - embed_start
-                record_embedding_cache_embed(count=len(miss_texts), seconds=embed_seconds)
-                if len(embedded) != len(miss_texts):
-                    raise RuntimeError(
-                        f"Embedder returned {len(embedded)} vectors for {len(miss_texts)} texts."
-                    )
-                miss_vectors = {
-                    content_sha: list(vector)
-                    for content_sha, vector in zip(misses, embedded, strict=False)
-                }
-                store_start = time.perf_counter()
-                self._cache.put_many(model_key=self.model_key, vectors_by_hash=miss_vectors)
-                record_embedding_cache_store(
-                    count=len(miss_vectors),
-                    seconds=time.perf_counter() - store_start,
-                )
-                cached.update(miss_vectors)
-
-            return cast(
-                "Sequence[Embedding]",
-                [list(cached[content_sha]) for content_sha in hashes_in_order],
-            )
-        except Exception:
+        except (OSError, sqlite3.Error, TypeError, ValueError):
             record_embedding_cache_error()
             return self._base.embed(texts_list)
+
+        misses = [content_sha for content_sha in by_hash if content_sha not in cached]
+        record_embedding_cache_lookup(
+            hits=len(by_hash) - len(misses),
+            misses=len(misses),
+            seconds=time.perf_counter() - lookup_start,
+        )
+
+        if misses:
+            miss_texts = [by_hash[content_sha] for content_sha in misses]
+            embed_start = time.perf_counter()
+            embedded = self._base.embed(miss_texts)
+            record_embedding_cache_embed(
+                count=len(miss_texts), seconds=time.perf_counter() - embed_start
+            )
+            if len(embedded) != len(miss_texts):
+                raise RuntimeError(
+                    f"Embedder returned {len(embedded)} vectors for {len(miss_texts)} texts."
+                )
+            miss_vectors = {
+                content_sha: list(vector)
+                for content_sha, vector in zip(misses, embedded, strict=False)
+            }
+            store_start = time.perf_counter()
+            try:
+                self._cache.put_many(model_key=self.model_key, vectors_by_hash=miss_vectors)
+            except (OSError, sqlite3.Error, TypeError, ValueError):
+                record_embedding_cache_error()
+            else:
+                record_embedding_cache_store(
+                    count=len(miss_vectors), seconds=time.perf_counter() - store_start
+                )
+            cached.update(miss_vectors)
+
+        return cast(
+            "Sequence[Embedding]",
+            [list(cached[content_sha]) for content_sha in hashes_in_order],
+        )

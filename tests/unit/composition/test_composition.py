@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
-import httpx
 import pytest
 
 from local_rag_backend.composition.adapters import (
@@ -17,7 +15,6 @@ from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError, LLMConfigurationError
 from local_rag_backend.infrastructure.embeddings.cached import ContentAddressedCachingEmbedder
-from local_rag_backend.infrastructure.search_backends.elastic_like import ElasticLikeSearchRetriever
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 from local_rag_backend.settings import Settings
 
@@ -86,36 +83,8 @@ def test_build_retriever_passes_settings_identity_and_vector_backend(backend):
     }
 
 
-@pytest.mark.parametrize("backend, mode", [("elasticsearch", "sparse"), ("opensearch", "dual")])
-def test_build_retriever_supports_remote_modes(backend, mode):
-    cfg = _settings(search_backend=backend, es_base_url="http://es", os_base_url="http://os")
-    retriever = build_retriever_with_default_embedder_from_settings(
-        settings_obj=cfg,
-        retrieval_mode=mode,
-        doc_repo=SimpleNamespace(),
-        openai_embedder_factory=DummyEmbedder,
-    )
-    assert isinstance(retriever, ElasticLikeSearchRetriever)
-    assert retriever._backend_name == backend
-    retriever._client.close()
-
-
-def test_build_retriever_rejects_sparse_for_mismatched_elasticsearch_backend():
+def test_hybrid_uses_filtered_sparse_branch():
     cfg = _settings(
-        persistence_backend="elasticsearch", es_base_url="http://es", retrieval_mode="hybrid"
-    )
-    with pytest.raises(ValueError, match="supports retrieval_mode=sparse only when"):
-        build_retriever_with_default_embedder_from_settings(
-            settings_obj=cfg, retrieval_mode="sparse", doc_repo=SimpleNamespace()
-        )
-
-
-@pytest.mark.parametrize("search_backend", ["elasticsearch", "local_split"])
-def test_hybrid_uses_filtered_sparse_branch_for_selected_search_backend(search_backend):
-    cfg = _settings(
-        persistence_backend="elasticsearch",
-        search_backend=search_backend,
-        es_base_url="http://es",
         retrieval_mode="hybrid",
         hybrid_retrieval_alpha=0.25,
     )
@@ -135,22 +104,8 @@ def test_hybrid_uses_filtered_sparse_branch_for_selected_search_backend(search_b
     request = RetrievalRequest(
         query="hello", top_k=2, mode="hybrid", filters=(RetrievalFilter("scope", ("public",)),)
     )
-    if search_backend == "local_split":
-        assert isinstance(retriever.sparse, LocalSplitSearchRetriever)
-        assert [doc.id for doc in retriever.retrieve(request).documents] == ["public"]
-        return
-    assert isinstance(retriever.sparse, ElasticLikeSearchRetriever)
-    bodies = []
-
-    def respond(request):
-        bodies.append(json.loads(request.content))
-        return httpx.Response(200, json={"hits": {"hits": []}})
-
-    retriever.sparse._client.close()
-    with httpx.Client(base_url="http://es", transport=httpx.MockTransport(respond)) as client:
-        retriever.sparse._client = client
-        retriever.retrieve(request)
-    assert bodies[0]["query"]["bool"]["filter"] == [{"terms": {"scope": ["public"]}}]
+    assert isinstance(retriever.sparse, LocalSplitSearchRetriever)
+    assert [doc.id for doc in retriever.retrieve(request).documents] == ["public"]
     assert retriever.alpha == 0.25
 
 

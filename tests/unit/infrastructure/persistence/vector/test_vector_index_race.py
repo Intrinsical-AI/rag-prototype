@@ -48,8 +48,8 @@ def test_search_during_add_does_not_raise_or_mis_map_ids(tmp_path):
         assert extend_called.wait(timeout=2), "add_to_index did not reach id_map.extend()"
 
         def _search_and_map():
-            idxs, _dists = fi.search(vec, k=1)
-            return fi.id_map[idxs[0]]
+            idxs, _dists, id_map = fi.search_with_snapshot(vec, k=1)
+            return id_map[idxs[0]]
 
         with ThreadPoolExecutor(max_workers=1) as ex:
             fut = ex.submit(_search_and_map)

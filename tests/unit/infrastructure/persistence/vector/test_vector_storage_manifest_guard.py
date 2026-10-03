@@ -115,9 +115,8 @@ def test_reads_reject_incompatible_manifests_without_repairing(tmp_path, mutatio
         manifest[key] = value
         write_manifest(manifest_path, manifest)
     before = manifest_path.read_bytes() if manifest_path.exists() else None
-    for operation in (store.similar, store.search):
-        with pytest.raises(RuntimeError, match="rebuild is required"):
-            operation([1.0, 0.0], 1)
+    with pytest.raises(RuntimeError, match="rebuild is required"):
+        store.similar([1.0, 0.0], 1)
     assert (manifest_path.read_bytes() if manifest_path.exists() else None) == before
 
     store.rebuild(["doc"], [[1.0, 0.0]])

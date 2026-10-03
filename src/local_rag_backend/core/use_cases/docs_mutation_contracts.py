@@ -32,6 +32,7 @@ class MutationIntent:
     upserts: tuple[MutationUpsertInput, ...] = ()
     delete_ids: tuple[str, ...] = ()
     delete_external_ids: tuple[str, ...] = ()
+    hard_delete_external_ids: tuple[str, ...] = ()
     source: str = "unknown"
 
 
@@ -40,31 +41,42 @@ def normalize_intent(
     intent: MutationIntent,
     new_op_id: Callable[[], str],
 ) -> MutationIntent:
-    upserts = [
-        MutationUpsertInput(
-            external_id=str(it.external_id).strip(),
-            content=str(it.content).strip(),
-            source_id=(str(it.source_id) if it.source_id is not None else None),
-            scope=(str(it.scope) if it.scope is not None else None),
-            snapshot_id=(str(it.snapshot_id) if it.snapshot_id is not None else None),
-            metadata=dict(it.metadata) if it.metadata is not None else None,
+    upserts: list[MutationUpsertInput] = []
+    for idx, item in enumerate(intent.upserts):
+        external_id = str(item.external_id).strip()
+        content = str(item.content)
+        if not external_id:
+            raise ValueError(f"upserts[{idx}].external_id must not be blank")
+        if not content.strip():
+            raise ValueError(f"upserts[{idx}].content must not be blank")
+        upserts.append(
+            MutationUpsertInput(
+                external_id=external_id,
+                content=content,
+                source_id=(str(item.source_id) if item.source_id is not None else None),
+                scope=(str(item.scope) if item.scope is not None else None),
+                snapshot_id=(str(item.snapshot_id) if item.snapshot_id is not None else None),
+                metadata=dict(item.metadata) if item.metadata is not None else None,
+            )
         )
-        for it in list(intent.upserts)
-        if str(it.external_id).strip() and str(it.content).strip()
-    ]
     ext_ids = normalize_str_items(intent.delete_external_ids)
+    hard_ext_ids = normalize_str_items(intent.hard_delete_external_ids)
     delete_ids = normalize_str_items(intent.delete_ids)
 
-    if not upserts and not ext_ids and not delete_ids:
+    if not upserts and not ext_ids and not hard_ext_ids and not delete_ids:
         raise ValueError("Mutation intent must include upserts and/or deletions.")
 
     upsert_ext_ids = [it.external_id for it in upserts]
     if len(set(upsert_ext_ids)) != len(upsert_ext_ids):
         raise ValueError("external_id values in upserts must be unique per mutation intent.")
-    ext_conflict = sorted(set(upsert_ext_ids) & set(ext_ids))
+    ext_conflict = sorted(
+        (set(upsert_ext_ids) & set(ext_ids))
+        | (set(upsert_ext_ids) & set(hard_ext_ids))
+        | (set(ext_ids) & set(hard_ext_ids))
+    )
     if ext_conflict:
         raise ValueError(
-            "upserts and delete_external_ids cannot target the same external_id values: "
+            "upserts and deletion modes cannot target the same external_id values: "
             + ", ".join(ext_conflict[:10])
         )
 
@@ -73,6 +85,7 @@ def normalize_intent(
         upserts=tuple(upserts),
         delete_ids=tuple(delete_ids),
         delete_external_ids=tuple(ext_ids),
+        hard_delete_external_ids=tuple(hard_ext_ids),
         source=str(intent.source or "unknown"),
     )
 
@@ -90,10 +103,6 @@ def summary_from_record(record: MutationRecord) -> MutationSummary:
         ),
         tombstoned=int(payload.get("tombstoned") or 0),
         missing_external_ids=list(payload.get("missing_external_ids") or []),
-        index_rebuilt=bool(payload.get("index_rebuilt") or False),
-        index_doc_count=(
-            int(payload["index_doc_count"]) if payload.get("index_doc_count") is not None else None
-        ),
         results=[
             UpsertDocResult(
                 external_id=str(item.get("external_id") or ""),
@@ -117,8 +126,6 @@ def summary_to_payload(summary: MutationSummary) -> dict[str, Any]:
         "deleted_index": summary.deleted_index,
         "tombstoned": summary.tombstoned,
         "missing_external_ids": list(summary.missing_external_ids or []),
-        "index_rebuilt": bool(summary.index_rebuilt),
-        "index_doc_count": summary.index_doc_count,
         "results": [
             {
                 "external_id": r.external_id,
@@ -132,7 +139,7 @@ def summary_to_payload(summary: MutationSummary) -> dict[str, Any]:
 
 
 def intent_to_dict(intent: MutationIntent) -> dict[str, Any]:
-    return {
+    payload = {
         "op_id": intent.op_id,
         "source": intent.source,
         "upserts": [
@@ -149,6 +156,9 @@ def intent_to_dict(intent: MutationIntent) -> dict[str, Any]:
         "delete_ids": list(intent.delete_ids),
         "delete_external_ids": list(intent.delete_external_ids),
     }
+    if intent.hard_delete_external_ids:
+        payload["hard_delete_external_ids"] = list(intent.hard_delete_external_ids)
+    return payload
 
 
 def normalize_str_items(values: Sequence[str]) -> list[str]:

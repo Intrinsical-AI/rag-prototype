@@ -1,7 +1,7 @@
 # tests/unit/core/test_chunker_progress.py
 import pytest
 
-from local_rag_backend.core.services.ingestion import default_chunker
+from local_rag_backend.core.services.chunking import chunk_chars_v1
 
 
 @pytest.mark.parametrize(
@@ -15,9 +15,8 @@ from local_rag_backend.core.services.ingestion import default_chunker
         ("A" * 25, 3, 0),  # zero overlap small window
     ],
 )
-def test_default_chunker_forward_progress(text, max_chars, overlap):
-    chunk = default_chunker(max_chars=max_chars, overlap=overlap)
-    chunks = chunk(text, None)
+def test_chunk_chars_v1_forward_progress(text, max_chars, overlap):
+    chunks = [c.text for c in chunk_chars_v1(text, max_chars=max_chars, overlap=overlap)]
 
     assert isinstance(chunks, list)
 

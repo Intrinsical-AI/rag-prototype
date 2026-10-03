@@ -1,8 +1,15 @@
 # tests/unit/infrastructure/llms/test_openai_generator.py
 
+import httpx
 import pytest
+from openai import APIConnectionError, APITimeoutError
 
-from local_rag_backend.core.errors import LLMConfigurationError, LLMResponseError
+from local_rag_backend.core.errors import (
+    LLMConfigurationError,
+    LLMConnectionError,
+    LLMResponseError,
+    LLMTimeoutError,
+)
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.settings import get_settings
 
@@ -98,3 +105,34 @@ def test_generator_passes_configured_timeout(monkeypatch):
     out = gen.generate("q", ["ctx"])
     assert out == "ok"
     assert captured.get("timeout") == 23
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "expected_error"),
+    [
+        (APITimeoutError(request=httpx.Request("POST", "https://example.test")), LLMTimeoutError),
+        (
+            APIConnectionError(request=httpx.Request("POST", "https://example.test")),
+            LLMConnectionError,
+        ),
+    ],
+)
+def test_generator_preserves_timeout_and_connection_error_types(
+    monkeypatch, provider_error, expected_error
+):
+    def fail_create(**_kwargs):
+        raise provider_error
+
+    class DummyClient:
+        class chat:
+            class completions:
+                create = staticmethod(fail_create)
+
+    monkeypatch.setattr(settings, "openai_api_key", "DUMMY", raising=False)
+    monkeypatch.setattr(
+        "local_rag_backend.infrastructure.llms.openai_chat.OpenAI", lambda **_: DummyClient()
+    )
+    generator = OpenAIGenerator(settings_obj=settings)
+
+    with pytest.raises(expected_error):
+        generator.generate("question", ["context"])

@@ -78,11 +78,6 @@ def status_cmd() -> None:
     _echo_status_value(label="Host", value=f"{runtime.host}:{runtime.port}", key_fg=key_fg)
     _echo_status_value(label="Retrieval Mode", value=runtime.retrieval_mode, key_fg=key_fg)
     _echo_status_value(
-        label="Persistence Backend",
-        value=runtime.persistence_backend,
-        key_fg=key_fg,
-    )
-    _echo_status_value(
         label="Debug Mode",
         value=("✅" if runtime.debug else "❌"),
         key_fg=key_fg,
@@ -131,26 +126,12 @@ def status_cmd() -> None:
     click.echo()
 
     click.secho("📁 Storage Status", fg=title_fg, bold=True)
-    if runtime.persistence_backend == "elasticsearch":
-        _echo_status_value(
-            label="Elasticsearch",
-            value=(container.settings_obj.es_base_url or "[MISSING]"),
-            key_fg=key_fg,
-        )
-        for name, value in [
-            ("Docs index", container.settings_obj.es_docs_index),
-            ("History index", container.settings_obj.es_history_index),
-            ("System index", container.settings_obj.es_system_index),
-            ("Tombstones index", container.settings_obj.es_tombstones_index),
-        ]:
-            _echo_status_value(label=name, value=value, key_fg=key_fg)
-    else:
-        for name, path_str in [
-            ("Database", container.settings_obj.sqlite_url.replace("sqlite:///", "")),
-            ("FAISS index", runtime.index_path),
-            ("Sample data", container.settings_obj.faq_csv),
-        ]:
-            _echo_path_status(label=name, path_str=path_str, key_fg=key_fg)
+    for name, path_str in [
+        ("Database", container.settings_obj.sqlite_url.replace("sqlite:///", "")),
+        ("Vector index", runtime.index_path),
+        ("Sample data", container.settings_obj.faq_csv),
+    ]:
+        _echo_path_status(label=name, path_str=path_str, key_fg=key_fg)
 
     click.echo()
     click.secho("📊 Data & Index Diagnostics", fg=title_fg, bold=True)
@@ -187,11 +168,10 @@ def status_cmd() -> None:
                 f"{stats.get('vectors')} vectors "
                 f"(dim={stats.get('dim')}, backend={stats.get('backend')})"
             )
-            if runtime.persistence_backend != "elasticsearch":
-                click.echo(
-                    f"  {click.style('Manifest:', fg=key_fg, bold=True)} OK "
-                    f"(path={stats.get('manifest_path')})"
-                )
+            click.echo(
+                f"  {click.style('Manifest:', fg=key_fg, bold=True)} OK "
+                f"(path={stats.get('manifest_path')})"
+            )
             if int(stats.get("duplicates") or 0):
                 click.echo(
                     f"  {click.style('Index drift:', fg=key_fg, bold=True)} "
@@ -212,7 +192,7 @@ def status_cmd() -> None:
                 f"[ERROR] {status_txt} "
                 f"(hint: {stats.get('hint')})"
             )
-            if status_txt == "drift" and runtime.persistence_backend != "elasticsearch":
+            if status_txt == "drift":
                 mm = stats.get("manifest_mismatches") or []
                 if isinstance(mm, list) and mm:
                     sample = ", ".join(

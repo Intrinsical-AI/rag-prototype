@@ -49,7 +49,7 @@ async function staticPage(docs) {
   return page;
 }
 
-test('accepted Elasticsearch IDs and HTML previews remain literal text', async () => {
+test('accepted SQLite external IDs and HTML previews remain literal text', async () => {
   const docs = JSON.parse(execFileSync('uv', ['run', '--project', repo, '--frozen', '--no-sync',
     'python', path.join(repo, 'tests/support/frontend_query_fixture.py')], {
     cwd: root, env: { ...process.env, RAG_CONFIG_PATH: configPath, UV_CACHE_DIR: '/tmp/uv-cache' },
@@ -64,7 +64,7 @@ test('accepted Elasticsearch IDs and HTML previews remain literal text', async (
   } finally { await page.close(); }
 });
 
-test('preview strips only a verified ingestion header and measures its body', async () => {
+test('preview displays raw content without interpreting legacy headers', async () => {
   const metadata = { source: 'api:/docs/ingest', input_index: 0, chunk_index: 0,
     chunk_start_char: 0, chunk_end_char: 10, chunker_version: 'chars_v1',
     embedding_model: 'none', dedup_sha256: 'a'.repeat(64), parent_doc_id: 'api:/docs/ingest:text=0' };
@@ -83,9 +83,7 @@ test('preview strips only a verified ingestion header and measures its body', as
   const page = await staticPage(docs);
   try {
     const rows = await page.locator('#docsList > div').allTextContents();
-    assert.equal(rows[0], '#ingested — Short body');
-    assert.equal(rows[1], `#ingested — ${'x'.repeat(160)}…`);
-    for (let i = 2; i < docs.length; i++) {
+    for (let i = 0; i < docs.length; i++) {
       const content = docs[i].content;
       assert.equal(rows[i], `#${docs[i].id} — ${content.slice(0, 160).replace(/\s+/g, ' ').trim()}${content.length > 160 ? '…' : ''}`);
     }
@@ -119,7 +117,7 @@ test('real HTTP and SQLite add/list/query, status and history lifecycle', async 
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
     await fs.writeFile(configPath, JSON.stringify({ ...config,
       app_host: '127.0.0.1', app_port: port, debug: false, log_level: 'WARNING',
-      persistence_backend: 'local_split', search_backend: 'local_split', retrieval_mode: 'sparse',
+      retrieval_mode: 'sparse',
       embedding_cache_db_path: path.join(root, 'data/embedding-cache.sqlite3'),
       faq_csv: path.join(root, 'data/unused-faq.csv'), eval_dataset_path: path.join(root, 'data/unused-eval.jsonl'),
       openrouter_enabled: false, ollama_enabled: true, ollama_model: 'local-smoke',
@@ -161,7 +159,7 @@ test('real HTTP and SQLite add/list/query, status and history lifecycle', async 
     assert.equal(response.status(), 200);
     const ingested = await response.json();
     assert.equal(ingested.count, 1);
-    await expect(page.locator('#docsList')).toContainText(text.toLowerCase());
+    await expect(page.locator('#docsList')).toContainText(text);
     await expect(page.locator('#docText')).toHaveValue('');
     await page.locator('#refreshDocsBtn').click();
     await page.reload({ waitUntil: 'networkidle' });
@@ -177,12 +175,12 @@ test('real HTTP and SQLite add/list/query, status and history lifecycle', async 
     const result = await ask.json();
     assert.equal(result.answer, answer);
     assert.equal(result.sources.length, 1);
-    assert(result.sources[0].document.content.includes(text.toLowerCase()));
+    assert(result.sources[0].document.content.includes(text));
     await expect(page.locator('#answerBox')).toHaveText(answer);
     await expect(status).toBeHidden();
     await expect(history).toBeVisible();
     assert.equal(llmCalls.length, 1);
-    assert(llmCalls[0].prompt.includes(text.toLowerCase()));
+    assert(llmCalls[0].prompt.includes(text));
     assert(llmCalls[0].prompt.includes(question));
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#clearHistoryBtn').click();

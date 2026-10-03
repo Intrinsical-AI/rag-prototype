@@ -104,7 +104,7 @@ def exclusive_file_lock(
                 raise WriteLockTimeoutError(
                     f"{error_message} Timed out after {float(timeout_s):.2f}s."
                 )
-            time.sleep(max(0.001, float(poll_s)))
+            time.sleep(min(max(0.001, float(poll_s)), deadline - now))
 
         yield
     finally:

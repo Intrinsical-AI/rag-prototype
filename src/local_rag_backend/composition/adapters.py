@@ -52,7 +52,11 @@ from local_rag_backend.infrastructure.ingestion.loaders import (
     detect_json_export_format,
 )
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
-from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator, create_openai_client
+from local_rag_backend.infrastructure.llms.openai_chat import (
+    OpenAIGenerator,
+    create_openai_client,
+    translate_openai_error,
+)
 from local_rag_backend.infrastructure.observability.diagnostics import (
     get_document_ids,
     get_documents_count,
@@ -60,10 +64,7 @@ from local_rag_backend.infrastructure.observability.diagnostics import (
     get_incomplete_mutation_records_count,
     get_retrieval_index_stats,
 )
-from local_rag_backend.infrastructure.persistence.elasticsearch import (
-    ElasticClient,
-    ElasticHealthDiagnostics,
-)
+from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
 from local_rag_backend.infrastructure.persistence.sql.crud import get_history
 from local_rag_backend.infrastructure.persistence.vector.manifest import (
     expected_manifest_config_from_settings,
@@ -71,14 +72,10 @@ from local_rag_backend.infrastructure.persistence.vector.manifest import (
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.infrastructure.retrieval.dense_vector import DenseVectorRetriever
 from local_rag_backend.infrastructure.retrieval.hybrid import HybridRetriever
-from local_rag_backend.infrastructure.search_backends import (
-    ElasticLikeSearchRetriever,
-    LocalSplitSearchRetriever,
-    SolrSearchRetriever,
-)
+from local_rag_backend.infrastructure.retrieval.sparse_bm25 import SparseBM25Retriever
+from local_rag_backend.infrastructure.search_backends import LocalSplitSearchRetriever
 from local_rag_backend.integrations.embeddings._factory import (
     DEFAULT_DENSE_BACKEND_MESSAGE as DEFAULT_DENSE_BACKEND_MESSAGE,
-    _settings_cfg_version,
     build_dense_embedder_from_settings,
 )
 
@@ -86,7 +83,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from local_rag_backend.core.domain.entities import Document as DomainDocument
-    from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import (
         DocumentRepoPort,
         EmbedderPort,
@@ -97,13 +93,6 @@ if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _LocalSparseInputs:
-    docs: Sequence[DomainDocument]
-    corpus: list[str]
-    doc_ids: list[DocId]
 
 
 @dataclass(frozen=True)
@@ -159,30 +148,9 @@ class _SqlHistoryReadPort(HistoryReadPort):
 
 
 @dataclass(frozen=True)
-class _StorageHistoryReadPort(HistoryReadPort):
-    history_repo_factory: Callable[[], QAHistoryPort]
-
-    def list_history_entries(self, *, limit: int, offset: int) -> tuple[HistoryEntry, ...]:
-        repo = self.history_repo_factory()
-        list_entries = getattr(repo, "list_entries", None)
-        if not callable(list_entries):
-            raise RuntimeError("Configured history backend does not support list_entries.")
-        rows = list_entries(limit=limit, offset=offset)
-        return tuple(
-            HistoryEntry(
-                id=int(getattr(row, "id", 0) or 0),
-                question=str(getattr(row, "question", "") or ""),
-                answer=str(getattr(row, "answer", "") or ""),
-                created_at=str(getattr(row, "created_at", "") or ""),
-                source_ids=tuple(str(x) for x in (getattr(row, "source_ids", ()) or ())),
-            )
-            for row in rows
-        )
-
-
-@dataclass(frozen=True)
 class _DefaultHealthDiagnosticsPort(HealthDiagnosticsPort):
     engine: Any
+    journal: FileMutationJournal | None = None
 
     def ping_database(self) -> None:
         with self.engine.connect() as conn:
@@ -219,6 +187,12 @@ class _DefaultHealthDiagnosticsPort(HealthDiagnosticsPort):
         )
 
     def get_incomplete_mutation_records_count(self, *, coordination_dir: Path) -> int:
+        if (
+            self.journal is not None
+            and self.journal.root.resolve()
+            == (Path(coordination_dir) / ".mutation_journal").resolve()
+        ):
+            return self.journal.count_incomplete()
         return int(get_incomplete_mutation_records_count(coordination_dir=coordination_dir))
 
 
@@ -250,7 +224,11 @@ class _DefaultRagRuntimeFactory(RagRuntimeFactoryPort):
 
     def run_ask_eval(self, *, question: str, cfg: Any) -> dict[str, Any]:
         doc_repo = self.doc_repo_factory()
-        docs = doc_repo.get_all_documents()
+        docs = (
+            doc_repo.get_all_documents()
+            if str(cfg.retrieval_mode) in {"sparse", "dual", "hybrid"}
+            else None
+        )
         retriever = self.build_retriever_from_config(cfg, doc_repo, preloaded_docs=docs)
         generator = self.build_generator_from_config(cfg)
         history_storage = self.history_repo_factory()
@@ -274,16 +252,19 @@ class _OpenAICompatibleOpenRouterClient(OpenRouterClientPort):
     default_model: str
 
     def generate(self, *, request: OpenRouterGenerateRequest) -> OpenRouterGenerateResult:
-        response = self.client.chat.completions.create(
-            model=(request.model or self.default_model),
-            temperature=request.temperature,
-            top_p=request.top_p,
-            max_tokens=request.max_tokens,
-            messages=[
-                {"role": "system", "content": request.system_instruction},
-                {"role": "user", "content": request.user_content},
-            ],
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=(request.model or self.default_model),
+                temperature=request.temperature,
+                top_p=request.top_p,
+                max_tokens=request.max_tokens,
+                messages=[
+                    {"role": "system", "content": request.system_instruction},
+                    {"role": "user", "content": request.user_content},
+                ],
+            )
+        except Exception as exc:
+            raise translate_openai_error(exc, provider_name="OpenRouter") from exc
 
         choices = getattr(response, "choices", None)
         if not isinstance(choices, list) or not choices:
@@ -320,24 +301,17 @@ def build_docs_read_port(
 
 def build_history_read_port(
     *,
-    settings_obj: Settings,
-    history_repo_factory: Callable[[], QAHistoryPort],
     session_factory: Any,
 ) -> HistoryReadPort:
-    if settings_obj.persistence_backend == "elasticsearch":
-        return _StorageHistoryReadPort(history_repo_factory=history_repo_factory)
     return _SqlHistoryReadPort(session_factory=session_factory)
 
 
 def build_health_diagnostics_port(
     *,
-    settings_obj: Settings,
     engine: Any,
-    elastic_client: ElasticClient | None = None,
+    journal: FileMutationJournal | None = None,
 ) -> HealthDiagnosticsPort:
-    if settings_obj.persistence_backend == "elasticsearch":
-        return ElasticHealthDiagnostics(settings_obj=settings_obj, client=elastic_client)
-    return _DefaultHealthDiagnosticsPort(engine=engine)
+    return _DefaultHealthDiagnosticsPort(engine=engine, journal=journal)
 
 
 def build_expected_manifest_config(*, settings_obj: Settings) -> dict[str, Any]:
@@ -365,6 +339,15 @@ def build_rag_runtime_factory(
     )
 
 
+def _openrouter_headers(settings_obj: Settings) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if settings_obj.openrouter_site_url is not None:
+        headers["HTTP-Referer"] = settings_obj.openrouter_site_url
+    if settings_obj.openrouter_app_title is not None:
+        headers["X-Title"] = settings_obj.openrouter_app_title
+    return headers
+
+
 def build_openrouter_client_from_settings(
     *,
     settings_obj: Settings,
@@ -374,16 +357,10 @@ def build_openrouter_client_from_settings(
     resolved_create_client = create_openai_client_fn or create_openai_client
     resolved_client_factory = openai_client_factory or OpenAI
 
-    headers: dict[str, str] = {}
-    if settings_obj.openrouter_site_url is not None:
-        headers["HTTP-Referer"] = settings_obj.openrouter_site_url
-    if settings_obj.openrouter_app_title is not None:
-        headers["X-Title"] = settings_obj.openrouter_app_title
-
     client = resolved_create_client(
         api_key=settings_obj.openrouter_api_key,
         base_url=settings_obj.openrouter_base_url,
-        default_headers=headers or None,
+        default_headers=_openrouter_headers(settings_obj) or None,
         timeout=settings_obj.openai_request_timeout,
         client_factory=resolved_client_factory,
     )
@@ -395,15 +372,20 @@ def build_openrouter_client_from_settings(
 
 def get_available_llm_providers(*, settings_obj: Settings) -> dict[str, str]:
     providers: dict[str, str] = {}
-    if settings_obj.openai_api_key:
-        providers["openai"] = "configured"
     if settings_obj.ollama_enabled:
         providers["ollama"] = "enabled"
-    if getattr(settings_obj, "openrouter_enabled", False) and getattr(
-        settings_obj, "openrouter_api_key", None
-    ):
+    if settings_obj.openai_api_key:
+        providers["openai"] = "configured"
+    if settings_obj.openrouter_configured:
         providers["openrouter"] = "configured"
     return providers
+
+
+def _preferred_available_llm_provider(providers: Mapping[str, str]) -> str | None:
+    return next(
+        (name for name in ("ollama", "openai", "openrouter") if name in providers),
+        None,
+    )
 
 
 def build_retriever_with_default_embedder_from_settings(
@@ -455,49 +437,25 @@ def _load_local_sparse_inputs(
     *,
     doc_repo: DocumentRepoPort,
     preloaded_docs: Sequence[DomainDocument] | None,
-) -> _LocalSparseInputs:
-    docs = (
+) -> list[DomainDocument]:
+    return (
         list(preloaded_docs) if preloaded_docs is not None else list(doc_repo.get_all_documents())
     )
-    return _LocalSparseInputs(
-        docs=docs,
-        corpus=[doc.content for doc in docs],
-        doc_ids=[doc.id for doc in docs],
-    )
 
 
-def _validate_retrieval_backend_compatibility(
+def _build_cached_sparse_retriever(
     *,
-    mode: str,
-    persistence_backend: str,
-    search_backend: str,
-) -> None:
-    if mode not in {"sparse", "dense", "dual", "hybrid"}:
-        raise ValueError(f"Unsupported retrieval_mode: {mode}")
-    if (
-        persistence_backend == "elasticsearch"
-        and mode == "sparse"
-        and search_backend != "elasticsearch"
-    ):
-        raise ValueError(
-            "persistence_backend=elasticsearch supports retrieval_mode=sparse only when "
-            "search_backend=elasticsearch"
-        )
-    if search_backend == "solr" and mode in {"dense", "dual"}:
-        raise ValueError("search_backend=solr supports only retrieval_mode=sparse in v1")
-    if mode == "hybrid" and search_backend not in {"local_split", "elasticsearch"}:
-        raise ValueError(
-            "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
-        )
-    if (
-        mode == "hybrid"
-        and search_backend == "elasticsearch"
-        and persistence_backend != "elasticsearch"
-    ):
-        raise ValueError(
-            "retrieval_mode=hybrid with search_backend=elasticsearch requires "
-            "persistence_backend=elasticsearch"
-        )
+    doc_repo: DocumentRepoPort,
+    sparse_inputs: Sequence[DomainDocument] | None,
+) -> SparseBM25Retriever | None:
+    if sparse_inputs is None:
+        return None
+    return SparseBM25Retriever(
+        documents=[doc.content for doc in sparse_inputs],
+        doc_ids=[doc.id for doc in sparse_inputs],
+        doc_repo=doc_repo,
+        preloaded_docs=sparse_inputs,
+    )
 
 
 def _build_vector_repo_from_settings(
@@ -522,7 +480,7 @@ def _build_local_split_retriever(
     mode: str,
     doc_repo: DocumentRepoPort,
     dense_embedder_factory: Callable[[], EmbedderPort],
-    sparse_inputs: _LocalSparseInputs | None,
+    sparse_inputs: Sequence[DomainDocument] | None,
     vector_repo_factory: Callable[..., Any],
 ) -> RetrieverPort:
     embedder: EmbedderPort | None = None
@@ -540,96 +498,10 @@ def _build_local_split_retriever(
         doc_repo=doc_repo,
         embedder=embedder,
         vector_repo=vector_repo,
-        preloaded_docs=(sparse_inputs.docs if sparse_inputs is not None else None),
-    )
-
-
-def _build_remote_search_retriever(
-    *,
-    settings_obj: Settings,
-    search_backend: str,
-    embedder: EmbedderPort | None,
-) -> RetrieverPort:
-    if search_backend == "elasticsearch":
-        return ElasticLikeSearchRetriever(
-            backend_name="elasticsearch",
-            base_url=str(settings_obj.es_base_url or ""),
-            docs_index=str(settings_obj.es_docs_index),
-            content_field=str(settings_obj.es_content_field),
-            embedding_field=str(settings_obj.es_embedding_field),
-            request_timeout_s=float(settings_obj.es_request_timeout_s),
-            verify_tls=bool(settings_obj.es_verify_tls),
-            api_key=settings_obj.es_api_key,
-            username=settings_obj.es_username,
-            password=settings_obj.es_password,
-            embedder=embedder,
-            dense_candidate_k=int(settings_obj.es_hybrid_vector_k),
-        )
-    if search_backend == "opensearch":
-        return ElasticLikeSearchRetriever(
-            backend_name="opensearch",
-            base_url=str(settings_obj.os_base_url or ""),
-            docs_index=str(settings_obj.os_docs_index),
-            content_field=str(settings_obj.os_content_field),
-            embedding_field=str(settings_obj.os_embedding_field),
-            request_timeout_s=float(settings_obj.os_request_timeout_s),
-            verify_tls=bool(settings_obj.os_verify_tls),
-            api_key=settings_obj.os_api_key,
-            username=settings_obj.os_username,
-            password=settings_obj.os_password,
-            embedder=embedder,
-            dense_candidate_k=int(settings_obj.os_dense_candidate_k),
-        )
-    if search_backend == "solr":
-        return SolrSearchRetriever(
-            base_url=str(settings_obj.solr_base_url or ""),
-            core=str(settings_obj.solr_core),
-            content_field=str(settings_obj.solr_content_field),
-            request_timeout_s=float(settings_obj.solr_request_timeout_s),
-        )
-    raise ValueError(f"Unsupported search_backend: {search_backend}")
-
-
-def _build_non_hybrid_retriever_from_settings(
-    *,
-    settings_obj: Settings,
-    mode: str,
-    search_backend: str,
-    doc_repo: DocumentRepoPort,
-    dense_embedder_factory: Callable[[], EmbedderPort],
-    sparse_inputs: _LocalSparseInputs | None,
-    vector_repo_factory: Callable[..., Any],
-) -> RetrieverPort:
-    if search_backend == "local_split":
-        return _build_local_split_retriever(
-            settings_obj=settings_obj,
-            mode=mode,
-            doc_repo=doc_repo,
-            dense_embedder_factory=dense_embedder_factory,
-            sparse_inputs=sparse_inputs,
-            vector_repo_factory=vector_repo_factory,
-        )
-    embedder = dense_embedder_factory() if mode in {"dense", "dual"} else None
-    return _build_remote_search_retriever(
-        settings_obj=settings_obj,
-        search_backend=search_backend,
-        embedder=embedder,
-    )
-
-
-def _build_hybrid_sparse_retriever(
-    *,
-    settings_obj: Settings,
-    doc_repo: DocumentRepoPort,
-    sparse_inputs: _LocalSparseInputs | None,
-) -> RetrieverPort:
-    if settings_obj.search_backend == "elasticsearch":
-        return _build_remote_search_retriever(
-            settings_obj=settings_obj, search_backend="elasticsearch", embedder=None
-        )
-    return LocalSplitSearchRetriever(
-        doc_repo=doc_repo,
-        preloaded_docs=sparse_inputs.docs if sparse_inputs is not None else None,
+        preloaded_docs=sparse_inputs,
+        cached_sparse_retriever=_build_cached_sparse_retriever(
+            doc_repo=doc_repo, sparse_inputs=sparse_inputs
+        ),
     )
 
 
@@ -638,7 +510,7 @@ def _build_hybrid_retriever_from_settings(
     settings_obj: Settings,
     doc_repo: DocumentRepoPort,
     dense_embedder_factory: Callable[[], EmbedderPort],
-    sparse_inputs: _LocalSparseInputs | None,
+    sparse_inputs: Sequence[DomainDocument] | None,
     hybrid_alpha: float | None,
     dense_retriever_factory: Callable[..., RetrieverPort],
     hybrid_retriever_factory: Callable[..., RetrieverPort],
@@ -655,10 +527,12 @@ def _build_hybrid_retriever_from_settings(
         vector_repo=vector_repo,
         doc_repo=doc_repo,
     )
-    sparse_retriever = _build_hybrid_sparse_retriever(
-        settings_obj=settings_obj,
+    sparse_retriever = LocalSplitSearchRetriever(
         doc_repo=doc_repo,
-        sparse_inputs=sparse_inputs,
+        preloaded_docs=sparse_inputs,
+        cached_sparse_retriever=_build_cached_sparse_retriever(
+            doc_repo=doc_repo, sparse_inputs=sparse_inputs
+        ),
     )
     return hybrid_retriever_factory(
         dense=dense_retriever,
@@ -696,15 +570,9 @@ def _apply_reranker_from_settings(
 
 def resolve_preferred_llm_provider(*, settings_obj: Settings) -> str:
     """Return the preferred LLM provider according to the configured precedence."""
-    provider: str | None = None
-    if settings_obj.ollama_enabled:
-        provider = "ollama"
-    elif settings_obj.openai_api_key:
-        provider = "openai"
-    elif getattr(settings_obj, "openrouter_enabled", False) and getattr(
-        settings_obj, "openrouter_api_key", None
-    ):
-        provider = "openrouter"
+    provider = _preferred_available_llm_provider(
+        get_available_llm_providers(settings_obj=settings_obj)
+    )
 
     if provider is None:
         raise LLMConfigurationError(
@@ -712,11 +580,9 @@ def resolve_preferred_llm_provider(*, settings_obj: Settings) -> str:
             "or enable openrouter_enabled with openrouter_api_key."
         )
     logger.info(
-        "llm_provider_selected provider=%s mode=%s backend=%s cfg_version=%s",
+        "llm_provider_selected provider=%s mode=%s",
         provider,
         str(getattr(settings_obj, "retrieval_mode", "unknown")),
-        str(getattr(settings_obj, "search_backend", "local_split")),
-        _settings_cfg_version(settings_obj),
     )
     return provider
 
@@ -740,26 +606,20 @@ def build_retriever_from_settings(
     """Build the retriever selected by runtime settings and call-site overrides."""
 
     mode = str(retrieval_mode)
-    persistence_backend = str(getattr(settings_obj, "persistence_backend", "local_split"))
-    search_backend = str(getattr(settings_obj, "search_backend", "local_split"))
-    _validate_retrieval_backend_compatibility(
-        mode=mode,
-        persistence_backend=persistence_backend,
-        search_backend=search_backend,
-    )
+    if mode not in {"sparse", "dense", "dual", "hybrid"}:
+        raise ValueError(f"Unsupported retrieval_mode: {mode}")
 
-    sparse_inputs: _LocalSparseInputs | None = None
-    if mode in {"sparse", "hybrid", "dual"} and search_backend == "local_split":
+    sparse_inputs: list[DomainDocument] | None = None
+    if mode in {"sparse", "hybrid", "dual"}:
         sparse_inputs = _load_local_sparse_inputs(
             doc_repo=doc_repo,
             preloaded_docs=preloaded_docs,
         )
 
     if mode in {"sparse", "dense", "dual"}:
-        retriever = _build_non_hybrid_retriever_from_settings(
+        retriever = _build_local_split_retriever(
             settings_obj=settings_obj,
             mode=mode,
-            search_backend=search_backend,
             doc_repo=doc_repo,
             dense_embedder_factory=dense_embedder_factory,
             sparse_inputs=sparse_inputs,
@@ -786,15 +646,13 @@ def build_retriever_from_settings(
         reranker_factory=reranker_factory,
     )
     logger.info(
-        "retriever_selected mode=%s backend=%s cache_key=%s cfg_version=%s",
+        "retriever_selected mode=%s cache_key=%s",
         mode,
-        search_backend,
         (
             str(getattr(settings_obj, "embedding_cache_db_path", "none"))
             if mode in {"dense", "dual", "hybrid"}
             else "none"
         ),
-        _settings_cfg_version(settings_obj),
     )
     return retriever
 
@@ -823,19 +681,14 @@ def build_generator_from_settings(
         if available_providers is not None
         else get_available_llm_providers(settings_obj=settings_obj)
     )
-    provider = llm_provider or next(iter(providers), None)
+    provider = llm_provider or _preferred_available_llm_provider(providers)
 
     if not provider:
-        raise RuntimeError("No LLM provider available.")
+        raise LLMConfigurationError("No LLM provider available.")
     if provider not in providers:
         raise ValueError(f"LLM provider '{provider}' is not available or configured.")
 
     if provider == "openrouter":
-        headers: dict[str, str] = {}
-        if settings_obj.openrouter_site_url is not None:
-            headers["HTTP-Referer"] = settings_obj.openrouter_site_url
-        if settings_obj.openrouter_app_title is not None:
-            headers["X-Title"] = settings_obj.openrouter_app_title
         return openai_generator_factory(
             model=(model or settings_obj.openrouter_model),
             temperature=temperature,
@@ -844,7 +697,7 @@ def build_generator_from_settings(
             prompt_template=prompt_template,
             api_key=settings_obj.openrouter_api_key,
             base_url=settings_obj.openrouter_base_url,
-            extra_headers=headers or None,
+            extra_headers=_openrouter_headers(settings_obj) or None,
         )
     if provider == "openai":
         return openai_generator_factory(

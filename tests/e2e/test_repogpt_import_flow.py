@@ -35,7 +35,7 @@ def test_repogpt_emit_code_units_imports_and_retrieves_by_queryable_metadata(
     )
     payload = load_repogpt_payload(payload_path=payload_path, repo_path=repo_path)
 
-    assert payload["schema_version"] == "4"
+    assert payload["schema_version"] == "5"
     assert payload["replace_scope"] is True
 
     result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload_path)])

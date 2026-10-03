@@ -76,7 +76,6 @@ class RerankingRetriever:
             filters=request.filters,
             candidate_k=request.candidate_k,
             dual_candidate_k=request.dual_candidate_k,
-            min_score=request.min_score,
         )
         structured_result = self.base.retrieve(base_request)
         docs = list(structured_result.documents)

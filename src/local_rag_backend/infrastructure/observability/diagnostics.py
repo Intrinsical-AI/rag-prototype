@@ -4,17 +4,16 @@ Operational diagnostics for the app layer (health/readiness/status).
 
 from __future__ import annotations
 
-import json
-import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
+from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
+
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
-
-logger = logging.getLogger(__name__)
 
 
 def get_documents_count(engine: Engine) -> int:
@@ -225,20 +224,9 @@ def get_incomplete_mutation_records_count(*, coordination_dir: Path) -> int:
     journal_dir = Path(coordination_dir) / ".mutation_journal"
     if not journal_dir.is_dir():
         return 0
+    return _journal_for_diagnostics(journal_dir.resolve()).count_incomplete()
 
-    incomplete = 0
-    for path in sorted(journal_dir.glob("*.json")):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            logger.warning(
-                "Skipping unreadable mutation journal diagnostics record at %s", path, exc_info=True
-            )
-            continue
-        if not isinstance(payload, dict):
-            continue
-        state = str(payload.get("state") or "").strip()
-        if state in {"COMMITTED", "ROLLED_BACK"}:
-            continue
-        incomplete += 1
-    return incomplete
+
+@lru_cache(maxsize=16)
+def _journal_for_diagnostics(journal_dir: Path) -> FileMutationJournal:
+    return FileMutationJournal(journal_dir)

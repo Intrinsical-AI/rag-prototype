@@ -35,7 +35,7 @@ def test_cli_does_not_register_removed_mutation_commands() -> None:
 @pytest.mark.parametrize(
     ("wrapper_name", "expected_args"),
     [
-        ("rag_server", ["server"]),
+        ("rag_server", ["server", "--flag"]),
         ("rag_bootstrap", ["bootstrap", "--flag"]),
         ("rag_status", ["status", "--flag"]),
         ("rag_eval", ["eval", "--flag"]),

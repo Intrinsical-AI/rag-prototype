@@ -223,8 +223,6 @@ jobs:
           --cov-branch
           --cov-report=term-missing:skip-covered
           --cov=local_rag_backend.infrastructure.search_backends.local_split
-          --cov=local_rag_backend.infrastructure.search_backends.elastic_like
-          --cov=local_rag_backend.infrastructure.search_backends.solr
           --cov=local_rag_backend.core.services.reranking
           --cov=local_rag_backend.core.use_cases.health
           --cov=local_rag_backend.cli_commands.index

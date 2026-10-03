@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 
 class TextFileLoader(LoaderPort):
+    _format = "text"
+    _loader_name = "TextFileLoader"
+
     def __init__(
         self,
         path: str | Path,
@@ -36,12 +39,12 @@ class TextFileLoader(LoaderPort):
         md = dict(self._metadata) if self._metadata else {}
         md.setdefault("source_path", str(self.path))
         md.setdefault("filename", self.path.name)
-        md.setdefault("format", "text")
+        md.setdefault("format", self._format)
         yield LoadedItem(
             text=text,
             lineage=loader_lineage(
                 source_uri=str(self.path.resolve()),
-                loader_name="TextFileLoader",
+                loader_name=self._loader_name,
                 source_version=None,
                 record_locator="file",
             ),

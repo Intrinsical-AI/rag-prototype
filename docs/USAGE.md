@@ -8,7 +8,7 @@ Este proyecto no está optimizado para "subir documentos y preguntar". Está dis
 
 Por eso existen tres piezas que no conviene saltarse:
 
-* `MutationCoordinator`: garantiza que toda mutación pase por un write-path canónico, con saga durable o path atómico según el backend.
+* `MutationCoordinator`: garantiza que toda mutación pase por el write-path canónico con saga durable.
 * `rag-rebuild-index` / `POST /api/index/rebuild`: el índice de lectura es reparable y derivado; el rebuild explícito evita que el estado corrupto se oculte como si fuera normal.
 * `rag-eval` y `rag-eval-compare`: cualquier cambio de chunking, retrieval o reranking debe pasar por un gate reproducible para evitar regresiones silenciosas.
 
@@ -35,7 +35,6 @@ para `perf_metrics_out_path`. Si despliegas con Compose, monta el YAML y apunta
 
 ```yaml
 # config.yaml
-persistence_backend: local_split
 app_host: 127.0.0.1
 app_port: 8000
 debug: false
@@ -47,7 +46,6 @@ api_key: null
 public_bind_requires_api_key: true
 cors_allow_origins: []
 
-search_backend: local_split
 retrieval_mode: sparse
 vector_backend: auto
 hybrid_retrieval_alpha: 0.5
@@ -69,9 +67,9 @@ En producción (`debug: false`), `cors_allow_origins` debe quedar vacío o enume
 orígenes exactos, por ejemplo `["https://app.example.com"]`. El comodín `"*"`
 se rechaza al arrancar; solo se habilita automáticamente en modo debug local.
 
-Nota de topología: `search_backend` controla el motor de consulta independientemente de
-`persistence_backend`. Consulta la matriz del README para validar `dense`, `dual` o `hybrid`
-antes de cambiar valores.
+La persistencia y la búsqueda son locales: SQLite y, para `dense`, `dual` o `hybrid`, un índice FAISS/NumPy. Los selectores antiguos de backends remotos ya no son válidos.
+
+**Cambio de formato:** ahora se guarda el chunk original; el linaje queda en metadata. Los IDs de `/api/docs/ingest` dependen del texto original y de la versión de chunking. Para pasar de datos anteriores, usa un directorio de datos vacío y vuelve a ingerir todas las fuentes. La ingesta incremental y un rebuild solo del índice dejan contenido mixto o duplicados.
 
 ## Paso 2: Implementación de un `Loader` Personalizado
 
@@ -142,6 +140,7 @@ def main():
 
     # 3. Instanciar el contenedor y el coordinador canónico
     container = AppContainer.from_settings(settings)
+    container.initialize()
     coordinator = MutationCoordinator(
         settings_obj=settings,
         ports=container.docs_mutation_ports(
@@ -192,14 +191,15 @@ Script para hacer preguntas a los datos utilizando `RagService` y el proveedor L
 ```python
 # run_query.py
 
-from local_rag_backend.bootstrap import bootstrap_rag_service
+from local_rag_backend.composition.container import AppContainer
+from local_rag_backend.settings import get_settings
 
 def main():
     print("--- Iniciando servicio RAG para consulta ---")
 
-    # La función bootstrap_rag_service crea y conecta todos los componentes
-    # necesarios para realizar consultas (repositorios, retrievers, generador).
-    rag_service = bootstrap_rag_service()
+    container = AppContainer.from_settings(get_settings())
+    container.initialize()
+    rag_service = container.build_rag_service()
 
     question = "¿Qué es la arquitectura hexagonal?"
     print(f"\nPregunta: {question}")
@@ -242,19 +242,15 @@ rag-ingest --dry-run ./docs
 
 Notas:
 
-* En `local_split` + `dense`/`hybrid`, la CLI actualiza SQLite y el índice vectorial local de forma consistente (FAISS o NumPy, según `vector_backend`) y borra chunks obsoletos si un fichero se acorta.
-* En `elasticsearch` + `dense`/`hybrid`, la CLI usa el backend unificado: documentos, embeddings, history, system state y tombstones viven en Elasticsearch.
-* La detección de formato es best-effort (no solo extensión). Opcionalmente puedes instalar `python-magic` con el extra `magic`.
+* En `dense`/`dual`/`hybrid`, la CLI actualiza SQLite y el índice vectorial local (FAISS o NumPy, según `vector_backend`) y borra chunks obsoletos si un fichero se acorta.
+* La extensión conocida determina el formato después de descartar contenido binario; para extensiones desconocidas se aplican heurísticas. Opcionalmente puedes instalar `python-magic` con el extra `magic`.
 * Si no quieres seguir enlaces simbólicos (incluyendo rutas raíz que sean symlink), usa `--no-follow-symlinks`.
 
 ---
 
 ## Mantenimiento (dense/dual/hybrid): mutación canónica + repair explícito
 
-`MutationCoordinator` es el write-path canónico en ambos backends:
-
-* `local_split`: `DURABLE_SAGA` con journal duradero, SQLite como store canónico y vector index local como estado derivado.
-* `elasticsearch`: path atómico sobre backend unificado; no hay journal de mutación local ni lock SQL.
+`MutationCoordinator` es el write-path canónico: `DURABLE_SAGA` con journal duradero, SQLite como store canónico y vector index local como estado derivado. El journal guarda operaciones activas en `active/` y recibos terminales en `done/`. Los recibos `done/` se retienen hasta 30 días o 256 MiB; por tanto, el replay exacto por `op_id` está limitado a esa ventana. La excepción son los recibos que prevalecen sobre un registro plano incompleto: se conservan hasta resolverlo. Los registros planos antiguos quedan de solo lectura y son replayables. Los registros incompletos o corruptos hacen que `/readyz` devuelva `503`; los activos sin resolver bloquean nuevas escrituras y un recibo terminal corrupto bloquea el replay de su `op_id`.
 
 ### 1) CLI (canónico)
 
@@ -373,24 +369,23 @@ print(summary)
 
 Notas:
 
-* En `local_split`, el rebuild recompone el índice vectorial local desde el store canónico.
-* En `elasticsearch`, el rebuild re-embebe los documentos del índice de documentos y actualiza los vectores in-place.
+* El rebuild recompone el índice vectorial local desde SQLite.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
 * `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI y HTTP ahora usan el mismo default: `true`.
-* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v4` se normaliza en el borde de transporte, no en el core del importador.
+* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v5` se normaliza en el borde de transporte, no en el core del importador.
 * Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
 * `rag_status` devuelve un `runtime` estructurado con topología, seguridad, backends y rutas, además de `health` e `index` cuando aplican.
 
 ### RepoGPT contract
 
-`RepoGPT code-units v4` es el contrato soportado para la integración canónica de código:
+`RepoGPT code-units v5` es el contrato soportado para la integración canónica de código:
 
 * `kind = "code-units"`
-* `schema_version = "4"`
+* `schema_version = "5"`
 * `scope`, `snapshot_id`, `replace_scope`
 * `documents[]` con `external_id`, `content`, `metadata`
 
-El import canónico sigue siendo genérico; no se especializa el use case al dominio RepoGPT. La validación específica vive en el borde de transporte para detectar payloads `code-units` desalineados antes de tocar el write-path canónico.
+El import canónico sigue siendo genérico. El borde valida todos los documentos v5 y omite los módulos estructurales sin contenido residual. Si no queda contenido indexable, `replace_scope=false` no muta datos; una exportación completa con `replace_scope=true` elimina los documentos obsoletos del scope. Las importaciones genéricas vacías siguen siendo inválidas.
 
 ---
 
@@ -504,7 +499,7 @@ Reranker opcional (mejora de calidad medible con `rag-eval`):
 ### Optional external E2E fixtures
 
 El gate RepoGPT por defecto usa la fixture canónica versionada
-`tests/fixtures/repogpt_code_units_v4.json`: valida al consumidor RAG sin abrir ni
+`tests/fixtures/repogpt_code_units_v5.json`: valida al consumidor RAG sin abrir ni
 modificar otro checkout. Para ejecutar el productor real, configura explícitamente
 `REPOGPT_ROOT`; se usan su intérprete preparado, el código fuente versionado en
 `tests/fixtures/repogpt_eval_repo` y las flags

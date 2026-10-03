@@ -1,7 +1,7 @@
 # ADR-007: Persistence Topology Abstraction (Split-Store and Unified-Store)
 
 ## Status
-Proposed
+Superseded historical proposal. The current runtime uses SQLite and a local vector index only; `StorageProfile` and remote adapters were removed.
 
 ## Date
 2026-03-01

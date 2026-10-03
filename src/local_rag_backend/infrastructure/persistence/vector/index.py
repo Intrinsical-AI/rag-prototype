@@ -222,17 +222,6 @@ class VectorIndex:
                 self.id_map.extend(batch_ids)
             self._save_locked()
 
-    def search(
-        self, query_vector: Sequence[float], k: int
-    ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
-        if k <= 0:
-            return np.asarray([], dtype=np.int64), np.asarray([], dtype=np.float32)
-
-        query_np = np.asarray(query_vector, dtype="float32").reshape(1, -1)
-
-        with self._state_lock:
-            return self.engine.search(query_np, k)
-
     def search_with_snapshot(
         self, query_vector: Sequence[float], k: int
     ) -> tuple[NDArray[np.int64], NDArray[np.float32], list[DocId]]:

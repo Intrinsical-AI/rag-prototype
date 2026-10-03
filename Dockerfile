@@ -15,6 +15,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
+    APP_HOST=0.0.0.0 \
+    APP_PORT=8000 \
     PATH="/opt/venv/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -55,11 +57,11 @@ RUN set -eux; \
         EXTRA_FLAGS="${EXTRA_FLAGS} --extra ${extra}"; \
       done; \
     fi; \
-    uv sync --frozen --extra server --extra dev --extra test --extra lint ${EXTRA_FLAGS}
+    uv sync --frozen --extra server --group dev --group test --group lint ${EXTRA_FLAGS}
 
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 USER appuser
-CMD ["uvicorn", "local_rag_backend.http.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["rag-server", "--reload"]
 
 # --- Stage 4: Production runtime (minimal) ---
 FROM ${PYTHON_IMAGE} as production
@@ -69,6 +71,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
+    APP_HOST=0.0.0.0 \
+    APP_PORT=8000 \
     PATH="/opt/venv/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -80,6 +84,7 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 COPY --from=deps /opt/venv /opt/venv
 
 WORKDIR /app
+COPY config.example.yaml ./config.yaml
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
@@ -87,7 +92,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 USER appuser
 EXPOSE 8000
-CMD ["uvicorn", "local_rag_backend.http.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--access-log", "--log-level", "info"]
+CMD ["rag-server", "--workers", "4", "--no-reload"]
 
 # --- Stage 5: Testing Environment ---
 FROM development as testing

@@ -56,10 +56,6 @@ class DenseVectorRetriever(RetrieverPort):
                 break
             window = min(window * 2, total)
 
-        # Scores belong to the final candidate window. Thresholds must not trigger
-        # further overfetch: min-max normalization itself depends on that window.
-        if request.min_score is not None:
-            eligible = [item for item in eligible if item.score >= request.min_score]
         return RetrievalResult(
             items=tuple(eligible[: request.top_k]),
             mode_used="dense",

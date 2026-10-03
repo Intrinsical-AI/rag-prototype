@@ -37,13 +37,13 @@ from local_rag_backend.core.use_cases.docs_mutation import (
 from local_rag_backend.core.use_cases.errors import (
     BadRequestError,
     PayloadTooLargeError,
+    ServiceUnavailableError,
     UnprocessableEntityError,
 )
 from local_rag_backend.core.use_cases.mutations import run_api_mutation
 from local_rag_backend.http.dependencies import (
     get_app_container_dependency,
     get_settings_dependency,
-    reset_rag_service,
 )
 from local_rag_backend.http.schemas.docs import (
     CanonicalImportResponse,
@@ -70,27 +70,19 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
-def _to_document_in_db(item: Any) -> DocumentInDB:
-    return DocumentInDB(
-        id=str(item.id),
-        content=str(item.content),
-        external_id=(
-            str(item.external_id) if getattr(item, "external_id", None) is not None else None
-        ),
-        source_id=(str(item.source_id) if getattr(item, "source_id", None) is not None else None),
-        metadata=(
-            dict(item.metadata or {}) if getattr(item, "metadata", None) is not None else None
-        ),
-    )
-
-
 def _map_docs_error(
     exc: Exception,
     *,
     operation: str,
-) -> PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None:
+) -> (
+    PayloadTooLargeError
+    | UnprocessableEntityError
+    | BadRequestError
+    | ServiceUnavailableError
+    | None
+):
     if isinstance(exc, EmbeddingsBackendUnavailableError):
-        return BadRequestError(DEFAULT_DENSE_BACKEND_MESSAGE)
+        return ServiceUnavailableError(DEFAULT_DENSE_BACKEND_MESSAGE)
     if operation == "mutate" and isinstance(exc, ValueError):
         return BadRequestError(str(exc))
     if operation == "import":
@@ -109,13 +101,18 @@ async def _run_docs_mutation_operation(
     container: AppContainer,
     run_locked: Callable[[Callable[[], Any]], Any] | None = None,
     map_error: Callable[
-        [Exception], PayloadTooLargeError | UnprocessableEntityError | BadRequestError | None
+        [Exception],
+        PayloadTooLargeError
+        | UnprocessableEntityError
+        | BadRequestError
+        | ServiceUnavailableError
+        | None,
     ],
 ) -> Any:
     return await run_api_mutation(
         operation=operation,
         run_locked=(run_locked or (lambda fn: fn())),
-        reset_after=reset_rag_service,
+        reset_after=container.clear_local_rag_service_cache,
         blocking_executor=container.blocking_executor(),
         map_error=map_error,
     )
@@ -133,7 +130,7 @@ async def query_docs(
         offset=payload.offset,
         filters=tuple(item.to_domain() for item in payload.filters),
     )
-    return [_to_document_in_db(item) for item in docs]
+    return [DocumentInDB.model_validate(item) for item in docs]
 
 
 async def _read_upload_with_limit(
@@ -207,8 +204,6 @@ async def mutate_docs(
         deleted_index=summary.deleted_index,
         tombstoned=summary.tombstoned,
         missing_external_ids=list(summary.missing_external_ids or []),
-        index_rebuilt=summary.index_rebuilt,
-        index_doc_count=summary.index_doc_count,
         results=[
             UpsertDocResult(
                 external_id=r.external_id,
@@ -287,7 +282,7 @@ async def ingest_docs(
     mutation_bundle = container.build_docs_mutation_bundle(
         missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
     )
-    texts = [t.strip() for t in payload.texts if t and t.strip()]
+    texts = [t for t in payload.texts if t and t.strip()]
     if not texts:
         return IngestResponse(count=0, ids=[])
     t = Timer()

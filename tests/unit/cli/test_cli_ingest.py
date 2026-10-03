@@ -117,3 +117,88 @@ def test_cli_ingest_accepts_utf8_non_ascii_text(in_memory_sqlite, tmp_path, monk
     docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs) == 1
     assert (docs[0].source_id or "").endswith("es.txt")
+
+
+def test_cli_ingest_txt_preserves_first_line_case_and_spacing(
+    in_memory_sqlite, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_chars", 10_000, raising=False)
+    text_file = tmp_path / "notes.txt"
+    raw = "First, line\nSecond line  \n"
+    text_file.write_text(raw, encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    assert result.exit_code == 0, result.output
+    docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    assert [doc.content for doc in docs] == [raw]
+
+
+def test_cli_ingest_skips_blank_chunks_without_renumbering(in_memory_sqlite, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_chars", 8, raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_overlap", 0, raising=False)
+    text_file = tmp_path / "notes.txt"
+    text_file.write_text(" " * 8 + " Exact \n", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+
+    assert result.exit_code == 0, result.output
+    docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
+    assert len(docs) == 1
+    assert docs[0].content == " Exact \n"
+    assert docs[0].metadata is not None
+    assert docs[0].metadata["chunk_index"] == 1
+    assert docs[0].metadata["chunk_start_char"] == 8
+    assert docs[0].metadata["chunk_end_char"] == 16
+
+
+def test_cli_ingest_all_blank_csv_rows_removes_stale_docs(in_memory_sqlite, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    csv_file = tmp_path / "notes.csv"
+    csv_file.write_text("title;body\nQ;A\n", encoding="utf-8")
+    first = CliRunner().invoke(cli, ["ingest", str(csv_file), "--no-magic"])
+    assert first.exit_code == 0, first.output
+    store = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    assert len(store.get_all_documents()) == 1
+
+    csv_file.write_text("title;body\n;\n", encoding="utf-8")
+    second = CliRunner().invoke(cli, ["ingest", str(csv_file), "--no-magic"])
+
+    assert second.exit_code == 0, second.output
+    assert store.get_all_documents() == []
+
+
+def test_cli_ingest_blank_text_file_removes_stale_docs(in_memory_sqlite, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    text_file = tmp_path / "notes.txt"
+    text_file.write_text("Original document", encoding="utf-8")
+    first = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    assert first.exit_code == 0, first.output
+    store = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    assert len(store.get_all_documents()) == 1
+
+    text_file.write_text(" " * 16, encoding="utf-8")
+    second = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+
+    assert second.exit_code == 0, second.output
+    assert store.get_all_documents() == []
+
+
+def test_cli_ingest_all_tombstoned_chunks_is_noop(in_memory_sqlite, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    text_file = tmp_path / "notes.txt"
+    text_file.write_text("Do not restore me", encoding="utf-8")
+
+    first = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    assert first.exit_code == 0, first.output
+    store = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    docs = store.get_all_documents()
+    assert len(docs) == 1
+    assert docs[0].external_id is not None
+    store.delete_by_external_ids([docs[0].external_id])
+
+    second = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    assert second.exit_code == 0, second.output
+    assert "inserted=0" in second.output
+    assert store.get_all_documents() == []

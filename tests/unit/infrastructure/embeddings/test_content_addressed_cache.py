@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.embeddings.cached import (
@@ -88,3 +91,33 @@ def test_resolve_embedding_cache_db_path_honors_override(tmp_path: Path) -> None
         )
         == override
     )
+
+
+def test_provider_failure_is_not_retried(tmp_path: Path) -> None:
+    class FailingEmbedder(_Embedder):
+        def embed(self, texts):
+            self.calls.append(list(texts))
+            raise RuntimeError("provider failed")
+
+    base = FailingEmbedder()
+    cached = ContentAddressedCachingEmbedder(base=base, cache_db_path=tmp_path / "cache.sqlite3")
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        cached.embed(["alpha"])
+
+    assert base.calls == [["alpha"]]
+
+
+def test_cache_store_failure_returns_computed_vectors_without_reembedding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _Embedder()
+    cached = ContentAddressedCachingEmbedder(base=base, cache_db_path=tmp_path / "cache.sqlite3")
+
+    def fail_store(**_kwargs):
+        raise sqlite3.OperationalError("cache unavailable")
+
+    monkeypatch.setattr(cached._cache, "put_many", fail_store)
+
+    assert cached.embed(["alpha"]) == [[5.0, 6.0]]
+    assert base.calls == [["alpha"]]

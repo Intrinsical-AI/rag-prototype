@@ -19,6 +19,7 @@ def bootstrap_cmd() -> None:
                 run_sample_data_ingestion,
                 use_lock=False,
                 ensure_schema=False,
+                invalidate_shared=False,
             )
             bar.update(1)
         click.echo("[OK] Bootstrap completed successfully!")

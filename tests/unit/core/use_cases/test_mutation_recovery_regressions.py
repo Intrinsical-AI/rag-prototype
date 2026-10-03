@@ -13,7 +13,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
-from local_rag_backend.core.domain.profiles import StorageProfileRegistry
 from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.ports.contracts import (
     DocsMutationPorts,
@@ -21,8 +20,6 @@ from local_rag_backend.core.ports.contracts import (
     MutationRecord,
 )
 from local_rag_backend.core.services.maintenance import rebuild_index_from_db
-from local_rag_backend.core.use_cases._batch_coordinator import MutationBatchItem
-from local_rag_backend.core.use_cases._mutation_saga_executor import PreparedMutation
 from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
 from local_rag_backend.core.use_cases.docs_mutation_contracts import (
     MutationIntent,
@@ -59,7 +56,6 @@ def runtime(tmp_path):
         vector_backend="numpy",
         index_path=str(tmp_path / "index.npy"),
         id_map_path=str(tmp_path / "ids.json"),
-        mutation_batch_max_wait_ms=0,
         st_embedding_model="test",
         synthetic_embeddings=True,
     )
@@ -97,7 +93,6 @@ def runtime(tmp_path):
         reconcile_index=reconcile,
         write_lock=write_lock,
         mutation_journal_factory=lambda: journal,
-        storage_profile_registry=StorageProfileRegistry(),
         mutation_uow_factory=lambda: session_uow(session_factory=sessions),
     )
     result = SimpleNamespace(
@@ -128,6 +123,49 @@ def test_committed_replay_preserves_later_content_and_original_response(runtime)
     assert runtime.coordinator.execute(a) == original
     assert runtime.repo.get_all_documents()[0].content == "v2"
     assert runtime.rebuilds == []
+
+
+def test_legacy_incomplete_mutation_recovers_once_without_changing_flat_record(runtime):
+    runtime.coordinator.execute(_upsert("initial"))
+    before_docs = runtime.repo.snapshot_by_external_ids(["doc"])
+    runtime.repo.upsert_documents_by_external_id(
+        [runtime.repo.UpsertDoc(external_id="doc", content="v2")]
+    )
+    intent = _upsert("legacy-pending", "v2")
+    runtime.journal.upsert(
+        MutationRecord(
+            op_id=intent.op_id,
+            state="SQL_COMMITTED",
+            intent=intent_to_dict(intent),
+            before_image={"docs": before_docs, "existing_tombstones": []},
+        )
+    )
+    filename = hashlib.sha256(intent.op_id.encode()).hexdigest() + ".json"
+    active = runtime.journal.active_dir / filename
+    flat = runtime.journal.root / filename
+    flat.write_bytes(active.read_bytes())
+    active.unlink()
+    old_bytes = flat.read_bytes()
+
+    reopened = FileMutationJournal(runtime.journal.root)
+    coordinator = MutationCoordinator(
+        settings_obj=runtime.settings,
+        ports=replace(runtime.ports, mutation_journal_factory=lambda: reopened),
+    )
+    assert coordinator.recover_incomplete() == 1
+    assert runtime.repo.get_all_documents()[0].content == "v1"
+    assert reopened.get(intent.op_id).state == "ROLLED_BACK"
+    assert flat.read_bytes() == old_bytes
+
+    after_restart = FileMutationJournal(runtime.journal.root)
+    coordinator = MutationCoordinator(
+        settings_obj=runtime.settings,
+        ports=replace(runtime.ports, mutation_journal_factory=lambda: after_restart),
+    )
+    assert coordinator.recover_incomplete() == 0
+    assert runtime.repo.get_all_documents()[0].content == "v1"
+    assert after_restart.get(intent.op_id).state == "ROLLED_BACK"
+    assert flat.read_bytes() == old_bytes
 
 
 def test_same_op_id_concurrent_requests_return_one_original_outcome(runtime):
@@ -180,7 +218,13 @@ def test_fast_replay_reloads_commit_completed_by_other_thread_while_waiting_for_
     intent = _upsert("writer")
     original = runtime.coordinator.execute(intent)
     committed = runtime.journal.get(intent.op_id)
-    runtime.journal.upsert(replace(committed, state="SQL_COMMITTED"))
+    runtime.journal.upsert(
+        replace(
+            committed,
+            state="SQL_COMMITTED",
+            before_image={"docs": [], "existing_tombstones": []},
+        )
+    )
     waiting_for_lock = Event()
 
     @contextmanager
@@ -250,7 +294,7 @@ def test_partial_vector_file_write_recovers_both_stores(runtime, monkeypatch, op
         runtime.coordinator.execute(intent)
     assert [(d.external_id, d.content) for d in runtime.repo.get_all_documents()] == [("doc", "v1")]
     assert runtime.vector().ntotal == 1
-    assert runtime.vector().search([1.0, 0.0], 1)[1].tolist() == [0.0]
+    assert runtime.vector().vector_index.search_with_snapshot([1.0, 0.0], 1)[1].tolist() == [0.0]
     assert runtime.journal.get("failed").state == "ROLLED_BACK"
     assert runtime.coordinator.recover_incomplete() == 0
     assert len(runtime.rebuilds) == 1
@@ -274,7 +318,7 @@ def test_pre_vector_failure_does_not_rebuild(runtime):
     assert runtime.journal.get("failed").state == "ROLLED_BACK"
 
 
-def test_failed_rebuild_blocks_rest_of_batch_without_repeated_rebuilds(runtime, monkeypatch):
+def test_failed_rebuild_blocks_later_mutations(runtime, monkeypatch):
     runtime.coordinator.execute(_upsert("initial"))
     attempts = []
 
@@ -289,19 +333,11 @@ def test_failed_rebuild_blocks_rest_of_batch_without_repeated_rebuilds(runtime, 
     coordinator = MutationCoordinator(
         settings_obj=runtime.settings, ports=replace(runtime.ports, reconcile_index=fail_rebuild)
     )
-    batch = [
-        MutationBatchItem(
-            payload=PreparedMutation(
-                intent=intent,
-                vector_mode_enabled=True,
-                precomputed_vectors_by_external_id={intent.upserts[0].external_id: [0.0, 1.0]},
-            )
-        )
-        for intent in [_upsert("failed", "v2"), _upsert("next", "v2", "next")]
-    ]
-    coordinator._process_batch(batch=batch, journal=runtime.journal, use_atomic=False)
-    assert all(isinstance(item.error, MutationRecoveryRequiredError) for item in batch)
-    assert attempts == [True]
+    with pytest.raises(MutationRecoveryRequiredError):
+        coordinator.execute(_upsert("failed", "v2"))
+    with pytest.raises(MutationRecoveryRequiredError):
+        coordinator.execute(_upsert("next", "v2", "next"))
+    assert attempts == [True, True]
     assert runtime.journal.get("failed").state == "FAILED_NEEDS_RECOVERY"
     assert runtime.journal.get("next") is None
     assert [(d.external_id, d.content) for d in runtime.repo.get_all_documents()] == [("doc", "v1")]
@@ -359,7 +395,7 @@ def test_vector_committed_recovery_preserves_exact_outcome_and_record(runtime, m
     assert runtime.rebuilds == []
 
 
-def test_final_journal_write_failure_blocks_remaining_batch_items(runtime, monkeypatch):
+def test_final_journal_write_failure_blocks_later_mutations(runtime, monkeypatch):
     original_upsert = runtime.journal.upsert
 
     def fail_commit(record):
@@ -368,16 +404,10 @@ def test_final_journal_write_failure_blocks_remaining_batch_items(runtime, monke
         original_upsert(record)
 
     monkeypatch.setattr(runtime.journal, "upsert", fail_commit)
-    batch = [
-        MutationBatchItem(
-            payload=runtime.coordinator._saga.prepare(
-                intent=_upsert(name, external_id=name), vector_mode_enabled=True
-            )
-        )
-        for name in ("first", "next")
-    ]
-    runtime.coordinator._process_batch(batch=batch, journal=runtime.journal, use_atomic=False)
-    assert all(isinstance(item.error, MutationRecoveryRequiredError) for item in batch)
+    with pytest.raises(MutationRecoveryRequiredError):
+        runtime.coordinator.execute(_upsert("first", external_id="first"))
+    with pytest.raises(MutationRecoveryRequiredError):
+        runtime.coordinator.execute(_upsert("next", external_id="next"))
     assert runtime.journal.get("first").state == "VECTOR_COMMITTED"
     assert runtime.journal.get("next") is None
     assert [doc.external_id for doc in runtime.repo.get_all_documents()] == ["first"]
@@ -388,16 +418,23 @@ def test_final_journal_write_failure_blocks_remaining_batch_items(runtime, monke
 @pytest.mark.parametrize("entrypoint", ["execute", "recover"])
 def test_corrupt_record_preserves_journal_and_corpus(runtime, state, entrypoint):
     runtime.coordinator.execute(_upsert("initial"))
-    path = runtime.journal.root / (hashlib.sha256(b"initial").hexdigest() + ".json")
-    payload = json.loads(path.read_text())
+    filename = hashlib.sha256(b"initial").hexdigest() + ".json"
+    done_path = runtime.journal.done_dir / filename
+    path = done_path if state == "COMMITTED" else runtime.journal.active_dir / filename
+    payload = json.loads(done_path.read_text())
     payload["state"] = state
     payload["before_image" if state == "SQL_COMMITTED" else "outcome"] = {}
     content = json.dumps(payload).encode()
     path.write_bytes(content)
+    if state == "COMMITTED":
+        # Completed receipts are checked for replay and during the hourly sweep.
+        runtime.journal._last_sweep_monotonic = 0.0
 
     with pytest.raises(MutationRecoveryRequiredError) as error:
         if entrypoint == "execute":
-            runtime.coordinator.execute(_upsert("new-op", "v2"))
+            runtime.coordinator.execute(
+                _upsert("initial") if state == "COMMITTED" else _upsert("new-op", "v2")
+            )
         else:
             runtime.coordinator.recover_incomplete()
 
@@ -416,7 +453,13 @@ def test_recovery_journal_write_failure_remains_pending_and_typed(
 ):
     runtime.coordinator.execute(_upsert("initial"))
     original_record = runtime.journal.get("initial")
-    runtime.journal.upsert(replace(original_record, state="SQL_COMMITTED"))
+    runtime.journal.upsert(
+        replace(
+            original_record,
+            state="SQL_COMMITTED",
+            before_image={"docs": [], "existing_tombstones": []},
+        )
+    )
     original_upsert = runtime.journal.upsert
 
     def fail_write(record):
@@ -445,7 +488,13 @@ def test_recovery_journal_write_failure_remains_pending_and_typed(
 
 def test_pending_recovery_blocks_next_operation_until_reconciled(runtime):
     runtime.coordinator.execute(_upsert("initial"))
-    runtime.journal.upsert(replace(runtime.journal.get("initial"), state="SQL_COMMITTED"))
+    runtime.journal.upsert(
+        replace(
+            runtime.journal.get("initial"),
+            state="SQL_COMMITTED",
+            before_image={"docs": [], "existing_tombstones": []},
+        )
+    )
 
     def unavailable():
         raise OSError("rebuild offline")

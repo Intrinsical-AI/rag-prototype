@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 
+from local_rag_backend.core.errors import WriteLockTimeoutError
 from local_rag_backend.infrastructure.concurrency.locks import write_lock
 from local_rag_backend.infrastructure.concurrency.locks.write_lock import _exclusive_file_lock
 
@@ -57,7 +60,7 @@ def test_multi_store_write_lock_records_wait_and_hold_metrics(tmp_path, monkeypa
         _ = path, timeout_s, poll_s
         yield
 
-    mono = iter([10.0, 10.2, 10.2, 10.7])
+    mono = iter([10.0, 10.0, 10.0, 10.2, 10.2, 10.7])
     monkeypatch.setattr(write_lock, "_exclusive_file_lock", _fake_lock, raising=True)
     monkeypatch.setattr(write_lock.time, "monotonic", lambda: next(mono), raising=True)
     monkeypatch.setattr(write_lock.time, "time", lambda: 123.0, raising=True)
@@ -79,7 +82,7 @@ def test_multi_store_write_lock_records_released_and_failed_on_exception(tmp_pat
         _ = path, timeout_s, poll_s
         yield
 
-    mono = iter([1.0, 1.1, 1.1, 1.6, 1.8])
+    mono = iter([1.0, 1.0, 1.0, 1.1, 1.1, 1.6, 1.8])
     monkeypatch.setattr(write_lock, "_exclusive_file_lock", _fake_lock, raising=True)
     monkeypatch.setattr(write_lock.time, "monotonic", lambda: next(mono), raising=True)
     monkeypatch.setattr(write_lock.time, "time", lambda: 321.0, raising=True)
@@ -94,3 +97,56 @@ def test_multi_store_write_lock_records_released_and_failed_on_exception(tmp_pat
     assert [r["status"] for r in rows] == ["acquired", "released", "failed"]
     assert rows[1]["hold_ms"] == pytest.approx(500.0, abs=0.001)
     assert rows[2]["wait_ms"] == pytest.approx(800.0, abs=0.001)
+
+
+def test_multi_store_write_lock_times_out_while_waiting_for_local_lock(tmp_path):
+    holder_ready = threading.Event()
+    release_holder = threading.Event()
+
+    def _hold_lock() -> None:
+        with write_lock.multi_store_write_lock(coordination_dir=tmp_path):
+            holder_ready.set()
+            release_holder.wait(timeout=1)
+
+    holder = threading.Thread(target=_hold_lock, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=1)
+    started = time.monotonic()
+    try:
+        with (
+            pytest.raises(WriteLockTimeoutError),
+            write_lock.multi_store_write_lock(coordination_dir=tmp_path, timeout_s=0.05),
+        ):
+            pass
+        assert time.monotonic() - started < 0.2
+    finally:
+        release_holder.set()
+        holder.join(timeout=1)
+    assert not holder.is_alive()
+
+
+def test_multi_store_write_lock_passes_remaining_budget_to_file_lock(tmp_path, monkeypatch):
+    remaining: list[float] = []
+
+    class _SlowLocalLock:
+        def acquire(self, *, timeout: float) -> bool:
+            assert timeout <= 0.2
+            time.sleep(0.06)
+            return True
+
+        def release(self) -> None:
+            return None
+
+    @contextmanager
+    def _fake_file_lock(path, *, timeout_s: float, poll_s: float):
+        _ = path, poll_s
+        remaining.append(timeout_s)
+        yield
+
+    monkeypatch.setattr(write_lock, "_LOCAL_WRITE_LOCK", _SlowLocalLock())
+    monkeypatch.setattr(write_lock, "_exclusive_file_lock", _fake_file_lock)
+    with write_lock.multi_store_write_lock(coordination_dir=tmp_path, timeout_s=0.2):
+        pass
+
+    assert len(remaining) == 1
+    assert 0.05 < remaining[0] < 0.17

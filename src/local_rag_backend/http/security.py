@@ -14,7 +14,7 @@ from fastapi import Request
 
 from local_rag_backend.composition.factory import get_app_context
 from local_rag_backend.core.use_cases.errors import UnauthorizedError
-from local_rag_backend.settings import Settings
+from local_rag_backend.settings import enforce_safe_bind_config as enforce_safe_bind_config
 
 API_KEY_HEADER = "X-API-Key"
 _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -80,30 +80,6 @@ def _extract_forwarded_for_hosts(header_value: str) -> list[str]:
             if normalized:
                 hosts.append(normalized)
     return hosts
-
-
-def enforce_safe_bind_config(settings: Settings) -> None:
-    """
-    Refuse to start with a public bind without an API key.
-
-    Threat model: this is a "local-first" service, but users sometimes run it in Docker
-    with `-p 8000:8000` or set `APP_HOST=0.0.0.0`. Without auth, endpoints can ingest
-    arbitrary docs and proxy paid LLM calls (OpenAI/OpenRouter), causing data/cost risk.
-    """
-    if not getattr(settings, "public_bind_requires_api_key", True):
-        return
-    if settings.api_key:
-        return
-
-    host = (settings.app_host or "").strip().lower()
-    localhost_hosts = {"127.0.0.1", "localhost", "::1"}
-    if host in localhost_hosts:
-        return
-
-    raise RuntimeError(
-        "Refusing to start without API key when binding to a non-localhost address. "
-        "Set API_KEY (recommended) or set PUBLIC_BIND_REQUIRES_API_KEY=false to override."
-    )
 
 
 async def require_api_key(request: Request) -> None:

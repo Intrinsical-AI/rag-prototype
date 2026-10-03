@@ -51,7 +51,7 @@ def _dispatch_entrypoint(*, command: str, include_argv: bool) -> None:
 
 def rag_server() -> None:
     """Entry point for rag-server command."""
-    _dispatch_entrypoint(command="server", include_argv=False)
+    _dispatch_entrypoint(command="server", include_argv=True)
 
 
 def rag_bootstrap() -> None:

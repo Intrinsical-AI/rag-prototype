@@ -16,9 +16,6 @@ def test_runtime_snapshot_exposes_narrow_agent_surface(tmp_path) -> None:
         enable_monitoring=True,
         api_key="secret",
         public_bind_requires_api_key=False,
-        persistence_backend="elasticsearch",
-        es_base_url="https://es.local",
-        search_backend="elasticsearch",
         retrieval_mode="hybrid",
         vector_backend="faiss",
         mutation_recovery_enabled=False,
@@ -47,11 +44,8 @@ def test_runtime_snapshot_exposes_narrow_agent_surface(tmp_path) -> None:
         "mutation_recovery_enabled": False,
     }
     assert payload["backends"] == {
-        "persistence": "elasticsearch",
-        "search": "elasticsearch",
         "retrieval": "hybrid",
         "vector": "faiss",
-        "storage_profile": "",
     }
     assert payload["paths"] == {
         "data_dir": str(data_dir),

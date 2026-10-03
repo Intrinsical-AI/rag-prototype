@@ -21,9 +21,6 @@ from local_rag_backend.infrastructure.retrieval.scoring import normalize_min_max
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import numpy as np
-    from numpy.typing import NDArray
-
     from local_rag_backend.settings import Settings
 
 
@@ -142,12 +139,6 @@ class VectorStorage(VectorRepoPort):
     ) -> None:
         self.vector_index.rebuild_from_batches(batches)
         self._ensure_manifest(overwrite=True)
-
-    def search(
-        self, query_vector: Sequence[float], k: int
-    ) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
-        self._ensure_manifest(overwrite=False, create=False)
-        return self.vector_index.search(query_vector, k)
 
     def similar(self, vector: Sequence[float], k: int) -> list[tuple[DocId, float]]:
         self._ensure_manifest(overwrite=False, create=False)

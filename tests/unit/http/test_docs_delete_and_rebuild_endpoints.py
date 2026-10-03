@@ -94,7 +94,7 @@ async def test_mutate_delete_dense_does_not_require_embedder_when_no_upserts(
     payload = rd.json()
     assert payload["deleted_sql"] == 1
     assert payload["deleted_index"] == 1
-    assert payload["index_rebuilt"] is False
+    assert "index_rebuilt" not in payload
     assert embedder_calls == 0
 
 

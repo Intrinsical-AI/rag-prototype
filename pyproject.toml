@@ -177,6 +177,8 @@ ignore = ["E501","B008","B904","S101","S603","S607"]
 "scripts/**/*" = ["S602","S603","S607"]
 "**/conftest.py" = ["ARG001"]
 "src/local_rag_backend/settings.py" = ["S104"]
+# Regression fixtures exercise rejected public binds without opening listeners.
+"tests/unit/settings/test_deployment_overrides.py" = ["S104"]
 "src/local_rag_backend/infrastructure/persistence/faiss/index.py" = ["S301"]
 
 [tool.ruff.lint.isort]

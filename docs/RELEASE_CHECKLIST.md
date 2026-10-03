@@ -57,16 +57,22 @@ Breaking changes relative to `v3.0.0`:
 - Library examples use `get_settings()` instead of importing a global
   `settings` instance. Imports no longer read YAML or initialize the database;
   explicit containers own their runtime resources and must be closed.
-- Mutation journal v2 rejects older, corrupt, or unresolved records and blocks
-  writes until their state is resolved. There is no automatic migration or
-  compatibility alias, and rebuilding an index does not repair the journal.
-  Existing data must be reviewed separately before changing its runtime; this
-  candidate does not authorize deleting or rewriting it.
+- Persistence and search now use local SQLite and FAISS/NumPy only. Remote
+  Elasticsearch, OpenSearch, and Solr adapters and their settings were removed.
+- Ingestion stores raw chunks and metadata separately. Document identity no
+  longer includes the embedding model. Existing data needs a fresh empty data
+  directory and full re-ingest; incremental ingest or vector-only rebuild can
+  leave duplicate IDs and mixed content. This candidate does not delete data.
+- The mutation journal stores active records in `active/` and terminal receipts
+  in `done/`. Terminal receipts are retained for up to 30 days or 256 MiB, so
+  exact `op_id` replay is bounded by that retention window. Old flat receipts
+  remain read-only and replayable. Incomplete or corrupt records block writes
+  and make `/readyz` return `503`; rebuilding an index does not repair them.
 
 HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
 also recovers from JSON decoder `ValueError`, including integer literals beyond
 Python's configured digit limit, so the next MCP request remains processable.
-The canonical import contract remains compatible with RepoGPT code-units v4 and
+The canonical import contract accepts RepoGPT code-units v5 and
 the generic rag-adapters payload; installed-artifact receipts establish the
 specific tested producer combination.
 
@@ -89,7 +95,7 @@ statement. No legacy aliases or new migration guarantee for historical SQLite
 databases were introduced by 3.0.0.
 
 The release also includes the already-implemented canonical import diagnostics,
-HTTP/frontend hardening, and rejection of incomplete Elasticsearch enumeration
+HTTP/frontend hardening, and rejection of incomplete legacy remote enumeration
 before destructive scope operations. Existing regression suites cover those
 behaviors. Historical validation results below do not certify the current
 candidate; record its exact commit, gates, and artifact hashes separately.

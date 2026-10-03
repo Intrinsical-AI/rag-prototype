@@ -8,6 +8,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from local_rag_backend.core.services.external_canonical import (
+    REPOGPT_CODE_UNITS_KIND,
+    REPOGPT_CODE_UNITS_SCHEMA_VERSION,
     normalize_external_canonical_payload,
     repogpt_document_metadata,
 )
@@ -37,10 +39,9 @@ class CanonicalImportDocumentPayload(BaseModel):
     @field_validator("content")
     @classmethod
     def _content_not_blank(cls, value: str) -> str:
-        value2 = value.strip()
-        if not value2:
+        if not value.strip():
             raise ValueError("content must not be blank")
-        return value2
+        return value
 
 
 class CanonicalImportStats(BaseModel):
@@ -58,9 +59,7 @@ class CanonicalImportPayload(BaseModel):
     replace_scope: StrictBool = True
     stats: CanonicalImportStats | None = None
     failures: list[dict[str, Any]] | None = None
-    documents: list[CanonicalImportDocumentPayload] = Field(
-        default_factory=list, min_length=1, max_length=5000
-    )
+    documents: list[CanonicalImportDocumentPayload] = Field(default_factory=list, max_length=5000)
 
     @field_validator("scope", "snapshot_id")
     @classmethod
@@ -72,6 +71,12 @@ class CanonicalImportPayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_unique_external_ids(self) -> CanonicalImportPayload:
+        producer_fields = self.model_extra or {}
+        if not self.documents and not (
+            producer_fields.get("kind") == REPOGPT_CODE_UNITS_KIND
+            and producer_fields.get("schema_version") == REPOGPT_CODE_UNITS_SCHEMA_VERSION
+        ):
+            raise ValueError("canonical imports require a non-empty documents list")
         seen: set[str] = set()
         duplicates: list[str] = []
         for document in self.documents:
@@ -140,6 +145,7 @@ def build_canonical_import_request_input(
             for item in payload.documents
         ),
         source=source,
+        allow_empty=(payload.model_extra or {}).get("kind") == REPOGPT_CODE_UNITS_KIND,
     )
 
 

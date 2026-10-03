@@ -82,7 +82,7 @@ def test_dense_stops_at_exhaustion_without_matches():
     assert result.candidate_count == 5
 
 
-def test_dense_uses_final_window_scores_before_threshold_without_more_overfetch():
+def test_dense_uses_final_window_scores_after_filter_overfetch():
     docs, vectors, embedder = Documents(), Vectors(), Embeddings()
     docs.docs[1] = replace(docs.docs[1], metadata={"scope": "public"})
     result = DenseVectorRetriever(embedder, vectors, docs).retrieve(
@@ -90,22 +90,21 @@ def test_dense_uses_final_window_scores_before_threshold_without_more_overfetch(
             query="query",
             top_k=2,
             mode="dense",
-            min_score=0.5,
             filters=(RetrievalFilter("scope", ("public",)),),
         )
     )
     # ID 2 initially has score 0 in the two-item window, then 2/3 in the final four.
-    assert [doc.id for doc in result.documents] == ["2"]
-    assert result.scores == pytest.approx((2 / 3,))
+    assert [doc.id for doc in result.documents] == ["2", "4"]
+    assert result.scores == pytest.approx((2 / 3, 0.0))
     assert vectors.calls == [2, 4]
     assert result.candidate_count == 4
 
 
-def test_dense_does_not_overfetch_for_min_score_or_unfiltered_queries():
+def test_dense_does_not_overfetch_for_unfiltered_queries():
     docs, vectors, embedder = Documents(), Vectors(), Embeddings()
-    request = RetrievalRequest(query="query", top_k=2, mode="dense", min_score=0.5)
+    request = RetrievalRequest(query="query", top_k=2, mode="dense")
     result = DenseVectorRetriever(embedder, vectors, docs).retrieve(request)
-    assert [doc.id for doc in result.documents] == ["1"]
+    assert [doc.id for doc in result.documents] == ["1", "2"]
     assert vectors.calls == [2]
 
 
@@ -120,7 +119,7 @@ def test_local_dense_and_hybrid_share_filter_semantics():
     assert [doc.id for doc in hybrid.retrieve(replace(request, mode="hybrid")).documents] == ["4"]
 
 
-def test_hybrid_preserves_filters_and_applies_threshold_after_fusion():
+def test_hybrid_preserves_filters_after_fusion():
     requests = []
     doc = Document(DocId("1"), "text")
 
@@ -135,13 +134,12 @@ def test_hybrid_preserves_filters_and_applies_threshold_after_fusion():
             )
 
     filters = (RetrievalFilter("scope", ("public",)),)
-    request = RetrievalRequest(query="text", top_k=1, mode="hybrid", filters=filters, min_score=0.6)
+    request = RetrievalRequest(query="text", top_k=1, mode="hybrid", filters=filters)
     hybrid = HybridRetriever(dense=Branch(0.4), sparse=Branch(1.0), alpha=0.5)
     result = hybrid.retrieve(request)
     assert result.scores == pytest.approx((0.7,))
     assert [item.mode for item in requests] == ["dense", "sparse"]
-    assert all(item.filters == filters and item.min_score is None for item in requests)
-    assert hybrid.retrieve(replace(request, min_score=0.8)).items == ()
+    assert all(item.filters == filters for item in requests)
 
 
 def test_sparse_tied_rankings_have_consistent_prefixes():

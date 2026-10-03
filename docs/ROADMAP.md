@@ -23,7 +23,7 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 ## P1
 
 - `mutation`: extract a typed mutation runtime/config object from `Settings`
-- `mutation`: remove duplicated profile resolution and strategy branching from `MutationCoordinator`
+- [x] `mutation`: remove profile resolution and strategy branching from `MutationCoordinator`
 - `mutation`: split `_mutation_saga_executor.py` into explicit phases without changing behavior
 - [x] `eval`: emit per-query outputs for compare mode
   - this is the prerequisite for stronger statistical comparison later
@@ -34,8 +34,6 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - `maintenance`: extract a shared helper for multi-store delete orchestration
 - `ingest`: replace `Any` item contracts in `_ingestion_planner.py` with a small Protocol or DTO
 - `ingest`: remove `click.echo` from planner internals so planning stays transport-neutral
-- `state`: make `ElasticSystemStateStorage.bump_version()` atomic
-  - add a contention-focused test, not only a sequential monotonic test
 - `release` (in progress for v2.1.0): reconcile tags, GitHub Releases, package version, and default branch
   - current mismatch: GitHub latest release is `2.0.1`, package metadata is `1.3.0`
   - next release uses forward-only package/tag version `2.1.0` / `v2.1.0`

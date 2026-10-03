@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from typing import Any, Literal
 
     from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy.sql.elements import ColumnElement
 
 
 @dataclass(frozen=True)
@@ -39,18 +40,10 @@ class _DocumentChanges:
     source: bool
     scope: bool
     snapshot: bool
-    dedup: bool
 
     @property
     def any_changed(self) -> bool:
-        return (
-            self.content
-            or self.metadata
-            or self.source
-            or self.scope
-            or self.snapshot
-            or self.dedup
-        )
+        return self.content or self.metadata or self.source or self.scope or self.snapshot
 
 
 def _to_domain_document(d: DbDocument) -> DomainDocument:
@@ -156,7 +149,6 @@ class SqlDocumentStorage(DocumentRepoPort):
         scope: str | None = None
         snapshot_id: str | None = None
         metadata: Mapping[str, Any] | None = None
-        chunk_dedup_sha256: str | None = None
         embedding: Sequence[float] | None = None
 
     @dataclass(frozen=True)
@@ -165,74 +157,6 @@ class SqlDocumentStorage(DocumentRepoPort):
         id: DocId
         action: Literal["inserted", "updated", "unchanged"]
         content_changed: bool
-
-    @dataclass(frozen=True)
-    class ExistingDocState:
-        id: DocId
-        external_id: str
-        content: str
-        content_sha256: str | None
-        scope: str | None
-        snapshot_id: str | None
-
-    @dataclass(frozen=True)
-    class DocumentSnapshot:
-        id: DocId
-        external_id: str | None
-        content: str
-        source_id: str | None
-        scope: str | None
-        snapshot_id: str | None
-        metadata: Mapping[str, Any] | None
-        content_sha256: str | None
-        chunk_dedup_sha256: str | None
-
-        def to_dict(self) -> dict[str, Any]:
-            return {
-                "id": str(self.id),
-                "external_id": self.external_id,
-                "content": self.content,
-                "source_id": self.source_id,
-                "scope": self.scope,
-                "snapshot_id": self.snapshot_id,
-                "metadata": dict(self.metadata) if self.metadata is not None else None,
-                "content_sha256": self.content_sha256,
-                "chunk_dedup_sha256": self.chunk_dedup_sha256,
-            }
-
-    def get_existing_doc_states_by_external_id(
-        self, external_ids: Sequence[str]
-    ) -> dict[str, ExistingDocState]:
-        ext_ids = [str(x).strip() for x in external_ids if str(x).strip()]
-        if not ext_ids:
-            return {}
-        with get_managed_session(self._session_factory) as (session, _owns_session):
-            rows = (
-                session.query(
-                    DbDocument.doc_id,
-                    DbDocument.external_id,
-                    DbDocument.content,
-                    DbDocument.content_sha256,
-                    DbDocument.scope,
-                    DbDocument.snapshot_id,
-                )
-                .filter(DbDocument.external_id.is_not(None))
-                .filter(DbDocument.external_id.in_(ext_ids))
-                .all()
-            )
-            out: dict[str, SqlDocumentStorage.ExistingDocState] = {}
-            for doc_id, ext_id, content, content_sha, scope, snapshot_id in rows:
-                if ext_id is None:
-                    continue
-                out[str(ext_id)] = SqlDocumentStorage.ExistingDocState(
-                    id=DocId(str(doc_id)),
-                    external_id=str(ext_id),
-                    content=str(content or ""),
-                    content_sha256=(str(content_sha) if content_sha is not None else None),
-                    scope=(str(scope) if scope is not None else None),
-                    snapshot_id=(str(snapshot_id) if snapshot_id is not None else None),
-                )
-            return out
 
     def upsert_documents_by_external_id(
         self, items: Sequence[UpsertDoc]
@@ -268,7 +192,7 @@ class SqlDocumentStorage(DocumentRepoPort):
 
             for item in items_list:
                 external_id = item.external_id.strip()
-                content = item.content.strip()
+                content = item.content
                 if not content:
                     raise ValueError("content must not be blank")
                 sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -285,7 +209,6 @@ class SqlDocumentStorage(DocumentRepoPort):
                         snapshot_id=item.snapshot_id,
                         metadata_=dict(item.metadata) if item.metadata is not None else None,
                         content_sha256=sha,
-                        chunk_dedup_sha256=item.chunk_dedup_sha256,
                     )
                     session.add(new_doc)
                     results.append(
@@ -326,8 +249,6 @@ class SqlDocumentStorage(DocumentRepoPort):
                     db_doc.snapshot_id = item.snapshot_id
                 if item.metadata is not None:
                     db_doc.metadata_ = dict(item.metadata)
-                if item.chunk_dedup_sha256 is not None:
-                    db_doc.chunk_dedup_sha256 = item.chunk_dedup_sha256
 
                 results.append(
                     SqlDocumentStorage.UpsertResult(
@@ -373,10 +294,7 @@ class SqlDocumentStorage(DocumentRepoPort):
                 out.append((DocId(str(doc_id)), str(ext_id)))
             return out
 
-    def snapshot_by_ids(self, ids: Sequence[DocId]) -> list[dict[str, Any]]:
-        normalized = [str(x).strip() for x in ids if str(x).strip()]
-        if not normalized:
-            return []
+    def _snapshots_where(self, predicate: ColumnElement[bool]) -> list[dict[str, Any]]:
         with get_managed_session(self._session_factory) as (session, _owns_session):
             rows = (
                 session.query(
@@ -388,25 +306,21 @@ class SqlDocumentStorage(DocumentRepoPort):
                     DbDocument.snapshot_id,
                     DbDocument.metadata_,
                     DbDocument.content_sha256,
-                    DbDocument.chunk_dedup_sha256,
                 )
-                .filter(DbDocument.doc_id.in_(normalized))
+                .filter(predicate)
                 .all()
             )
-            snapshots = [
-                SqlDocumentStorage.DocumentSnapshot(
-                    id=DocId(str(doc_id)),
-                    external_id=(str(external_id) if external_id is not None else None),
-                    content=str(content),
-                    source_id=(str(source_id) if source_id is not None else None),
-                    scope=(str(scope) if scope is not None else None),
-                    snapshot_id=(str(snapshot_id) if snapshot_id is not None else None),
-                    metadata=(dict(metadata_) if isinstance(metadata_, dict) else None),
-                    content_sha256=(str(content_sha256) if content_sha256 is not None else None),
-                    chunk_dedup_sha256=(
-                        str(chunk_dedup_sha256) if chunk_dedup_sha256 is not None else None
-                    ),
-                )
+            return [
+                {
+                    "id": str(doc_id),
+                    "external_id": str(external_id) if external_id is not None else None,
+                    "content": str(content),
+                    "source_id": str(source_id) if source_id is not None else None,
+                    "scope": str(scope) if scope is not None else None,
+                    "snapshot_id": str(snapshot_id) if snapshot_id is not None else None,
+                    "metadata": dict(metadata_) if isinstance(metadata_, dict) else None,
+                    "content_sha256": str(content_sha256) if content_sha256 is not None else None,
+                }
                 for (
                     doc_id,
                     external_id,
@@ -416,59 +330,22 @@ class SqlDocumentStorage(DocumentRepoPort):
                     snapshot_id,
                     metadata_,
                     content_sha256,
-                    chunk_dedup_sha256,
                 ) in rows
             ]
-            return [snap.to_dict() for snap in snapshots]
+
+    def snapshot_by_ids(self, ids: Sequence[DocId]) -> list[dict[str, Any]]:
+        normalized = [str(x).strip() for x in ids if str(x).strip()]
+        if not normalized:
+            return []
+        return self._snapshots_where(DbDocument.doc_id.in_(normalized))
 
     def snapshot_by_external_ids(self, external_ids: Sequence[str]) -> list[dict[str, Any]]:
         ext_ids = _normalize_external_ids(external_ids)
         if not ext_ids:
             return []
-        with get_managed_session(self._session_factory) as (session, _owns_session):
-            rows = (
-                session.query(
-                    DbDocument.doc_id,
-                    DbDocument.external_id,
-                    DbDocument.content,
-                    DbDocument.source_id,
-                    DbDocument.scope,
-                    DbDocument.snapshot_id,
-                    DbDocument.metadata_,
-                    DbDocument.content_sha256,
-                    DbDocument.chunk_dedup_sha256,
-                )
-                .filter(DbDocument.external_id.is_not(None))
-                .filter(DbDocument.external_id.in_(ext_ids))
-                .all()
-            )
-            snapshots = [
-                SqlDocumentStorage.DocumentSnapshot(
-                    id=DocId(str(doc_id)),
-                    external_id=(str(external_id) if external_id is not None else None),
-                    content=str(content),
-                    source_id=(str(source_id) if source_id is not None else None),
-                    scope=(str(scope) if scope is not None else None),
-                    snapshot_id=(str(snapshot_id) if snapshot_id is not None else None),
-                    metadata=(dict(metadata_) if isinstance(metadata_, dict) else None),
-                    content_sha256=(str(content_sha256) if content_sha256 is not None else None),
-                    chunk_dedup_sha256=(
-                        str(chunk_dedup_sha256) if chunk_dedup_sha256 is not None else None
-                    ),
-                )
-                for (
-                    doc_id,
-                    external_id,
-                    content,
-                    source_id,
-                    scope,
-                    snapshot_id,
-                    metadata_,
-                    content_sha256,
-                    chunk_dedup_sha256,
-                ) in rows
-            ]
-            return [snap.to_dict() for snap in snapshots]
+        return self._snapshots_where(
+            DbDocument.external_id.is_not(None) & DbDocument.external_id.in_(ext_ids)
+        )
 
     def hard_delete_by_external_ids(self, external_ids: Sequence[str]) -> int:
         ext_ids = _normalize_external_ids(external_ids)
@@ -521,8 +398,8 @@ class SqlDocumentStorage(DocumentRepoPort):
                 doc_id = str(snap.get("id") or "").strip()
                 if not doc_id:
                     continue
-                content = str(snap.get("content") or "").strip()
-                if not content:
+                content = str(snap.get("content") or "")
+                if not content.strip():
                     continue
                 content_sha = (
                     str(snap.get("content_sha256") or "").strip()
@@ -538,9 +415,6 @@ class SqlDocumentStorage(DocumentRepoPort):
                 snapshot_id = str(snapshot_id_raw) if snapshot_id_raw is not None else None
                 metadata_raw = snap.get("metadata")
                 metadata_ = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else None
-                chunk_dedup_raw = snap.get("chunk_dedup_sha256")
-                chunk_dedup = str(chunk_dedup_raw) if chunk_dedup_raw is not None else None
-
                 row = by_id.get(doc_id)
                 if row is None:
                     session.add(
@@ -553,7 +427,6 @@ class SqlDocumentStorage(DocumentRepoPort):
                             snapshot_id=snapshot_id,
                             metadata_=metadata_,
                             content_sha256=content_sha,
-                            chunk_dedup_sha256=chunk_dedup,
                         )
                     )
                 else:
@@ -564,7 +437,6 @@ class SqlDocumentStorage(DocumentRepoPort):
                     row.snapshot_id = snapshot_id
                     row.metadata_ = metadata_
                     row.content_sha256 = content_sha
-                    row.chunk_dedup_sha256 = chunk_dedup
                 restored += 1
             if owns_session:
                 session.commit()
@@ -583,28 +455,6 @@ class SqlDocumentStorage(DocumentRepoPort):
                 .all()
             )
             return {str(r[0]) for r in rows if r and r[0]}
-
-    def tombstone_external_ids(self, external_ids: Sequence[str]) -> int:
-        ext_ids = _normalize_external_ids(external_ids)
-        if not ext_ids:
-            return 0
-
-        with get_managed_session(self._session_factory) as (session, owns_session):
-            existing = (
-                session.query(DbDocumentTombstone.external_id)
-                .filter(DbDocumentTombstone.external_id.in_(ext_ids))
-                .all()
-            )
-            existing_set = {str(r[0]) for r in existing if r and r[0]}
-            to_add = [e for e in ext_ids if e not in existing_set]
-            if not to_add:
-                return 0
-            session.add_all([DbDocumentTombstone(external_id=e) for e in to_add])
-            if owns_session:
-                session.commit()
-            else:
-                session.flush()
-            return len(to_add)
 
     def delete_by_external_ids(
         self, external_ids: Sequence[str]
@@ -692,17 +542,12 @@ def _detect_document_changes(
     if item.snapshot_id is not None:
         snapshot_changed = item.snapshot_id != db_doc.snapshot_id
 
-    dedup_changed = False
-    if item.chunk_dedup_sha256 is not None:
-        dedup_changed = item.chunk_dedup_sha256 != db_doc.chunk_dedup_sha256
-
     return _DocumentChanges(
         content=content_changed,
         metadata=metadata_changed,
         source=source_changed,
         scope=scope_changed,
         snapshot=snapshot_changed,
-        dedup=dedup_changed,
     )
 
 

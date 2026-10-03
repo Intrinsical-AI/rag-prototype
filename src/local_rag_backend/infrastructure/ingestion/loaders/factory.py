@@ -10,6 +10,7 @@ Goal:
 
 from __future__ import annotations
 
+import csv
 import importlib
 import json
 import math
@@ -59,38 +60,31 @@ def detect_file_format(path: Path, *, sniff_bytes: int = 4096, use_magic: bool =
     # Optional python-magic (libmagic).
     if use_magic:
         mime = _magic_mime(raw)
-        if mime:
-            if mime == "text/csv":
-                return Detection("csv", "magic", mime=mime)
-            if mime in {"text/markdown", "text/x-markdown"}:
-                return Detection("markdown", "magic", mime=mime)
-            if mime.startswith("text/"):
-                # We'll still try to refine to csv/markdown via heuristics below.
-                pass
-            elif mime in {
-                "application/octet-stream",
-                "application/x-dosexec",
-                "application/pdf",
-                "image/png",
-                "image/jpeg",
-            }:
-                return Detection("binary", "magic", mime=mime)
+        if mime in {
+            "application/octet-stream",
+            "application/x-dosexec",
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+        }:
+            return Detection("binary", "magic", mime=mime)
 
     # Heuristics based on decoded sample.
     text = _decode_text_sample(raw)
     if text is None:
         return Detection("unknown", "decode-failed")
+    if not _looks_like_text(text):
+        if ext_hint is not None and not text.strip():
+            return Detection(ext_hint, "extension+blank")
+        return Detection("unknown", "no-signal")
+    if ext_hint is not None:
+        return Detection(ext_hint, "extension+text")
 
     if _looks_like_markdown(text):
         return Detection("markdown", "heuristic")
     if _looks_like_csv(text):
         return Detection("csv", "heuristic")
-    if _looks_like_text(text):
-        if ext_hint is not None:
-            return Detection(ext_hint, "extension+text")
-        return Detection("text", "heuristic")
-
-    return Detection("unknown", "no-signal")
+    return Detection("text", "heuristic")
 
 
 def get_loader_for_file(
@@ -175,13 +169,13 @@ def _looks_like_csv(text: str) -> bool:
     lines = [ln for ln in text.splitlines() if ln.strip()][:5]
     if len(lines) < 2:
         return False
-    candidates = [",", ";", "\t", "|"]
-    for delim in candidates:
-        counts = [ln.count(delim) for ln in lines]
-        if max(counts) <= 0:
+    for delim in (",", ";", "\t", "|"):
+        try:
+            rows = list(csv.reader(lines, delimiter=delim, strict=True))
+        except csv.Error:
             continue
-        # Similar delimiter counts across lines suggests tabular structure.
-        if max(counts) - min(counts) <= 1 and max(counts) >= 1:
+        widths = {len(row) for row in rows}
+        if len(widths) == 1 and next(iter(widths)) >= 2:
             return True
     return False
 

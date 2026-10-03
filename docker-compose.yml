@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   rag-backend:
     build:
@@ -8,38 +6,21 @@ services:
     image: intrinsical/rag-prototype:latest
     container_name: rag-backend
     environment:
-      - APP_HOST=0.0.0.0
-      - APP_PORT=8000
-      # Security (recommended when exposing beyond localhost)
-      # - API_KEY=${API_KEY}
-      # - CORS_ALLOW_ORIGINS=["http://localhost:5173"]
-      # Default lightweight image.
-      # local_split => sparse|dense|hybrid
-      # elasticsearch => dense|hybrid (requires external ES service/env)
-      - PERSISTENCE_BACKEND=local_split
-      # For local_split dense/hybrid, install the `dense` extra
-      - RETRIEVAL_MODE=sparse # if dense set accordingly.
-      # OpenAI (optional)
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # OpenRouter (optional)
-      # - OPENROUTER_ENABLED=true
-      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      # Ollama integration
-      - OLLAMA_ENABLED=true
+      - RAG_CONFIG_PATH=/app/config.yaml
+      - API_KEY=${API_KEY:?Set API_KEY before starting Compose}
       - OLLAMA_BASE_URL=http://ollama:11434
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
+      - ./config.yaml:/app/config.yaml:ro
       - rag_data:/app/data
     depends_on:
       - ollama
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.35.1
     container_name: ollama
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped

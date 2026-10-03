@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 import pytest
@@ -138,40 +137,13 @@ def test_from_settings_preserves_injectable_overrides() -> None:
     assert ports.build_upsert_doc is _CustomUpsert
 
 
-def test_elasticsearch_defaults_bind_elastic_runtime() -> None:
-    es_settings = settings.model_copy(
-        update={
-            "persistence_backend": "elasticsearch",
-            "retrieval_mode": "dense",
-            "es_base_url": "http://localhost:9200",
-        }
-    )
-
-    class _DummySystemState:
-        def get_version(self, key: str) -> int:
-            _ = key
-            return 0
-
-        def bump_version(self, key: str) -> int:
-            _ = key
-            return 1
-
+def test_docs_mutation_ports_share_one_journal_instance(tmp_path) -> None:
     container = AppContainer(
-        settings_obj=es_settings,
-        system_state_factory=_DummySystemState,
+        settings_obj=settings.model_copy(update={"data_dir": tmp_path}),
     )
-    ports = container.docs_mutation_ports(build_embedder=lambda: DummyEmbedder())
-
-    assert ports.build_upsert_doc.__qualname__.endswith("ElasticDocsRepository.UpsertDoc")
-    assert ports.mutation_uow_factory is None
-    assert isinstance(container.doc_repo_factory, partial)
-    assert container.doc_repo_factory.keywords["settings_obj"] is es_settings
-    assert isinstance(container.history_repo_factory, partial)
-    assert isinstance(container.vector_repo_factory, partial)
-    assert container.vector_repo_factory.func.__name__ == "ElasticVectorRepo"
-    assert (
-        container.vector_repo_factory.keywords["client"]
-        is container.doc_repo_factory.keywords["client"]
-        is container.history_repo_factory.keywords["client"]
-    )
-    container.close()
+    try:
+        first = container.docs_mutation_ports().mutation_journal_factory()
+        second = container.docs_mutation_ports().mutation_journal_factory()
+        assert first is second
+    finally:
+        container.close()

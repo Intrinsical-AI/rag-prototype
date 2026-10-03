@@ -14,9 +14,15 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 
-from local_rag_backend.core.errors import LLMConfigurationError, LLMResponseError
+from local_rag_backend.core.errors import (
+    LLMConfigurationError,
+    LLMConnectionError,
+    LLMProviderError,
+    LLMResponseError,
+    LLMTimeoutError,
+)
 from local_rag_backend.core.ports import GeneratorPort
 from local_rag_backend.core.services.prompting import render_prompt_template
 from local_rag_backend.settings import Settings
@@ -41,6 +47,15 @@ def create_openai_client(
     if timeout is not None:
         kwargs["timeout"] = timeout
     return client_factory(**kwargs)
+
+
+def translate_openai_error(exc: Exception, *, provider_name: str) -> LLMProviderError:
+    """Keep transport failures distinct from malformed or rejected responses."""
+    if isinstance(exc, APITimeoutError):
+        return LLMTimeoutError(f"{provider_name} request timed out: {exc}")
+    if isinstance(exc, APIConnectionError):
+        return LLMConnectionError(f"Could not connect to {provider_name}: {exc}")
+    return LLMResponseError(f"{provider_name} API error: {exc}")
 
 
 class OpenAIGenerator(GeneratorPort):
@@ -98,5 +113,4 @@ class OpenAIGenerator(GeneratorPort):
             content = response.choices[0].message.content
             return content or ""
         except Exception as e:
-            # Broadly catch provider/runtime SDK errors and map in app layer.
-            raise LLMResponseError(f"OpenAI API error: {e!s}") from e
+            raise translate_openai_error(e, provider_name="OpenAI") from e

@@ -4,7 +4,7 @@ import json
 
 import pytest
 from click.testing import CliRunner
-from support.canonical import repogpt_failure, repogpt_payload
+from support.canonical import repogpt_empty_module_payload, repogpt_failure, repogpt_payload
 
 from local_rag_backend.cli import cli
 from local_rag_backend.core.services.canonical_import_transport import (
@@ -90,30 +90,21 @@ async def test_partial_rejected_without_writes_and_explicit_upsert_preserves_abs
 @pytest.mark.parametrize("transport", ["http", "cli", "mcp"])
 @pytest.mark.parametrize("failed_files", [0, 1])
 @pytest.mark.parametrize("upsert_only", [False, True])
-async def test_empty_snapshot_rejected_without_writes(
+async def test_empty_v5_snapshot_sync_or_no_op_by_effective_replace_scope(
     transport, failed_files, upsert_only, asgi_client, in_memory_sqlite, tmp_path, monkeypatch
 ):
-    from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
-
     monkeypatch.setattr(settings, "retrieval_mode", "sparse")
     repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     repo.upsert_documents_by_external_id(
         [repo.UpsertDoc(external_id="last-doc", content="keep last document", scope="repogpt:demo")]
     )
-    before = repo.get_all_documents()
-
-    def no_mutation(*args, **kwargs):
-        pytest.fail("An empty canonical snapshot reached the write coordinator")
-
-    monkeypatch.setattr(MutationCoordinator, "execute", no_mutation)
-    payload = _payload(failed_files=failed_files, replace_scope=not upsert_only)
-    payload["documents"] = []
-    payload["stats"].update(total_files=failed_files, ok_files=0, emitted_documents=0)
+    before = list(repo.get_all_documents())
+    payload = repogpt_empty_module_payload(failed_files=failed_files, replace_scope=not upsert_only)
     if failed_files:
         payload["failures"] = [repogpt_failure()]
     if transport == "http":
         response = await asgi_client.post("/api/docs/import-canonical", json=payload)
-        assert response.status_code == 422
+        accepted = response.status_code == 200
         detail = response.text
     elif transport == "cli":
         path = tmp_path / "empty.json"
@@ -122,12 +113,22 @@ async def test_empty_snapshot_rejected_without_writes(
         if upsert_only:
             args.append("--upsert-only")
         result = CliRunner().invoke(cli, args)
-        assert result.exit_code != 0
+        accepted = result.exit_code == 0
         detail = result.output
     else:
-        with pytest.raises(ValueError) as caught:
+        try:
             tool_import_canonical(payload, replace_scope_override=False if upsert_only else None)
-        detail = str(caught.value)
-    assert "non-empty documents list" in detail
-    assert repo.get_all_documents() == before
-    assert not repo.get_tombstoned_external_ids(["last-doc"])
+            accepted, detail = True, ""
+        except ValueError as exc:
+            accepted, detail = False, str(exc)
+
+    if failed_files and not upsert_only:
+        assert not accepted
+        assert "Partial canonical exports" in detail
+        assert list(repo.get_all_documents()) == before
+    elif upsert_only:
+        assert accepted, detail
+        assert list(repo.get_all_documents()) == before
+    else:
+        assert accepted, detail
+        assert list(repo.get_all_documents()) == []

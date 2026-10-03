@@ -66,8 +66,6 @@ class DummyEmbedder:
 def _eval_settings():
     return settings.model_copy(
         update={
-            "persistence_backend": "local_split",
-            "search_backend": "local_split",
             "vector_backend": "numpy",
             "openai_api_key": None,
         }
@@ -190,16 +188,12 @@ def test_build_eval_storage_port_uses_isolated_local_paths(tmp_path: Path) -> No
             "index_path": str(tmp_path / "main.index"),
             "id_map_path": str(tmp_path / "main_id_map.json"),
             "sqlite_url": f"sqlite:///{tmp_path / 'main.db'}",
-            "persistence_backend": "elasticsearch",
-            "search_backend": "elasticsearch",
         }
     )
 
     storage = build_eval_storage_port(settings_obj=base)
     eval_settings = storage.get_eval_settings()
 
-    assert eval_settings.persistence_backend == "local_split"
-    assert eval_settings.search_backend == "local_split"
     assert Path(eval_settings.index_path) != Path(base.index_path)
     assert Path(eval_settings.id_map_path) != Path(base.id_map_path)
     assert eval_settings.sqlite_url != base.sqlite_url
@@ -407,8 +401,6 @@ def test_run_retrieval_eval_reuses_persisted_dense_eval_index(
     cfg = settings.model_copy(
         update={
             "data_dir": tmp_path / "eval-cache",
-            "persistence_backend": "local_split",
-            "search_backend": "local_split",
             "vector_backend": "numpy",
             "openai_api_key": None,
         }
@@ -478,8 +470,6 @@ def test_run_retrieval_eval_rebuilds_dense_eval_index_when_model_manifest_change
     ds = _mode_dataset()
     base_cfg = {
         "data_dir": tmp_path / "eval-cache",
-        "persistence_backend": "local_split",
-        "search_backend": "local_split",
         "vector_backend": "numpy",
         "openai_api_key": None,
     }
@@ -569,8 +559,6 @@ def test_run_retrieval_eval_builds_dense_eval_index_in_chunks(
     cfg = settings.model_copy(
         update={
             "data_dir": tmp_path / "chunked-cache",
-            "persistence_backend": "local_split",
-            "search_backend": "local_split",
             "vector_backend": "numpy",
             "openai_api_key": None,
         }

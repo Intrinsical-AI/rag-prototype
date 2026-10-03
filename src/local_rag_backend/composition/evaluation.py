@@ -91,8 +91,6 @@ class _SqlEvalStoragePort(EvalStoragePort):
     def _settings_for_eval_root(self, eval_root: Path) -> Settings:
         return self._base_settings.model_copy(
             update={
-                "persistence_backend": "local_split",
-                "search_backend": "local_split",
                 "data_dir": eval_root,
                 "index_path": str(eval_root / "eval.index"),
                 "id_map_path": str(eval_root / "eval_id_map.json"),

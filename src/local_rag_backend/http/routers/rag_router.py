@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Query
 
-from local_rag_backend.core.use_cases.errors import BadRequestError, InternalServerError
+from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
+from local_rag_backend.core.use_cases.errors import (
+    BadRequestError,
+    InternalServerError,
+    ServiceUnavailableError,
+)
 from local_rag_backend.core.use_cases.rag_query import (
     execute_ask_eval_sync,
     list_history_entries_sync,
@@ -42,18 +47,6 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
-def _to_document_in_db(doc: Any) -> DocumentInDB:
-    return DocumentInDB(
-        id=str(doc.id),
-        content=str(doc.content),
-        external_id=(
-            str(doc.external_id) if getattr(doc, "external_id", None) is not None else None
-        ),
-        source_id=(str(doc.source_id) if getattr(doc, "source_id", None) is not None else None),
-        metadata=(dict(doc.metadata or {}) if getattr(doc, "metadata", None) is not None else None),
-    )
-
-
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")
 async def ask(
     request: AskRequest,
@@ -64,15 +57,27 @@ async def ask(
     service = await get_rag_service()
     t = Timer()
     ok = False
-    try:
-        rag_result = await container.blocking_executor().run_blocking(
-            lambda: service.ask(
+
+    def _run_ask() -> dict[str, Any]:
+        filters = tuple(item.to_domain() for item in request.filters)
+        retrieval_mode = str(settings_obj.retrieval_mode)
+        if retrieval_mode == "dual":
+            return service.ask(
                 request.question,
                 top_k=int(request.k),
-                filters=tuple(item.to_domain() for item in request.filters),
-                retrieval_mode=str(settings_obj.retrieval_mode),
+                filters=filters,
+                dual_candidate_k=int(settings_obj.dual_candidate_k),
+                retrieval_mode=retrieval_mode,
             )
+        return service.ask(
+            request.question,
+            top_k=int(request.k),
+            filters=filters,
+            retrieval_mode=retrieval_mode,
         )
+
+    try:
+        rag_result = await container.blocking_executor().run_blocking(_run_ask)
         ok = True
     finally:
         observe_query(
@@ -96,7 +101,7 @@ async def ask(
 
     sources = [
         QueryResult(
-            document=_to_document_in_db(doc),
+            document=DocumentInDB.model_validate(doc),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)
@@ -160,6 +165,8 @@ async def ask_eval(
         )
     except ValueError as e:
         raise BadRequestError(str(e)) from e
+    except EmbeddingsBackendUnavailableError as e:
+        raise ServiceUnavailableError(str(e)) from e
     except RuntimeError as e:
         raise InternalServerError(str(e)) from e
 
@@ -168,7 +175,7 @@ async def ask_eval(
     scores = rag_result["scores"]
     sources = [
         QueryResult(
-            document=_to_document_in_db(doc),
+            document=DocumentInDB.model_validate(doc),
             score=score,
         )
         for doc, score in zip(docs, scores, strict=False)

@@ -41,3 +41,20 @@ def test_execute_import_canonical_sync_rejects_mixed_valid_and_invalid_docs() ->
             settings_obj="settings",  # type: ignore[arg-type]
             ports="ports",  # type: ignore[arg-type]
         )
+
+
+def test_execute_import_canonical_sync_rejects_overlong_later_document_before_writes() -> None:
+    with pytest.raises(ValueError, match=r"documents\[1\]\.content exceeds 20000"):
+        execute_import_canonical_sync(
+            request=CanonicalImportRequestInput(
+                scope="repogpt:demo",
+                snapshot_id="snap-3",
+                replace_scope=True,
+                documents=(
+                    CanonicalImportDocumentInput(external_id="doc-1", content="valid"),
+                    CanonicalImportDocumentInput(external_id="doc-2", content="x" * 20_001),
+                ),
+            ),
+            settings_obj="settings",  # type: ignore[arg-type]
+            ports="ports",  # type: ignore[arg-type]
+        )

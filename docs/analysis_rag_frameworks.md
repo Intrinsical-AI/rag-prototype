@@ -4,6 +4,8 @@ description: Comprehensive analysis of rag-prototype vs other frameworks (Haysta
 type: project
 ---
 
+> Historical comparison. Backend capabilities and recommendations below predate the current local-only runtime.
+
 ## COMPARATIVE ANALYSIS: RAG-PROTOTYPE + ALTERNATIVE BACKENDS
 
 ### Executive Summary
@@ -73,7 +75,7 @@ type: project
 | **Architectural Style** | Hexagonal (Ports & Adapters) + modular monolith | Component-based + pipeline DSL |
 | **Core Abstraction** | Port interfaces (DocumentRepoPort, VectorRepoPort, RetrieverPort) | Components (Document Store, Retriever, Generator, etc.) |
 | **Dependency Injection** | Centralized AppContainer + factory pattern | Dependency resolution via @component decorator |
-| **Write Path** | Canonical mutation coordinator (DURABLE_SAGA or ATOMIC) | Component-to-component data flow |
+| **Write Path** | Canonical mutation coordinator (local durable saga) | Component-to-component data flow |
 | **Consistency Model** | Explicit (capability-driven) | Implicit (component-dependent) |
 | **Configuration** | Single config.yaml file (Pydantic validated) | YAML + Python (.pipeline files) |
 | **Error Handling** | Typed AppError hierarchy + mapper at boundary | Exception propagation + optional error recovery |
@@ -86,9 +88,9 @@ type: project
 
 | Aspect | rag-prototype | Haystack v2 |
 |--------|---------------|------------|
-| **Document Store Adapters** | ~2 mature (SQL, Elasticsearch); Solr partial | ~6+ (Elasticsearch, Weaviate, Pinecone, Milvus, Qdrant, Mongo, In-Memory) |
+| **Document Store Adapters** | SQLite | ~6+ (Elasticsearch, Weaviate, Pinecone, Milvus, Qdrant, Mongo, In-Memory) |
 | **Vector Store Abstraction** | VectorRepoPort (separate from docs) | DocumentStore handles both (no separation) |
-| **Split vs Unified** | Both (local_split = split; elasticsearch = unified) | Unified model (one store handles docs + vectors) |
+| **Split vs Unified** | Local split store (SQLite documents, FAISS/NumPy vectors) | Unified model (one store handles docs + vectors) |
 | **Embedder Integration** | Pluggable (OpenAI, SentenceTransformers, custom) | Pluggable (OpenAI, HF, Ollama, custom) |
 | **Retriever Types** | 4 modes (sparse, dense, dual, hybrid) | ~10+ (TfidfRetriever, BM25, DensePassageRetriever, etc.) |
 | **Multi-Vector Support** | ❌ Limited (one embedding per doc) | ✅ Native (multiple embeddings per doc) |
@@ -117,8 +119,8 @@ type: project
 |----------|---------------|----------|--------|
 | **Rapid Prototyping** | ⭐⭐⭐ (3 hrs setup) | ⭐⭐⭐⭐⭐ (30 mins) | **Haystack** |
 | **Custom Persistence** | ⭐⭐⭐⭐⭐ (clean ports) | ⭐⭐⭐ (component overhead) | **rag-prototype** |
-| **Enterprise Multi-Backend** | ⭐⭐⭐⭐ (flexible matrix) | ⭐⭐⭐ (decent coverage) | **rag-prototype** |
-| **Consistency Guarantees** | ⭐⭐⭐⭐⭐ (explicit SAGA/ATOMIC) | ⭐⭐ (implicit, store-dependent) | **rag-prototype** |
+| **Enterprise Multi-Backend** | Not supported (local backend only) | ⭐⭐⭐ (decent coverage) | **Haystack** |
+| **Consistency Guarantees** | Local durable saga with recovery | Store-dependent | Depends on deployment |
 | **Production RAG Pipeline** | ⭐⭐⭐⭐ (solid ops tooling) | ⭐⭐⭐⭐ (mature + battle-tested) | **Haystack** |
 | **Simple Vector Search** | ⭐⭐⭐ (over-engineered) | ⭐⭐⭐⭐ (lightweight) | **Haystack** |
 | **Complex Retrieval Logic** | ⭐⭐⭐⭐⭐ (RetrieverPort flexibility) | ⭐⭐⭐⭐ (hybrid components) | **rag-prototype** |
@@ -319,8 +321,8 @@ START: "I need to build RAG"
 ### Why I'd choose rag-prototype over Haystack (if scales/timelines allow)
 
 1. **Architectural honesty**: Every abstraction is explicit. Ports are contracts. Mutations are intentional.
-2. **Consistency is configurable**: Not "implicit per backend". You decide SAGA vs ATOMIC.
-3. **Future-proof**: I can swap backends (SQL → pgvector → Milvus) without rewriting business logic.
+2. **Consistency is explicit**: Local writes use a durable saga with a file-backed journal.
+3. **Backend scope is narrow**: SQLite and local FAISS/NumPy are the supported stores.
 4. **Type safety**: Pydantic + SQLAlchemy catches errors at boundaries, not at runtime.
 5. **Debuggability**: Clear control flow. No hidden pipeline magic.
 
