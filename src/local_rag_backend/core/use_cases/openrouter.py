@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from local_rag_backend.core.errors import LLMResponseError
+from local_rag_backend.core.errors import LLMProviderError, LLMResponseError
 from local_rag_backend.core.ports import (
     OpenRouterGenerateRequest,
     OpenRouterGenerateResult,
@@ -21,5 +21,7 @@ def generate_openrouter_sync(
 ) -> OpenRouterGenerateResult:
     try:
         return openrouter_client.generate(request=payload)
+    except LLMProviderError:
+        raise
     except Exception as e:
         raise LLMResponseError(f"OpenRouter error: {e!s}") from e

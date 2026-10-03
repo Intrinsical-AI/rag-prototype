@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
-from local_rag_backend.infrastructure.persistence.sql.sessions import get_session
+from local_rag_backend.infrastructure.persistence.sql.sessions import (
+    get_managed_session,
+    get_session,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
@@ -63,8 +66,11 @@ class SystemStateStorage:
         if not state_key:
             raise ValueError("system_state key must not be blank")
 
-        with get_session(self._session_factory) as session:
-            self._ensure_table(session)
+        with get_managed_session(self._session_factory) as (session, owns_session):
+            # The schema is created at container startup before a mutation UoW.
+            # Creating it here would commit the document mutation prematurely.
+            if owns_session:
+                self._ensure_table(session)
             session.execute(
                 text(
                     "INSERT INTO system_state(key, version, updated_at) "
@@ -85,7 +91,8 @@ class SystemStateStorage:
                 text("SELECT version FROM system_state WHERE key=:key"),
                 {"key": state_key},
             ).scalar()
-            session.commit()
+            if owns_session:
+                session.commit()
             return int(version or 0)
 
 

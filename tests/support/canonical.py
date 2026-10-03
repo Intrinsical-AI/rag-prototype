@@ -1,4 +1,4 @@
-"""Current RepoGPT v4 producer payloads for transport boundary tests."""
+"""Current RepoGPT v5 producer payloads for transport boundary tests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 def repogpt_failure(path: str = "broken.py") -> dict[str, Any]:
     return {
         "record_type": "failure",
-        "schema_version": "4",
+        "schema_version": "5",
         "path": path,
         "language": "py",
         "error": "parse failed",
@@ -28,7 +28,7 @@ def repogpt_payload(
     digest = hashlib.sha256(content.encode()).hexdigest()
     return {
         "kind": "code-units",
-        "schema_version": "4",
+        "schema_version": "5",
         "repo_key": "demo",
         "scope": "repogpt:demo",
         "snapshot_id": "new",
@@ -71,3 +71,32 @@ def repogpt_payload(
             }
         ],
     }
+
+
+def repogpt_empty_module_payload(
+    *,
+    failed_files: int = 0,
+    failures: list[dict[str, Any]] | None = None,
+    replace_scope: bool = True,
+) -> dict[str, Any]:
+    payload = repogpt_payload(
+        failed_files=failed_files,
+        failures=failures,
+        replace_scope=replace_scope,
+    )
+    document = payload["documents"][0]
+    module_id = "repogpt:demo:app.py:module"
+    document.update(
+        external_id=module_id,
+        unit_type="module",
+        unit_level="container",
+        symbol=None,
+        qualified_name="app.py",
+        container_id=module_id,
+        depth=0,
+        ancestor_path=[],
+        content="",
+        content_ranges=[],
+        content_hash=hashlib.sha256(b"").hexdigest(),
+    )
+    return payload

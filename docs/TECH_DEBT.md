@@ -57,13 +57,12 @@ Interpretation:
 
 | Area | Debt | Evidence | Risk | Priority |
 | --- | --- | --- | --- | --- |
-| Mutation saga | One module still owns profile validation, journal lifecycle, before-image, SQL apply, vector apply, rollback, recovery, and reconcile | [`src/local_rag_backend/core/use_cases/_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) | High blast radius for write-path changes | High |
-| Mutation coordinator | Strategy selection, profile resolution, batching, and settings-derived behavior remain concentrated in one coordinator | [`src/local_rag_backend/core/use_cases/docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) | Coordination logic still spreads across layers | High |
-| Canonical import path | Scope-sync still relies on dynamic repo capabilities outside the coordinator; transport validation is now shared, but the write semantics still depend on repo-specific delete hooks | [`src/local_rag_backend/core/use_cases/docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py) | Same business action can still depend on repo capabilities outside the core coordinator | High |
+| Mutation saga | One module still owns journal lifecycle, before-images, SQL apply, vector apply, rollback, recovery, and reconcile | [`src/local_rag_backend/core/use_cases/_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) | High blast radius for write-path changes | High |
+| Mutation coordinator | Saga orchestration remains concentrated in one coordinator | [`src/local_rag_backend/core/use_cases/docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) | Coordination logic still spreads across layers | High |
+| Canonical import path | Scope-sync and mutation batching still require careful recovery tests | [`src/local_rag_backend/core/use_cases/docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py), [`src/local_rag_backend/cli_commands/docs/docs_import_canonical.py`](../src/local_rag_backend/cli_commands/docs/docs_import_canonical.py) | Partial imports can leave a partially updated scope | High |
 | Evaluation methodology | Score/unknown-ID handling is fixed; compare gate still needs statistical testing beyond aggregate deltas | [`src/local_rag_backend/core/services/evaluation.py`](../src/local_rag_backend/core/services/evaluation.py), [`src/local_rag_backend/core/use_cases/evaluation.py`](../src/local_rag_backend/core/use_cases/evaluation.py) | Candidate quality can still be overstated without paired significance tests | Medium |
 | CLI / DX contract consistency | Evaluation flags are still powerful and cognitively expensive; some command surfaces remain manually shaped rather than spec-driven | [`src/local_rag_backend/cli_commands/docs/docs_mutate.py`](../src/local_rag_backend/cli_commands/docs/docs_mutate.py), [`src/local_rag_backend/cli_commands/eval.py`](../src/local_rag_backend/cli_commands/eval.py) | Users still have to learn a wide CLI surface | Medium |
 | Ingestion planner | Planning, stale detection, batching, mutation execution, and terminal output still live in one module; `items` remains `Any` | [`src/local_rag_backend/cli_commands/docs/_ingestion_planner.py`](../src/local_rag_backend/cli_commands/docs/_ingestion_planner.py) | Reuse is limited; contracts remain implicit | Medium |
-| Elasticsearch system state | `bump_version()` is still read-modify-write without an atomic compare-and-swap or conflict retry loop | [`src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py`](../src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py) | Cross-worker cache invalidation can lose increments under contention | Medium |
 | Release hygiene | Remote tags, GitHub release metadata, package version, and default branch do not describe one coherent release line | Git refs and GitHub release metadata checked on 2026-04-27 | Consumers and maintainers can pick the wrong artifact or branch | Medium |
 
 ## Detailed Findings
@@ -73,7 +72,7 @@ Interpretation:
 Validated points:
 
 - [`_mutation_saga_executor.py`](../src/local_rag_backend/core/use_cases/_mutation_saga_executor.py) carries the durable write flow; journal v2 and recovery barriers now make replay/failure behavior explicit.
-- [`docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) still resolves storage profile and execution mode before delegating into saga or atomic execution.
+- [`docs_mutation.py`](../src/local_rag_backend/core/use_cases/docs_mutation.py) delegates all writes to the saga executor.
 - Critical paths still depend on optional adapter capabilities and dynamic checks around journal, vector delta, and rollback support.
 
 Nuance:
@@ -84,7 +83,7 @@ Nuance:
 Recommended direction:
 
 - Extract a typed mutation runtime/config resolver from `Settings`.
-- Split saga internals into explicit phases: profile checks, journal lifecycle, SQL phase, vector phase, recovery.
+- Split saga internals into explicit phases: journal lifecycle, SQL phase, vector phase, recovery.
 - Keep behavior stable first; do not combine this with transport or feature work.
 
 ### 2. Canonical scope cleanup has bounded consistency guarantees
@@ -94,13 +93,12 @@ Validated points:
 - CLI, HTTP and MCP share typed validation and default `replace_scope` to `True`.
 - Partial producer exports are rejected before writes unless effective upsert-only mode is explicit.
 - Local scope cleanup binds SQL lookup/deletion and vector delta to the existing SQL unit of work. Vector failure rolls SQL back; vector write or SQL commit failure requires an explicit index rebuild.
-- Elasticsearch deletes the complete document, including its embedding, and bulk item errors are propagated.
-- Scope replacement in [`docs_import_canonical.py`](../src/local_rag_backend/core/use_cases/docs_import_canonical.py) still depends on dynamic repo methods such as `list_external_ids_by_scope`, `snapshot_by_external_ids`, and `hard_delete_by_external_ids`.
+- Scope replacement uses a journaled hard-delete intent for stale documents.
 
 Why this matters:
 
 - The transport behavior is aligned. Cleanup remains a bounded use case using repository capabilities.
-- SQL and the two vector files do not share a durable transaction; whole-import batch atomicity and process-crash recovery are not guaranteed.
+- SQL and the two vector files do not share a transaction; the durable journal compensates individual mutations, while whole-import batches are not atomic.
 
 Recommended direction:
 
@@ -177,24 +175,7 @@ Recommended direction:
 - Move terminal output back to [`docs_ingest.py`](../src/local_rag_backend/cli_commands/docs/docs_ingest.py).
 - Replace `Any` with a small Protocol or DTO.
 
-### 7. Elasticsearch system state is a real concurrency blind spot
-
-Validated points:
-
-- [`ElasticSystemStateStorage.bump_version()`](../src/local_rag_backend/infrastructure/persistence/elasticsearch/system_state.py) reads the current version and writes `current + 1` back without compare-and-swap or conflict retry.
-- This storage is used to invalidate cached runtime state from `AppContainer`.
-
-Why this matters:
-
-- Under concurrent writers, version increments can be lost.
-- That means cache invalidation is best-effort, not monotonic.
-
-Recommended direction:
-
-- Replace read-modify-write with an atomic Elasticsearch update strategy.
-- Add a contention-focused test, not only a monotonic sequential test.
-
-### 8. Release and tag state is inconsistent
+### 7. Release and tag state is inconsistent
 
 Review date: 2026-04-27.
 
@@ -301,7 +282,7 @@ Interpretation:
 
 - Extract a typed mutation runtime/config object from `Settings`.
 - Split mutation saga internals by phase without changing external behavior.
-- Remove duplicate profile resolution and strategy branching where possible from `MutationCoordinator`.
+- Keep the single saga path in `MutationCoordinator` small and explicit.
 - [x] Add per-query outputs to evaluation compare mode.
 - [x] Reduce `eval-compare` flag complexity with spec-file support.
 - Homogenize CLI exit codes and success/error output shape.
@@ -310,7 +291,6 @@ Interpretation:
 
 - Refactor `maintenance.py` with a shared helper.
 - Decouple `_ingestion_planner.py` from terminal output and replace `Any` item contracts.
-- Harden `ElasticSystemStateStorage.bump_version()` with atomic update semantics.
 - Resolve release/tag hygiene:
   - decide canonical release branch
   - choose tag convention (`vX.Y.Z` or `X.Y.Z`)

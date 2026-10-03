@@ -62,9 +62,6 @@ def ingest_cmd(
         raise SystemExit(2)
 
     try:
-        from local_rag_backend.core.services.ingestion import build_preprocess_fn_from_settings
-
-        preprocess_fn = build_preprocess_fn_from_settings(get_settings())
         delimiter_opt, has_header = resolve_loader_options(
             settings_obj=get_settings(),
             csv_delimiter=csv_delimiter,
@@ -91,7 +88,6 @@ def ingest_cmd(
 
         ingest_plans, total_files, dry_run_chunks, total_skipped = build_ingest_plans(
             files=files,
-            preprocess_fn=preprocess_fn,
             build_upsert_doc=ports.build_upsert_doc,
             settings_obj=get_settings(),
             sniff_bytes=sniff_bytes,
@@ -111,7 +107,7 @@ def ingest_cmd(
         doc_repo = ports.doc_repo_factory()
         coordinator = MutationCoordinator(settings_obj=get_settings(), ports=ports)
 
-        def _ingest_sync() -> tuple[int, int, int, int, bool]:
+        def _ingest_sync() -> tuple[int, int, int, int]:
             return execute_ingest_batches(
                 ingest_plans=ingest_plans,
                 doc_repo=doc_repo,
@@ -119,13 +115,13 @@ def ingest_cmd(
                 settings_obj=get_settings(),
             )
 
-        total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any = (
-            run_cli_mutation(_ingest_sync, use_lock=False)
+        total_inserted, total_updated, total_unchanged, total_chunks = run_cli_mutation(
+            _ingest_sync, use_lock=False, invalidate_shared=False
         )
         click.echo(
             f"[OK] Ingest completed. files={total_files} chunks={total_chunks} "
             f"inserted={total_inserted} updated={total_updated} unchanged={total_unchanged} "
-            f"skipped={total_skipped} rebuilt_index={rebuilt_any}"
+            f"skipped={total_skipped}"
         )
     except Exception as e:
         click.echo(f"[ERROR] Error ingesting files: {e}", err=True)

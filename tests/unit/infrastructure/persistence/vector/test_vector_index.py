@@ -19,10 +19,10 @@ def test_faiss_add_and_search(tmp_path):
 
     fi.add_to_index(ids, vecs)
 
-    idxs, dists = fi.search(vecs[0], k=3)
+    idxs, dists, id_map = fi.search_with_snapshot(vecs[0], k=3)
 
     # The first result should be the identical vector (distance 0)
     assert idxs[0] != -1
-    top_id = fi.id_map[idxs[0]]
+    top_id = id_map[idxs[0]]
     assert top_id == 10
     assert dists[0] == approx(0.0)

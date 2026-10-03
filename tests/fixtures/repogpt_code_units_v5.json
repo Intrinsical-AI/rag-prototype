@@ -1,5 +1,5 @@
 {
-  "schema_version": "4",
+  "schema_version": "5",
   "kind": "code-units",
   "repo_key": "repogpt_eval_repo",
   "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
@@ -9,10 +9,44 @@
     "total_files": 5,
     "ok_files": 5,
     "failed_files": 0,
-    "emitted_documents": 14
+    "emitted_documents": 19
   },
   "failures": [],
   "documents": [
+    {
+      "external_id": "repogpt:repogpt_eval_repo:README.md:module",
+      "source_id": "repogpt:repogpt_eval_repo:file:README.md",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "README.md",
+      "language": "md",
+      "unit_type": "module",
+      "unit_level": "container",
+      "symbol": "README",
+      "qualified_name": "README.md",
+      "container_id": "repogpt:repogpt_eval_repo:README.md:module",
+      "depth": 0,
+      "ancestor_path": [],
+      "start_line": 1,
+      "end_line": 11,
+      "content": "",
+      "content_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
+          "size": 205
+        },
+        "tags": [],
+        "attributes": {
+          "relative_path": "README.md"
+        },
+        "dependencies": []
+      },
+      "content_ranges": []
+    },
     {
       "external_id": "repogpt:repogpt_eval_repo:README.md:heading:repogpt-eval-repo",
       "source_id": "repogpt:repogpt_eval_repo:file:README.md",
@@ -94,7 +128,7 @@
       "language": "md",
       "unit_type": "code_block",
       "unit_level": "symbol",
-      "symbol": "python",
+      "symbol": null,
       "qualified_name": "repogpt-eval-repo/usage/code_block[1]",
       "container_id": "repogpt:repogpt_eval_repo:README.md:heading:repogpt-eval-repo/usage",
       "depth": 3,
@@ -120,6 +154,45 @@
         },
         "dependencies": []
       }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:auth.py:module",
+      "source_id": "repogpt:repogpt_eval_repo:file:auth.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "auth.py",
+      "language": "py",
+      "unit_type": "module",
+      "unit_level": "container",
+      "symbol": "auth",
+      "qualified_name": "auth.py",
+      "container_id": "repogpt:repogpt_eval_repo:auth.py:module",
+      "depth": 0,
+      "ancestor_path": [],
+      "start_line": 1,
+      "end_line": 14,
+      "content": "\n\n",
+      "content_hash": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0",
+          "size": 519
+        },
+        "tags": [],
+        "attributes": {
+          "relative_path": "auth.py"
+        },
+        "dependencies": []
+      },
+      "content_ranges": [
+        {
+          "start_line": 9,
+          "end_line": 10
+        }
+      ]
     },
     {
       "external_id": "repogpt:repogpt_eval_repo:auth.py:function:extract_bearer_token",
@@ -214,6 +287,45 @@
         },
         "dependencies": []
       }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:client.py:module",
+      "source_id": "repogpt:repogpt_eval_repo:file:client.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "client.py",
+      "language": "py",
+      "unit_type": "module",
+      "unit_level": "container",
+      "symbol": "client",
+      "qualified_name": "client.py",
+      "container_id": "repogpt:repogpt_eval_repo:client.py:module",
+      "depth": 0,
+      "ancestor_path": [],
+      "start_line": 1,
+      "end_line": 14,
+      "content": "\n\n",
+      "content_hash": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
+          "size": 456
+        },
+        "tags": [],
+        "attributes": {
+          "relative_path": "client.py"
+        },
+        "dependencies": []
+      },
+      "content_ranges": [
+        {
+          "start_line": 10,
+          "end_line": 11
+        }
+      ]
     },
     {
       "external_id": "repogpt:repogpt_eval_repo:client.py:class:ApiClient",
@@ -407,6 +519,49 @@
       }
     },
     {
+      "external_id": "repogpt:repogpt_eval_repo:config.py:module",
+      "source_id": "repogpt:repogpt_eval_repo:file:config.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "config.py",
+      "language": "py",
+      "unit_type": "module",
+      "unit_level": "container",
+      "symbol": "config",
+      "qualified_name": "config.py",
+      "container_id": "repogpt:repogpt_eval_repo:config.py:module",
+      "depth": 0,
+      "ancestor_path": [],
+      "start_line": 1,
+      "end_line": 16,
+      "content": "from collections.abc import Mapping\n\n\n\n\n",
+      "content_hash": "ef2a7c2d9984ab28f1f5ddc4465837268969daeb924aecd781972aa7f363d016",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03",
+          "size": 498
+        },
+        "tags": [],
+        "attributes": {
+          "relative_path": "config.py"
+        },
+        "dependencies": []
+      },
+      "content_ranges": [
+        {
+          "start_line": 1,
+          "end_line": 3
+        },
+        {
+          "start_line": 9,
+          "end_line": 10
+        }
+      ]
+    },
+    {
       "external_id": "repogpt:repogpt_eval_repo:config.py:function:parse_timeout",
       "source_id": "repogpt:repogpt_eval_repo:file:config.py",
       "repo_key": "repogpt_eval_repo",
@@ -499,6 +654,45 @@
         },
         "dependencies": []
       }
+    },
+    {
+      "external_id": "repogpt:repogpt_eval_repo:sample.py:module",
+      "source_id": "repogpt:repogpt_eval_repo:file:sample.py",
+      "repo_key": "repogpt_eval_repo",
+      "scope": "repogpt:repogpt_eval_repo",
+      "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
+      "path": "sample.py",
+      "language": "py",
+      "unit_type": "module",
+      "unit_level": "container",
+      "symbol": "sample",
+      "qualified_name": "sample.py",
+      "container_id": "repogpt:repogpt_eval_repo:sample.py:module",
+      "depth": 0,
+      "ancestor_path": [],
+      "start_line": 1,
+      "end_line": 11,
+      "content": "\n\n",
+      "content_hash": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+      "docstring_present": false,
+      "has_children": true,
+      "metadata": {
+        "file": {
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
+          "size": 290
+        },
+        "tags": [],
+        "attributes": {
+          "relative_path": "sample.py"
+        },
+        "dependencies": []
+      },
+      "content_ranges": [
+        {
+          "start_line": 7,
+          "end_line": 8
+        }
+      ]
     },
     {
       "external_id": "repogpt:repogpt_eval_repo:sample.py:class:Demo",

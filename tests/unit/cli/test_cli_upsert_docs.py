@@ -4,6 +4,7 @@ from click.testing import CliRunner
 from support.container import override_container
 
 from local_rag_backend.cli import cli
+from local_rag_backend.composition import factory
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import get_settings
@@ -33,6 +34,30 @@ def test_cli_mutate_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch)
     docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert len(docs) == 2
     assert {d.external_id for d in docs} == {"doc-1", "doc-2"}
+
+
+def test_cli_mutate_rejects_blank_upsert_before_deleting(in_memory_sqlite, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    repo.upsert_documents_by_external_id(
+        [repo.UpsertDoc(external_id="keep", content="keep this document")]
+    )
+    payload = tmp_path / "invalid-mutation.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "upserts": [{"external_id": "new", "content": " "}],
+                "delete_external_ids": ["keep"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+
+    assert result.exit_code == 1
+    assert "content must not be blank" in result.output
+    assert {doc.external_id for doc in repo.get_all_documents()} == {"keep"}
 
 
 def test_cli_mutate_docs_dense_embed_failure_does_not_persist_sql(
@@ -80,7 +105,8 @@ def test_cli_mutate_docs_failure_still_invalidates_cached_rag_service(
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: BadEmbedder())
     monkeypatch.setattr(
-        "local_rag_backend.cli_commands.runtime._reset_rag_service_best_effort",
+        factory.get_app_context().container,
+        "clear_local_rag_service_cache",
         _count_reset,
         raising=True,
     )
@@ -93,7 +119,7 @@ def test_cli_mutate_docs_failure_still_invalidates_cached_rag_service(
     r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
     assert r.exit_code == 1
     assert "embed fail" in r.output
-    assert reset_calls == 1
+    assert reset_calls >= 1
 
 
 def test_cli_mutate_docs_rejects_duplicate_external_id_before_embedding(

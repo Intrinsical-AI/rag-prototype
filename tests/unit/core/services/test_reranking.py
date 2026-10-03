@@ -79,14 +79,12 @@ def test_reranking_retriever_structured_request_preserves_metadata_and_candidate
             filters=(),
             candidate_k=1,
             dual_candidate_k=3,
-            min_score=0.2,
         )
     )
 
     assert seen["request"].top_k == 4
     assert seen["request"].candidate_k == 1
     assert seen["request"].dual_candidate_k == 3
-    assert seen["request"].min_score == 0.2
     assert [item.document.external_id for item in result.items] == ["d1", "d2"]
     assert result.mode_used == "dual"
     assert result.backend_used == "elastic"

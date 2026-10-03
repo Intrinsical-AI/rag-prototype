@@ -320,14 +320,12 @@ def test_mcp_import_canonical_rejects_repogpt_schema_v3(
     )
 
     assert response["result"]["isError"] is True
-    assert "schema_version='4'" in response["result"]["content"][0]["text"]
+    assert "schema_version='5'" in response["result"]["content"][0]["text"]
 
 
 def test_mcp_eval_supports_filters(in_memory_sqlite, tmp_path, monkeypatch) -> None:
     _ = in_memory_sqlite
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(settings, "search_backend", "local_split", raising=False)
-    monkeypatch.setattr(settings, "persistence_backend", "local_split", raising=False)
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data", raising=False)
     settings.data_dir.mkdir()
 

@@ -26,10 +26,6 @@ DEFAULT_DENSE_BACKEND_MESSAGE = (
 )
 
 
-def _settings_cfg_version(settings_obj: Settings) -> str:
-    return str(getattr(settings_obj, "storage_profile", "") or "default")
-
-
 def _build_default_openai_embedder(settings_obj: Settings) -> EmbedderPort:
     from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
 
@@ -79,12 +75,10 @@ def build_dense_embedder_from_settings(
             raise EmbeddingsBackendUnavailableError(backend_message) from exc
         provider = "sentence_transformers"
     logger.info(
-        "dense_embedder_selected provider=%s mode=%s cache_key=%s backend=%s cfg_version=%s",
+        "dense_embedder_selected provider=%s mode=%s cache_key=%s",
         provider,
         str(getattr(settings_obj, "retrieval_mode", "unknown")),
         str(cache_db_path),
-        str(getattr(settings_obj, "search_backend", "local_split")),
-        _settings_cfg_version(settings_obj),
     )
     return ContentAddressedCachingEmbedder(
         base=base,

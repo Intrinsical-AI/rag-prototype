@@ -53,7 +53,7 @@ summary = coordinator.execute(
 print(summary)
 ```
 
-For application writes, keep `MutationCoordinator` as the final write path. Direct `ETLService`/`IngestionPipeline` examples bypass the mutation journal, write lock, and backend-specific consistency rules.
+For application writes, use `MutationCoordinator` so SQLite and vector state remain coordinated through the journal and write lock.
 
 ## Behavior and options
 

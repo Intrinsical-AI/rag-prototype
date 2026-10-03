@@ -3,34 +3,7 @@
 from __future__ import annotations
 
 from local_rag_backend.core.domain.types import ItemLineage, TransformStep
-from local_rag_backend.core.services.ingestion import default_preprocess, stable_lineage_metadata
-
-# ---------------------------------------------------------------------------
-# default_preprocess
-# ---------------------------------------------------------------------------
-
-
-def test_default_preprocess_lowercases_and_strips() -> None:
-    assert default_preprocess("  Hello World  ") == "hello world"
-
-
-def test_default_preprocess_removes_html() -> None:
-    assert default_preprocess("<b>Bold</b> text") == "bold text"
-
-
-def test_default_preprocess_collapses_whitespace() -> None:
-    assert default_preprocess("a   b\n\tc") == "a b c"
-
-
-def test_default_preprocess_empty_string() -> None:
-    assert default_preprocess("") == ""
-
-
-def test_default_preprocess_ignores_metadata_arg() -> None:
-    # metadata is accepted but has no effect on the output
-    result = default_preprocess("Hello", {"key": "value"})
-    assert result == "hello"
-
+from local_rag_backend.core.services.ingestion import stable_lineage_metadata
 
 # ---------------------------------------------------------------------------
 # stable_lineage_metadata

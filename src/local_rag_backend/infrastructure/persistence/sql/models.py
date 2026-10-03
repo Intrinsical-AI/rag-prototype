@@ -3,7 +3,7 @@
 import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Text, func
+from sqlalchemy import DateTime, Integer, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -23,7 +23,6 @@ class Document(Base):
     snapshot_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
     content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
-    chunk_dedup_sha256: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -59,4 +58,16 @@ class DocumentTombstone(Base):
     external_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     deleted_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SystemState(Base):
+    """Cross-process cache version, created with the other local tables."""
+
+    __tablename__ = "system_state"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=False), nullable=False, server_default=func.current_timestamp()
     )

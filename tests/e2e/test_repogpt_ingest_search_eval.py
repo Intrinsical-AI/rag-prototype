@@ -44,8 +44,6 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
 ) -> None:
     _ = in_memory_sqlite
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(settings, "search_backend", "local_split", raising=False)
-    monkeypatch.setattr(settings, "persistence_backend", "local_split", raising=False)
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(settings, "data_dir", data_dir, raising=False)
@@ -53,7 +51,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     payload_path = tmp_path / "repogpt_eval_code_units.json"
     payload = load_repogpt_payload(payload_path=payload_path)
 
-    assert payload["schema_version"] == "4"
+    assert payload["schema_version"] == "5"
     assert payload["replace_scope"] is True
     repo_key = str(payload["repo_key"])
 
@@ -71,7 +69,12 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
 
     repo = SqlDocumentStorage(in_memory_sqlite)
     docs = list(repo.get_all_documents())
-    assert len(docs) == len(list(payload["documents"]))  # type: ignore[arg-type]
+    indexable = [
+        document
+        for document in list(payload["documents"])  # type: ignore[arg-type]
+        if document["unit_type"] != "module" or document["content"].strip()
+    ]
+    assert len(docs) == len(indexable)
     retriever = LocalSplitSearchRetriever(doc_repo=repo)
 
     helper_id = _retrieved_external_id(

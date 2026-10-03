@@ -7,14 +7,12 @@
 
 ## 0) TL;DR (90 seconds)
 
-- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. Today it supports split-store persistence (`local_split`: SQLite + local vector index), unified persistence (`elasticsearch`), and external search adapters (`opensearch`, `solr`) controlled via `search_backend` in `config.yaml`, while keeping application contracts backend-agnostic.
+- **What:** `rag-prototype` is a local-first RAG system (library + CLI + optional FastAPI transport) built as a modular monolith with hexagonal boundaries. It uses SQLite for canonical documents and a local FAISS/NumPy index for dense retrieval.
 - **Why:** The immediate priority is architectural stabilization and decoupling (not feature expansion). We will accept breaking changes to eliminate structural debt now and freeze a clean first deliverable.
 - **How:**
   - Domain + ports in `core/`, adapters in `infrastructure/`, composition in `composition/`, transports in `http/` and `cli_commands/`.
-  - Canonical write path via `MutationCoordinator` (thin orchestrator), with batch and execution strategy delegated to dedicated modules.
-  - Current write consistency model is capability-driven:
-    - `local_split` => `DURABLE_SAGA`
-    - `elasticsearch` => `ATOMIC`
+  - Canonical write path via `MutationCoordinator` (thin orchestrator), with execution strategy delegated to dedicated modules.
+  - Current write consistency model is a durable saga over SQLite and the local vector index.
   - SQL writes inside canonical mutation run under explicit `mutation_uow_factory` and shared SQL session context (`session_uow`).
   - App/runtime wiring centralized in `AppContainer` + `composition/*`.
   - Architecture guard tests enforce import boundaries in CI.
@@ -24,7 +22,7 @@
   - No direct writes to persistence backends outside canonical mutation/index use cases.
   - `core/{domain,ports,services}` must not depend on `infrastructure/`, `http/`, `composition/`.
   - `core/use_cases` depends on ports/contracts only (no concrete infra/composition imports).
-  - Application/core layers must not assume split persistence (`SQL + local vector index`) as mandatory architecture.
+  - Application/core layers express persistence through ports.
   - Breaking changes are allowed during this deliverable; no migration compatibility layer is required.
   - CI gates (`pre-commit`, `ruff`, `mypy`, `pytest`, architecture tests) are mandatory.
 
@@ -49,7 +47,7 @@
 - Legal / regulatory: no special regulated-domain requirement declared for D1.
 - Budget / latency / throughput: local-first single-node operation, optional Docker; avoid infra-heavy dependencies by default.
 - Team: small maintainer set; changes must be reviewable in small increments.
-- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current supported persistence backends are `local_split` (SQLite + local vector index) and `elasticsearch`. Active search adapters: `local_split`, `elasticsearch`, `opensearch`, `solr` (controlled via `search_backend` in `config.yaml`). Architecture keeps room for future unified engines (pgvector, Qdrant) through ports.
+- Tech (languages, runtime, hosting): Python 3.11/3.12, `uv`, FastAPI optional extra (`server`). Current persistence is SQLite with an optional local FAISS/NumPy vector index.
 - Product constraint: breaking changes explicitly allowed for this deliverable.
 
 ### 1.4 Quality attributes
@@ -58,7 +56,7 @@
 | ------------ | -----: | ----------- |
 | Latency p95 (`POST /api/ask`, sparse, local sample dataset) | <= 2000ms | `rag_query_duration_seconds` metric + e2e smoke |
 | Availability (single instance) | >= 99.0% in controlled environment | `/healthz` + `/readyz` checks |
-| Consistency | capability-driven (`DURABLE_SAGA` or `ATOMIC`) | mutation/recovery tests + integration tests |
+| Consistency | durable saga with recovery | mutation/recovery tests + integration tests |
 | Cost | single-node local runtime (no mandatory external SaaS except optional LLM provider) | Docker/local runtime footprint |
 
 ### 1.5 Definition of Done (Deliverable D1)
@@ -86,9 +84,7 @@
 - **LoadedItem:** Ingestion unit from a loader with lineage metadata.
 - **MutationIntent:** Requested write operation (upserts/deletes) for canonical mutation flow.
 - **MutationRecord:** Durable journal state for multi-store writes.
-- **StorageProfile:** Capability profile (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`) for allowed operations.
 - **Retriever mode:** `sparse`, `dense`, `dual`, `hybrid` retrieval strategy.
-- **Search backend:** `search_backend` setting decouples query execution engine from persistence topology (`local_split`, `elasticsearch`, `opensearch`, `solr`).
 
 ### 2.2 Bounded contexts
 
@@ -97,7 +93,7 @@
 | Retrieval Query | Retrieve docs + generate answer | No | LLM adapters, retrievers | `/api/ask`, `/api/ask_eval`, `RagService.ask` |
 | Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs/ingest`, `/api/docs/import-conversations`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
 | Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag-rebuild-index` |
-| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, ES mappings | `/healthz`, `/readyz`, `rag-status` |
+| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, journal | `/healthz`, `/readyz`, `rag-status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
 | Composition Runtime | Settings-bound SQL runtime, executor, locks, providers, cache invalidation | No | settings + adapters | DI factory/container |
 
@@ -132,27 +128,14 @@
 - **Equality:** structural equality of source and transform metadata
 - **Validation:** source URI + loader metadata must be serializable
 
-#### Value Object: `StorageProfile`
-- **Equality:** by `profile_id` + capabilities set
-- **Validation:** profile must exist in registry (`StorageProfileRegistry`)
-
 ---
 
 ## 3) Data model
 
 ### 3.1 Storage overview
-- Current supported backends:
-  - `local_split`: relational persistence via SQLite + SQLAlchemy plus vector index via FAISS/numpy adapters on local disk.
-  - `elasticsearch`: unified document/vector/history/system-state/tombstone persistence via HTTP adapter.
-  - `opensearch` (`search_backend=opensearch`): OpenSearch adapter for query execution; persistence still handled by `local_split` SQL layer.
-  - `solr` (`search_backend=solr`): Solr adapter for sparse (lexical) retrieval; only `retrieval_mode=sparse` is supported in v1.
-- `search_backend` decouples the query-execution engine from `persistence_backend`. When both are set to the same system (e.g. `elasticsearch`/`elasticsearch`), writes and reads are colocated; mixed configurations (e.g. `local_split` + `opensearch`) split SQL writes from remote retrieval.
-- Target abstraction:
-  - application uses persistence ports and capability profile, not concrete store topology;
-  - supported topologies:
-    - split-store (`DocumentRepoPort` + `VectorRepoPort`);
-    - unified-store (single adapter handles document + vector + metadata operations).
-- Cache: in-process runtime cache (`RagService` cache versioned via `system_state`, stored in SQLite or Elasticsearch depending on backend).
+- Current storage: SQLite + SQLAlchemy for canonical documents and state, and a FAISS/NumPy vector index on local disk for dense modes.
+- Application uses persistence ports; composition binds them to the local storage adapters.
+- Cache: in-process runtime cache (`RagService`) versioned via SQLite `system_state`.
 - Files / blobs: local filesystem (`data/`, index artifacts, mutation journal).
 - Concurrency locks: OS-level file/write lock adapters in `infrastructure/concurrency/locks/{file_lock.py,write_lock.py}`.
 - Evaluation fixtures: repository-level datasets under `datasets/` (for example `datasets/rag_eval_v1.jsonl`), optionally overridden by `eval_dataset_path` in `config.yaml`.
@@ -162,7 +145,6 @@
 - SQL schema bootstrap: `src/local_rag_backend/infrastructure/persistence/sql/base.py`
 - Vector manifest contract: `src/local_rag_backend/infrastructure/persistence/vector/manifest.py`
 - SQL UoW/session binding: `session_uow()` + `get_bound_session()` in `sql/base.py`
-- [TODO: persistence-agnostic] Add backend contract tests validating unified adapters against the same application persistence behaviors.
 
 ### 3.3 DTOs / Contracts
 - HTTP DTOs: `src/local_rag_backend/http/schemas/`
@@ -202,17 +184,17 @@
 ## 4) Invariants & validation
 
 ### 4.1 Global invariants
-- Multi-store write operations are serialized under shared write lock when the active storage profile requires `DURABLE_SAGA`.
-- Canonical write flow is strategy-driven by `StorageProfile` capability (`DURABLE_SAGA` or `ATOMIC`).
+- Multi-store write operations are serialized under the shared write lock and durable saga.
+- Canonical write flow journals SQLite and local vector changes for recovery.
 - Canonical SQL mutation and SQL compensation run inside explicit unit-of-work boundaries.
 - When UoW is active, SQL repositories must reuse the bound session and must not force early commit.
-- Lock scope is bounded to local commit work only when the active backend requires split-store coordination.
+- Lock scope is bounded to local commit work after embedding precomputation.
 - Network I/O (`embeddings`/provider calls) must never execute while holding `multiprocess_write_lock`.
-- Mutation requests may be coalesced before lock acquisition and drained as bounded micro-batches (`max_batch_size`, `max_wait_ms`).
+- Each mutation acquires the shared write lock in its calling thread after embedding precomputation.
 - Dense/hybrid mutation cannot silently proceed when embeddings backend is unavailable.
 - Retrieval mode must be one of `sparse|dense|dual|hybrid`.
 - Transport isolation rule: removing `http/` must not break core mutation/query capabilities.
-- Persistence topology isolation rule: application behavior must be invariant under split-store vs unified-store backends (except declared capability differences).
+- Persistence isolation rule: application behavior uses ports; concrete SQLite/vector details stay in adapters.
 
 ### 4.2 Per-aggregate invariants
 
@@ -224,14 +206,13 @@
 
 ### 4.3 Failure semantics
 - Validation errors: mapped to `AppError` hierarchy (`400/401/404/409/413/422/5xx`).
-- Idempotency: local journal v2 stores the committed outcome for exact `op_id` replay. Elasticsearch bulk execution has no cross-document transaction or local saga journal.
-- Retry safety: incomplete local journal v2 records are recovered under the write lock. Unreadable/older records and failed recovery block new writes. SQL compensation is followed by one rebuild only when a persisted vector attempt requires it; rebuild alone never repairs a journal.
+- Idempotency: the local journal stores terminal outcomes for exact `op_id` replay while receipts are retained. Terminal `done/` receipts are kept for up to 30 days or 256 MiB, except receipts shadowing incomplete flat records; old flat receipts remain read-only and replayable.
+- Retry safety: incomplete records in `active/` and older flat records are recovered under the write lock. Unresolved active records block new writes; corrupt records make `/readyz` return `503`, and a corrupt terminal receipt blocks replay of its `op_id`. SQL compensation is followed by one rebuild only when a persisted vector attempt requires it; rebuild alone never repairs a journal.
 - Embedding failures are pre-lock failures: they must not leave partial SQL/vector state.
-- Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id`; journal state transitions apply only to `DURABLE_SAGA` backends.
+- Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id` within receipt retention.
 - Consistency model per operation:
   - SQL-only operations: atomic per DB transaction (owned session) or per explicit unit-of-work (shared session).
-  - `local_split` SQL + vector mutations: `DURABLE_SAGA` with compensation/recovery.
-  - `elasticsearch` unified mutations: `ATOMIC` execution profile with per-document storage of content and embedding, no multi-item/document-tombstone transaction, and no local journal recovery loop.
+  - SQLite + vector mutations: durable saga with compensation/recovery.
 
 ---
 
@@ -250,7 +231,7 @@
 
 | Layer | Responsibilities | Must NOT contain |
 | ----- | ---------------- | ---------------- |
-| Domain (`core/domain`) | entities, value objects, storage profile semantics | HTTP/DB/LLM framework code |
+| Domain (`core/domain`) | entities and value objects | HTTP/DB/LLM framework code |
 | Application (`core/use_cases`, `core/services`) | use cases, orchestration, business flow | transport framework dependencies |
 | Adapters (`infrastructure`) | persistence adapters (split or unified), embeddings, LLM clients, observability adapters | domain policy decisions |
 | Composition (`composition`) | dependency assembly, runtime lifecycle/wiring | business rules |
@@ -280,10 +261,10 @@ Ports defined in `core/ports/use_cases.py` are active and used by all migrated u
 | `evaluation.py` | migrated to eval storage/retriever ports | `EvalStoragePort` + `EvalRetrieverFactoryPort` |
 | `openrouter.py` | migrated to port-based OpenAI-compatible client | `OpenRouterClientPort` (OpenAI-compatible adapter) |
 | `mutations.py` | migrated to blocking execution port | `BlockingExecutorPort` |
-| `docs_mutation.py` | orchestrator kept thin; contracts/batch/saga extracted | `docs_mutation_contracts.py` + `_batch_coordinator.py` + `_mutation_saga_executor.py` |
+| `docs_mutation.py` | orchestrator kept thin; contracts/saga extracted | `docs_mutation_contracts.py` + `_mutation_saga_executor.py` |
 
 ### 5.5 Fase B hardening backlog
-- [x] `core/use_cases/docs_mutation.py` coordinator complexity reduced: intent normalization + journal payload shaping externalized (`docs_mutation_contracts.py`), SQL/vector/recovery + locking extracted to `_mutation_saga_executor.py`, and batching extracted to `_batch_coordinator.py`.
+- [x] `core/use_cases/docs_mutation.py` coordinator complexity reduced: intent normalization + journal payload shaping externalized (`docs_mutation_contracts.py`), SQL/vector/recovery + locking extracted to `_mutation_saga_executor.py`.
 - [TODO: Fase C] Unit-of-work boundary (`mutation_uow_factory`) is active and bound to shared SQL sessions (`session_uow`) for mutation SQL + rollback paths; extending the same transactional seam to other write-heavy workflows is intentionally deferred.
 - [x] Composition fan-out reduced in `AppContainer`: routers/CLI consume focused builders/bundles (`build_docs_read_port`, `build_history_read_port`, `build_docs_mutation_bundle`, `index_mutation_ports`, `build_health_readiness_bundle`, `build_eval_execution_bundle`) instead of assembling adapters ad hoc.
 - [x] Bootstrap sample ingestion (`run_sample_data_ingestion`) migrated to canonical `MutationCoordinator` flow (no parallel ETL write path), preserving lock + journal + recovery semantics.
@@ -291,17 +272,9 @@ Ports defined in `core/ports/use_cases.py` are active and used by all migrated u
 - [x] Focused characterization tests added for mutation failure semantics (journal recovery, rollback failure, vector delta failure) in `tests/unit/core/use_cases/test_docs_mutation_refactor.py`.
 - [x] External HTTP/CLI contracts remained stable across B1-B2.5 refactors (validated by e2e/unit smoke coverage and full regression suite).
 
-### 5.6 Persistence backend agnostic target (next cycle)
-- [TODO: architecture] Introduce explicit persistence topology abstraction in ports:
-  - `SplitStorePersistencePort` (document + vector + history seams);
-  - `UnifiedKnowledgeStorePort` (single backend abstraction with equivalent use-case operations).
-- [TODO: architecture] Promote capability-driven orchestration (`StorageProfile`-based) so mutation/query flows choose strategy by capabilities, not by backend names.
-- [TODO: architecture] Move SQL/FAISS-specific assumptions fully to adapters/composition.
-- [TODO: architecture] Add contract test suite to validate adapter parity across:
-  - split baseline (`SQLite + FAISS/numpy`);
-  - active search adapters (`OpenSearch`, `Solr`);
-  - unified candidates (`pgvector`, `Qdrant`).
-- [TODO: architecture] Keep external HTTP/CLI contracts stable while allowing internal breaking changes.
+### 5.6 Persistence boundary
+
+Application use cases depend on document and vector ports. Composition binds them to SQLite and FAISS/NumPy. New backends require an explicit use case and their own consistency tests; the current runtime has no remote persistence or search adapter.
 
 Fase B closure (2026-03-01):
 - Completed.
@@ -315,7 +288,6 @@ Fase B closure (2026-03-01):
 - Runtime key components:
   - `RagService` (query orchestration)
   - `MutationCoordinator` (thin write orchestration and delegation)
-  - `MutationBatchCoordinator` (bounded in-memory queue: coalesce, timed drain, fairness)
   - `MutationSagaExecutor` (DURABLE_SAGA execution and recovery)
   - `AppContainer` (composition root)
   - Context bundles from composition root to routers (reduced fan-out wiring seams)
@@ -335,21 +307,18 @@ Fase B closure (2026-03-01):
 - Trigger: `/api/docs/mutate`, `/api/docs/ingest`,
   `/api/docs/import-conversations`, `rag-mutate-docs`, `rag-ingest`
 - Steps:
-  - normalize intent and enqueue into `MutationBatchCoordinator`;
-  - batch coordinator drains by bounded policy (`max_batch_size`, `max_wait_ms`);
-  - phase A (outside lock): resolve storage profile/capabilities and precompute embeddings/vector payloads;
-  - acquire shared write lock for phase B only;
+  - normalize intent;
+  - phase A (outside lock): precompute embeddings/vector payloads;
+  - acquire the shared write lock in the same thread for phase B;
   - phase B (inside lock): journal transition -> SQL mutation -> vector delta -> commit/finalize journal;
-  - execute selected consistency strategy:
-    - split-store: SQL mutation + vector delta + compensation/recovery (`DURABLE_SAGA`);
-    - unified-store: single backend mutation with backend-native atomicity when available;
-  - release lock and return per-item summary (contract unchanged).
+  - compensate or recover incomplete SQL/vector changes through the journal;
+  - release lock and return the mutation summary.
 - Side effects: backend writes and mutation journal entries.
-- Failure modes: capability mismatch, embedding precompute failure, partial batch failure requiring compensation, rollback failure, lock timeout.
+- Failure modes: embedding precompute failure, compensation failure, rollback failure, lock timeout.
 
 #### Flow: `Index rebuild/repair`
 - Trigger: `/api/index/rebuild` or `rag-rebuild-index`
-- Steps: purge artifacts -> embed all canonical docs from persistence port -> rebuild vector index (or trigger backend-native rebuild) -> emit diagnostics
+- Steps: purge artifacts -> embed all canonical docs from SQLite -> rebuild local vector index -> emit diagnostics
 - Side effects: full index rewrite
 - Failure modes: embedder unavailable, manifest/drift mismatch, index persistence failure
 
@@ -373,7 +342,7 @@ Fase B closure (2026-03-01):
 ### 7.2 Events & messaging
 - Broker: none (no async message bus in current architecture).
 - Topics: none.
-- Delivery: synchronous request/response at API boundary, with internal in-process batch queue for mutation coalescing.
+- Delivery: synchronous request/response at API boundary; each mutation owns its lock acquisition.
 - Consumer idempotency: achieved in mutation path via `op_id` + journal, not via broker semantics.
 
 ---
@@ -404,11 +373,11 @@ Fase B closure (2026-03-01):
   - shared write lock under heavy mutation load, plus SQLite exclusive-write serialization
 - Benchmarks:
   - functional: `pytest` integration/e2e suites
-  - runtime signals: `rag_query_duration_seconds`, mutation queue/lock/batch metrics
+  - runtime signals: `rag_query_duration_seconds`, mutation queue/lock metrics
 - Scaling strategy:
   - vertical first (single instance)
   - optional multi-worker ASGI; process cache invalidation via `system_state` versioning
-  - mutation throughput improved via short critical section + micro-batching (fewer lock acquisitions, fewer write transactions)
+  - mutation throughput benefits from a short lock critical section
   - no distributed storage orchestration in D1 scope
 
 ---
@@ -457,7 +426,7 @@ Key mutation/UoW characterization tests:
 - Environments: local dev, CI, containerized runtime.
 - Config strategy: single-file `config.yaml` loaded at startup, validated by Pydantic, and used as the sole runtime source of truth.
 - Migrations:
-  - Fresh SQLite tables are created at explicit local runtime bootstrap; Elasticsearch startup does not initialize SQLite. Existing-schema migration is not provided. Library imports do not read YAML or connect to SQL.
+  - Fresh SQLite tables are created at explicit local runtime bootstrap. Existing-schema migration is not provided. Library imports do not read YAML or connect to SQL.
   - D1 allows breaking schema/contracts if required for decoupling.
 - Rollback plan:
   - code rollback via git release tags
@@ -501,9 +470,9 @@ Active ADR set for D1:
 4. ADR-004: Settings/config access policy (avoid hidden global coupling in app/core paths).
 5. ADR-005: Architecture test suite as release gate.
 6. ADR-006: Mutation UoW + shared SQL session boundary in `SqlDocumentStorage`/`HistorySqlStorage`.
-7. ADR-007 (proposed): persistence topology abstraction (split-store and unified-store), capability matrix, and cross-backend contract test policy.
+7. ADR-007 (historical proposal): persistence topology abstraction. The current runtime uses only local SQLite/vector storage.
 8. ADR-008 (proposed): short lock critical section (no network I/O under lock) with precomputed embedding/vector payloads.
-9. ADR-009 (proposed): single-writer micro-batching in `MutationCoordinator` (`max_batch_size`, `max_wait_ms`, drain-on-lock-owner).
+9. ADR-009 (superseded): single-writer micro-batching was removed after a lock-order deadlock.
 
 ---
 

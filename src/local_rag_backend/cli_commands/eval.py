@@ -51,16 +51,16 @@ def _collect_eval_threshold_failures(
     *,
     result: EvalResult,
     k: int,
-    fail_below_ndcg: float,
-    fail_below_map: float,
-    fail_below_mrr: float,
+    fail_below_ndcg: float | None,
+    fail_below_map: float | None,
+    fail_below_mrr: float | None,
 ) -> list[str]:
     failures: list[str] = []
-    if result.ndcg_at_k < float(fail_below_ndcg):
+    if fail_below_ndcg is not None and result.ndcg_at_k < fail_below_ndcg:
         failures.append(f"nDCG@{k}={result.ndcg_at_k:.3f} (min {fail_below_ndcg})")
-    if result.map_at_k < float(fail_below_map):
+    if fail_below_map is not None and result.map_at_k < fail_below_map:
         failures.append(f"MAP@{k}={result.map_at_k:.3f} (min {fail_below_map})")
-    if result.mrr_at_k < float(fail_below_mrr):
+    if fail_below_mrr is not None and result.mrr_at_k < fail_below_mrr:
         failures.append(f"MRR@{k}={result.mrr_at_k:.3f} (min {fail_below_mrr})")
     return failures
 
@@ -102,9 +102,9 @@ def _collect_eval_threshold_failures(
 )
 @click.option("--max-queries", type=int, default=None, help="Evaluate only the first N queries.")
 @click.option("--reranker/--no-reranker", default=False, show_default=True)
-@click.option("--fail-below-ndcg", type=float, default=1.0, show_default=True)
-@click.option("--fail-below-map", type=float, default=0.9, show_default=True)
-@click.option("--fail-below-mrr", type=float, default=0.9, show_default=True)
+@click.option("--fail-below-ndcg", type=float, default=None)
+@click.option("--fail-below-map", type=float, default=None)
+@click.option("--fail-below-mrr", type=float, default=None)
 @click.option(
     "--json-out",
     type=click.Path(dir_okay=False, path_type=Path),
@@ -138,9 +138,9 @@ def eval_cmd(
     hybrid_alpha: float | None,
     max_queries: int | None,
     reranker: bool,
-    fail_below_ndcg: float,
-    fail_below_map: float,
-    fail_below_mrr: float,
+    fail_below_ndcg: float | None,
+    fail_below_map: float | None,
+    fail_below_mrr: float | None,
     json_out: Path | None,
     run_out: Path | None,
     report_out: Path | None,

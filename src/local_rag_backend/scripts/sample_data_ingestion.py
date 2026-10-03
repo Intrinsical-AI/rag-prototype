@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, Any
 from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.core.services.chunking import chunk_chars_v1
 from local_rag_backend.core.services.ingestion import (
-    build_preprocess_fn_from_settings,
-    default_formatter,
     stable_lineage_metadata,
 )
 from local_rag_backend.core.use_cases.docs_mutation import (
@@ -60,7 +58,6 @@ def _build_bootstrap_mutation_intent(
     ports: DocsMutationPorts,
 ) -> MutationIntent:
     loader = CSVLoader(csv_path_obj, delimiter=DELIMITER, has_header=settings_obj.csv_has_header)
-    preprocess_fn = build_preprocess_fn_from_settings(settings_obj)
 
     source_id = str(csv_path_obj.resolve())
     external_id_prefix = f"bootstrap:{source_id}:"
@@ -75,13 +72,14 @@ def _build_bootstrap_mutation_intent(
         row_index = _coerce_row_index(metadata_base.get("row_index"), fallback=fallback_row_index)
         part_id = f"row-{row_index}"
 
-        processed = preprocess_fn(item.text, metadata_base)
         chunks = chunk_chars_v1(
-            processed,
+            item.text,
             max_chars=settings_obj.ingest_chunk_chars,
             overlap=settings_obj.ingest_chunk_overlap,
         )
         for chunk in chunks:
+            if not chunk.text.strip():
+                continue
             chunk_index = int(chunk.chunk_index)
             external_id = f"{external_id_prefix}part={part_id}:chunk={chunk_index}"
             desired_external_ids.add(external_id)
@@ -95,7 +93,7 @@ def _build_bootstrap_mutation_intent(
 
             items_by_external_id[external_id] = MutationUpsertInput(
                 external_id=external_id,
-                content=default_formatter(chunk.text, metadata_chunk),
+                content=chunk.text,
                 source_id=source_id,
                 metadata=metadata_chunk,
             )
@@ -159,7 +157,7 @@ def run_sample_data_ingestion(
             settings_obj=settings_obj, ports=mutation_bundle.ports
         ).execute(intent)
         processed = int(summary.inserted + summary.updated + summary.unchanged)
-        logger.info("Ingested %d documents using %s.", processed, settings_obj.persistence_backend)
+        logger.info("Ingested %d documents into SQLite.", processed)
         return processed
     finally:
         container.close()

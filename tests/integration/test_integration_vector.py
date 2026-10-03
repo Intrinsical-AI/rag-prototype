@@ -14,5 +14,5 @@ def test_vector_index_add_and_search(tmp_path):
     # Save and reload (persists well)
     idx2 = VectorIndex(index_path, id_map_path, dim=dim)
     q = vectors[0]
-    idxs, _dists = idx2.search(q, k=1)
-    assert idx2.id_map[idxs[0]] == ids[0]
+    idxs, _dists, id_map = idx2.search_with_snapshot(q, k=1)
+    assert id_map[idxs[0]] == ids[0]

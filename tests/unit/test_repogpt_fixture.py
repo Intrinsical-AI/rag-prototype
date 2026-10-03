@@ -64,7 +64,7 @@ def test_default_payload_is_versioned_and_needs_no_external_checkout(tmp_path, m
     monkeypatch.setattr(repogpt_fixture.subprocess, "run", forbidden)
     output = tmp_path / "payload.json"
     payload = repogpt_fixture.load_repogpt_payload(payload_path=output)
-    assert payload["schema_version"] == "4"
+    assert payload["schema_version"] == "5"
     assert payload["replace_scope"] is True
     assert payload["documents"]
     assert output.read_text() == repogpt_fixture.CANONICAL_FIXTURE.read_text()

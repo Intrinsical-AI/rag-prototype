@@ -21,17 +21,6 @@ def test_store_and_get_documents(in_memory_sqlite):
     assert contents == sorted(texts)
 
 
-def test_tombstone_external_ids_deduplicates_request(in_memory_sqlite):
-    storage = SqlDocumentStorage(session_factory=in_memory_sqlite)
-
-    added = storage.tombstone_external_ids([" ext-1 ", "ext-1", "ext-1"])
-    assert added == 1
-
-    # Idempotent on repeated calls with duplicates.
-    added_again = storage.tombstone_external_ids(["ext-1", " ext-1 "])
-    assert added_again == 0
-
-
 def test_delete_by_external_ids_accepts_duplicates_without_integrity_error(in_memory_sqlite):
     storage = SqlDocumentStorage(session_factory=in_memory_sqlite)
     storage.upsert_documents_by_external_id(
@@ -72,3 +61,40 @@ def test_sql_document_storage_obeys_shared_uow_rollback(in_memory_sqlite):
 
     all_docs = storage.get_all_documents()
     assert all_docs == []
+
+
+def test_snapshot_selectors_use_same_before_image_shape(in_memory_sqlite):
+    storage = SqlDocumentStorage(session_factory=in_memory_sqlite)
+    results, _, _ = storage.upsert_documents_by_external_id(
+        [
+            storage.UpsertDoc(
+                external_id="entry",
+                content="Raw content",
+                source_id="source",
+                scope="scope",
+                snapshot_id="snapshot",
+                metadata={"nested": {"value": 1}},
+            )
+        ]
+    )
+    plain_id = storage.store_documents(["Plain content"])[0]
+
+    snapshots_by_id = storage.snapshot_by_ids([results[0].id, plain_id])
+    snapshots_by_external_id = storage.snapshot_by_external_ids([" entry ", "entry"])
+
+    assert len(snapshots_by_id) == 2
+    assert snapshots_by_external_id == [
+        next(snap for snap in snapshots_by_id if snap["external_id"] == "entry")
+    ]
+    assert {snap["external_id"] for snap in snapshots_by_id} == {"entry", None}
+    assert set(snapshots_by_external_id[0]) == {
+        "id",
+        "external_id",
+        "content",
+        "source_id",
+        "scope",
+        "snapshot_id",
+        "metadata",
+        "content_sha256",
+    }
+    assert snapshots_by_external_id[0]["metadata"] == {"nested": {"value": 1}}

@@ -23,8 +23,6 @@ class MutationSummary:
     deleted_index: int | None = None
     tombstoned: int = 0
     missing_external_ids: list[str] | None = None
-    index_rebuilt: bool = False
-    index_doc_count: int | None = None
     results: list[UpsertDocResult] | None = None
 
 

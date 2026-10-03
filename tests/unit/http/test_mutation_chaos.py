@@ -95,7 +95,7 @@ async def test_vector_failure_persists_rolled_back_journal_record(
     monkeypatch.setattr(container, "vector_repo_factory", lambda **kwargs: FailingVec())
 
     journal_dir = Path(settings.get_coordination_dir()) / ".mutation_journal"
-    before = sorted(journal_dir.glob("*.json")) if journal_dir.is_dir() else []
+    before = set((journal_dir / "done").glob("*.json"))
 
     with pytest.raises(RuntimeError, match="vec upsert fail"):
         await asgi_client.post(
@@ -103,7 +103,7 @@ async def test_vector_failure_persists_rolled_back_journal_record(
             json={"upserts": [{"external_id": "doc-journal", "content": "x"}]},
         )
 
-    after = sorted(journal_dir.glob("*.json")) if journal_dir.is_dir() else []
-    assert len(after) >= len(before) + 1
-    last_record = json.loads(after[-1].read_text(encoding="utf-8"))
+    after = set((journal_dir / "done").glob("*.json"))
+    assert len(after - before) == 1
+    last_record = json.loads(next(iter(after - before)).read_text(encoding="utf-8"))
     assert last_record.get("state") == "ROLLED_BACK"

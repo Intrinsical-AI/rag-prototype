@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+from local_rag_backend.core.ports.contracts import MutationRecord
+from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import get_settings
 
@@ -79,6 +83,59 @@ async def test_import_canonical_defaults_replace_scope_true(
     assert {
         doc.external_id for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     } == {"doc-2"}
+
+
+async def test_failed_canonical_scope_deletion_is_journaled_and_compensated(
+    asgi_client, in_memory_sqlite, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    first = {
+        "scope": "repogpt:demo",
+        "snapshot_id": "first",
+        "documents": [
+            {"external_id": "keep", "content": "old keep"},
+            {"external_id": "stale", "content": "old stale"},
+        ],
+    }
+    assert (await asgi_client.post("/api/docs/import-canonical", json=first)).status_code == 200
+
+    observed: list[MutationRecord] = []
+    original_upsert = FileMutationJournal.upsert
+
+    def record_upsert(self: FileMutationJournal, record: MutationRecord) -> None:
+        if record.intent.get("hard_delete_external_ids"):
+            observed.append(record)
+        original_upsert(self, record)
+
+    original_delete = SqlDocumentStorage.hard_delete_by_external_ids
+    failed = False
+
+    def fail_once(self: SqlDocumentStorage, external_ids):
+        nonlocal failed
+        result = original_delete(self, external_ids)
+        if not failed:
+            failed = True
+            raise RuntimeError("injected scope delete failure")
+        return result
+
+    monkeypatch.setattr(FileMutationJournal, "upsert", record_upsert)
+    monkeypatch.setattr(SqlDocumentStorage, "hard_delete_by_external_ids", fail_once)
+    second = {
+        "scope": "repogpt:demo",
+        "snapshot_id": "second",
+        "documents": [{"external_id": "keep", "content": "new keep"}],
+    }
+
+    with pytest.raises(RuntimeError, match="injected scope delete failure"):
+        await asgi_client.post("/api/docs/import-canonical", json=second)
+
+    docs = {
+        doc.external_id: doc for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    }
+    assert set(docs) == {"keep", "stale"}
+    assert docs["stale"].content == "old stale"
+    assert not SqlDocumentStorage(in_memory_sqlite).get_tombstoned_external_ids(["stale"])
+    assert any(record.state == "ROLLED_BACK" for record in observed)
 
 
 async def test_import_canonical_replace_scope_hard_deletes_stale_docs(
@@ -211,4 +268,4 @@ async def test_import_canonical_rejects_repogpt_schema_v3_payload(
 
     response = await asgi_client.post("/api/docs/import-canonical", json=payload)
     assert response.status_code == 422
-    assert "schema_version='4'" in response.text
+    assert "schema_version='5'" in response.text

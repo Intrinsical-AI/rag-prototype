@@ -6,7 +6,6 @@ from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
-from local_rag_backend.core.domain.profiles import StorageCapability
 from local_rag_backend.core.domain.types import DocId
 from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.ports.contracts import MutationRecord
@@ -37,34 +36,6 @@ if TYPE_CHECKING:
 
 def uses_vector_index(*, settings_obj: Settings) -> bool:
     return str(settings_obj.retrieval_mode) in ("dense", "dual", "hybrid")
-
-
-def validate_storage_profile(
-    *,
-    settings_obj: Settings,
-    ports: DocsMutationPorts,
-    vector_mode_enabled: bool,
-) -> None:
-    profile = ports.storage_profile_registry.resolve(
-        profile_id=getattr(settings_obj, "storage_profile", ""),
-        persistence_backend=getattr(settings_obj, "persistence_backend", "local_split"),
-        retrieval_mode=settings_obj.retrieval_mode,
-        vector_backend=getattr(settings_obj, "vector_backend", "auto"),
-    )
-    if profile.has(StorageCapability.READ_ONLY):
-        raise RuntimeError(
-            f"Storage profile {profile.profile_id!r} is read-only and cannot serve mutations."
-        )
-    if not profile.has(StorageCapability.DURABLE_SAGA) and not profile.has(
-        StorageCapability.ATOMIC
-    ):
-        raise RuntimeError(
-            f"Storage profile {profile.profile_id!r} does not satisfy writable storage capabilities."
-        )
-    if vector_mode_enabled and not profile.supports_vectors:
-        raise RuntimeError(
-            f"Storage profile {profile.profile_id!r} does not provide vector capabilities."
-        )
 
 
 def validate_rollback_contract(*, ports: DocsMutationPorts) -> None:
@@ -210,6 +181,8 @@ class MutationSagaExecutor:
                     intent=normalized,
                     build_upsert_doc=self.ports.build_upsert_doc,
                 )
+                if self.ports.bump_rag_service_version is not None:
+                    self.ports.bump_rag_service_version()
             _upsert_journal_record(
                 journal=journal,
                 op_id=normalized.op_id,
@@ -218,17 +191,19 @@ class MutationSagaExecutor:
                 before_image=before_image,
             )
             deleted_index = None
-            index_doc_count = None
             if prepared.vector_mode_enabled:
-                deleted_index, index_doc_count = _apply_vector_delta(
+                deleted_index = _apply_vector_delta(
                     sql_outcome=sql_outcome,
-                    doc_repo=doc_repo,
                     settings_obj=self.settings_obj,
                     ports=self.ports,
                     vectors_by_external_id=prepared.precomputed_vectors_by_external_id,
                     before_apply=before_vector_write,
                     embedding_identity=prepared.embedding_identity,
                 )
+                # Readers can construct a service after the SQL commit but before
+                # vector files change. Publish a second version after the delta.
+                if vector_attempted and self.ports.bump_rag_service_version is not None:
+                    self.ports.bump_rag_service_version()
             summary = MutationSummary(
                 op_id=normalized.op_id,
                 inserted=sql_outcome.inserted,
@@ -238,8 +213,6 @@ class MutationSagaExecutor:
                 deleted_index=deleted_index,
                 tombstoned=sql_outcome.tombstoned,
                 missing_external_ids=list(sql_outcome.missing_external_ids),
-                index_rebuilt=False,
-                index_doc_count=index_doc_count,
                 results=list(sql_outcome.results),
             )
             if prepared.vector_mode_enabled:
@@ -320,6 +293,8 @@ class MutationSagaExecutor:
         try:
             if any(record.vector_attempted for record in rollbacks):
                 self.ports.reconcile_index()
+                if self.ports.bump_rag_service_version is not None:
+                    self.ports.bump_rag_service_version()
         except Exception as exc:
             self._fail_recovery(journal=journal, records=rollbacks, cause=exc)
 
@@ -329,6 +304,13 @@ class MutationSagaExecutor:
                 journal=journal, record=_clone_record(record=record, state="ROLLED_BACK")
             )
         for record in commits:
+            if self.ports.bump_rag_service_version is not None:
+                try:
+                    self.ports.bump_rag_service_version()
+                except Exception as exc:
+                    raise MutationRecoveryRequiredError(
+                        f"Cannot publish recovered mutation {record.op_id!r} to readers: {exc}"
+                    ) from exc
             _write_journal_record(
                 journal=journal, record=_clone_record(record=record, state="COMMITTED", error=None)
             )
@@ -361,6 +343,8 @@ class MutationSagaExecutor:
     ) -> None:
         with mutation_uow_context(ports=self.ports):
             _rollback_sql(doc_repo=doc_repo, intent=intent, before_image=before_image)
+            if self.ports.bump_rag_service_version is not None:
+                self.ports.bump_rag_service_version()
 
     def _assert_replay_compatible(
         self, *, existing_intent: dict[str, Any], intent: MutationIntent
@@ -413,11 +397,12 @@ def _write_journal_record(*, journal: MutationJournalPort, record: MutationRecor
 
 def _capture_before_image(*, doc_repo: Any, intent: MutationIntent) -> dict[str, Any]:
     snapshots: list[dict[str, Any]] = []
-    if intent.upserts or intent.delete_external_ids:
+    if intent.upserts or intent.delete_external_ids or intent.hard_delete_external_ids:
         external_ids = sorted(
             {
                 *(u.external_id for u in intent.upserts),
                 *intent.delete_external_ids,
+                *intent.hard_delete_external_ids,
             }
         )
         if hasattr(doc_repo, "snapshot_by_external_ids"):
@@ -521,6 +506,23 @@ def _apply_sql_mutation(
         missing_external_ids.extend([str(x) for x in list(missing)])
         tombstoned += int(tombstoned_count)
 
+    if intent.hard_delete_external_ids:
+        hard_delete = getattr(doc_repo, "hard_delete_by_external_ids", None)
+        snapshot = getattr(doc_repo, "snapshot_by_external_ids", None)
+        if not callable(hard_delete) or not callable(snapshot):
+            raise RuntimeError("Hard delete requires snapshot and delete repository methods.")
+        hard_ids = list(intent.hard_delete_external_ids)
+        existing = [dict(row) for row in snapshot(hard_ids)]
+        deleted = int(hard_delete(hard_ids))
+        if deleted != len(existing):
+            raise RuntimeError("Hard delete count differs from the captured document count.")
+        deleted_sql += deleted
+        deleted_doc_ids.extend(
+            DocId(str(row["id"])) for row in existing if str(row.get("id") or "").strip()
+        )
+        existing_external_ids = {str(row.get("external_id") or "") for row in existing}
+        missing_external_ids.extend(ext for ext in hard_ids if ext not in existing_external_ids)
+
     dedup_deleted_ids = list({str(x): DocId(str(x)) for x in deleted_doc_ids}.values())
     return SqlMutationOutcome(
         inserted=inserted,
@@ -539,13 +541,12 @@ def _apply_sql_mutation(
 def _apply_vector_delta(
     *,
     sql_outcome: SqlMutationOutcome,
-    doc_repo: Any,
     settings_obj: Settings,
     ports: DocsMutationPorts,
     vectors_by_external_id: dict[str, list[float]],
     before_apply: Callable[[], None],
     embedding_identity: EmbeddingIdentity | None,
-) -> tuple[int, int | None]:
+) -> int:
 
     delete_ids = [
         DocId(str(x))
@@ -607,16 +608,18 @@ def _apply_vector_delta(
         before_apply()
         apply_delta(delete_ids=delete_ids, upserts=upsert_vectors)
 
-    index_doc_count = (
-        len(list(doc_repo.get_all_documents())) if hasattr(doc_repo, "get_all_documents") else None
-    )
-    return len(delete_ids), index_doc_count
+    return len(delete_ids)
 
 
 def _rollback_sql(*, doc_repo: Any, intent: dict[str, Any], before_image: dict[str, Any]) -> None:
     upserts = [str(x.get("external_id") or "").strip() for x in list(intent.get("upserts") or [])]
     delete_external_ids = normalize_str_items(list(intent.get("delete_external_ids") or []))
-    affected_external_ids = normalize_str_items([*upserts, *delete_external_ids])
+    hard_delete_external_ids = normalize_str_items(
+        list(intent.get("hard_delete_external_ids") or [])
+    )
+    affected_external_ids = normalize_str_items(
+        [*upserts, *delete_external_ids, *hard_delete_external_ids]
+    )
 
     if affected_external_ids and hasattr(doc_repo, "hard_delete_by_external_ids"):
         doc_repo.hard_delete_by_external_ids(affected_external_ids)
@@ -674,6 +677,5 @@ __all__ = [
     "mutation_uow_context",
     "uses_vector_index",
     "validate_rollback_contract",
-    "validate_storage_profile",
     "write_lock_context",
 ]

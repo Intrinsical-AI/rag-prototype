@@ -19,7 +19,6 @@ La estructura del proyecto separa preocupaciones en capas concéntricas: `core/`
 Casos de uso y coordinación transport-agnostic:
 
 - `docs_mutation.py`: `MutationCoordinator`, `MutationIntent`.
-- `_batch_coordinator.py`: `MutationBatchCoordinator` (micro-batching y drenado acotado).
 - `_mutation_saga_executor.py`: `MutationSagaExecutor` (saga durable + recovery).
 - `docs_ingest.py`: ingesta de textos con salida a mutación canónica.
 - `docs_import.py`: import de JSON (ChatGPT/Gemini) + delegación a ingesta.
@@ -27,10 +26,6 @@ Casos de uso y coordinación transport-agnostic:
 - `mutations.py`: wrapper compartido de ejecución de mutaciones API/CLI.
 - `errors.py`: errores tipados de aplicación + `map_runtime_error`.
 - `results.py`: DTOs de salida de casos de uso.
-
-### `core/domain/`
-
-- `profiles.py`: capabilities (`ATOMIC`, `DURABLE_SAGA`, `READ_ONLY`), `StorageProfileRegistry`.
 
 ### `core/ports/`
 
@@ -89,13 +84,12 @@ Estas reglas están cubiertas por tests de arquitectura.
 
 1. Construcción de `MutationIntent` (con `op_id` idempotente opcional).
 2. `MutationCoordinator.execute(...)` (orquestador delgado).
-3. `MutationBatchCoordinator` agrupa y drena (`max_batch_size`, `max_wait_ms`).
-4. `MutationSagaExecutor` precomputa embeddings fuera de lock.
-5. Lock multi-store + journal.
-6. SQL commit.
-7. Vector delta incremental (`apply_delta_atomic`).
-8. Compensación/recovery si falla fase vector.
-9. Invalidación de caché de `RagService`.
+3. `MutationSagaExecutor` precomputa embeddings fuera de lock.
+4. Cada mutación adquiere el lock multi-store y usa el journal.
+5. SQL commit.
+6. Vector delta incremental (`apply_delta_atomic`).
+7. Compensación/recovery si falla fase vector.
+8. Invalidación de caché de `RagService`.
 
 ### Garantía
 

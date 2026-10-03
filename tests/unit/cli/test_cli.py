@@ -38,5 +38,5 @@ def test_cli_status(monkeypatch, tmp_path):
     assert "127.0.0.1:9999" in out
     assert "Retrieval Mode: sparse" in out
     assert "Database:" in out and "YES" in out
-    assert "FAISS index:" in out and "YES" in out
+    assert "FAISS index:" not in out
     assert "Sample data:" in out and "YES" in out

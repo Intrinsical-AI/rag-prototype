@@ -2,7 +2,6 @@
 # Paths below are resolved relative to this file at startup.
 
 # --- Core ---
-persistence_backend: local_split
 app_host: 127.0.0.1
 app_port: 8000
 debug: false
@@ -16,7 +15,6 @@ public_bind_requires_api_key: true
 cors_allow_origins: []
 
 # --- Retrieval ---
-search_backend: local_split
 retrieval_mode: sparse
 vector_backend: auto
 hybrid_retrieval_alpha: 0.5
@@ -48,7 +46,6 @@ index_path: data/index.faiss
 id_map_path: data/id_map.json
 sqlite_url: sqlite:///./data/app.db
 faq_csv: data/faq.csv
-storage_profile: ""
 eval_dataset_path: datasets/rag_eval_v1.jsonl
 embedding_cache_db_path: data/embedding_cache.sqlite3
 disable_embedding_cache: false
@@ -69,46 +66,10 @@ blocking_queue_network: 64
 blocking_queue_eval: 32
 write_lock_timeout_s: 30.0
 write_lock_poll_s: 0.05
-mutation_batch_max_size: 32
-mutation_batch_max_wait_ms: 50
 # Background recovery policy; unreadable or unresolved journal records still block writes.
 # Local journal v2 has no automatic migration; an index rebuild does not repair journal state.
 mutation_recovery_enabled: true
 mutation_recovery_interval_s: 30.0
-
-# --- Elasticsearch ---
-es_base_url: null
-es_api_key: null
-es_username: null
-es_password: null
-es_verify_tls: true
-es_request_timeout_s: 30.0
-es_docs_index: rag-docs
-es_history_index: rag-history
-es_system_index: rag-system
-es_tombstones_index: rag-tombstones
-es_content_field: content
-es_embedding_field: embedding
-es_hybrid_lexical_k: 50
-es_hybrid_vector_k: 50
-
-# --- OpenSearch ---
-os_base_url: null
-os_api_key: null
-os_username: null
-os_password: null
-os_verify_tls: true
-os_request_timeout_s: 30.0
-os_docs_index: rag-docs
-os_content_field: content
-os_embedding_field: embedding
-os_dense_candidate_k: 50
-
-# --- Solr ---
-solr_base_url: null
-solr_core: rag-docs
-solr_content_field: content
-solr_request_timeout_s: 30.0
 
 # --- Ingestion ---
 ingest_chunk_strategy: chars_v1
@@ -117,10 +78,6 @@ ingest_chunk_chars: 1200
 ingest_chunk_overlap: 200
 csv_has_header: true
 ingest_batch_size: 64
-ingest_clean_lowercase: true
-ingest_clean_remove_html: true
-ingest_clean_collapse_whitespace: true
-ingest_clean_strip: true
 
 # --- Retrieval quality ---
 reranker_strategy: overlap_v1

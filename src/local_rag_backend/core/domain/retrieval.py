@@ -97,7 +97,6 @@ class RetrievalRequest:
     filters: tuple[RetrievalFilter, ...] = ()
     candidate_k: int | None = None
     dual_candidate_k: int | None = None
-    min_score: float | None = None
 
     def __post_init__(self) -> None:
         query = str(self.query).strip()

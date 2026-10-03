@@ -130,8 +130,6 @@ class LocalSplitSearchRetriever:
             key=lambda item: item.score,
             reverse=True,
         )
-        if request.min_score is not None:
-            reranked = [item for item in reranked if float(item.score) >= float(request.min_score)]
         return RetrievalResult(
             items=tuple(reranked[: request.top_k]),
             mode_used="dual",

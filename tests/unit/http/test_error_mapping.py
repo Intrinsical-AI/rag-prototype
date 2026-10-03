@@ -16,7 +16,7 @@ from local_rag_backend.core.use_cases.errors import AppError, map_runtime_error
 @pytest.mark.parametrize(
     ("exc", "expected_status"),
     [
-        (EmbeddingsBackendUnavailableError("embeddings"), 400),
+        (EmbeddingsBackendUnavailableError("embeddings"), 503),
         (LLMTimeoutError("timeout"), 504),
         (LLMConnectionError("connection"), 503),
         (LLMResponseError("response"), 502),

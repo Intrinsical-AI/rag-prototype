@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from local_rag_backend.infrastructure.persistence.shared.atomic_io import (
+    atomic_replace_file,
+    ensure_durable_directory,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -115,16 +119,20 @@ class NumpyEngine:
     def save(self, index_path: Path) -> None:
         if self._vectors is None:  # pragma: no cover
             raise RuntimeError("Numpy vectors unexpectedly uninitialized in save")
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            prefix=index_path.name + ".",
-            suffix=".tmp",
-            dir=index_path.parent,
-            delete=False,
-        ) as tmp:
-            np.save(tmp, self._vectors, allow_pickle=False)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-            tmp_path = Path(tmp.name)
-        os.replace(tmp_path, index_path)
+        ensure_durable_directory(index_path.parent)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix=index_path.name + ".",
+                suffix=".tmp",
+                dir=index_path.parent,
+                delete=False,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+                np.save(tmp, self._vectors, allow_pickle=False)
+                tmp.flush()
+            atomic_replace_file(tmp_path, index_path)
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)

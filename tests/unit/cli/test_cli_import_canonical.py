@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 from support.canonical import repogpt_payload
 
@@ -85,123 +86,40 @@ def test_read_payload_rejects_non_object_json(tmp_path) -> None:
         raise AssertionError("expected ValueError")
 
 
-def test_read_payload_accepts_repogpt_code_units_v4(tmp_path) -> None:
+def test_cli_import_rejects_repogpt_code_units_v3(tmp_path) -> None:
     payload = tmp_path / "payload.json"
-    payload.write_text(json.dumps(repogpt_payload()), encoding="utf-8")
-    loaded = import_cmd_module._read_payload(payload)
-    assert loaded["schema_version"] == "4"
-    assert loaded["kind"] == "code-units"
-    request = import_cmd_module._build_request(loaded, replace_scope=True)
-    assert request.documents[0].metadata["path"] == "app.py"
+    invalid = repogpt_payload()
+    invalid["schema_version"] = "3"
+    payload.write_text(json.dumps(invalid), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
+
+    assert result.exit_code == 1
+    assert "schema_version='5'" in result.output
 
 
-def test_read_payload_rejects_repogpt_code_units_v3(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("invalid_fields", "error_field"),
+    [
+        ({"documents": "bad-documents"}, "documents"),
+        ({"documents": ["bad-item"]}, "documents.0"),
+        ({"replace_scope": "true"}, "replace_scope"),
+    ],
+)
+def test_cli_import_rejects_invalid_payload(tmp_path, invalid_fields, error_field) -> None:
     payload = tmp_path / "payload.json"
-    payload.write_text(
-        json.dumps(
-            {
-                "schema_version": "3",
-                "kind": "code-units",
-                "repo_key": "demo",
-                "scope": "repogpt:demo",
-                "snapshot_id": "demo-snap",
-                "documents": [
-                    {
-                        "external_id": "repogpt:demo:1",
-                        "content": "def helper():\n    return 1\n",
-                        "metadata": {
-                            "path": "src/app.py",
-                            "unit_type": "function",
-                            "repo_key": "demo",
-                            "content_hash": "abc123",
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    raw = {
+        "scope": "repo",
+        "snapshot_id": "snap",
+        "documents": [{"external_id": "doc-1", "content": "hello"}],
+    }
+    raw.update(invalid_fields)
+    payload.write_text(json.dumps(raw), encoding="utf-8")
 
-    try:
-        import_cmd_module._read_payload(payload)
-    except ValueError as exc:
-        assert "schema_version='4'" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
+    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
 
-
-def test_build_request_rejects_non_list_documents() -> None:
-    try:
-        import_cmd_module._build_request(
-            {"scope": "repo", "snapshot_id": "snap", "documents": "bad-documents"},
-            replace_scope=True,
-        )
-    except ValueError as exc:
-        assert "payload.documents must be a list" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
-
-
-def test_build_request_rejects_non_object_document_items() -> None:
-    try:
-        import_cmd_module._build_request(
-            {"scope": "repo", "snapshot_id": "snap", "documents": ["bad-item"]},
-            replace_scope=True,
-        )
-    except ValueError as exc:
-        assert "each payload.documents item must be an object" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
-
-
-def test_resolve_replace_scope_defaults_to_true_when_payload_is_missing() -> None:
-    assert import_cmd_module._resolve_replace_scope({}, replace_scope_override=None) is True
-
-
-def test_resolve_replace_scope_uses_payload_when_no_flag_override() -> None:
-    assert (
-        import_cmd_module._resolve_replace_scope(
-            {"replace_scope": False},
-            replace_scope_override=None,
-        )
-        is False
-    )
-    assert (
-        import_cmd_module._resolve_replace_scope(
-            {"replace_scope": True},
-            replace_scope_override=None,
-        )
-        is True
-    )
-
-
-def test_resolve_replace_scope_explicit_flags_override_payload() -> None:
-    assert (
-        import_cmd_module._resolve_replace_scope(
-            {"replace_scope": False},
-            replace_scope_override=True,
-        )
-        is True
-    )
-    assert (
-        import_cmd_module._resolve_replace_scope(
-            {"replace_scope": True},
-            replace_scope_override=False,
-        )
-        is False
-    )
-
-
-def test_resolve_replace_scope_rejects_non_boolean_payload_value() -> None:
-    try:
-        import_cmd_module._resolve_replace_scope(
-            {"replace_scope": "true"},
-            replace_scope_override=None,
-        )
-    except ValueError as exc:
-        assert "payload.replace_scope must be a boolean" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
+    assert result.exit_code == 1
+    assert error_field in result.output
 
 
 def test_cli_import_canonical_honors_payload_replace_scope_false(

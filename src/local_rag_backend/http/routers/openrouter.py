@@ -44,10 +44,7 @@ async def openrouter_generate(
     container: AppContainer = Depends(get_app_container_dependency),
     settings_obj: Settings = Depends(get_settings_dependency),
 ) -> OpenRouterGenerateResponse:
-    if not (
-        getattr(settings_obj, "openrouter_enabled", False)
-        and getattr(settings_obj, "openrouter_api_key", None)
-    ):
+    if not settings_obj.openrouter_configured:
         raise BadRequestError(
             detail="OpenRouter is not configured (set openrouter_enabled and openrouter_api_key in config.yaml)",
         )

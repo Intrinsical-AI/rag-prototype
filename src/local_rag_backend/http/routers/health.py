@@ -111,9 +111,10 @@ async def readiness_check(
         expected_manifest=expected_manifest,
     ):
         is_ready = False
-    await container.blocking_executor().run_blocking(
+    if not await container.blocking_executor().run_blocking(
         check_mutation_journal, checks=checks, settings_obj=settings_obj, diagnostics=diagnostics
-    )
+    ):
+        is_ready = False
 
     response_payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
     if not is_ready:

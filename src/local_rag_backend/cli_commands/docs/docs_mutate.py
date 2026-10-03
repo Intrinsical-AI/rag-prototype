@@ -48,7 +48,7 @@ def _build_intent(payload: dict[str, Any]) -> MutationIntent:
         upserts.append(
             MutationUpsertInput(
                 external_id=str(item.get("external_id") or "").strip(),
-                content=str(item.get("content") or "").strip(),
+                content=str(item.get("content") or ""),
                 source_id=(
                     str(item.get("source_id")) if item.get("source_id") is not None else None
                 ),
@@ -91,7 +91,7 @@ def mutate_docs_cmd(payload_json: Path) -> None:
         def _run_sync() -> MutationSummary:
             return coordinator.execute(intent)
 
-        summary = run_cli_mutation(_run_sync, use_lock=False)
+        summary = run_cli_mutation(_run_sync, use_lock=False, invalidate_shared=False)
         click.echo(
             "[OK] Mutation committed. "
             f"op_id={summary.op_id} inserted={summary.inserted} updated={summary.updated} "

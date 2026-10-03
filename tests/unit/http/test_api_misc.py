@@ -27,7 +27,6 @@ async def test_get_config_defaults(asgi_client, monkeypatch):
     data = r.json()
     assert set(
         [
-            "search_backend",
             "retrieval_mode",
             "dual_candidate_k",
             "hybrid_alpha",

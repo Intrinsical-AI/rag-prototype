@@ -1,4 +1,7 @@
 .git
+.pre-commit-cache
+.uv-cache
+.import_linter_cache
 .github
 
 # Virtualenvs and dependency caches

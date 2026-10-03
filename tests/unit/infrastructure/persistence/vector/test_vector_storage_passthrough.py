@@ -1,6 +1,3 @@
-import numpy as np
-import pytest
-
 from local_rag_backend.infrastructure.persistence.vector.storage import VectorStorage
 from local_rag_backend.settings import Settings
 
@@ -17,9 +14,6 @@ class _DummyVectorIndex:
 
     def add_to_index(self, ids, vecs):
         self.add_calls.append((ids, vecs))
-
-    def search(self, query_vector, k):
-        return np.asarray([1, 2], dtype=np.int64), np.asarray([0.1, 0.2], dtype=np.float32)
 
 
 def test_vector_storage_upsert_calls_index(monkeypatch, tmp_path):
@@ -39,20 +33,3 @@ def test_vector_storage_upsert_calls_index(monkeypatch, tmp_path):
     ids, vecs = st.vector_index.add_calls[0]
     assert ids == [10, 11]
     assert vecs == [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]
-
-
-def test_vector_storage_search_passthrough(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "local_rag_backend.infrastructure.persistence.vector.storage.VectorIndex",
-        _DummyVectorIndex,
-        raising=True,
-    )
-    st = VectorStorage(
-        index_path=str(tmp_path / "i"),
-        id_map_path=str(tmp_path / "m"),
-        dim=3,
-        settings_obj=Settings(),
-    )
-    idxs, dists = st.search([0.0, 0.0, 0.0], k=2)
-    assert idxs.tolist() == [1, 2]
-    assert dists.tolist() == pytest.approx([0.1, 0.2])

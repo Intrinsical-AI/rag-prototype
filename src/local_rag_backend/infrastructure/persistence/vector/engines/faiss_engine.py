@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from local_rag_backend.infrastructure.persistence.shared.atomic_io import (
+    atomic_replace_file,
+    ensure_durable_directory,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -101,7 +106,16 @@ class FaissEngine:
     def save(self, index_path: Path) -> None:
         if self.index is None:  # pragma: no cover
             raise RuntimeError("FAISS index unexpectedly uninitialized in save")
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_index = index_path.with_name(index_path.name + ".tmp")
-        self._faiss.write_index(self.index, str(tmp_index))
-        os.replace(tmp_index, index_path)
+        ensure_durable_directory(index_path.parent)
+        with tempfile.NamedTemporaryFile(
+            prefix=index_path.name + ".",
+            suffix=".tmp",
+            dir=index_path.parent,
+            delete=False,
+        ) as tmp:
+            tmp_index = Path(tmp.name)
+        try:
+            self._faiss.write_index(self.index, str(tmp_index))
+            atomic_replace_file(tmp_index, index_path)
+        finally:
+            tmp_index.unlink(missing_ok=True)

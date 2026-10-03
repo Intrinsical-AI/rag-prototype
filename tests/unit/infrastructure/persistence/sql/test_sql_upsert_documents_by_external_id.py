@@ -139,31 +139,6 @@ def test_upsert_scope_and_snapshot_are_persisted_and_queryable(in_memory_sqlite)
     }
 
 
-def test_upsert_dedup_only_change(in_memory_sqlite):
-    """chunk_dedup_sha256 update triggers action=updated with content_changed=False."""
-    repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
-    first, *_ = repo.upsert_documents_by_external_id(
-        [
-            SqlDocumentStorage.UpsertDoc(
-                external_id="doc-1", content="text", chunk_dedup_sha256="sha-v1"
-            )
-        ]
-    )
-    doc_id = first[0].id
-
-    res, changed, updated_ids = repo.upsert_documents_by_external_id(
-        [
-            SqlDocumentStorage.UpsertDoc(
-                external_id="doc-1", content="text", chunk_dedup_sha256="sha-v2"
-            )
-        ]
-    )
-    assert res[0].action == "updated"
-    assert res[0].content_changed is False
-    assert changed == []
-    assert updated_ids == []
-
-
 def test_upsert_rejects_duplicate_external_ids(in_memory_sqlite):
     repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
     with pytest.raises(ValueError, match="unique within the request"):

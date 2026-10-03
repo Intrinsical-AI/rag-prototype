@@ -42,10 +42,9 @@ class UpsertDocItem(BaseModel):
     @field_validator("content")
     @classmethod
     def _content_not_blank(cls, v: str) -> str:
-        v2 = v.strip()
-        if not v2:
+        if not v.strip():
             raise ValueError("content must not be blank")
-        return v2
+        return v
 
 
 class UpsertDocResult(BaseModel):
@@ -151,6 +150,4 @@ class DocsMutateResponse(BaseModel):
     deleted_index: int | None = None
     tombstoned: int = 0
     missing_external_ids: list[str] = Field(default_factory=list)
-    index_rebuilt: bool = False
-    index_doc_count: int | None = None
     results: list[UpsertDocResult] = Field(default_factory=list)

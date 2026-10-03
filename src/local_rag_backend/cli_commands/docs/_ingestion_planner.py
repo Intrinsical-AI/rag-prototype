@@ -35,7 +35,6 @@ class BatchSyncResult:
     inserted: int
     updated: int
     unchanged: int
-    rebuilt: bool
     deleted_stale: int
     ingested_chunks: int
     stale_by_file: list[tuple[Path, int]]
@@ -75,7 +74,6 @@ def discover_input_files(
 def _build_file_ingest_plan(
     *,
     file_path: Path,
-    preprocess_fn: Callable[..., str],
     build_upsert_doc: Callable[..., Any],
     settings_obj: Settings,
     sniff_bytes: int,
@@ -84,10 +82,7 @@ def _build_file_ingest_plan(
     has_header: bool,
 ) -> IngestPlan | None:
     from local_rag_backend.core.services.chunking import chunk_chars_v1
-    from local_rag_backend.core.services.ingestion import (
-        default_formatter,
-        stable_lineage_metadata,
-    )
+    from local_rag_backend.core.services.ingestion import stable_lineage_metadata
     from local_rag_backend.infrastructure.ingestion.loaders.factory import (
         detect_file_format,
         get_loader_for_file,
@@ -122,13 +117,14 @@ def _build_file_ingest_plan(
             part_id = f"row-{md['row_index']}"
 
         parent_doc_id = f"{file_prefix}part={part_id}"
-        processed = preprocess_fn(loaded.text, md)
         chunks = chunk_chars_v1(
-            processed,
+            loaded.text,
             max_chars=settings_obj.ingest_chunk_chars,
             overlap=settings_obj.ingest_chunk_overlap,
         )
         for c in chunks:
+            if not c.text.strip():
+                continue
             chunk_index = int(c.chunk_index)
             chunk = c.text
             external_id = f"{file_prefix}part={part_id}:chunk={chunk_index}"
@@ -140,18 +136,15 @@ def _build_file_ingest_plan(
             md_chunk["chunk_start_char"] = int(c.start_char)
             md_chunk["chunk_end_char"] = int(c.end_char)
             md_chunk["parent_doc_id"] = parent_doc_id
-            content = default_formatter(chunk, md_chunk)
             items.append(
                 build_upsert_doc(
                     external_id=external_id,
-                    content=content,
+                    content=chunk,
                     source_id=source_id,
                     metadata=md_chunk,
                 )
             )
 
-    if not items:
-        return None
     return IngestPlan(
         file_path=file_path,
         file_prefix=file_prefix,
@@ -163,7 +156,6 @@ def _build_file_ingest_plan(
 def build_ingest_plans(
     *,
     files: list[Path],
-    preprocess_fn: Callable[..., str],
     build_upsert_doc: Callable[..., Any],
     settings_obj: Settings,
     sniff_bytes: int,
@@ -180,7 +172,6 @@ def build_ingest_plans(
     for file_path in files:
         plan = _build_file_ingest_plan(
             file_path=file_path,
-            preprocess_fn=preprocess_fn,
             build_upsert_doc=build_upsert_doc,
             settings_obj=settings_obj,
             sniff_bytes=sniff_bytes,
@@ -264,6 +255,15 @@ def _ingest_batch_sync(
         )
         for item in unique_items
     )
+    if not upserts and not stale_ids_unique:
+        return BatchSyncResult(
+            inserted=0,
+            updated=0,
+            unchanged=0,
+            deleted_stale=0,
+            ingested_chunks=0,
+            stale_by_file=[],
+        )
     summary = coordinator.execute(
         MutationIntent(
             op_id="",
@@ -277,7 +277,6 @@ def _ingest_batch_sync(
         inserted=summary.inserted,
         updated=summary.updated,
         unchanged=summary.unchanged,
-        rebuilt=bool(summary.index_rebuilt),
         deleted_stale=int(summary.deleted_sql),
         ingested_chunks=ingested_chunks,
         stale_by_file=stale_by_file,
@@ -290,12 +289,11 @@ def execute_ingest_batches(
     doc_repo: Any,
     coordinator: MutationCoordinator,
     settings_obj: Settings,
-) -> tuple[int, int, int, int, bool]:
+) -> tuple[int, int, int, int]:
     total_inserted = 0
     total_updated = 0
     total_unchanged = 0
     total_chunks = 0
-    rebuilt_any = False
 
     batch_size = settings_obj.ingest_batch_size
     for i in range(0, len(ingest_plans), batch_size):
@@ -309,11 +307,10 @@ def execute_ingest_batches(
         total_inserted += batch.inserted
         total_updated += batch.updated
         total_unchanged += batch.unchanged
-        rebuilt_any = rebuilt_any or batch.rebuilt
         for stale_file_path, stale_count in batch.stale_by_file:
             click.echo(f"[INFO] Deleted {stale_count} stale chunks for {stale_file_path}.")
 
-    return total_inserted, total_updated, total_unchanged, total_chunks, rebuilt_any
+    return total_inserted, total_updated, total_unchanged, total_chunks
 
 
 __all__ = [

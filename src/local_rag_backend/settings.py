@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_CONFIG_PATH = Path("config.yaml")
 CONFIG_PATH_ENV_VAR = "RAG_CONFIG_PATH"
@@ -70,6 +70,30 @@ def _resolve_config_path(config_path: str | Path | None) -> Path:
     return DEFAULT_CONFIG_PATH
 
 
+def enforce_safe_bind_config(settings: Settings) -> None:
+    """
+    Refuse to start with a public bind without an API key.
+
+    Threat model: this is a "local-first" service, but users sometimes run it in Docker
+    with `-p 8000:8000` or set `APP_HOST=0.0.0.0`. Without auth, endpoints can ingest
+    arbitrary docs and proxy paid LLM calls (OpenAI/OpenRouter), causing data/cost risk.
+    """
+    if not getattr(settings, "public_bind_requires_api_key", True):
+        return
+    if settings.api_key:
+        return
+
+    host = (settings.app_host or "").strip().lower()
+    localhost_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host in localhost_hosts:
+        return
+
+    raise RuntimeError(
+        "Refusing to start without API key when binding to a non-localhost address. "
+        "Set API_KEY (recommended) or set PUBLIC_BIND_REQUIRES_API_KEY=false to override."
+    )
+
+
 def load_settings_from_yaml(config_path: str | Path | None = None) -> Settings:
     """Load settings from YAML and apply path/url normalization in one place.
 
@@ -89,6 +113,17 @@ def load_settings_from_yaml(config_path: str | Path | None = None) -> Settings:
         data = dict(raw)
     else:
         raise ValueError("Configuration file must contain a YAML mapping at the top level.")
+
+    # Explicit deployment overrides precede validation and win over mounted YAML.
+    for environment, field in (
+        ("APP_HOST", "app_host"),
+        ("APP_PORT", "app_port"),
+        ("API_KEY", "api_key"),
+        ("OLLAMA_BASE_URL", "ollama_base_url"),
+        ("OLLAMA_ENABLED", "ollama_enabled"),
+    ):
+        if environment in os.environ:
+            data[field] = os.environ[environment]
 
     # Populate defaults before resolving paths so omitted and explicit defaults
     # have the same meaning regardless of the caller's working directory.
@@ -127,15 +162,6 @@ class Settings(BaseModel):
 
         def __init__(self, **kwargs: Any) -> None: ...
 
-    persistence_backend: Literal["local_split", "elasticsearch"] = Field(
-        "local_split",
-        description=(
-            "Persistence backend topology. "
-            "'local_split' uses SQLite + local vector index; "
-            "'elasticsearch' uses Elasticsearch as unified storage."
-        ),
-    )
-
     # --- Core --- #
     app_host: str = Field("127.0.0.1", description="Server host IP.")
     app_port: int = Field(8000, description="Server port.")
@@ -172,15 +198,6 @@ class Settings(BaseModel):
     )
 
     # --- Retrieval --- #
-    search_backend: Literal["local_split", "elasticsearch", "opensearch", "solr"] = Field(
-        "local_split",
-        description=(
-            "Search execution backend. "
-            "'local_split' queries the local SQL/vector stores; "
-            "'elasticsearch' and 'opensearch' query remote search clusters; "
-            "'solr' queries a remote Solr core."
-        ),
-    )
     retrieval_mode: Literal["sparse", "dense", "dual", "hybrid"] = Field(
         # Default to sparse to keep the base installation lightweight; dense/hybrid require extra deps.
         "sparse",
@@ -245,13 +262,6 @@ class Settings(BaseModel):
     id_map_path: str = Field("data/id_map.json", description="Path to the vector index ID map.")
     sqlite_url: str = Field("sqlite:///./data/app.db", description="SQLite database URL.")
     faq_csv: str = Field("data/faq.csv", description="FAQ CSV file path.")
-    storage_profile: str = Field(
-        "",
-        description=(
-            "Storage profile identifier (optional). If empty, it is inferred from retrieval_mode "
-            "and vector backend."
-        ),
-    )
     eval_dataset_path: str = Field(
         "datasets/rag_eval_v1.jsonl",
         description="Default JSONL dataset path for offline retrieval evaluation.",
@@ -349,24 +359,6 @@ class Settings(BaseModel):
         le=5.0,
         description="Polling interval in seconds for lock acquisition retries.",
     )
-    mutation_batch_max_size: int = Field(
-        32,
-        ge=1,
-        le=512,
-        description=(
-            "Maximum number of queued mutation requests drained by one lock holder in a single "
-            "batch cycle."
-        ),
-    )
-    mutation_batch_max_wait_ms: int = Field(
-        50,
-        ge=0,
-        le=5000,
-        description=(
-            "Maximum wait (milliseconds) to coalesce additional mutation requests before "
-            "draining a batch."
-        ),
-    )
     mutation_recovery_enabled: bool = Field(
         True,
         description="Enable startup recovery of incomplete durable mutation records.",
@@ -377,51 +369,6 @@ class Settings(BaseModel):
         le=3600.0,
         description="Background interval (seconds) for retrying incomplete mutation recovery.",
     )
-    es_base_url: str | None = Field(None, description="Elasticsearch base URL.")
-    es_api_key: str | None = Field(None, description="Elasticsearch API key.")
-    es_username: str | None = Field(None, description="Elasticsearch username.")
-    es_password: str | None = Field(None, description="Elasticsearch password.")
-    es_verify_tls: bool = Field(True, description="Verify Elasticsearch TLS certificates.")
-    es_request_timeout_s: float = Field(
-        30.0, ge=0.5, le=600.0, description="Elasticsearch request timeout in seconds."
-    )
-    es_docs_index: str = Field("rag-docs", description="Elasticsearch index for documents.")
-    es_history_index: str = Field("rag-history", description="Elasticsearch index for history.")
-    es_system_index: str = Field("rag-system", description="Elasticsearch index for system state.")
-    es_tombstones_index: str = Field(
-        "rag-tombstones", description="Elasticsearch index for document tombstones."
-    )
-    es_content_field: str = Field("content", description="Elasticsearch content field name.")
-    es_embedding_field: str = Field(
-        "embedding", description="Elasticsearch dense vector field name."
-    )
-    es_hybrid_lexical_k: int = Field(
-        50, ge=1, le=1000, description="Lexical candidate count for Elasticsearch hybrid."
-    )
-    es_hybrid_vector_k: int = Field(
-        50, ge=1, le=1000, description="Vector candidate count for Elasticsearch hybrid."
-    )
-    os_base_url: str | None = Field(None, description="OpenSearch base URL.")
-    os_api_key: str | None = Field(None, description="OpenSearch API key.")
-    os_username: str | None = Field(None, description="OpenSearch username.")
-    os_password: str | None = Field(None, description="OpenSearch password.")
-    os_verify_tls: bool = Field(True, description="Verify OpenSearch TLS certificates.")
-    os_request_timeout_s: float = Field(
-        30.0, ge=0.5, le=600.0, description="OpenSearch request timeout in seconds."
-    )
-    os_docs_index: str = Field("rag-docs", description="OpenSearch index for documents.")
-    os_content_field: str = Field("content", description="OpenSearch content field name.")
-    os_embedding_field: str = Field("embedding", description="OpenSearch dense vector field name.")
-    os_dense_candidate_k: int = Field(
-        50, ge=1, le=1000, description="Vector candidate count for OpenSearch dense retrieval."
-    )
-    solr_base_url: str | None = Field(None, description="Solr base URL.")
-    solr_core: str = Field("rag-docs", description="Solr core/collection for documents.")
-    solr_content_field: str = Field("content", description="Solr content field name.")
-    solr_request_timeout_s: float = Field(
-        30.0, ge=0.5, le=600.0, description="Solr request timeout in seconds."
-    )
-
     # --- Ingestion --- #
     ingest_chunk_strategy: Literal["chars_v1"] = Field(
         "chars_v1", description="Chunking strategy identifier (deterministic)."
@@ -439,13 +386,6 @@ class Settings(BaseModel):
     ingest_batch_size: int = Field(
         64, ge=1, le=512, description="Number of file-plans processed per ingestion batch."
     )
-    ingest_clean_lowercase: bool = Field(True, description="Lowercase during ingestion cleaning.")
-    ingest_clean_remove_html: bool = Field(True, description="Remove HTML tags during cleaning.")
-    ingest_clean_collapse_whitespace: bool = Field(
-        True, description="Collapse whitespace during cleaning."
-    )
-    ingest_clean_strip: bool = Field(True, description="Strip leading/trailing whitespace first.")
-
     # --- Retrieval quality (optional) --- #
     reranker_strategy: Literal["overlap_v1"] = Field(
         "overlap_v1", description="Reranker strategy identifier."
@@ -510,10 +450,7 @@ class Settings(BaseModel):
 
     @field_validator("sqlite_url")
     @classmethod
-    def _validate_sqlite_url(cls, v: str, info: ValidationInfo) -> str:
-        persistence_backend = str(info.data.get("persistence_backend") or "local_split")
-        if persistence_backend == "elasticsearch":
-            return v
+    def _validate_sqlite_url(cls, v: str) -> str:
         if not v.startswith("sqlite:///"):
             raise ValueError("SQLite URL must start with 'sqlite:///'")
         return v
@@ -525,41 +462,9 @@ class Settings(BaseModel):
             raise ValueError("Ollama URL must start with http:// or https://")
         return v.rstrip("/")
 
-    @field_validator("es_base_url")
-    @classmethod
-    def _validate_es_url(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("Elasticsearch URL must start with http:// or https://")
-        return v.rstrip("/")
-
-    @field_validator("os_base_url")
-    @classmethod
-    def _validate_os_url(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("OpenSearch URL must start with http:// or https://")
-        return v.rstrip("/")
-
-    @field_validator("solr_base_url")
-    @classmethod
-    def _validate_solr_url(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("Solr URL must start with http:// or https://")
-        return v.rstrip("/")
-
     @model_validator(mode="after")
     def _validate_chunking(self) -> Settings:
-        """Cross-field validation for retrieval/storage compatibility.
-
-        - Chunking constraints are validated for ingestion safety.
-        - Backend-specific URL requirements are enforced before runtime wiring.
-        - Hybrid/search/persistence combinations are constrained to known-safe modes.
-        """
+        """Validate security and chunking constraints."""
         if not self.debug and any(origin.strip() == "*" for origin in self.cors_allow_origins):
             raise ValueError(
                 "cors_allow_origins must contain explicit origins when debug=false; "
@@ -567,43 +472,11 @@ class Settings(BaseModel):
             )
         if self.ingest_chunk_overlap >= self.ingest_chunk_chars:
             raise ValueError("ingest_chunk_overlap must be strictly less than ingest_chunk_chars")
-        if self.persistence_backend == "elasticsearch":
-            if self.retrieval_mode == "sparse" and self.search_backend != "elasticsearch":
-                raise ValueError(
-                    "persistence_backend=elasticsearch supports retrieval_mode=sparse only when "
-                    "search_backend=elasticsearch"
-                )
-            if not self.es_base_url:
-                raise ValueError("es_base_url is required when persistence_backend=elasticsearch")
-        else:
-            if not self.sqlite_url.startswith("sqlite:///"):
-                raise ValueError("SQLite URL must start with 'sqlite:///'")
-
-        if self.search_backend == "elasticsearch" and not self.es_base_url:
-            raise ValueError("es_base_url is required when search_backend=elasticsearch")
-        if self.search_backend == "opensearch" and not self.os_base_url:
-            raise ValueError("os_base_url is required when search_backend=opensearch")
-        if self.search_backend == "solr" and not self.solr_base_url:
-            raise ValueError("solr_base_url is required when search_backend=solr")
-        if self.search_backend == "solr" and self.retrieval_mode in {"dense", "dual"}:
-            raise ValueError("search_backend=solr supports only retrieval_mode=sparse in v1")
-        if self.retrieval_mode == "hybrid" and self.search_backend not in {
-            "local_split",
-            "elasticsearch",
-        }:
-            raise ValueError(
-                "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
-            )
-        if (
-            self.retrieval_mode == "hybrid"
-            and self.search_backend == "elasticsearch"
-            and self.persistence_backend != "elasticsearch"
-        ):
-            raise ValueError(
-                "retrieval_mode=hybrid with search_backend=elasticsearch requires "
-                "persistence_backend=elasticsearch"
-            )
         return self
+
+    @property
+    def openrouter_configured(self) -> bool:
+        return bool(self.openrouter_enabled and self.openrouter_api_key)
 
     def get_database_path(self) -> Path:
         """Get the database file path."""

@@ -14,7 +14,7 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 
 ### Surfaces & Features
 
-- `retrieval-backend-matrix` — Sparse BM25, dense, hybrid, and selectable persistence backends. (`implemented`; `library`, `http`)
+- `retrieval-backend-matrix` — Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing. (`implemented`; `library`, `http`)
 - `canonical-import` — Validated canonical document import for external producers such as RepoGPT. (`implemented`; `cli`, `library`)
 - `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
 - `mcp-server` — MCP server surface for exposing retrieval operations to tool clients. (`implemented`; `mcp`)
@@ -64,7 +64,7 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 [![Downloads](https://img.shields.io/pypi/dm/rag-prototype.svg)](https://pypi.org/project/rag-prototype/) -->
 
 > Stateful RAG platform with a hexagonal architecture (Ports & Adapters), FastAPI, canonical mutation flows, and offline evaluation gates. It supports four retrieval modes (BM25, dense vector, dual, hybrid) plus swappable LLM connectors (OpenAI, OpenRouter, Ollama).
-> Default runtime mode is `sparse` on `local_split` persistence (`SQLite` only). Dense/dual/hybrid can run either on `local_split` (`SQLite + faiss/numpy`) or on a unified Elasticsearch backend. The write-path is intentionally stateful: canonical mutations, rebuilds, and recovery are first-class.
+> Default runtime mode is `sparse` on SQLite. Dense/dual/hybrid add a local FAISS or NumPy vector index. Canonical mutations, rebuilds, and recovery are first-class.
 
 The working tree is the **4.0.0 candidate**, with breaking changes from `v3.0.0`
 described in the [compatibility notes](docs/RELEASE_CHECKLIST.md#candidate-400).
@@ -83,8 +83,8 @@ tags and artifacts remain unchanged.
 
   * Sparse: BM25 (offline).
   * Dual: sparse candidate pool with dense rerank.
-  * Dense: local vector index (`faiss`/`numpy`) or unified Elasticsearch vector search.
-  * Hybrid: local dense+BM25 combination or Elasticsearch lexical+vector fusion.
+  * Dense: local vector index (`faiss`/`numpy`).
+  * Hybrid: local dense+BM25 combination.
 * **LLMs**
 
   * OpenAI Chat (via API key).
@@ -92,8 +92,7 @@ tags and artifacts remain unchanged.
   * Local Ollama (over HTTP). Current clients are synchronous.
 * **Persistence**
 
-  * `local_split`: SQLite via SQLAlchemy for documents/history + on-disk vector index for dense/hybrid.
-  * `elasticsearch`: unified documents, vectors, history, system state, and tombstones in Elasticsearch.
+  * SQLite via SQLAlchemy for documents/history + on-disk vector index for dense/hybrid.
 * **API**
 
   * FastAPI with validation and OpenAPI at `/docs`.
@@ -163,8 +162,10 @@ rag-server
 > `/healthz` confirms the HTTP app is alive. `/readyz` and `/api/ask` require a configured
 > LLM provider and may return `503` until `config.yaml` enables OpenAI, OpenRouter, or Ollama.
 
-> `rag-server` does not accept CLI flags (`--host`, `--port`, etc.). Host and port are controlled
-> exclusively via `config.yaml` (`app_host`, `app_port`).
+> `rag-server` accepts `--workers` (default 1) and `--reload`/`--no-reload`.
+> Host and port come from settings: `APP_HOST`, `APP_PORT`, `API_KEY`,
+> `OLLAMA_BASE_URL` and `OLLAMA_ENABLED` override their YAML fields. Other fields
+> remain controlled by `config.yaml`. Reload requires one worker.
 
 > Alternative startup (without `rag-server` wrapper):
 > `uvicorn local_rag_backend.http.main:app --reload`.
@@ -195,24 +196,15 @@ environment variables are set, its relative value is resolved against the select
 All runtime keys are shown in `snake_case` and map 1:1 to the fields in `config.yaml`.
 
 
-### Backend matrix
+### Local storage and retrieval
 
-| `persistence_backend` | `search_backend` | `retrieval_mode` | Canonical write model | Notes |
-| --- | --- | --- | --- | --- |
-| `local_split` | `local_split` (default) | `sparse`, `dense`, `dual`, `hybrid` | `DURABLE_SAGA` | Default standalone topology. Sparse/dual are SQLite-backed; dense/hybrid add local vector state. |
-| `local_split` | `elasticsearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote Elasticsearch query execution over local SQL persistence. `hybrid` is rejected. |
-| `local_split` | `opensearch` | `sparse`, `dense`, `dual` | `DURABLE_SAGA` | Remote OpenSearch query execution over local SQL persistence. `hybrid` is rejected. |
-| `local_split` | `solr` | `sparse` | `DURABLE_SAGA` | Lexical-only backend. Dense/dual/hybrid are rejected. |
-| `elasticsearch` | `elasticsearch` | `sparse`, `dense`, `dual`, `hybrid` | `ATOMIC` | Unified docs/history/vectors/system-state/tombstones in Elasticsearch. |
-| `elasticsearch` | `local_split` | `dense`, `dual`, `hybrid` | `ATOMIC` | ES-backed persistence with local_split query orchestration. Sparse is rejected. |
-| `elasticsearch` | `opensearch` | `dense`, `dual` | `ATOMIC` | ES-backed persistence with OpenSearch query execution. Sparse/hybrid are rejected. |
-| `elasticsearch` | `solr` | none | `ATOMIC` | Rejected at startup. Solr is sparse-only, but sparse is disallowed with ES persistence unless `search_backend=elasticsearch`. |
+SQLite holds canonical documents, history, tombstones, and the runtime version. Sparse retrieval uses BM25 over those documents. Dense/dual/hybrid modes additionally use a local FAISS or NumPy vector index. All document mutations use the durable saga and local mutation journal. The removed `persistence_backend`, `search_backend`, and remote backend keys are rejected by current settings validation.
 
-The selector in `Settings` plus `composition/adapters.py` enforce this matrix at startup.
+**Breaking data change:** ingestion now stores each raw chunk exactly as loaded, with lineage in metadata instead of a text header. `/api/docs/ingest` IDs now depend on raw content and chunker version, not the embedding model. Existing corpora contain transformed text and old IDs. To adopt this format, use a **fresh empty data directory and re-ingest all sources**; an incremental ingest or vector-only rebuild will leave duplicates or mixed content. Keep the old directory separately if its history or journal receipts must remain available.
 
-### Index manifest (`local_split` dense/hybrid only)
+### Index manifest (dense/dual/hybrid only)
 
-When `persistence_backend=local_split` and `retrieval_mode=dense|hybrid`, the system writes an `index_manifest.json` next to `index_path`.
+When `retrieval_mode=dense|dual|hybrid`, the system writes an `index_manifest.json` next to `index_path`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
 If you change any of these settings, `/readyz` and `rag-status` will report drift and instruct you to rebuild:
@@ -224,25 +216,9 @@ If you change any of these settings, `/readyz` and `rag-status` will report drif
 * vector `id_map.json` stores `list[str]`
 * no runtime migration/fallback for older schemas or id maps
 
-### Retrieval Adapter Resolution
+### Retrieval adapter
 
-The backend matrix above is authoritative. The common runtime routes are:
-
-* `local_split` + `local_split`:
-  `LocalSplitSearchRetriever` orchestrates sparse, dense, dual, and hybrid strategies.
-  Hybrid branches receive their own retrieval mode and apply the score threshold after fusion.
-* `local_split` + `elasticsearch` or `opensearch`:
-  `ElasticLikeSearchRetriever` for `sparse`, `dense`, or `dual`.
-* `local_split` + `solr`:
-  `SolrSearchRetriever` for `sparse` only.
-* `elasticsearch` + `elasticsearch`:
-  `ElasticLikeSearchRetriever` for `sparse`/`dense`, and `HybridRetriever(Elastic dense retriever, Elastic lexical retriever, alpha)` for `hybrid`.
-* `elasticsearch` + `local_split`:
-  `LocalSplitSearchRetriever`-style orchestration over ES-backed persistence for `dense`/`dual`/`hybrid`.
-* `elasticsearch` + `opensearch`:
-  `ElasticLikeSearchRetriever` for `dense`/`dual`.
-* If `enable_reranker: true`, the selected retriever is wrapped as:
-  `RerankingRetriever(base=<selected>)`
+`LocalSplitSearchRetriever` orchestrates sparse, dense, dual, and hybrid strategies. If `enable_reranker: true`, the retriever is wrapped by `RerankingRetriever`.
 
 This boundary is enforced in `composition/adapters.py` and consumed by `AppContainer`.
 
@@ -265,7 +241,7 @@ Use these entrypoints for the main workflows:
 See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
 for batch-spec examples and compare-mode usage.
 
-`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v4. The import flow stays generic, but the edge transport now validates RepoGPT `kind="code-units"` and `schema_version="4"` when those producer markers are present.
+`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v5. The import flow stays generic, but the edge transport validates RepoGPT `kind="code-units"` and `schema_version="5"` when those producer markers are present.
 
 Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
 a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP
@@ -274,12 +250,14 @@ the available documents while preserving absent ones. Overrides are checked befo
 any writes. RepoGPT needs its own environment: run `uv sync --frozen --extra dev`
 in its checkout before running the producer-to-RAG E2E; RAG's interpreter is not a fallback.
 
-Empty snapshots are rejected before writes on CLI, HTTP and MCP, including
-upsert-only mode. RepoGPT v4 can emit `documents: []` with zero files, failures
-and emitted documents (for example after removing the last exportable file),
-but RAG reports `RepoGPT canonical payloads must include a non-empty documents list.`
-An empty export with failures is also rejected. Neither case clears the existing
-scope. Authoritative empty replacement needs a separate explicit clearing policy.
+RepoGPT v5 module documents with blank residual content are validated, then left out
+of the index. The producer export must still contain at least one validated
+document; a raw `documents: []` payload cannot clear a scope. An export with no
+indexable documents is a no-op in upsert-only mode.
+A complete export with `replace_scope=true` deletes stale documents in that scope;
+an export with failures cannot replace it. Generic canonical imports still require
+at least one non-blank document. Recoverable documents above 20,000 characters are
+rejected before any mutation.
 
 Explicit deletion is available through `POST /api/docs/mutate` and
 `rag-mutate-docs --json ...`, using `delete_ids` or `delete_external_ids` (at most
@@ -288,14 +266,7 @@ equivalent to an empty canonical replacement. Enumerate documents with filtered,
 paginated `/api/docs/query` requests (`limit` at most 1,000, plus `offset`); the
 frontend's first 100 documents do not represent an entire scope.
 
-Scope cleanup in `local_split` uses one SQL transaction through vector deletion.
-A vector failure rolls SQL back, but the two vector files are not a single atomic
-write. If the vector write or final SQL commit fails, the command/API reports that
-`rag-rebuild-index` (or `POST /api/index/rebuild`) is required before retrying.
-Rebuild reads canonical SQL and recreates the index. Elasticsearch deletes the
-document and its colocated embedding together and reports bulk item failures.
-These guarantees cover stale-document cleanup, not whole-import batch atomicity
-or process-crash recovery.
+Scope cleanup is a journaled mutation. The saga records before-images and compensates SQL and vector state after failure. Rebuild reads canonical SQL and recreates the index. Whole-import batches are not atomic; each mutation has its own recovery record.
 
 The included frontend uses `POST /api/docs/ingest` and `POST /api/docs/query` with
 `{"limit": 100, "offset": 0}`; the latter still returns an array of documents.
@@ -373,7 +344,7 @@ do not need to infer topology from raw config fields.
 ### Run with Docker Compose (including Ollama)
 
 ```bash
-# Build and start backend + Ollama
+# Set API_KEY in your environment, then build and start backend + Ollama
 docker compose up -d --build
 
 # (Optional) Pull a model into Ollama once the service is up
@@ -385,11 +356,12 @@ curl http://localhost:8000/healthz/ollama
 ```
 
 Notes:
-- Backend listens on `8000`, Ollama on `11434`.
+- Backend publishes `127.0.0.1:8000`; Ollama is available only within the Compose network.
+- Compose requires `API_KEY`. The process bind and startup guard share the same settings.
+- Ollama is pinned to 0.35.1; enable it with `ollama_enabled: true` in YAML when needed.
 - Configure providers via `config.yaml`.
-- `docker-compose.yml` sets container environment defaults for convenience, but the app still reads `config.yaml` as the runtime source of truth. If you want compose-driven config, mount or generate a `config.yaml` inside the container.
-- `docker-compose.yml` defaults the container runtime to `persistence_backend: local_split` and `retrieval_mode: sparse`, but those values do not override `config.yaml` by themselves.
-- For `local_split` dense/hybrid in compose, build backend with extras, for example:
+- `docker-compose.yml` mounts `./config.yaml` read-only at `/app/config.yaml` and sets `RAG_CONFIG_PATH`. Edit that file for retrieval mode and provider settings. Compose supplies `API_KEY` and `OLLAMA_BASE_URL=http://ollama:11434`; enable Ollama in YAML when needed.
+- For dense/dual/hybrid in Compose, build the backend with extras, for example:
 
 ```bash
 docker compose build --build-arg RAG_EXTRAS=dense rag-backend
@@ -410,7 +382,7 @@ docker compose up -d
 ├── data/                      # CSV, SQLite DB, vector index files
 ├── src/local_rag_backend/
 │   ├── core/                  # domain, ports, services, use cases
-│   │   ├── domain/            # entities, types, storage profiles
+│   │   ├── domain/            # entities and types
 │   │   ├── ports/             # abstract contracts (Protocol-based)
 │   │   ├── services/          # domain services (ETL, RAG runtime, reranking)
 │   │   └── use_cases/         # application use cases (ingest, query, mutation, …)
@@ -466,18 +438,15 @@ Notes:
   configuration. OpenRouter is only considered available when `openrouter_enabled=true` and
   `openrouter_api_key` is set.
 * In dense/dual/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
-* `local_split` uses `MutationCoordinator` with `DURABLE_SAGA`: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
-* `elasticsearch` uses `MutationCoordinator` with an atomic backend path: document, vector, history, system-state, and tombstone semantics are unified in Elasticsearch.
+* `MutationCoordinator` uses a durable saga: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
 * Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
 * `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
-* In `local_split` dense/dual/hybrid mode, `/readyz` is intentionally strict and returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
-* In `elasticsearch` mode, `/readyz` validates backend connectivity, index existence, mapping dimensions, and embedded-document counts.
+* In dense/dual/hybrid mode, `/readyz` returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * For public/proxy deployments, set `api_key` in `config.yaml` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy. The UI's optional **API access** field sends this key with all API calls and keeps it only until the page reloads.
 * Filter `values` must be a nonempty array of nonblank strings. Values are trimmed; strings, numbers, and blank items are rejected (`422` in HTTP, `-32602` in MCP).
 * Document/history reads and readiness I/O run through the container's worker executor. Document pagination does not provide a stable snapshot across separate requests.
 * Conversation uploads exceeding 50 MiB return `413` before parsing or mutation.
-* Local mutation journal v2 preserves committed outcomes for exact `op_id` replay. Corrupt, older, or unresolved journal records block writes with `MutationRecoveryRequiredError`: HTTP returns a generic `503`, while CLI/MCP provide an operator diagnostic. Rebuilding the vector index does not repair the journal.
-* Elasticsearch keeps each document and embedding together. Its `ATOMIC` execution profile does not promise a transaction across bulk items or document/tombstone operations; partial failures remain visible.
+* The local mutation journal keeps active records in `active/` and terminal receipts in `done/`. Committed receipts omit before-images. Terminal receipts are retained for up to 30 days or 256 MiB, with maintenance under the write lock; exact `op_id` replay is bounded by that retention window. Older flat receipts remain read-only and replayable. A terminal receipt that shadows an incomplete flat record is retained until the flat record is resolved. Incomplete or corrupt records make `/readyz` return `503`; unresolved active records block writes, while a corrupt terminal receipt blocks replay of its `op_id`. Rebuilding the vector index does not repair the journal.
 
 Example:
 
@@ -612,13 +581,12 @@ make smoke-frontend
 
 The frontend smoke reuses the workspace's installed Playwright and Chromium
 from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`
-path outside this workspace. It checks accepted Elasticsearch IDs with a local
-HTTP storage double, API-key forwarding and non-JSON failures, and real browser add/list/query plus visibility using
+path outside this workspace. It checks opaque document IDs and literal HTML with temporary SQLite data, API-key forwarding and non-JSON failures, and real browser add/list/query plus visibility using
 temporary SQLite data and a loopback Ollama response double. It needs permission
 to launch Chromium and bind loopback ports; it does not contact an external LLM
-or Elasticsearch service. Temporary evidence is printed under `/tmp`.
+service. Temporary evidence is printed under `/tmp`.
 
-The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v4.json`.
+The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v5.json`.
 It requires no sibling checkout. Live producer coverage is explicit: set `REPOGPT_ROOT`; the helper uses the
 versioned source fixture and passes `--replace-scope --include-tests --repo-key repogpt_eval_repo`.
 Invalid configured paths or producer failures fail the test.
@@ -710,7 +678,7 @@ Notes:
 
 - `drop_empty=True` skips whitespace-only documents.
 - `metadata_filter={...}` yields only items whose metadata includes the given key/value pairs.
-- Application writes should go through `MutationCoordinator`, not direct `ETLService`/`IngestionPipeline`, so SQL and vector state stay coordinated.
+- Application writes should go through `MutationCoordinator` so SQLite and vector state stay coordinated.
 - The adapter expects each LangChain `Document` to have `page_content` and `metadata` fields. It gracefully falls back to dict-like objects or stringification when needed.
 
 ---
@@ -726,3 +694,9 @@ MIT. See [LICENSE](LICENSE) file for details.
 **Built with ❤️ by [Intrinsical AI](https://python-lair.space) & Co.**
 
 </div>
+
+
+Architecture checks discover every Python module as part of a regular package.
+Core restrictions include transitive imports. Router restrictions forbid direct
+concrete adapter imports; wiring through composition is permitted. The AST checks
+resolve relative imports as well as absolute imports.

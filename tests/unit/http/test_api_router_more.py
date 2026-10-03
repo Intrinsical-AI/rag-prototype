@@ -2,7 +2,12 @@
 import pytest
 from support.container import override_container
 
-from local_rag_backend.core.errors import LLMConfigurationError, LLMConnectionError, LLMTimeoutError
+from local_rag_backend.core.errors import (
+    EmbeddingsBackendUnavailableError,
+    LLMConfigurationError,
+    LLMConnectionError,
+    LLMTimeoutError,
+)
 from local_rag_backend.http import dependencies as deps
 from local_rag_backend.http.routers import health as health_router, rag_router
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
@@ -215,3 +220,16 @@ async def test_ask_eval_maps_typed_llm_connection_error_to_503(
     assert r.status_code == 503
     assert r.json()["detail"] == "Service unavailable."
     assert "provider unreachable" not in r.text
+
+
+async def test_ask_eval_maps_unavailable_embeddings_to_503(asgi_client, monkeypatch):
+    def fail_eval(**_kwargs):
+        raise EmbeddingsBackendUnavailableError("embedding model unavailable")
+
+    monkeypatch.setattr(rag_router, "execute_ask_eval_sync", fail_eval)
+    response = await asgi_client.post(
+        "/api/ask_eval",
+        json={"question": "hello", "config": {"retrieval_mode": "sparse", "k": 1}},
+    )
+
+    assert response.status_code == 503

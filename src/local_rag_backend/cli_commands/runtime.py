@@ -63,6 +63,7 @@ def run_cli_mutation(
     *,
     use_lock: bool = True,
     ensure_schema: bool = True,
+    invalidate_shared: bool = True,
 ) -> T:
     from local_rag_backend.core.use_cases.mutations import (
         run_cli_mutation as run_cli_mutation_core,
@@ -78,7 +79,11 @@ def run_cli_mutation(
         operation=operation,
         ensure_schema=ensure_fn,
         run_locked=run_locked_fn,
-        reset_after=_reset_rag_service_best_effort,
+        reset_after=(
+            _reset_rag_service_best_effort
+            if invalidate_shared
+            else get_cli_container().clear_local_rag_service_cache
+        ),
     )
 
 

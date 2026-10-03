@@ -1,4 +1,4 @@
-`repogpt_code_units_v4.json` is the canonical RepoGPT v4 producer output for the
+`repogpt_code_units_v5.json` is the canonical RepoGPT v5 producer output for the
 versioned source fixture in `repogpt_eval_repo/`. It exercises RAG import,
 metadata filtering, retrieval, idempotency, and scope replacement without
 requiring another checkout. The default gate validates the recorded payload;

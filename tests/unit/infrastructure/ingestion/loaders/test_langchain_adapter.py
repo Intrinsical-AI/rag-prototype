@@ -1,7 +1,6 @@
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from local_rag_backend.core.services.ingestion import IngestionPipeline
 from local_rag_backend.infrastructure.ingestion.loaders import LangChainLoader
 
 
@@ -113,43 +112,3 @@ def test_langchain_loader_stringify_fallback():
     assert len(items) == 1
     assert items[0].text == "weird-object"
     assert items[0].metadata is None
-
-
-def test_langchain_loader_works_with_ingestion_pipeline(monkeypatch):
-    # Minimal ETL mocks
-    class DummyDocRepo:
-        def __init__(self) -> None:
-            self.saved: list[str] = []
-
-        def store_documents(self, texts: list[str]) -> list[int]:
-            self.saved.extend(texts)
-            return list(range(1, len(texts) + 1))
-
-    class DummyEmbedder:
-        dim = 3
-
-        def embed(self, texts: list[str]) -> list[list[float]]:
-            return [[float(i), 0.0, 0.0] for i, _ in enumerate(texts)]
-
-    class DummyVectorRepo:
-        def upsert(self, ids, vectors) -> None:
-            pass
-
-        def delete(self, ids) -> None:
-            pass
-
-    from local_rag_backend.core.services.etl import ETLService
-
-    etl = ETLService(DummyDocRepo(), DummyVectorRepo(), DummyEmbedder())
-
-    docs = [
-        _DummyDoc("Title A\n\nBody A", {"title": "Title A"}),
-        _DummyDoc("Title B\n\nBody B", {"title": "Title B"}),
-    ]
-    loader = LangChainLoader(_DummyLoaderList(docs))
-
-    pipeline = IngestionPipeline(loader=loader, etl_service=etl)
-    count = pipeline.run()
-
-    # Pipeline counts input chunks (no chunking splitting here because texts are short)
-    assert count == 2

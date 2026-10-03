@@ -30,7 +30,6 @@ from local_rag_backend.composition.adapters import (
     get_available_llm_providers as get_available_llm_providers_from_settings,
     resolve_preferred_llm_provider,
 )
-from local_rag_backend.core.domain.profiles import StorageProfileRegistry
 from local_rag_backend.core.ports.contracts import DocsMutationPorts, IndexMutationPorts
 from local_rag_backend.core.services.maintenance import (
     rebuild_index_from_db,
@@ -49,14 +48,6 @@ from local_rag_backend.infrastructure.embeddings.sentence_transformers import (
 from local_rag_backend.infrastructure.llms.ollama_chat import OllamaGenerator
 from local_rag_backend.infrastructure.llms.openai_chat import OpenAIGenerator
 from local_rag_backend.infrastructure.observability.perf import configure_perf_metrics
-from local_rag_backend.infrastructure.persistence.elasticsearch import (
-    ElasticClient,
-    ElasticDocsRepository,
-    ElasticHistoryStorage,
-    ElasticSystemStateStorage,
-    ElasticVectorRepo,
-    purge_index_artifacts_noop,
-)
 from local_rag_backend.infrastructure.persistence.shared.mutation_journal import FileMutationJournal
 from local_rag_backend.infrastructure.persistence.sql import (
     HistorySqlStorage,
@@ -144,55 +135,25 @@ class AppContainer:
         write_lock: Callable[..., Any] | None = None,
         mutation_journal_factory: Callable[..., Any] | None = None,
         mutation_uow_factory: Callable[..., Any] | None = None,
-        storage_profile_registry: StorageProfileRegistry | None = None,
         rag_service_factory: Callable[..., RagService] | None = None,
         system_state_factory: Callable[[], SystemStateStorage] | None = None,
     ) -> None:
         self.settings_obj = settings_obj
         self._blocking_executor = BlockingExecutor(settings_obj=settings_obj)
         self.engine = None
-        self._elastic_client: ElasticClient | None = None
         self.session_factory = session_factory
         self._owns_engine = session_factory is None
-        default_doc_factory: Callable[[], DocumentRepoPort]
-        default_history_factory: Callable[[], QAHistoryPort]
-        default_state_factory: Callable[[], SystemStateStorage | ElasticSystemStateStorage]
-        default_vector_factory: Callable[..., VectorRepoPort]
-        default_upsert_doc: Any
-        use_es = settings_obj.persistence_backend == "elasticsearch"
-        if use_es:
-            self._elastic_client = ElasticClient(settings_obj=settings_obj)
-            default_doc_factory = partial(
-                ElasticDocsRepository, settings_obj=settings_obj, client=self._elastic_client
-            )
-            default_history_factory = partial(
-                ElasticHistoryStorage, settings_obj=settings_obj, client=self._elastic_client
-            )
-            default_state_factory = partial(
-                ElasticSystemStateStorage, settings_obj=settings_obj, client=self._elastic_client
-            )
-            default_vector_factory = partial(ElasticVectorRepo, client=self._elastic_client)
-            default_upsert_doc = ElasticDocsRepository.UpsertDoc
+        if self.session_factory is None:
+            engine_options: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
+            if settings_obj.sqlite_url in {"sqlite://", "sqlite:///:memory:"}:
+                engine_options.update(poolclass=QueuePool, pool_size=1, max_overflow=0)
+            self.engine = create_engine(settings_obj.sqlite_url, **engine_options)
+            self.session_factory = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
         else:
-            if self.session_factory is None:
-                engine_options: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
-                if settings_obj.sqlite_url in {"sqlite://", "sqlite:///:memory:"}:
-                    engine_options.update(poolclass=QueuePool, pool_size=1, max_overflow=0)
-                self.engine = create_engine(settings_obj.sqlite_url, **engine_options)
-                self.session_factory = sessionmaker(
-                    bind=self.engine, autocommit=False, autoflush=False
-                )
-            else:
-                self.engine = self.session_factory.kw["bind"]
-            default_doc_factory = partial(SqlDocumentStorage, session_factory=self.session_factory)
-            default_history_factory = partial(
-                HistorySqlStorage, session_factory=self.session_factory
-            )
-            default_state_factory = partial(
-                SystemStateStorage, session_factory=self.session_factory
-            )
-            default_vector_factory = VectorStorage
-            default_upsert_doc = SqlDocumentStorage.UpsertDoc
+            self.engine = self.session_factory.kw["bind"]
+        default_doc_factory = partial(SqlDocumentStorage, session_factory=self.session_factory)
+        default_history_factory = partial(HistorySqlStorage, session_factory=self.session_factory)
+        default_state_factory = partial(SystemStateStorage, session_factory=self.session_factory)
         self.openai_embedder_factory = openai_embedder_factory or partial(
             OpenAIEmbedder, settings_obj=settings_obj
         )
@@ -208,16 +169,14 @@ class AppContainer:
             OllamaGenerator, settings_obj=settings_obj
         )
         self.doc_repo_factory = doc_repo_factory or default_doc_factory
-        self.build_upsert_doc = build_upsert_doc or default_upsert_doc
+        self.build_upsert_doc = build_upsert_doc or SqlDocumentStorage.UpsertDoc
         self.history_repo_factory = history_repo_factory or default_history_factory
         self.dense_retriever_factory = dense_retriever_factory or DenseVectorRetriever
         self.hybrid_retriever_factory = hybrid_retriever_factory or HybridRetriever
-        self.vector_repo_factory = vector_repo_factory or default_vector_factory
+        self.vector_repo_factory = vector_repo_factory or VectorStorage
         self.reranker_factory = reranker_factory or RerankingRetriever
         self.rebuild_fn = rebuild_fn or rebuild_index_from_db
-        self.purge_index_artifacts_fn = purge_index_artifacts_fn or (
-            purge_index_artifacts_noop if use_es else purge_index_artifacts
-        )
+        self.purge_index_artifacts_fn = purge_index_artifacts_fn or purge_index_artifacts
         self.write_lock = write_lock or partial(
             multi_store_write_lock,
             coordination_dir=settings_obj.get_coordination_dir(),
@@ -225,15 +184,18 @@ class AppContainer:
             poll_s=settings_obj.write_lock_poll_s,
             metrics_path=settings_obj.lock_metrics_path,
         )
-        self.mutation_journal_factory = mutation_journal_factory or (
-            lambda: FileMutationJournal(settings_obj.get_coordination_dir() / ".mutation_journal")
-        )
+        self._mutation_journal = (
+            mutation_journal_factory
+            or (
+                lambda: FileMutationJournal(
+                    settings_obj.get_coordination_dir() / ".mutation_journal"
+                )
+            )
+        )()
+        self.mutation_journal_factory = lambda: self._mutation_journal
         self.mutation_uow_factory = mutation_uow_factory or (
             partial(db_base.session_uow, session_factory=self.session_factory)
-            if self.session_factory is not None
-            else None
         )
-        self.storage_profile_registry = storage_profile_registry or StorageProfileRegistry()
         self.rag_service_factory = rag_service_factory or RagService
         self._system_state = (system_state_factory or default_state_factory)()
         self._rag_service_cache_lock = Lock()
@@ -259,34 +221,11 @@ class AppContainer:
         self.clear_local_rag_service_cache()
         if self.engine is not None and self._owns_engine:
             self.engine.dispose()
-        if self._elastic_client is not None:
-            self._elastic_client.close()
 
     def validate_rag_config(self, config: AskEvalConfigLike) -> list[str]:
         errors = []
         if config.retrieval_mode not in ["sparse", "dense", "dual", "hybrid"]:
             errors.append(f"Invalid retrieval_mode: {config.retrieval_mode}")
-        if self.settings_obj.search_backend == "solr" and config.retrieval_mode in {
-            "dense",
-            "dual",
-        }:
-            errors.append("search_backend=solr supports only retrieval_mode=sparse in v1")
-        if config.retrieval_mode == "hybrid" and self.settings_obj.search_backend not in {
-            "local_split",
-            "elasticsearch",
-        }:
-            errors.append(
-                "retrieval_mode=hybrid is supported only with search_backend=local_split|elasticsearch"
-            )
-        if (
-            config.retrieval_mode == "hybrid"
-            and self.settings_obj.search_backend == "elasticsearch"
-            and self.settings_obj.persistence_backend != "elasticsearch"
-        ):
-            errors.append(
-                "retrieval_mode=hybrid with search_backend=elasticsearch requires "
-                "persistence_backend=elasticsearch"
-            )
         if config.prompt_template is not None:
             try:
                 validate_prompt_template(config.prompt_template)
@@ -321,16 +260,13 @@ class AppContainer:
 
     def build_history_read_port(self) -> HistoryReadPort:
         return build_history_read_port(
-            settings_obj=self.settings_obj,
-            history_repo_factory=self.history_repo_factory,
             session_factory=self.session_factory,
         )
 
     def build_health_diagnostics_port(self, *, engine: Any | None = None) -> HealthDiagnosticsPort:
         return build_health_diagnostics_port(
-            settings_obj=self.settings_obj,
             engine=(engine if engine is not None else self.engine),
-            elastic_client=self._elastic_client,
+            journal=self._mutation_journal,
         )
 
     def build_health_readiness_bundle(self, *, engine: Any | None = None) -> HealthReadinessBundle:
@@ -378,9 +314,6 @@ class AppContainer:
         return build_eval_storage_port(settings_obj=self.settings_obj)
 
     def build_eval_retriever_factory_port(self) -> EvalRetrieverFactoryPort:
-        # Eval always uses local_split settings internally (_SqlEvalStoragePort overrides
-        # search_backend/persistence_backend to "local_split"), so the vector repo must be
-        # VectorStorage (FAISS), not the production ElasticVectorRepo.
         return build_eval_retriever_factory_port(
             openai_embedder_factory=self.openai_embedder_factory,
             st_embedder_factory=self.st_embedder_factory,
@@ -418,8 +351,10 @@ class AppContainer:
             ),
             write_lock=self.write_lock,
             mutation_journal_factory=self.mutation_journal_factory,
-            storage_profile_registry=self.storage_profile_registry,
             mutation_uow_factory=self.mutation_uow_factory,
+            bump_rag_service_version=lambda: self._system_state.bump_version(
+                self.RAG_SERVICE_STATE_KEY
+            ),
         )
 
     def index_mutation_ports(

@@ -87,7 +87,7 @@ async def test_docs_query_filters_by_scope_snapshot_and_metadata(
     [
         (["  A  ", "", " B "], 2),
         (["á", "漢字", "   "], 2),
-        (["dup", "dup", "  dup  "], 1),  # hash-based dedup (post-clean)
+        (["dup", "dup", "  dup  "], 2),  # whitespace is part of raw chunk identity
     ],
 )
 async def test_post_docs_sparse_various_inputs(
@@ -141,7 +141,7 @@ async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlit
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     monkeypatch.setattr(settings, "ingest_chunker_version", "v1", raising=False)
 
-    payload = {"texts": ["  DU P  ", "du p", "DU P"]}
+    payload = {"texts": ["DU P", "DU P", "DU P"]}
     r1 = await asgi_client.post("/api/docs/ingest", json=payload)
     assert r1.status_code == 200
     ids1 = r1.json()["ids"]
@@ -157,6 +157,56 @@ async def test_post_docs_sparse_dedup_is_idempotent(asgi_client, in_memory_sqlit
 
     docs2 = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     assert len(docs2) == 1
+
+
+async def test_post_docs_ingest_preserves_nonblank_input_exactly(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    raw = "  The Capital of France is Paris.\n"
+    response = await asgi_client.post("/api/docs/ingest", json={"texts": [raw]})
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    assert len(docs) == 1
+    assert docs[0].content == raw
+    assert docs[0].metadata is not None
+    assert docs[0].metadata["source"] == "api:/docs/ingest"
+
+
+async def test_post_docs_ingest_skips_blank_chunks_without_renumbering(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_chars", 8, raising=False)
+    monkeypatch.setattr(settings, "ingest_chunk_overlap", 0, raising=False)
+    raw = " " * 8 + " Exact \n"
+
+    response = await asgi_client.post("/api/docs/ingest", json={"texts": [raw]})
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    assert len(docs) == 1
+    assert docs[0].content == " Exact \n"
+    assert docs[0].metadata is not None
+    assert docs[0].metadata["chunk_index"] == 1
+    assert docs[0].metadata["chunk_start_char"] == 8
+    assert docs[0].metadata["chunk_end_char"] == 16
+
+
+async def test_post_docs_mutate_preserves_content_whitespace(
+    asgi_client, in_memory_sqlite, monkeypatch
+):
+    monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
+    raw = "  Preserve This\n"
+    response = await asgi_client.post(
+        "/api/docs/mutate",
+        json={"upserts": [{"external_id": "raw:1", "content": raw}]},
+    )
+    assert response.status_code == 200
+    docs = SqlDocumentStorage(in_memory_sqlite).get_all_documents()
+    assert [doc.content for doc in docs] == [raw]
 
 
 async def test_post_docs_sparse_chunker_version_change_inserts_new(

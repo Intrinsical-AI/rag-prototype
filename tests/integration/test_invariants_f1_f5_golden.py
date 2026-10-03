@@ -41,8 +41,6 @@ async def test_golden_f1_f2_docs_mutation_ingest_and_list(
         "deleted_index",
         "tombstoned",
         "missing_external_ids",
-        "index_rebuilt",
-        "index_doc_count",
         "results",
     }
 

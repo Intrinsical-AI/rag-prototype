@@ -3,7 +3,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from local_rag_backend.core.domain.retrieval import RetrievalRequest
-from local_rag_backend.core.services.etl import ETLService
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.infrastructure.embeddings import openai as openai_embedder_mod
 from local_rag_backend.infrastructure.embeddings.openai import OpenAIEmbedder
@@ -99,9 +98,16 @@ def test_dense_and_hybrid_end_to_end(tmp_path, monkeypatch):
         dim=embedder.dim,
     )
 
-    etl = ETLService(doc_repo, vec_repo, embedder)
-    ids = etl.ingest(["alpha alpha alpha", "zzzz zzzz zzzz"])
-    assert len(list(ids)) == 2
+    texts = ["alpha alpha alpha", "zzzz zzzz zzzz"]
+    upserts, _, _ = doc_repo.upsert_documents_by_external_id(
+        [
+            SqlDocumentStorage.UpsertDoc(external_id=f"seed-{index}", content=text)
+            for index, text in enumerate(texts)
+        ]
+    )
+    ids = [result.id for result in upserts]
+    assert len(ids) == 2
+    vec_repo.rebuild(ids, embedder.embed(texts))
 
     dense = DenseVectorRetriever(embedder=embedder, vector_repo=vec_repo, doc_repo=doc_repo)
     result = dense.retrieve(RetrievalRequest(query="alpha", top_k=1, mode="dense"))

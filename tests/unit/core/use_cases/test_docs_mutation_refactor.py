@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
-from local_rag_backend.core.domain.profiles import StorageProfileRegistry
 from local_rag_backend.core.errors import MutationRecoveryRequiredError
 from local_rag_backend.core.ports.contracts import DocsMutationPorts, MutationRecord
 from local_rag_backend.core.use_cases.docs_mutation import (
@@ -27,17 +26,15 @@ from local_rag_backend.core.use_cases.docs_mutation_contracts import (
     summary_to_payload,
 )
 from local_rag_backend.core.use_cases.results import MutationSummary, UpsertDocResult
+from local_rag_backend.infrastructure.concurrency.locks.write_lock import multi_store_write_lock
 
 
 @dataclass
 class _SettingsStub:
     retrieval_mode: str = "sparse"
     vector_backend: str = "faiss"
-    storage_profile: str = ""
     write_lock_timeout_s: float = 1.0
     write_lock_poll_s: float = 0.01
-    mutation_batch_max_size: int = 32
-    mutation_batch_max_wait_ms: int = 50
     index_path: str = "unused.idx"
     id_map_path: str = "unused.idmap"
 
@@ -248,6 +245,7 @@ def _build_ports(
     uow_factory: Any | None = None,
     retrieval_mode: str = "sparse",
     vector_repo_factory: Any | None = None,
+    bump_version: Any | None = None,
 ) -> tuple[MutationCoordinator, _MemoryJournal]:
     journal = _MemoryJournal()
     settings = _SettingsStub(retrieval_mode=retrieval_mode)
@@ -259,8 +257,8 @@ def _build_ports(
         reconcile_index=lambda: 0,
         write_lock=_noop_write_lock,
         mutation_journal_factory=lambda: journal,
-        storage_profile_registry=StorageProfileRegistry(),
         mutation_uow_factory=uow_factory,
+        bump_rag_service_version=bump_version,
     )
     return MutationCoordinator(settings_obj=settings, ports=ports), journal
 
@@ -269,10 +267,7 @@ def test_contract_helpers_normalize_and_payload_roundtrip() -> None:
     normalized = normalize_intent(
         intent=MutationIntent(
             op_id="  ",
-            upserts=(
-                MutationUpsertInput(external_id=" doc-1 ", content=" hello "),
-                MutationUpsertInput(external_id="doc-2", content=""),
-            ),
+            upserts=(MutationUpsertInput(external_id=" doc-1 ", content=" hello "),),
             delete_ids=(" id-1 ", "id-1"),
             delete_external_ids=(" ext-1 ", "ext-1"),
             source=" api ",
@@ -284,6 +279,15 @@ def test_contract_helpers_normalize_and_payload_roundtrip() -> None:
     assert [u.external_id for u in normalized.upserts] == ["doc-1"]
     assert list(normalized.delete_ids) == ["id-1"]
     assert list(normalized.delete_external_ids) == ["ext-1"]
+
+    with pytest.raises(ValueError, match="content must not be blank"):
+        normalize_intent(
+            intent=MutationIntent(
+                op_id="mut:invalid",
+                upserts=(MutationUpsertInput(external_id="doc-2", content=""),),
+            ),
+            new_op_id=lambda: "unused",
+        )
 
     summary = MutationSummary(
         op_id="mut:1",
@@ -452,7 +456,6 @@ def test_recover_incomplete_dense_reconciles_vector_index_with_sql_state() -> No
         ),
         write_lock=_noop_write_lock,
         mutation_journal_factory=lambda: journal,
-        storage_profile_registry=StorageProfileRegistry(),
         mutation_uow_factory=None,
     )
     coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
@@ -480,6 +483,30 @@ def test_recover_incomplete_dense_reconciles_vector_index_with_sql_state() -> No
     assert recovered.state == "ROLLED_BACK"
     assert doc_repo.get_all_documents() == []
     assert vec_repo.ids == set()
+
+
+def test_recovered_vector_commit_republishes_cache_version() -> None:
+    versions: list[int] = []
+
+    def bump() -> int:
+        versions.append(len(versions) + 1)
+        return versions[-1]
+
+    coordinator, journal = _build_ports(doc_repo=_DocRepoSparseStub(), bump_version=bump)
+    intent = MutationIntent(op_id="mut:legacy-vector-commit")
+    journal.upsert(
+        MutationRecord(
+            op_id=intent.op_id,
+            state="VECTOR_COMMITTED",
+            vector_attempted=True,
+            intent=intent_to_dict(intent),
+            outcome=summary_to_payload(MutationSummary(op_id=intent.op_id)),
+        )
+    )
+
+    assert coordinator.recover_incomplete(limit=10) == 1
+    assert versions == [1]
+    assert journal.get(intent.op_id).state == "COMMITTED"
 
 
 def test_dense_embeddings_are_precomputed_outside_write_lock() -> None:
@@ -528,7 +555,6 @@ def test_dense_embeddings_are_precomputed_outside_write_lock() -> None:
         reconcile_index=lambda: 0,
         write_lock=_write_lock,
         mutation_journal_factory=lambda: journal,
-        storage_profile_registry=StorageProfileRegistry(),
         mutation_uow_factory=None,
     )
     coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
@@ -688,7 +714,6 @@ def test_stale_precompute_is_safe_when_document_changes_before_lock() -> None:
         reconcile_index=lambda: 0,
         write_lock=_noop_write_lock,
         mutation_journal_factory=lambda: journal,
-        storage_profile_registry=StorageProfileRegistry(),
         mutation_uow_factory=None,
     )
     saga = MutationSagaExecutor(settings_obj=settings, ports=ports)
@@ -724,7 +749,7 @@ def test_stale_precompute_is_safe_when_document_changes_before_lock() -> None:
     assert repo._content_by_external_id["doc-1"] == "v0"
 
 
-def test_batch_drain_acquires_lock_once_for_two_concurrent_mutations() -> None:
+def test_concurrent_mutations_each_acquire_the_write_lock() -> None:
     class _Repo:
         def __init__(self) -> None:
             self._next = 1
@@ -783,11 +808,7 @@ def test_batch_drain_acquires_lock_once_for_two_concurrent_mutations() -> None:
             lock_entries += 1
         yield
 
-    settings = _SettingsStub(
-        retrieval_mode="sparse",
-        mutation_batch_max_size=32,
-        mutation_batch_max_wait_ms=200,
-    )
+    settings = _SettingsStub(retrieval_mode="sparse")
     repo = _Repo()
     journal = _MemoryJournal()
     ports = DocsMutationPorts(
@@ -798,7 +819,6 @@ def test_batch_drain_acquires_lock_once_for_two_concurrent_mutations() -> None:
         reconcile_index=lambda: 0,
         write_lock=_write_lock,
         mutation_journal_factory=lambda: journal,
-        storage_profile_registry=StorageProfileRegistry(),
         mutation_uow_factory=None,
     )
     coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
@@ -831,4 +851,68 @@ def test_batch_drain_acquires_lock_once_for_two_concurrent_mutations() -> None:
     assert not errors
     assert len(results) == 2
     assert all(r.inserted == 1 for r in results)
-    assert lock_entries == 1
+    assert lock_entries == 2
+
+
+def test_nested_import_mutation_does_not_wait_behind_another_lock_holder(tmp_path) -> None:
+    class _LocalSettings(_SettingsStub):
+        def get_coordination_dir(self) -> Path:
+            return tmp_path
+
+    attempted_lock = threading.Event()
+    other_result: list[MutationSummary] = []
+    other_errors: list[Exception] = []
+
+    @contextmanager
+    def _write_lock(*, coordination_dir=None, timeout_s=None, poll_s=None):
+        if threading.current_thread().name == "other-mutation":
+            attempted_lock.set()
+        with multi_store_write_lock(
+            coordination_dir=coordination_dir,
+            timeout_s=timeout_s,
+            poll_s=poll_s,
+        ):
+            yield
+
+    settings = _LocalSettings(retrieval_mode="sparse", write_lock_timeout_s=0.3)
+    journal = _MemoryJournal()
+    ports = DocsMutationPorts(
+        build_embedder=lambda: _DenseEmbedder(),
+        doc_repo_factory=_DocRepoSparseStub,
+        build_upsert_doc=lambda **kwargs: dict(kwargs),
+        vector_repo_factory=lambda **kwargs: object(),
+        reconcile_index=lambda: 0,
+        write_lock=_write_lock,
+        mutation_journal_factory=lambda: journal,
+    )
+    coordinator = MutationCoordinator(settings_obj=settings, ports=ports)
+
+    def _other_mutation() -> None:
+        try:
+            other_result.append(
+                coordinator.execute(
+                    MutationIntent(
+                        op_id="mut:other",
+                        upserts=(MutationUpsertInput(external_id="other", content="other"),),
+                    )
+                )
+            )
+        except Exception as exc:
+            other_errors.append(exc)
+
+    with multi_store_write_lock(coordination_dir=tmp_path):
+        other = threading.Thread(target=_other_mutation, name="other-mutation", daemon=True)
+        other.start()
+        assert attempted_lock.wait(timeout=1)
+        import_result = coordinator.execute(
+            MutationIntent(
+                op_id="mut:import",
+                upserts=(MutationUpsertInput(external_id="import", content="import"),),
+            )
+        )
+
+    other.join(timeout=1)
+    assert not other.is_alive()
+    assert not other_errors
+    assert import_result.inserted == 1
+    assert len(other_result) == 1

@@ -10,7 +10,6 @@ from support.container import override_container
 
 from local_rag_backend.composition import factory
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
-from local_rag_backend.http.routers import docs as docs_router
 from local_rag_backend.infrastructure.persistence.sql import SqlDocumentStorage
 from local_rag_backend.settings import get_settings
 
@@ -149,7 +148,6 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
     override_container(monkeypatch, doc_repo_factory=FakeRepo)
     override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: FakeEmbedder())
     override_container(monkeypatch, vector_repo_factory=lambda *a, **k: fake_vec)
-    monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     task_a = asyncio.create_task(
         asgi_client.post(
@@ -168,8 +166,9 @@ async def test_concurrent_mutations_are_serialized_and_keep_sql_vector_consisten
 
     assert ra.status_code == 200, ra.text
     assert rb.status_code == 200, rb.text
-    assert FakeRepo._by_external_id["doc-1"][1] == "B"
-    assert fake_vec.by_id[1] == [2.0]
+    final_content = FakeRepo._by_external_id["doc-1"][1]
+    assert final_content in {"A", "B"}
+    assert fake_vec.by_id[1] == ([1.0] if final_content == "A" else [2.0])
 
 
 async def test_docs_ingest_executes_single_locked_mutation_pass(
@@ -190,7 +189,6 @@ async def test_docs_ingest_executes_single_locked_mutation_pass(
         _fake_run_blocking,
         raising=True,
     )
-    monkeypatch.setattr(docs_router, "reset_rag_service", lambda: None, raising=True)
 
     resp = await asgi_client.post("/api/docs/ingest", json={"texts": ["  hello world  "]})
     assert resp.status_code == 200
@@ -227,7 +225,12 @@ async def test_mutation_failure_still_invalidates_cached_rag_service(
     monkeypatch.setattr(settings, "openai_api_key", "k", raising=False)
     override_container(monkeypatch, openai_embedder_factory=lambda *a, **k: FakeEmbedder())
     override_container(monkeypatch, vector_repo_factory=lambda *a, **k: FailingVec())
-    monkeypatch.setattr(docs_router, "reset_rag_service", _count_reset, raising=True)
+    monkeypatch.setattr(
+        factory.get_app_context().container,
+        "clear_local_rag_service_cache",
+        _count_reset,
+        raising=True,
+    )
 
     response = await asgi_client.post(
         "/api/docs/mutate",

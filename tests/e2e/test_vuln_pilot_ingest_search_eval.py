@@ -54,8 +54,6 @@ def test_vuln_pilot_import_search_eval_and_scope_sync(
 ) -> None:
     _ = in_memory_sqlite
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(settings, "search_backend", "local_split", raising=False)
-    monkeypatch.setattr(settings, "persistence_backend", "local_split", raising=False)
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(settings, "data_dir", data_dir, raising=False)

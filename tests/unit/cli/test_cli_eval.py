@@ -68,6 +68,27 @@ def test_rag_eval_fails_below_threshold(tmp_path: Path) -> None:
     assert r.output.count("\n") == 1
 
 
+def test_rag_eval_without_thresholds_reports_low_scores_without_failing(tmp_path: Path) -> None:
+    dataset = tmp_path / "low-scores.jsonl"
+    dataset.write_text(
+        "\n".join(
+            [
+                '{"type":"meta","dataset_id":"low","schema_version":1,"created_at":"2026-02-16"}',
+                '{"type":"doc","external_id":"doc:1","source_id":"eval","content":"unrelated"}',
+                '{"type":"doc","external_id":"doc:2","source_id":"eval","content":"alpha"}',
+                '{"type":"query","query":"alpha","relevant_external_ids":["doc:1"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(cli, ["eval", "--dataset", str(dataset), "--k", "1"])
+
+    assert result.exit_code == 0, result.output
+    assert "dataset=low mode=sparse" in result.output
+
+
 def test_rag_eval_reports_invalid_jsonl_cleanly(tmp_path: Path) -> None:
     ds = tmp_path / "bad.jsonl"
     ds.write_text('{"not":"valid"\n', encoding="utf-8")

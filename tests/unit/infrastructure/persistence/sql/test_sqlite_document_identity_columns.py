@@ -37,11 +37,11 @@ def test_fresh_schema_contains_doc_id_and_identity_columns(tmp_path):
             "snapshot_id",
             "metadata",
             "content_sha256",
-            "chunk_dedup_sha256",
             "created_at",
             "updated_at",
             "content",
         }.issubset(cols)
+        assert "chunk_dedup_sha256" not in cols
 
 
 def test_external_id_unique_constraint(tmp_path):
@@ -62,6 +62,35 @@ def test_external_id_unique_constraint(tmp_path):
             s.rollback()
         else:
             raise AssertionError("expected unique external_id constraint")
+
+
+def test_existing_nullable_chunk_dedup_column_does_not_block_upserts(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'legacy.db'}", connect_args={"check_same_thread": False}
+    )
+    db_base.ensure_sqlite_schema_current(engine_to_use=engine)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE documents ADD COLUMN chunk_dedup_sha256 TEXT"))
+
+    repo = SqlDocumentStorage(
+        session_factory=sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    )
+    results, _, _ = repo.upsert_documents_by_external_id(
+        [SqlDocumentStorage.UpsertDoc(external_id="existing", content="  Raw text  ")]
+    )
+    assert repo.get([results[0].id])[0].content == "  Raw text  "
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE documents SET chunk_dedup_sha256 = 'legacy' WHERE external_id = 'existing'"
+            )
+        )
+
+    by_id = repo.snapshot_by_ids([results[0].id])
+    by_external_id = repo.snapshot_by_external_ids(["existing"])
+    assert by_id == by_external_id
+    assert by_id[0]["content"] == "  Raw text  "
+    assert "chunk_dedup_sha256" not in by_id[0]
 
 
 def test_store_documents_returns_doc_ids(in_memory_sqlite):

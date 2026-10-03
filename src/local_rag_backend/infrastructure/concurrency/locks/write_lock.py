@@ -15,6 +15,7 @@ import time
 from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING
 
+from local_rag_backend.core.errors import WriteLockTimeoutError
 from local_rag_backend.infrastructure.concurrency.locks.file_lock import exclusive_file_lock
 
 if TYPE_CHECKING:
@@ -85,10 +86,22 @@ def multi_store_write_lock(
     if lock_path in held:
         yield
         return
-    file_lock_cm = _exclusive_file_lock(lock_path, timeout_s=timeout_s, poll_s=poll_s)
     acquire_started = time.monotonic()
+    deadline = acquire_started + max(0.0, float(timeout_s))
+    local_acquired = False
     try:
-        with _LOCAL_WRITE_LOCK, file_lock_cm:
+        local_acquired = _LOCAL_WRITE_LOCK.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        if not local_acquired:
+            raise WriteLockTimeoutError(
+                f"Unable to acquire local write lock for {lock_path}. "
+                f"Timed out after {float(timeout_s):.2f}s."
+            )
+        remaining_s = max(0.0, deadline - time.monotonic())
+        with _exclusive_file_lock(
+            lock_path,
+            timeout_s=remaining_s,
+            poll_s=min(poll_s, max(0.001, remaining_s)),
+        ):
             acquired_wait_s = time.monotonic() - acquire_started
             _record_lock_event(
                 lock_path=lock_path,
@@ -116,6 +129,9 @@ def multi_store_write_lock(
             status="failed",
         )
         raise
+    finally:
+        if local_acquired:
+            _LOCAL_WRITE_LOCK.release()
 
 
 __all__ = ["_exclusive_file_lock", "multi_store_write_lock"]

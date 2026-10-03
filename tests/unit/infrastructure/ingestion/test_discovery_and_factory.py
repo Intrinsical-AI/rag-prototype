@@ -114,13 +114,13 @@ def test_discover_files_skips_symlink_directory_input_when_follow_symlinks_is_di
     assert files_follow[0].name == "inside.txt"
 
 
-def test_factory_skips_binary_and_detects_markdown_heuristically(tmp_path: Path):
+def test_factory_skips_binary_and_detects_markdown_for_unknown_extension(tmp_path: Path):
     bin_p = tmp_path / "bin.dat"
     bin_p.write_bytes(b"\x00\x01\x02")
     assert detect_file_format(bin_p, use_magic=False).fmt == "binary"
     assert get_loader_for_file(bin_p, use_magic=False) is None
 
-    md_p = tmp_path / "note.txt"  # misleading extension
+    md_p = tmp_path / "note.unknown"
     md_p.write_text("# Title\n\n- item\n", encoding="utf-8")
     assert detect_file_format(md_p, use_magic=False).fmt == "markdown"
     loader = get_loader_for_file(md_p, use_magic=False)

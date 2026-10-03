@@ -33,7 +33,7 @@ def test_bootstrap_with_canonical_mutation_sparse_mode(tmp_path, monkeypatch, ca
         run_sample_data_ingestion(settings_obj=settings)
 
     assert any("Ingested" in m for m in caplog.messages)
-    assert any("local_split" in m for m in caplog.messages)
+    assert any("into SQLite" in m for m in caplog.messages)
 
     # Verify documents were stored
     from sqlalchemy import create_engine
@@ -52,6 +52,10 @@ def test_bootstrap_with_canonical_mutation_sparse_mode(tmp_path, monkeypatch, ca
     assert len(docs) == 2
     assert any("RAG" in doc.content for doc in docs)
     assert any("funciona" in doc.content for doc in docs)
+    assert {doc.content for doc in docs} == {
+        "¿Qué es RAG?\n\nEs Retrieval-Augmented Generation.",
+        "¿Cómo funciona?\n\nCombina búsqueda y generación.",
+    }
 
 
 def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, caplog):
@@ -97,7 +101,7 @@ def test_bootstrap_with_canonical_mutation_dense_mode(tmp_path, monkeypatch, cap
         run_sample_data_ingestion(settings_obj=settings)
 
     assert any("Ingested" in m for m in caplog.messages)
-    assert any("local_split" in m for m in caplog.messages)
+    assert any("into SQLite" in m for m in caplog.messages)
 
 
 def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
@@ -136,8 +140,14 @@ def test_bootstrap_with_custom_chunking_settings(tmp_path, monkeypatch, capsys):
 
     # Should have multiple chunks due to small chunk size
     assert len(docs) > 1
-    # Each chunk should contain the title metadata
-    assert all("Long Question" in doc.content for doc in docs)
+    from local_rag_backend.core.services.chunking import chunk_chars_v1
+
+    expected = [
+        chunk.text
+        for chunk in chunk_chars_v1(f"Long Question\n\n{long_content}", max_chars=50, overlap=10)
+    ]
+    docs_by_index = sorted(docs, key=lambda doc: int((doc.metadata or {})["chunk_index"]))
+    assert [doc.content for doc in docs_by_index] == expected
 
 
 def test_bootstrap_fails_when_configured_csv_is_missing(tmp_path, monkeypatch):

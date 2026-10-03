@@ -24,6 +24,8 @@ forbidden_modules =
 [importlinter:contract:http-routers-boundary]
 name = HTTP routers must not import concrete infrastructure adapters
 type = forbidden
+# Routers use composition for wiring; concrete adapter imports remain forbidden.
+allow_indirect_imports = True
 source_modules =
     local_rag_backend.http.routers
 forbidden_modules =

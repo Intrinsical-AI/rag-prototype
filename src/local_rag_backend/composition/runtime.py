@@ -20,11 +20,8 @@ class RuntimeSnapshot:
     public_bind_requires_api_key: bool
     api_key_configured: bool
     mutation_recovery_enabled: bool
-    persistence_backend: str
-    search_backend: str
     retrieval_mode: str
     vector_backend: str
-    storage_profile: str
     data_dir: str
     index_path: str
     id_map_path: str
@@ -48,11 +45,8 @@ class RuntimeSnapshot:
                 "mutation_recovery_enabled": self.mutation_recovery_enabled,
             },
             "backends": {
-                "persistence": self.persistence_backend,
-                "search": self.search_backend,
                 "retrieval": self.retrieval_mode,
                 "vector": self.vector_backend,
-                "storage_profile": self.storage_profile,
             },
             "paths": {
                 "data_dir": self.data_dir,
@@ -78,21 +72,15 @@ def build_runtime_snapshot(settings_obj: Settings) -> RuntimeSnapshot:
         public_bind_requires_api_key=bool(settings_obj.public_bind_requires_api_key),
         api_key_configured=bool(getattr(settings_obj, "api_key", None)),
         mutation_recovery_enabled=bool(settings_obj.mutation_recovery_enabled),
-        persistence_backend=str(settings_obj.persistence_backend),
-        search_backend=str(settings_obj.search_backend),
         retrieval_mode=str(settings_obj.retrieval_mode),
         vector_backend=str(settings_obj.vector_backend),
-        storage_profile=str(getattr(settings_obj, "storage_profile", "") or ""),
         data_dir=str(settings_obj.data_dir),
         index_path=str(settings_obj.index_path),
         id_map_path=str(settings_obj.id_map_path),
         eval_dataset_path=str(settings_obj.eval_dataset_path),
         ollama_enabled=bool(settings_obj.ollama_enabled),
         openai_enabled=bool(bool(getattr(settings_obj, "openai_api_key", None))),
-        openrouter_enabled=bool(
-            getattr(settings_obj, "openrouter_enabled", False)
-            and getattr(settings_obj, "openrouter_api_key", None)
-        ),
+        openrouter_enabled=settings_obj.openrouter_configured,
     )
 
 

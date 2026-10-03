@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from local_rag_backend.core.domain.entities import Document
-    from local_rag_backend.core.domain.profiles import StorageProfileRegistry
     from local_rag_backend.core.domain.types import DocId
     from local_rag_backend.core.ports import DocumentRepoPort, EmbedderPort, VectorRepoPort
 
@@ -49,7 +48,6 @@ class UpsertDocBuilderPort(Protocol):
         scope: str | None = None,
         snapshot_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-        chunk_dedup_sha256: str | None = None,
         embedding: Sequence[float] | None = None,
     ) -> object: ...
 
@@ -106,23 +104,24 @@ class MutationRecord:
         """Reject incomplete commit evidence before replay or terminal filtering."""
         payload = self.outcome
         counters = {"inserted", "updated", "unchanged", "deleted_sql", "tombstoned"}
-        nullable_counters = {"deleted_index", "index_doc_count"}
-        keys = (
-            counters
-            | nullable_counters
-            | {"op_id", "missing_external_ids", "index_rebuilt", "results"}
-        )
-        if not isinstance(payload, dict) or set(payload) != keys:
+        nullable_counters = {"deleted_index"}
+        keys = counters | nullable_counters | {"op_id", "missing_external_ids", "results"}
+        legacy_keys = keys | {"index_doc_count", "index_rebuilt"}
+        if not isinstance(payload, dict) or set(payload) not in (keys, legacy_keys):
             raise ValueError("outcome is missing or incomplete")
         if payload["op_id"] != self.op_id:
             raise ValueError("outcome does not match op_id")
-        for key in counters | nullable_counters:
+        for key in (
+            counters
+            | nullable_counters
+            | ({"index_doc_count"} if set(payload) == legacy_keys else set())
+        ):
             value = payload[key]
-            if value is None and key in nullable_counters:
+            if value is None and key in nullable_counters | {"index_doc_count"}:
                 continue
             if type(value) is not int or value < 0:
                 raise ValueError(f"invalid outcome counter {key}")
-        if type(payload["index_rebuilt"]) is not bool:
+        if "index_rebuilt" in payload and type(payload["index_rebuilt"]) is not bool:
             raise ValueError("invalid outcome index_rebuilt")
         missing = payload["missing_external_ids"]
         if not isinstance(missing, list) or any(not isinstance(v, str) for v in missing):
@@ -163,19 +162,24 @@ class MutationRecord:
             "scope",
             "snapshot_id",
             "content_sha256",
-            "chunk_dedup_sha256",
         }
         for snapshot in snapshots:
-            if not isinstance(snapshot, dict) or set(snapshot) != nullable_strings | {
+            keys = nullable_strings | {
                 "id",
                 "content",
                 "metadata",
-            }:
+            }
+            if not isinstance(snapshot, dict) or set(snapshot) not in (
+                keys,
+                keys | {"chunk_dedup_sha256"},
+            ):
                 raise ValueError("incomplete before_image document snapshot")
             for key in ("id", "content"):
                 if not isinstance(snapshot[key], str) or not snapshot[key].strip():
                     raise ValueError(f"invalid before_image document {key}")
-            for key in nullable_strings:
+            for key in nullable_strings | (
+                {"chunk_dedup_sha256"} if "chunk_dedup_sha256" in snapshot else set()
+            ):
                 if snapshot[key] is not None and not isinstance(snapshot[key], str):
                     raise ValueError(f"invalid before_image document {key}")
             if snapshot["metadata"] is not None and not isinstance(snapshot["metadata"], dict):
@@ -209,8 +213,8 @@ class DocsMutationPorts:
     reconcile_index: Callable[[], int]
     write_lock: WriteLockPort
     mutation_journal_factory: Callable[[], MutationJournalPort]
-    storage_profile_registry: StorageProfileRegistry
     mutation_uow_factory: Callable[[], AbstractContextManager[None]] | None = None
+    bump_rag_service_version: Callable[[], int] | None = None
 
 
 @dataclass(frozen=True)

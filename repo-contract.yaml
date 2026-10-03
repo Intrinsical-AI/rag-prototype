@@ -7,7 +7,7 @@ surfaces: [cli, http, mcp, library]
 features:
   - id: retrieval-backend-matrix
     status: implemented
-    summary: Sparse BM25, dense, hybrid, and selectable persistence backends.
+    summary: Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing.
     surfaces: [library, http]
     entrypoints:
       - src/local_rag_backend/composition/factory.py
