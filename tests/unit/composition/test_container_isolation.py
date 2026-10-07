@@ -8,6 +8,30 @@ from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.settings import Settings
 
 
+def test_evaluation_retains_injected_vector_repository_factory(tmp_path, monkeypatch):
+    import local_rag_backend.composition.container as composition
+
+    def injected(**_kwargs):
+        return None
+
+    container = AppContainer.from_settings(
+        Settings(sqlite_url="sqlite:///:memory:", data_dir=tmp_path),
+        vector_repo_factory=injected,
+    )
+    seen = {}
+
+    def build_factory(**kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(composition, "build_eval_retriever_factory_port", build_factory)
+    try:
+        container.build_eval_retriever_factory_port()
+        assert seen["vector_repo_factory"] is injected
+    finally:
+        container.close()
+
+
 @pytest.fixture()
 def containers(tmp_path):
     result = []

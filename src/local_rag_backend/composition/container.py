@@ -319,7 +319,7 @@ class AppContainer:
             st_embedder_factory=self.st_embedder_factory,
             dense_retriever_factory=self.dense_retriever_factory,
             hybrid_retriever_factory=self.hybrid_retriever_factory,
-            vector_repo_factory=VectorStorage,
+            vector_repo_factory=self.vector_repo_factory,
             reranker_factory=self.reranker_factory,
         )
 
