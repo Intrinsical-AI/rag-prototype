@@ -3,7 +3,7 @@
 .PHONY: help venv sync sync-dense-st sync-sec format format-check lint lint-imports
 .PHONY: type test test-architecture check pre-commit build
 .PHONY: contract-check
-.PHONY: smoke-embedding-api-wheel smoke-frontend sec sec-run sec-hard sec-soft clean clean-all
+.PHONY: smoke-embedding-api-wheel smoke-canonical-wheels smoke-frontend sec sec-run sec-hard sec-soft clean clean-all
 .PHONY: docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
@@ -96,6 +96,12 @@ build: sync ## Build wheel and source distributions
 smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embedding API outside checkout
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) UV_PROJECT_ENVIRONMENT=$(VENV_DIR) \
 		uv run --no-sync python scripts/smoke_embedding_api_wheel.py
+
+smoke-canonical-wheels: sync ## Validate three explicit producer/consumer wheels outside checkouts
+	@test -n "$(REPOGPT_WHEEL)" -a -n "$(ADAPTERS_WHEEL)" -a -n "$(RAG_WHEEL)" || \
+		{ echo "Set REPOGPT_WHEEL, ADAPTERS_WHEEL, and RAG_WHEEL to exact wheel paths" >&2; exit 1; }
+	$(UV) run --active --no-sync python scripts/smoke_canonical_wheels.py \
+		--repogpt-wheel "$(REPOGPT_WHEEL)" --adapters-wheel "$(ADAPTERS_WHEEL)" --rag-wheel "$(RAG_WHEEL)"
 
 smoke-frontend: sync ## Chromium regression and local HTTP/SQLite frontend smoke
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) node scripts/smoke_frontend.cjs
