@@ -21,6 +21,7 @@ from local_rag_backend.settings import Settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from concurrent.futures import Future
 
 T = TypeVar("T")
 BlockingTaskType = Literal["default", "mutation", "network", "eval"]
@@ -144,17 +145,28 @@ class BlockingExecutor:
             )
             return call()
 
-        fut = None
-        status: Literal["ok", "error", "cancelled"] = "ok"
+        def _release_completed_task(_future: Future[T]) -> None:
+            state.release_slot()
+            telemetry.observe_blocking_queue(
+                task_type=task_type,
+                pending=state.pending_snapshot(),
+                capacity=capacity,
+            )
+
         try:
             fut = state.executor.submit(_instrumented_call)
+        except RuntimeError:
+            state.release_slot()
+            raise
+        fut.add_done_callback(_release_completed_task)
+        status: Literal["ok", "error", "cancelled"] = "ok"
+        try:
             while not fut.done():
                 await asyncio.sleep(_POLL_INTERVAL_SECONDS)
             return fut.result()
-        except asyncio.CancelledError:  # pragma: no cover
+        except asyncio.CancelledError:
             status = "cancelled"
-            if fut is not None:
-                fut.cancel()
+            fut.cancel()
             raise
         except Exception:
             status = "error"
@@ -164,10 +176,4 @@ class BlockingExecutor:
                 task_type=task_type,
                 status=status,
                 duration_s=max(0.0, time.monotonic() - started_at),
-            )
-            state.release_slot()
-            telemetry.observe_blocking_queue(
-                task_type=task_type,
-                pending=state.pending_snapshot(),
-                capacity=capacity,
             )
