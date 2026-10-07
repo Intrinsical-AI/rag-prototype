@@ -47,7 +47,11 @@ class ChatGPTLoader:
         """Extract messages from a single conversation."""
         conv_id: str = str(conv.get("conversation_id") or "")
         title: str = str(conv.get("title") or "")
-        mapping: dict[str, Any] = conv.get("mapping") or {}
+        mapping = conv.get("mapping")
+        if mapping is None:
+            mapping = {}
+        if not isinstance(mapping, dict):
+            raise ValueError("ChatGPTLoader: mapping must be an object")
 
         for node in mapping.values():
             if not isinstance(node, dict):
@@ -64,12 +68,20 @@ class ChatGPTLoader:
             if content_block.get("content_type") != "text":
                 continue
 
-            parts = content_block.get("parts") or []
+            parts = content_block.get("parts")
+            if parts is None:
+                parts = []
+            if not isinstance(parts, list):
+                raise ValueError("ChatGPTLoader: content.parts must be an array")
             text = " ".join(str(p) for p in parts if p and str(p).strip())
             if not text.strip():
                 continue
 
-            author = msg.get("author") or {}
+            author = msg.get("author")
+            if author is None:
+                author = {}
+            if not isinstance(author, dict):
+                raise ValueError("ChatGPTLoader: author must be an object")
             role: str = str(author.get("role") or "")
             msg_id: str = str(msg.get("id") or "")
             create_time = msg.get("create_time")
