@@ -12,6 +12,23 @@ def _make_chatgpt_export(conversations: list[dict]) -> bytes:
     return json.dumps(conversations).encode("utf-8")
 
 
+@pytest.mark.parametrize("field", ["mapping", "author", "parts"])
+@pytest.mark.parametrize("malformed", ["invalid", 7, ["invalid"]])
+def test_chatgpt_loader_rejects_malformed_nested_shapes(field, malformed):
+    if field == "parts" and isinstance(malformed, list):
+        malformed = {"invalid": True}
+    message = {"author": {"role": "user"}, "content": {"content_type": "text", "parts": ["ok"]}}
+    conversation = {"mapping": {"node": {"message": message}}}
+    if field == "mapping":
+        conversation["mapping"] = malformed
+    elif field == "author":
+        message["author"] = malformed
+    else:
+        message["content"]["parts"] = malformed
+    with pytest.raises(ValueError, match=field):
+        list(ChatGPTLoader(_make_chatgpt_export([conversation])).load())
+
+
 def test_chatgpt_loader_minimal_valid_export():
     """Test minimal ChatGPT export with 1 conversation, 2 messages."""
     export = [

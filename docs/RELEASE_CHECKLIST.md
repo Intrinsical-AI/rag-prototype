@@ -76,6 +76,41 @@ The canonical import contract accepts RepoGPT code-units v5 and
 the generic rag-adapters payload; installed-artifact receipts establish the
 specific tested producer combination.
 
+For the retained code-units v5 boundary, canonical import accepts at most 5,000
+nonblank documents per snapshot, 20,000 characters per document, 512 characters
+per external ID, and 1,024 characters per source ID. RepoGPT can emit a valid v5
+artifact beyond those consumer limits; RAG rejects it before importing. This
+stabilization preserves the v5 contract and does not adopt the deferred v6
+snapshot-policy migration. Validate the exact producer wheels before freezing
+their candidate revisions.
+
+Build each candidate's wheel and sdist with `uv build --out-dir <separate-dir>`;
+pass one exact wheel from each build, retaining its SHA-256 and source revision:
+
+```bash
+make smoke-canonical-wheels \
+  REPOGPT_WHEEL=/absolute/path/repogpt-0.10.0-py3-none-any.whl \
+  ADAPTERS_WHEEL=/absolute/path/rag_adapters-0.2.0-py3-none-any.whl \
+  RAG_WHEEL=/absolute/path/rag_prototype-4.0.0-py3-none-any.whl
+```
+
+This gate creates a fresh environment outside checkouts, installs only the
+three selected wheels and their declared runtime dependencies, verifies import
+origins and packaged schemas, and uses synthetic text with sparse local SQLite
+retrieval. It exercises CLI import, idempotent replay, adapter failure evidence,
+and refusal to replace a partial scope. It clears source injection and provider
+credentials; it does not certify optional extractors, paid providers, or private
+data. Dependency installation may require registry access; `UV_OFFLINE=1` uses
+only cached dependencies. Freeze producer revisions together with
+these exact artifact hashes before final acceptance.
+
+The local `data/.mutation_journal-terminal-legacy-20261004T224154Z/` directory
+retains 525 private legacy `COMMITTED` receipts with before-images, outside the
+active journal. All 525 file hashes and sizes match the campaign custody
+baseline captured on 2026-10-07. Its exact directory is excluded from Git; this
+does not authorize deletion, upload, or replay into current data. These retained
+files are not source acceptance evidence and do not certify a data migration.
+
 ## Historical boundary: 3.0.0
 
 Breaking changes relative to 2.1.0:
