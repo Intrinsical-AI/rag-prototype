@@ -124,13 +124,13 @@ class ChatUnitsPayload(_Envelope):
 class _InputIdentity(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     format: Literal["pcap", "wigle"]
-    size_bytes: Annotated[int, Field(ge=1, le=256 * 1024 * 1024, strict=True)]
+    size_bytes: _Count
     sha256: _Digest
 
 
 class _ParserCounts(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    read: Annotated[int, Field(ge=0, le=100_000, strict=True)]
+    read: _Count
     accepted: _Count
     out_of_domain: _Count
     rejected: _Count
@@ -222,14 +222,18 @@ class Tr3v0rCanonicalPayload(_Envelope):
             raise ValueError("Tr3v0r completion dataset_key must match scope")
         counts: Counter[str] = Counter()
         for document in self.documents:
+            if set(document) != {"external_id", "source_id", "content", "metadata"}:
+                raise ValueError("Tr3v0r documents must use the native document fields")
             metadata = document.get("metadata")
             if (
                 not isinstance(metadata, dict)
                 or metadata.get("dataset_key") != completion.dataset_key
             ):
                 raise ValueError("Tr3v0r document dataset_key must match completion")
+            if not isinstance(metadata.get("schema_version"), str):
+                raise ValueError("Tr3v0r document metadata requires a schema_version string")
             doc_type = metadata.get("doc_type")
-            if doc_type not in _DOC_ARTIFACTS:
+            if not isinstance(doc_type, str) or doc_type not in _DOC_ARTIFACTS:
                 raise ValueError("Unknown Tr3v0r document type")
             counts[doc_type] += 1
             if not str(document.get("external_id", "")).startswith(self.scope + ":") or not str(

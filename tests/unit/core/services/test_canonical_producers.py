@@ -183,3 +183,67 @@ def test_partial_receipt_retains_record_accounting_without_authorizing_replaceme
         build_canonical_import_request_input_from_raw(
             raw, source="partial", replace_scope_override=True
         )
+
+
+@pytest.mark.parametrize("boundary", ["source_bytes", "source_records", "empty_source_partial"])
+def test_tr3v0r_receipt_describes_original_source_not_export_work_budget(boundary):
+    raw = _payload()
+    completion = raw["completion"]
+    manifest = completion["run_manifest"]
+    manifest["input"]["format"] = "wigle"
+    if boundary == "source_bytes":
+        manifest["input"]["size_bytes"] = 256 * 1024 * 1024 + 1
+    elif boundary == "source_records":
+        # Installed-producer reproduction: 100,000 recognized cell rows and one
+        # WiFi row produce only 30 KiB of selected artifacts for export.
+        manifest["input"]["size_bytes"] = 5_600_172
+        manifest["parser_counts"].update(read=100_001, out_of_domain=100_000)
+    else:
+        manifest["input"]["size_bytes"] = 0
+        manifest["input"]["sha256"] = hashlib.sha256(b"").hexdigest()
+        manifest["parser_counts"].update(read=0, accepted=0)
+        for name, artifact in manifest["artifacts"].items():
+            artifact["record_count"] = 1 if name == "graph_manifest" else 0
+        raw["documents"] = [
+            document
+            for document in raw["documents"]
+            if document["metadata"]["doc_type"] == "dataset_manifest"
+        ]
+        completion.update(
+            complete=False,
+            failures=["Declared source snapshot contains no represented observations"],
+            expected_document_counts={"dataset_manifest": 1},
+        )
+        completion["document_set_sha256"] = _digest(
+            sorted(raw["documents"], key=lambda doc: doc["external_id"])
+        )
+        raw["replace_scope"] = False
+    completion["run_manifest_sha256"] = _digest(manifest)
+    request = build_canonical_import_request_input_from_raw(raw, source="receipt-boundary")
+    assert request.documents
+    assert request.replace_scope is (boundary != "empty_source_partial")
+    if boundary == "empty_source_partial":
+        with pytest.raises(ValueError, match="Partial canonical"):
+            build_canonical_import_request_input_from_raw(
+                raw, source="receipt-boundary", replace_scope_override=True
+            )
+
+
+@pytest.mark.parametrize("mutation", ["missing_schema", "nonstring_schema", "extra_field"])
+def test_tr3v0r_documents_follow_the_packaged_native_schema(mutation):
+    raw = _payload()
+    document = raw["documents"][0]
+    if mutation == "missing_schema":
+        document["metadata"].pop("schema_version")
+    elif mutation == "nonstring_schema":
+        document["metadata"]["schema_version"] = 1
+    else:
+        document["unknown"] = "unexpected native document root field"
+    # A refreshed digest must not make a malformed producer document admissible.
+    raw["completion"]["document_set_sha256"] = _digest(
+        sorted(raw["documents"], key=lambda doc: doc["external_id"])
+    )
+    with pytest.raises(ValueError, match="Tr3v0r document"):
+        build_canonical_import_request_input_from_raw(
+            raw, source="document-contract", replace_scope_override=True
+        )
