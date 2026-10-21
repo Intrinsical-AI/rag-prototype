@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import logging
 import sys
-from typing import Any, Literal, cast
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -20,6 +20,7 @@ from local_rag_backend.cli_commands.runtime import (
 from local_rag_backend.composition.factory import reset_app_context
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
+from local_rag_backend.core.errors import RagBaseError
 from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input_from_raw,
 )
@@ -34,8 +35,13 @@ from local_rag_backend.core.use_cases.docs_import_canonical import (
 )
 from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 
-logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
-logger = logging.getLogger("rag_prototype_mcp")
+if TYPE_CHECKING:
+    from mcp.server.lowlevel import Server
+
+
+class ToolOperationError(ValueError):
+    """Known input/configuration refusal; application bugs retain internal-error handling."""
+
 
 MAX_ASK_QUESTION_CHARS = 4096
 
@@ -209,7 +215,7 @@ def tool_import_canonical(
             replace_scope_override=replace_scope_override,
         )
     except (ValidationError, ValueError) as exc:
-        raise ValueError(str(exc)) from exc
+        raise ToolOperationError(str(exc)) from exc
 
     container = get_cli_container()
     mutation_bundle = container.build_docs_mutation_bundle()
@@ -239,7 +245,7 @@ def tool_import_canonical(
 def tool_rebuild_index() -> dict[str, object]:
     runtime = get_cli_runtime_snapshot()
     if runtime.retrieval_mode not in {"dense", "dual", "hybrid"}:
-        raise RuntimeError("rag_rebuild_index requires retrieval_mode=dense|dual|hybrid.")
+        raise ToolOperationError("rag_rebuild_index requires retrieval_mode=dense|dual|hybrid.")
 
     from local_rag_backend.core.use_cases import index as index_service
 
@@ -262,7 +268,10 @@ def tool_eval(
     filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, object]:
     runtime = get_cli_runtime_snapshot()
-    dataset = load_eval_dataset(dataset_path or runtime.eval_dataset_path)
+    try:
+        dataset = load_eval_dataset(dataset_path or runtime.eval_dataset_path)
+    except (OSError, ValueError) as exc:
+        raise ToolOperationError(str(exc)) from exc
     parsed_filters = _parse_filters(filters)
     config = build_eval_retrieval_config(
         retrieval_mode=retrieval_mode,
@@ -289,132 +298,156 @@ def tool_eval(
     return response
 
 
-TOOLS: dict[str, dict[str, Any]] = {
-    "rag_status": {
-        "description": "Return structured runtime status, counts, and index diagnostics.",
-        "arguments": _Arguments,
-        "handler": tool_status,
+@dataclass(frozen=True)
+class Tool:
+    description: str
+    arguments: type[BaseModel]
+    handler: Callable[..., dict[str, object]]
+    success_schema: dict[str, Any]
+    destructive: bool = False
+    open_world: bool = False
+
+
+def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {"type": "object", "properties": properties, "required": required}
+
+
+_COUNT = {"type": "integer", "minimum": 0}
+_TEXT = {"type": "string"}
+_NULLABLE_TEXT = {"type": ["string", "null"]}
+_DOCUMENT = _schema(
+    {
+        "id": _TEXT,
+        "content": _TEXT,
+        "external_id": _NULLABLE_TEXT,
+        "source_id": _NULLABLE_TEXT,
+        "metadata": {"type": ["object", "null"]},
     },
-    "rag_ask": {
-        "description": "Ask a question using the configured RAG runtime.",
-        "arguments": _AskArguments,
-        "handler": tool_ask,
-    },
-    "rag_import_canonical": {
-        "description": "Import canonical documents via the native scope/snapshot sync flow.",
-        "arguments": _ImportArguments,
-        "handler": tool_import_canonical,
-    },
-    "rag_rebuild_index": {
-        "description": "Rebuild the dense/dual/hybrid retrieval index.",
-        "arguments": _Arguments,
-        "handler": tool_rebuild_index,
-    },
-    "rag_eval": {
-        "description": "Run offline retrieval evaluation with optional retrieval filters.",
-        "arguments": _EvalArguments,
-        "handler": tool_eval,
-    },
+    ["id", "content", "external_id", "source_id", "metadata"],
+)
+
+TOOLS: dict[str, Tool] = {
+    "rag_status": Tool(
+        "Initialize configured runtime storage and return status, counts and index diagnostics.",
+        _Arguments,
+        tool_status,
+        _schema(
+            {"version": _TEXT, "runtime": {"type": "object"}, "health": {"type": "object"}},
+            ["version", "runtime", "health"],
+        ),
+    ),
+    "rag_ask": Tool(
+        "Ask the configured RAG runtime and persist QA history; may call a configured LLM.",
+        _AskArguments,
+        tool_ask,
+        _schema(
+            {
+                "answer": _TEXT,
+                "sources": {
+                    "type": "array",
+                    "items": _schema(
+                        {
+                            "document": _DOCUMENT,
+                            "score": {"type": "number"},
+                        },
+                        ["document", "score"],
+                    ),
+                },
+            },
+            ["answer", "sources"],
+        ),
+        open_world=True,
+    ),
+    "rag_import_canonical": Tool(
+        "Import canonical documents through the locked native scope/snapshot mutation flow.",
+        _ImportArguments,
+        tool_import_canonical,
+        _schema(
+            {
+                "scope": _TEXT,
+                "snapshot_id": _TEXT,
+                "replace_scope": {"type": "boolean"},
+                **dict.fromkeys(
+                    ("inserted", "updated", "unchanged", "deleted_sql", "deleted_index"), _COUNT
+                ),
+                "deleted_index": {"type": ["integer", "null"], "minimum": 0},
+                "deleted_external_ids": {"type": "array", "items": _TEXT},
+            },
+            [
+                "scope",
+                "snapshot_id",
+                "replace_scope",
+                "inserted",
+                "updated",
+                "unchanged",
+                "deleted_sql",
+                "deleted_index",
+                "deleted_external_ids",
+            ],
+        ),
+        destructive=True,
+        open_world=True,
+    ),
+    "rag_rebuild_index": Tool(
+        "Rebuild the configured dense/dual/hybrid retrieval index using the native mutation lock.",
+        _Arguments,
+        tool_rebuild_index,
+        _schema(
+            {"vectors": _COUNT, "retrieval_mode": {"enum": ["dense", "dual", "hybrid"]}},
+            ["vectors", "retrieval_mode"],
+        ),
+        destructive=True,
+        open_world=True,
+    ),
+    "rag_eval": Tool(
+        "Run offline retrieval evaluation in its persistent evaluation workspace.",
+        _EvalArguments,
+        tool_eval,
+        _schema(
+            {
+                "dataset_id": _TEXT,
+                "retrieval_mode": {"enum": ["sparse", "dense", "dual", "hybrid"]},
+                "reranker_enabled": {"type": "boolean"},
+                "k": {"type": "integer", "minimum": 1},
+                "queries": _COUNT,
+                "metrics": {"type": "object", "additionalProperties": {"type": "number"}},
+                "filters": {"type": "array", "items": _FilterArguments.model_json_schema()},
+            },
+            [
+                "dataset_id",
+                "retrieval_mode",
+                "reranker_enabled",
+                "k",
+                "queries",
+                "metrics",
+                "filters",
+            ],
+        ),
+        destructive=True,
+        open_world=True,
+    ),
 }
 
-PROTOCOL_VERSION = "2024-11-05"
+PROTOCOL_VERSION = "2025-11-25"
 
 
-def _protocol_error(req_id: object, code: int, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+def create_server() -> Server[Any, Any]:
+    """Load the optional SDK only when an MCP server is requested."""
+    from local_rag_backend.mcp_transport import create_sdk_server
 
-
-def handle_request(request: object) -> dict[str, Any] | None:
-    """Handle one MCP message; notifications deliberately produce no response."""
-    if not isinstance(request, dict):
-        return _protocol_error(None, -32600, "Request must be a JSON object")
-    req_id = request.get("id")
-    method = request.get("method")
-    if (
-        request.get("jsonrpc") != "2.0"
-        or not isinstance(method, str)
-        or not method
-        or ("id" in request and type(req_id) not in (int, str))
-    ):
-        return _protocol_error(None, -32600, "Invalid JSON-RPC request")
-    if "id" not in request:
-        return None
-    params = request.get("params", {})
-    if not isinstance(params, dict):
-        return _protocol_error(req_id, -32602, "params must be an object")
-
-    if method == "initialize":
-        if (
-            not isinstance(params.get("protocolVersion"), str)
-            or not isinstance(params.get("capabilities"), dict)
-            or not isinstance(params.get("clientInfo"), dict)
-            or not isinstance(params["clientInfo"].get("name"), str)
-            or not isinstance(params["clientInfo"].get("version"), str)
-        ):
-            return _protocol_error(req_id, -32602, "Invalid initialize parameters")
-        result = {
-            "protocolVersion": PROTOCOL_VERSION,
-            "serverInfo": {"name": "rag-prototype", "version": __version__},
-            "capabilities": {"tools": {}},
-        }
-        return {"jsonrpc": "2.0", "id": req_id, "result": result}
-
-    if method == "ping":
-        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
-
-    if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "tools": [
-                    {
-                        "name": name,
-                        "description": spec["description"],
-                        "inputSchema": spec["arguments"].model_json_schema(),
-                    }
-                    for name, spec in TOOLS.items()
-                ]
-            },
-        }
-
-    if method != "tools/call":
-        return _protocol_error(req_id, -32601, f"Unknown method: {method}")
-    tool_name = params.get("name")
-    if not isinstance(tool_name, str) or tool_name not in TOOLS:
-        return _protocol_error(req_id, -32602, f"Unknown tool: {tool_name}")
-    spec = TOOLS[tool_name]
-    try:
-        arguments = spec["arguments"].model_validate(params.get("arguments", {}))
-    except ValidationError as exc:
-        return _protocol_error(req_id, -32602, str(exc))
-    try:
-        result = spec["handler"](**arguments.model_dump())
-        tool_result: dict[str, Any] = {
-            "content": [{"type": "text", "text": json.dumps(result, indent=2)}]
-        }
-    except Exception as exc:
-        logger.error("Tool error in %s: %s", tool_name, exc)
-        tool_result = {"isError": True, "content": [{"type": "text", "text": str(exc)}]}
-    return {"jsonrpc": "2.0", "id": req_id, "result": tool_result}
+    return create_sdk_server(TOOLS, expected_errors=(ToolOperationError, RagBaseError, OSError))
 
 
 def main() -> None:
-    logger.info("rag-prototype MCP Server starting...")
-    response: dict[str, Any] | None
     try:
-        for line in sys.stdin:
-            if not line.strip():
-                continue
-            try:
-                request = json.loads(line)
-            except ValueError as exc:
-                response = _protocol_error(None, -32700, f"Parse error: {exc}")
-            else:
-                response = handle_request(request)
-            if response is not None:
-                # Broken streams are fatal. Continuing cannot deliver a response and can spin.
-                print(json.dumps(response), flush=True)
+        from local_rag_backend.mcp_transport import run_stdio
+    except ModuleNotFoundError as exc:
+        if exc.name in {"mcp", "anyio", "jsonschema"}:
+            sys.stderr.write("rag-mcp requires the optional mcp extra: uv sync --extra mcp\n")
+            raise SystemExit(2) from None
+        raise
+    try:
+        run_stdio(create_server())
     finally:
         reset_app_context()
 

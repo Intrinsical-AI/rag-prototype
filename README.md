@@ -17,7 +17,7 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 - `retrieval-backend-matrix` — Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing. (`implemented`; `library`, `http`)
 - `canonical-import` — Explicitly discriminated RepoGPT v6, chat-units v4, and Tr3v0r v2 imports with complete-run replacement evidence. (`implemented`; `cli`, `library`)
 - `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
-- `mcp-server` — MCP server surface for exposing retrieval operations to tool clients. (`implemented`; `mcp`)
+- `mcp-server` — Optional official-SDK stdio MCP 2025-11-25 server exposes native retrieval, diagnostics, canonical import, rebuild and evaluation with validated structured results, effect annotations, sanitized errors and bounded single-worker execution. (`implemented`; `mcp`)
 
 ### Commands
 
@@ -328,6 +328,7 @@ Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 Optional: MCP server for agent-facing operational workflows:
 
 ```bash
+uv sync --frozen --extra mcp
 rag-mcp
 # or: python -m local_rag_backend.mcp_server
 ```
@@ -340,11 +341,23 @@ Tools:
 * `rag_eval`
 * `rag_status`
 
-The stdio server announces MCP `2024-11-05`, accepts `ping`, and does not reply to
-notifications. Invalid JSON lines return a parse error and leave the next line
-processable; a broken input/output stream terminates the server. Invalid tool
-arguments return JSON-RPC `-32602`; execution failures return tool content with
-`isError: true`.
+The official SDK handles stdio framing and lifecycle, targeting MCP `2025-11-25`.
+Every tool declares input/output schemas and effect annotations. SDK diagnostics,
+including malformed notification diagnostics, omit request bodies and exception values.
+Tools sent as notifications never execute. Invalid arguments and unknown tools return
+sanitized JSON-RPC `-32602`; known operational refusals return `isError: true` with
+matching JSON text and structured content. Application bugs and invalid outputs return
+sanitized `-32603`. Incomplete status reports preserve successful diagnostics and mark
+the result as an error. The complete serialized tool result, including both text and
+structured content, is limited to 256 KiB; oversized results fail explicitly.
+
+One blocking worker runs per process, and cancellation retains its capacity until the
+operation finishes. A client timeout does not prove rollback or cancellation of a mutation.
+Library and ordinary CLI imports do not load the optional SDK.
+
+Effect annotations reflect native behavior: `rag_ask` persists QA history and may call
+a configured LLM; `rag_status` may initialize configured storage; import, index rebuild
+and evaluation mutate their existing owned data. The native mutation locks remain in use.
 
 `rag_ask` is the narrow query/status integration surface used by the sibling
 `event-based-agent-runtime` repo. The runtime calls it over stdio MCP and keeps

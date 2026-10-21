@@ -32,9 +32,9 @@ features:
     evidence: [README.md]
   - id: mcp-server
     status: implemented
-    summary: MCP server surface for exposing retrieval operations to tool clients.
+    summary: Optional official-SDK stdio MCP 2025-11-25 server exposes native retrieval, diagnostics, canonical import, rebuild and evaluation with validated structured results, effect annotations, sanitized errors and bounded single-worker execution.
     surfaces: [mcp]
-    entrypoints: [src/local_rag_backend/mcp_server.py]
+    entrypoints: [src/local_rag_backend/mcp_server.py, src/local_rag_backend/mcp_transport.py]
     tests: [tests/unit/test_mcp_server.py]
     evidence: [README.md, pyproject.toml]
 commands:
