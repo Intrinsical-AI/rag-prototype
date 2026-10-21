@@ -15,7 +15,7 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 ### Surfaces & Features
 
 - `retrieval-backend-matrix` — Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing. (`implemented`; `library`, `http`)
-- `canonical-import` — Validated canonical document import for external producers such as RepoGPT. (`implemented`; `cli`, `library`)
+- `canonical-import` — Explicitly discriminated RepoGPT v6, chat-units v4, and Tr3v0r v2 imports with complete-run replacement evidence. (`implemented`; `cli`, `library`)
 - `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
 - `mcp-server` — MCP server surface for exposing retrieval operations to tool clients. (`implemented`; `mcp`)
 
@@ -241,7 +241,21 @@ Use these entrypoints for the main workflows:
 See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
 for batch-spec examples and compare-mode usage.
 
-`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v6. The import flow stays generic, but the edge transport validates RepoGPT `kind="code-units"` and `schema_version="6"` when those producer markers are present.
+`rag-import-canonical` accepts RepoGPT `kind="code-units"` / schema `"6"`,
+chat-exports `kind="chat-units"` / schema `"4"`, and Tr3v0r
+`kind="tr3v0r-canonical-rag"` / schema `"2"`. Unknown, conflicting, and obsolete
+producer identities are rejected. Marker-free native canonical imports remain
+supported; the former marker-free chat-exports compatibility envelope is removed.
+All CLI, HTTP, and MCP imports use the same validator and replacement gate.
+
+Tr3v0r scope replacement requires `completion.complete=true`, a complete-run
+manifest with its canonical SHA256, accounted parser records, artifact identities
+and counts, scope/snapshot binding, and a matching document-set digest. Incomplete
+exports carry failure evidence and can only upsert. CLI/MCP replacement overrides
+cannot bypass this gate. The receipt establishes processing of the declared local
+input snapshot; it does not prove historical coverage or authenticity. Chat
+replacement is also refused when `stats.error_count` is nonzero, even if the
+other failure fields are cleared.
 
 Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
 a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP

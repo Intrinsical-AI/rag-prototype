@@ -1,4 +1,4 @@
-"""Validate RepoGPT's code-units v6 wire format before canonical adaptation."""
+"""Discriminate native canonical imports and explicitly identified producers."""
 
 from __future__ import annotations
 
@@ -7,6 +7,11 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from local_rag_backend.core.services.producer_payloads import (
+    ChatUnitsPayload,
+    Tr3v0rCanonicalPayload,
+)
 
 REPOGPT_CODE_UNITS_KIND = "code-units"
 REPOGPT_CODE_UNITS_SCHEMA_VERSION = "6"
@@ -152,12 +157,26 @@ class _CodeUnitsPayload(_ProducerModel):
 def normalize_external_canonical_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Keep generic documents unchanged; drop validated empty module containers."""
     normalized = dict(payload)
-    if not any(
-        marker in payload and payload[marker] is not None for marker in _REPOGPT_TOP_LEVEL_MARKERS
-    ):
+    kind = payload.get("kind")
+    if kind == "chat-units":
+        ChatUnitsPayload.model_validate(payload)
         return normalized
-    if payload.get("kind") != REPOGPT_CODE_UNITS_KIND:
-        raise ValueError("RepoGPT canonical payloads must declare kind='code-units'.")
+    if kind == "tr3v0r-canonical-rag":
+        Tr3v0rCanonicalPayload.model_validate(payload)
+        return normalized
+    producer = payload.get("producer")
+    if isinstance(producer, Mapping) and producer.get("name") in {
+        "chat-exports",
+        "rag-adapters",
+        "tr3v0r",
+    }:
+        raise ValueError("Conflicting or obsolete canonical producer identity")
+    if not any(marker in payload for marker in _REPOGPT_TOP_LEVEL_MARKERS):
+        return normalized
+    if kind != REPOGPT_CODE_UNITS_KIND:
+        raise ValueError("Unknown canonical kind; RepoGPT payloads must declare kind='code-units'.")
+    if "completion" in payload:
+        raise ValueError("Conflicting canonical producer completion evidence")
     if payload.get("schema_version") != REPOGPT_CODE_UNITS_SCHEMA_VERSION:
         raise ValueError("RepoGPT canonical payloads must use code-units schema_version='6'.")
     _CodeUnitsPayload.model_validate(payload)

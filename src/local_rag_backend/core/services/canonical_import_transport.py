@@ -107,8 +107,19 @@ def resolve_canonical_import_replace_scope(
         if replace_scope_override is not None
         else bool(payload.replace_scope)
     )
+    producer_fields = payload.model_extra or {}
+    completion = producer_fields.get("completion")
+    incomplete_tr3v0r = producer_fields.get("kind") == "tr3v0r-canonical-rag" and (
+        not isinstance(completion, dict) or completion.get("complete") is not True
+    )
+    chat_errors = (
+        payload.stats is not None and (payload.stats.model_extra or {}).get("error_count", 0) > 0
+    )
     if replace_scope and (
-        (payload.stats is not None and payload.stats.failed_files > 0) or payload.failures
+        incomplete_tr3v0r
+        or chat_errors
+        or (payload.stats is not None and payload.stats.failed_files > 0)
+        or payload.failures
     ):
         raise ValueError(
             "Partial canonical exports cannot replace a scope. "

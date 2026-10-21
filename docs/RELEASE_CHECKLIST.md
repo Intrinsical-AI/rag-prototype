@@ -72,8 +72,8 @@ Breaking changes relative to `v3.0.0`:
 HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
 also recovers from JSON decoder `ValueError`, including integer literals beyond
 Python's configured digit limit, so the next MCP request remains processable.
-The canonical import contract accepts RepoGPT code-units v6 and
-the generic chat-exports payload; installed-artifact receipts establish the
+The canonical import contract accepts RepoGPT code-units v6, explicit
+chat-exports chat-units v4, and Tr3v0r canonical-rag v2; installed-artifact receipts establish the
 specific tested producer combination.
 
 For the retained code-units v6 boundary, canonical import accepts at most 5,000

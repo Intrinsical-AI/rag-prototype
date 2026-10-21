@@ -16,12 +16,12 @@ features:
     evidence: [README.md, pyproject.toml]
   - id: canonical-import
     status: implemented
-    summary: Validated canonical document import for external producers such as RepoGPT.
+    summary: Explicitly discriminated RepoGPT v6, chat-units v4, and Tr3v0r v2 imports with complete-run replacement evidence.
     surfaces: [cli, library]
     entrypoints:
       - src/local_rag_backend/core/services/external_canonical.py
       - src/local_rag_backend/cli.py
-    tests: [tests/e2e/test_repogpt_import_flow.py]
+    tests: [tests/e2e/test_repogpt_import_flow.py, tests/e2e/test_tr3v0r_import_flow.py, tests/e2e/test_canonical_producer_gates.py]
     evidence: [README.md, src/local_rag_backend/core/services/external_canonical.py]
   - id: http-api
     status: implemented

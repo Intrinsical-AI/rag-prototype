@@ -372,7 +372,7 @@ Notas:
 * El rebuild recompone el índice vectorial local desde SQLite.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
 * `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI y HTTP ahora usan el mismo default: `true`.
-* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v6` se normaliza en el borde de transporte, no en el core del importador.
+* CLI, HTTP y MCP comparten la misma validación tipada para canonical import: RepoGPT code-units v6, chat-exports chat-units v4 y Tr3v0r canonical-rag v2. Los marcadores desconocidos o incompatibles se rechazan. Tr3v0r requiere evidencia verificable de ejecución completa para reemplazar un scope; ningún override permite saltarla. Las exportaciones incompletas solo permiten upsert explícito.
 * Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
 * `rag_status` devuelve un `runtime` estructurado con topología, seguridad, backends y rutas, además de `health` e `index` cuando aplican.
 
