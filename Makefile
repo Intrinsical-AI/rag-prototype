@@ -19,6 +19,7 @@ IMAGE_NAME ?= intrinsical/rag-prototype
 IMAGE_TAG ?= latest
 WORKSPACE_CONTROL_ROOT ?= $(abspath ../../../workspace-control)
 WORKSPACE_CONTROL_CACHE ?= /tmp/uv-cache
+TR3V0R_EXAMPLE_SCRIPT ?= $(abspath ../tr3v0r/scripts/tools/generate_canonical_example.py)
 
 $(VENV_PYTHON_STAMP):
 	@if [ -x "$(VENV_DIR)/bin/python" ] || [ -f "$(VENV_DIR)/Scripts/python.exe" ]; then \
@@ -35,15 +36,15 @@ $(VENV_PYTHON_STAMP):
 	@touch "$@"
 
 $(VENV_SYNC_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --extra server --no-default-groups
+	$(UV) sync --frozen --group test --group lint --extra server --extra mcp --no-default-groups
 	@touch "$@"
 
 $(VENV_DENSE_ST_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --extra server --extra dense-st --no-default-groups
+	$(UV) sync --frozen --group test --group lint --extra server --extra mcp --extra dense-st --no-default-groups
 	@touch "$@"
 
 $(VENV_SEC_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --group sec --extra server --no-default-groups
+	$(UV) sync --frozen --group test --group lint --group sec --extra server --extra mcp --no-default-groups
 	@touch "$@"
 
 help: ## Show available targets
@@ -97,11 +98,13 @@ smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embeddin
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) UV_PROJECT_ENVIRONMENT=$(VENV_DIR) \
 		uv run --no-sync python scripts/smoke_embedding_api_wheel.py
 
-smoke-canonical-wheels: sync ## Validate three explicit producer/consumer wheels outside checkouts
-	@test -n "$(REPOGPT_WHEEL)" -a -n "$(CHAT_EXPORTS_WHEEL)" -a -n "$(RAG_WHEEL)" || \
-		{ echo "Set REPOGPT_WHEEL, CHAT_EXPORTS_WHEEL, and RAG_WHEEL to exact wheel paths" >&2; exit 1; }
+smoke-canonical-wheels: sync ## Validate explicit producer/consumer wheels outside checkouts
+	@test -n "$(REPOGPT_WHEEL)" -a -n "$(CHAT_EXPORTS_WHEEL)" -a -n "$(TR3V0R_WHEEL)" -a -n "$(RAG_WHEEL)" || \
+		{ echo "Set REPOGPT_WHEEL, CHAT_EXPORTS_WHEEL, TR3V0R_WHEEL, and RAG_WHEEL to exact wheel paths" >&2; exit 1; }
 	$(UV) run --active --no-sync python scripts/smoke_canonical_wheels.py \
-		--repogpt-wheel "$(REPOGPT_WHEEL)" --chat-exports-wheel "$(CHAT_EXPORTS_WHEEL)" --rag-wheel "$(RAG_WHEEL)"
+		--repogpt-wheel "$(REPOGPT_WHEEL)" --chat-exports-wheel "$(CHAT_EXPORTS_WHEEL)" \
+		--tr3v0r-wheel "$(TR3V0R_WHEEL)" --rag-wheel "$(RAG_WHEEL)" \
+		--tr3v0r-example-script "$(TR3V0R_EXAMPLE_SCRIPT)"
 
 smoke-frontend: sync ## Chromium regression and local HTTP/SQLite frontend smoke
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) node scripts/smoke_frontend.cjs

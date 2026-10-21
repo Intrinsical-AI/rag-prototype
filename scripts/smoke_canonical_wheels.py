@@ -1,4 +1,4 @@
-"""Validate exact RepoGPT and chat-exports wheels against an installed RAG wheel."""
+"""Validate exact native producer wheels against an isolated installed RAG wheel."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ for module, schema in (
     ("repogpt", "code-units-v6.schema.json"),
     ("chat_exports", "chat-archive-v3.schema.json"),
     ("chat_exports", "messages-v2.schema.json"),
-    ("chat_exports", "rag-import-chat-v3.schema.json"),
+    ("chat_exports", "rag-import-chat-v4.schema.json"),
 ):
     assert resources.files(module).joinpath("schemas", schema).is_file()
 
@@ -101,8 +101,8 @@ for path in chat_paths:
     assert len(chat_payload["failures"]) == 1
     assert chat_payload["failures"][0]["code"] == failure.code
     assert chat_payload["stats"]["failed_files"] == chat_payload["stats"]["error_count"] == 1
-    assert chat_payload["producer"]["format_version"] == "3"
-    assert not any(key in chat_payload for key in ("kind", "schema_version", "repo_key"))
+    assert chat_payload["producer"]["format_version"] == "4"
+    assert chat_payload["kind"] == "chat-units" and chat_payload["schema_version"] == "4"
     assert chat_payload["replace_scope"] is False
     validated = validate_canonical_import_payload(chat_payload)
     assert resolve_canonical_import_replace_scope(validated) is False
@@ -229,11 +229,144 @@ def _wheel(path: Path, name: str) -> dict[str, str]:
     }
 
 
+ISOLATED_CONSUMER = r"""
+import hashlib, importlib.metadata, importlib.util, json, sys, zipfile
+from pathlib import Path
+from local_rag_backend.core.services.canonical_import_transport import build_canonical_import_request_input_from_raw
+from local_rag_backend.mcp_server import tool_import_canonical
+from local_rag_backend.cli_commands.runtime import get_cli_container
+from local_rag_backend.composition.factory import reset_app_context
+
+wheel=Path(sys.argv[1]); producer_root=Path(sys.argv[2]); rf=json.loads(sys.argv[3])
+dist=importlib.metadata.distribution('rag-prototype')
+assert json.loads(dist.read_text('direct_url.json'))['url']==wheel.resolve().as_uri()
+with zipfile.ZipFile(wheel) as archive:
+ for name in archive.namelist():
+  if name.endswith(('/', '.dist-info/RECORD')):continue
+  installed=Path(dist.locate_file(name)).resolve()
+  assert installed.is_relative_to(Path(sys.prefix).resolve())
+  assert installed.read_bytes()==archive.read(name)
+for module in ('repogpt','chat_exports','tr3v0r'):
+ assert importlib.util.find_spec(module) is None, module
+paths=[producer_root/'repogpt.json', *sorted((producer_root/'exports'/'rag').glob('*.json')),
+       *sorted((producer_root/'telegram-output'/'rag').glob('*.json')), Path(rf['complete'])]
+assert len(paths)>=4
+reports=[]
+try:
+ for path in paths:
+  raw=json.loads(path.read_text())
+  first=tool_import_canonical(raw)
+  second=tool_import_canonical(raw)
+  assert second['inserted']==second['updated']==second['deleted_sql']==0
+  reports.append({'kind':raw['kind'],'documents':len(raw['documents'])})
+ partial=json.loads(Path(rf['upsert']).read_text())
+ assert partial['completion']['complete'] is False and partial['replace_scope'] is False
+ assert tool_import_canonical(partial)['deleted_sql']==0
+ before=list(get_cli_container().doc_repo_factory().get_all_documents())
+ try:tool_import_canonical(partial,replace_scope_override=True)
+ except ValueError:pass
+ else:raise AssertionError('Partial Tr3v0r replacement override bypassed evidence')
+ after=list(get_cli_container().doc_repo_factory().get_all_documents())
+ assert {str(item.id) for item in before}=={str(item.id) for item in after}
+ assert {item['kind'] for item in reports}=={'code-units','chat-units','tr3v0r-canonical-rag'}
+finally:reset_app_context()
+print(json.dumps({'producers':reports,'consumer_has_no_producer_packages':True,
+ 'replay_idempotent':True,'partial_rf_replacement_refused':True,
+ 'consumer_wheel_sha256':hashlib.sha256(wheel.read_bytes()).hexdigest()}))
+"""
+
+
+def _isolated_producer_boundary(
+    root: Path,
+    *,
+    uv: str,
+    env: dict[str, str],
+    wheels: dict[str, dict[str, str]],
+    example_script: Path,
+) -> dict[str, object]:
+    """Generate RF with its installed producer and consume all outputs separately."""
+    rf_env = root / "rf-venv"
+    consumer_env = root / "consumer-venv"
+    for environment, distribution in ((rf_env, "tr3v0r"), (consumer_env, "rag-prototype")):
+        _run([uv, "venv", "--python", sys.executable, str(environment)], cwd=root, env=env)
+        python = environment / "bin/python"
+        _run(
+            [uv, "pip", "install", "--python", str(python), wheels[distribution]["path"]],
+            cwd=root,
+            env=env,
+        )
+        _run([uv, "pip", "check", "--python", str(python)], cwd=root, env=env)
+        verify = r"""
+import importlib.metadata,json,sys,zipfile
+from pathlib import Path
+name=sys.argv[1];wheel=Path(sys.argv[2]);dist=importlib.metadata.distribution(name)
+assert json.loads(dist.read_text('direct_url.json'))['url']==wheel.resolve().as_uri()
+with zipfile.ZipFile(wheel) as archive:
+ for member in archive.namelist():
+  if member.endswith(('/','.dist-info/RECORD')):continue
+  path=Path(dist.locate_file(member)).resolve()
+  assert path.is_relative_to(Path(sys.prefix).resolve())
+  assert path.read_bytes()==archive.read(member)
+"""
+        _run(
+            [str(python), "-I", "-c", verify, distribution, wheels[distribution]["path"]],
+            cwd=root,
+            env=env,
+        )
+    if not example_script.is_file():
+        raise ValueError("Pass the Tr3v0r installed-producer example script explicitly")
+    generated = _run(
+        [
+            str(rf_env / "bin/python"),
+            "-I",
+            str(example_script),
+            "--output-dir",
+            str(root / "rf-output"),
+        ],
+        cwd=root,
+        env=env,
+    )
+    # The generator emits only the synthetic artifact paths on stdout.
+    rf = json.loads(generated)
+    consumer_config = json.loads((root / "config.json").read_text())
+    consumer_config.update(
+        sqlite_url=f"sqlite:///{root / 'isolated.sqlite3'}",
+        data_dir=str(root / "isolated-data"),
+        index_path=str(root / "isolated-index.npy"),
+        id_map_path=str(root / "isolated-ids.json"),
+    )
+    config_path = root / "isolated-config.json"
+    config_path.write_text(json.dumps(consumer_config), encoding="utf-8")
+    consumer_env_vars = {**env, "RAG_CONFIG_PATH": str(config_path)}
+    result = _run(
+        [
+            str(consumer_env / "bin/python"),
+            "-I",
+            "-c",
+            ISOLATED_CONSUMER,
+            wheels["rag-prototype"]["path"],
+            str(root),
+            json.dumps(rf),
+        ],
+        cwd=root,
+        env=consumer_env_vars,
+    )
+    for name, expected in wheels.items():
+        if hashlib.sha256(Path(expected["path"]).read_bytes()).hexdigest() != expected["sha256"]:
+            raise ValueError(f"Wheel changed during acceptance: {name}")
+    return {
+        "boundary": json.loads(result),
+        "example_script_sha256": hashlib.sha256(example_script.read_bytes()).hexdigest(),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repogpt-wheel", type=Path, required=True)
     parser.add_argument("--chat-exports-wheel", type=Path, required=True)
     parser.add_argument("--rag-wheel", type=Path, required=True)
+    parser.add_argument("--tr3v0r-wheel", type=Path, required=True)
+    parser.add_argument("--tr3v0r-example-script", type=Path, required=True)
     parser.add_argument("--scratch-root", type=Path)
     args = parser.parse_args()
     uv = shutil.which("uv")
@@ -245,6 +378,7 @@ def main() -> None:
             ("repogpt", args.repogpt_wheel),
             ("chat-exports", args.chat_exports_wheel),
             ("rag-prototype", args.rag_wheel),
+            ("tr3v0r", args.tr3v0r_wheel),
         )
     }
     env = os.environ.copy()
@@ -270,7 +404,7 @@ def main() -> None:
                 "install",
                 "--python",
                 str(python),
-                *(item["path"] for item in wheels.values()),
+                *(item["path"] for name, item in wheels.items() if name != "tr3v0r"),
             ],
             cwd=root,
             env=env,
@@ -302,7 +436,15 @@ def main() -> None:
             cwd=root,
             env=env,
         )
-        print(json.dumps({"wheels": wheels, "boundary": json.loads(result)}, sort_keys=True))
+        isolated = _isolated_producer_boundary(
+            root, uv=uv, env=env, wheels=wheels, example_script=args.tr3v0r_example_script.resolve()
+        )
+        print(
+            json.dumps(
+                {"wheels": wheels, "boundary": json.loads(result), "isolated": isolated},
+                sort_keys=True,
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -72,6 +72,15 @@ Breaking changes relative to `v3.0.0`:
 HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
 also recovers from JSON decoder `ValueError`, including integer literals beyond
 Python's configured digit limit, so the next MCP request remains processable.
+The native `rag-mcp` command now requires the optional `[mcp]` extra. The SDK is
+pinned to 1.28.1 with AnyIO 4.14.2 and targets protocol `2025-11-25`. Verify ping,
+output schemas/annotations, text/structured parity, idless-call nonexecution and
+payload-safe diagnostics through real stdio. Expected failures use `isError`;
+invalid arguments use `-32602` and unexpected/output failures use sanitized
+`-32603`. Inline results count both representations toward the 256 KiB limit;
+partial mutation results retain bounded receipts and mark omitted details.
+The base package and HTTP-only production image remain usable without the SDK.
+
 The canonical import contract accepts RepoGPT code-units v6, explicit
 chat-exports chat-units v4, and Tr3v0r canonical-rag v2; installed-artifact receipts establish the
 specific tested producer combination.
@@ -91,13 +100,17 @@ pass one exact wheel from each build, retaining its SHA-256 and source revision:
 make smoke-canonical-wheels \
   REPOGPT_WHEEL=/absolute/path/repogpt-0.11.0-py3-none-any.whl \
   CHAT_EXPORTS_WHEEL=/absolute/path/chat_exports-0.4.0.dev0-py3-none-any.whl \
+  TR3V0R_WHEEL=/absolute/path/tr3v0r-0.3.0-py3-none-any.whl \
   RAG_WHEEL=/absolute/path/rag_prototype-4.0.0-py3-none-any.whl
 ```
 
 This gate creates a fresh environment outside checkouts, installs only the
-three selected wheels and their declared runtime dependencies, verifies import
+selected wheels and their declared runtime dependencies, verifies import
 origins and packaged schemas, and uses synthetic text with sparse local SQLite
-retrieval. It exercises `chatx`, generation-three schemas, rich text, labeled links,
+retrieval. Separate RF producer and RAG-only consumer environments exercise all three
+producer outputs without importing producer packages in the consumer. The explicit
+Tr3v0r example script generates synthetic run evidence and is hashed in the receipt.
+It exercises `chatx`, archive-v3/chat-units-v4 schemas, rich text, labeled links,
 locations, CLI import, idempotent replay, excluded-month failure evidence, and
 refusal to replace a partial scope. It clears source injection and provider
 credentials; it does not certify optional extractors, paid providers, or private
