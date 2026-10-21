@@ -8,13 +8,13 @@ from pathlib import Path
 from support.external_paths import configured_directory
 
 REPOGPT_ROOT = configured_directory("REPOGPT_ROOT")
-CANONICAL_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/repogpt_code_units_v5.json"
+CANONICAL_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/repogpt_code_units_v6.json"
 REPOGPT_SOURCE_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/repogpt_eval_repo"
 
 
 def _preparation_message(root: Path) -> str:
     return (
-        f"Prepare RepoGPT in {root} with `uv sync --frozen --extra dev`; "
+        f"Prepare RepoGPT in {root} with `uv sync --frozen --group dev`; "
         "REPOGPT_ROOT must select its checkout with a working .venv/bin/python."
     )
 

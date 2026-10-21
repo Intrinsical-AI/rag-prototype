@@ -268,4 +268,4 @@ async def test_import_canonical_rejects_repogpt_schema_v3_payload(
 
     response = await asgi_client.post("/api/docs/import-canonical", json=payload)
     assert response.status_code == 422
-    assert "schema_version='5'" in response.text
+    assert "schema_version='6'" in response.text

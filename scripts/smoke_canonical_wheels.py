@@ -1,4 +1,4 @@
-"""Validate exact RepoGPT and chat-adapter wheels against an installed RAG wheel."""
+"""Validate exact RepoGPT and chat-exports wheels against an installed RAG wheel."""
 
 from __future__ import annotations
 
@@ -30,23 +30,25 @@ from local_rag_backend.core.services.canonical_import_transport import (
 )
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 from local_rag_backend.settings import get_settings
-from rag_adapters.codec import load_archive, save_archive
-from rag_adapters.projectors import PROJECTORS, apply_projections
+from chat_exports.core.archive import load_archive, prepare_archive, save_archive
+from chat_exports.core.models import Diagnostic, DiagnosticLocation
+from chat_exports.projectors import PROJECTORS, apply_projections
 
 root = Path.cwd()
 venv = Path(sys.prefix).resolve()
 versions = json.loads(sys.argv[1])
 for distribution, module in (
-    ("repogpt", "repogpt"), ("rag-adapters", "rag_adapters"),
+    ("repogpt", "repogpt"), ("chat-exports", "chat_exports"),
     ("rag-prototype", "local_rag_backend"),
 ):
     origin = Path(importlib.import_module(module).__file__).resolve()
     assert origin.is_relative_to(venv), origin
     assert metadata.version(distribution) == versions[distribution]
 for module, schema in (
-    ("repogpt", "code-units-v5.schema.json"),
-    ("rag_adapters", "chat-archive-v2.schema.json"),
-    ("rag_adapters", "rag-import-chat-v2.schema.json"),
+    ("repogpt", "code-units-v6.schema.json"),
+    ("chat_exports", "chat-archive-v3.schema.json"),
+    ("chat_exports", "messages-v2.schema.json"),
+    ("chat_exports", "rag-import-chat-v3.schema.json"),
 ):
     assert resources.files(module).joinpath("schemas", schema).is_file()
 
@@ -65,7 +67,7 @@ payload_path = root / "repogpt.json"
 run([sys.executable, "-m", "repogpt.app.cli", "--emit", "code-units", "--repo-key",
      "wheel-fixture", "--replace-scope", "--include-tests", "-o", str(payload_path), str(fixture)])
 payload = json.loads(payload_path.read_text())
-assert payload["schema_version"] == "5" and payload["replace_scope"] is True
+assert payload["schema_version"] == "6" and payload["replace_scope"] is True
 validate_canonical_import_payload(payload)
 rag_cli = str(venv / "bin" / "rag-import-canonical")
 run([rag_cli, "--json", str(payload_path)])
@@ -79,21 +81,27 @@ chat.mkdir()
     "[1/10/26, 10:00:00] Synthetic: excluded\n", encoding="utf-8",
 )
 archive_path = root / "archive" / "chat_archive.json"
-run([sys.executable, "-m", "rag_adapters.cli", "ingest", str(chat), "-o",
-     str(archive_path.parent), "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-chat"])
-archive = load_archive(archive_path)
+chat_cli = str(venv / "bin" / "chatx")
+run([chat_cli, "convert", str(chat), "-o", str(archive_path.parent), "--to", "none",
+     "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-chat"])
+archive = load_archive(archive_path).mutable_copy()
 archive.messages[-1].role = "system"
-failure = {"code": "projection_failed", "message_id": archive.messages[-1].message_id}
-archive.failures.append(failure)
-save_archive(archive, archive_path)
+failure = Diagnostic("error", "source_record_invalid", "synthetic excluded-month failure",
+    DiagnosticLocation("_chat.txt", line_start=3, line_end=3),
+    message_id=archive.messages[-1].message_id)
+archive.diagnostics.append(failure)
+save_archive(prepare_archive(archive), archive_path)
 export = root / "exports"
-run([sys.executable, "-m", "rag_adapters.cli", "export-rag", str(archive_path), "-o", str(export)],
+run([chat_cli, "export", str(archive_path), "-o", str(export), "--to", "rag"],
     expected=2)
-chat_paths = sorted(export.glob("*.json"))
+chat_paths = sorted((export / "rag").glob("*.json"))
 assert len(chat_paths) == 2
 for path in chat_paths:
     chat_payload = json.loads(path.read_text())
-    assert chat_payload["failures"] == [failure] and chat_payload["stats"]["failed_files"] == 1
+    assert len(chat_payload["failures"]) == 1
+    assert chat_payload["failures"][0]["code"] == failure.code
+    assert chat_payload["stats"]["failed_files"] == chat_payload["stats"]["error_count"] == 1
+    assert chat_payload["producer"]["format_version"] == "3"
     assert not any(key in chat_payload for key in ("kind", "schema_version", "repo_key"))
     assert chat_payload["replace_scope"] is False
     validated = validate_canonical_import_payload(chat_payload)
@@ -101,6 +109,35 @@ for path in chat_paths:
     run([rag_cli, "--json", str(path)])
     run([rag_cli, "--json", str(path)])
     run([rag_cli, "--json", str(path), "--replace-scope"], expected=1)
+
+telegram = root / "result.json"
+telegram.write_text(json.dumps({"name": "Wheel Telegram", "type": "personal_chat", "id": 42,
+    "messages": [
+        {"id": 1, "type": "message", "date": "2026-09-01T10:00:00",
+         "date_unixtime": "1788256800", "from": "Synthetic", "from_id": "user42",
+         "rich_message": {"rtl": False, "part": False, "blocks": [
+             {"type": "paragraph", "text": {"type": "plain", "text": "rich_needle"}},
+             {"type": "paragraph", "text": {"type": "text_link",
+                "text": {"type": "plain", "text": "docs_needle"},
+                "href": "https://example.org/installed_destination"}}
+         ]}},
+        {"id": 2, "type": "message", "date": "2026-09-01T10:01:00",
+         "date_unixtime": "1788256860", "from": "Synthetic", "from_id": "user42",
+         "text": "", "location_information": {"latitude": 40.416775, "longitude": -3.70379}}
+    ]}), encoding="utf-8")
+telegram_out = root / "telegram-output"
+run([chat_cli, "convert", str(telegram), "-o", str(telegram_out), "--tz", "UTC", "--to", "rag"])
+telegram_paths = sorted((telegram_out / "rag").glob("*.json"))
+assert len(telegram_paths) == 1
+telegram_payload = json.loads(telegram_paths[0].read_text())
+assert telegram_payload["scope"] == "chat:telegram:tg-42:2026-09"
+assert all(doc["source_id"] == "chat:telegram:tg-42" for doc in telegram_payload["documents"])
+telegram_contents = "\n".join(doc["content"] for doc in telegram_payload["documents"])
+for token in ("rich_needle", "docs_needle", "https://example.org/installed_destination",
+              "40.416775", "-3.70379"):
+    assert token in telegram_contents, (token, telegram_contents)
+run([rag_cli, "--json", str(telegram_paths[0])])
+run([rag_cli, "--json", str(telegram_paths[0])])
 
 media_chat = root / "media-chat"
 media_chat.mkdir()
@@ -111,20 +148,20 @@ media_chat.mkdir()
     "[1/9/26, 10:01:00] Synthetic: unused.txt (archivo adjunto)\n", encoding="utf-8",
 )
 bundle = root / "media-bundle"
-run([sys.executable, "-m", "rag_adapters.cli", "ingest", str(media_chat), "-o", str(bundle),
+run([chat_cli, "convert", str(media_chat), "-o", str(bundle), "--to", "none",
      "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-media", "--copy-media"])
-media_archive = load_archive(bundle / "chat_archive.json")
+media_archive = load_archive(bundle / "chat_archive.json").mutable_copy()
 selected = next(ref for ref in media_archive.media if ref.filename == "first.pdf")
 unused = next(ref for ref in media_archive.media if ref.filename == "unused.txt")
-PROJECTORS["pdf"] = replace(PROJECTORS["pdf"], package="rag-adapters", extract=lambda _p: "stub")
+PROJECTORS["pdf"] = replace(PROJECTORS["pdf"], package="chat-exports", extract=lambda _p: "stub")
 (bundle / unused.bundle_rel_path).write_bytes(b"changed unselected bytes")
 apply_projections(media_archive, bundle, requested=["pdf"], cache_dir=root / "cache",
-                  use_bundle=True, verify_all=False)
+                  mode="bundle", verification="selected")
 assert len(media_archive.projections) == 1
 (bundle / selected.bundle_rel_path).write_bytes(b"changed selected bytes")
 try:
     apply_projections(media_archive, bundle, requested=["pdf"], cache_dir=root / "cache",
-                      use_bundle=True, verify_all=False)
+                      mode="bundle", verification="selected")
 except ValueError as error:
     assert "hash mismatch" in str(error)
 else:
@@ -136,7 +173,7 @@ try:
     repo = container.doc_repo_factory()
     documents = list(repo.get_all_documents())
     expected_docs = [doc for doc in payload["documents"] if doc["content"].strip()]
-    assert len(documents) == len(expected_docs) + 2
+    assert len(documents) == len(expected_docs) + 2 + len(telegram_payload["documents"])
     retriever = LocalSplitSearchRetriever(doc_repo=repo)
     found = retriever.retrieve(RetrievalRequest(
         query="boundary_needle", top_k=1, mode="sparse",
@@ -144,6 +181,7 @@ try:
     ))
     assert found.items and found.items[0].document.metadata["repo_key"] == "wheel-fixture"
     assert retriever.retrieve(RetrievalRequest(query="september_needle", top_k=1, mode="sparse")).items
+    assert retriever.retrieve(RetrievalRequest(query="rich_needle", top_k=1, mode="sparse")).items
     overlong = json.loads(json.dumps(payload))
     overlong["documents"][0]["external_id"] = "x" * 513
     try:
@@ -156,7 +194,8 @@ try:
 finally:
     container.close()
 print(json.dumps({"versions": versions, "repo_documents": len(expected_docs),
-                  "chat_months": len(chat_paths), "stored_documents": len(documents),
+                  "chat_months": len(chat_paths), "telegram_documents": len(telegram_payload["documents"]),
+                  "stored_documents": len(documents), "rich_links_locations_preserved": True,
                   "replay_idempotent": True, "partial_replacement_refused": True,
                   "origins_in_fresh_venv": True, "consumer_limits_retained": True,
                   "selective_bundle_verified": True, "real_extractors": False}, sort_keys=True))
@@ -193,7 +232,7 @@ def _wheel(path: Path, name: str) -> dict[str, str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repogpt-wheel", type=Path, required=True)
-    parser.add_argument("--adapters-wheel", type=Path, required=True)
+    parser.add_argument("--chat-exports-wheel", type=Path, required=True)
     parser.add_argument("--rag-wheel", type=Path, required=True)
     parser.add_argument("--scratch-root", type=Path)
     args = parser.parse_args()
@@ -204,7 +243,7 @@ def main() -> None:
         name: _wheel(path.resolve(), name)
         for name, path in (
             ("repogpt", args.repogpt_wheel),
-            ("rag-adapters", args.adapters_wheel),
+            ("chat-exports", args.chat_exports_wheel),
             ("rag-prototype", args.rag_wheel),
         )
     }

@@ -72,16 +72,16 @@ Breaking changes relative to `v3.0.0`:
 HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
 also recovers from JSON decoder `ValueError`, including integer literals beyond
 Python's configured digit limit, so the next MCP request remains processable.
-The canonical import contract accepts RepoGPT code-units v5 and
-the generic rag-adapters payload; installed-artifact receipts establish the
+The canonical import contract accepts RepoGPT code-units v6 and
+the generic chat-exports payload; installed-artifact receipts establish the
 specific tested producer combination.
 
-For the retained code-units v5 boundary, canonical import accepts at most 5,000
+For the retained code-units v6 boundary, canonical import accepts at most 5,000
 nonblank documents per snapshot, 20,000 characters per document, 512 characters
-per external ID, and 1,024 characters per source ID. RepoGPT can emit a valid v5
+per external ID, and 1,024 characters per source ID. RepoGPT can emit a valid v6
 artifact beyond those consumer limits; RAG rejects it before importing. This
-stabilization preserves the v5 contract and does not adopt the deferred v6
-snapshot-policy migration. Validate the exact producer wheels before freezing
+boundary accepts only v6, removes redundant producer metadata fields, and
+preserves per-document identity and snapshot fields. Validate the exact producer wheels before freezing
 their candidate revisions.
 
 Build each candidate's wheel and sdist with `uv build --out-dir <separate-dir>`;
@@ -89,16 +89,17 @@ pass one exact wheel from each build, retaining its SHA-256 and source revision:
 
 ```bash
 make smoke-canonical-wheels \
-  REPOGPT_WHEEL=/absolute/path/repogpt-0.10.0-py3-none-any.whl \
-  ADAPTERS_WHEEL=/absolute/path/rag_adapters-0.2.0-py3-none-any.whl \
+  REPOGPT_WHEEL=/absolute/path/repogpt-0.11.0-py3-none-any.whl \
+  CHAT_EXPORTS_WHEEL=/absolute/path/chat_exports-0.4.0.dev0-py3-none-any.whl \
   RAG_WHEEL=/absolute/path/rag_prototype-4.0.0-py3-none-any.whl
 ```
 
 This gate creates a fresh environment outside checkouts, installs only the
 three selected wheels and their declared runtime dependencies, verifies import
 origins and packaged schemas, and uses synthetic text with sparse local SQLite
-retrieval. It exercises CLI import, idempotent replay, adapter failure evidence,
-and refusal to replace a partial scope. It clears source injection and provider
+retrieval. It exercises `chatx`, generation-three schemas, rich text, labeled links,
+locations, CLI import, idempotent replay, excluded-month failure evidence, and
+refusal to replace a partial scope. It clears source injection and provider
 credentials; it does not certify optional extractors, paid providers, or private
 data. Dependency installation may require registry access; `UV_OFFLINE=1` uses
 only cached dependencies. Freeze producer revisions together with

@@ -372,20 +372,20 @@ Notas:
 * El rebuild recompone el índice vectorial local desde SQLite.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
 * `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI y HTTP ahora usan el mismo default: `true`.
-* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v5` se normaliza en el borde de transporte, no en el core del importador.
+* CLI, HTTP y MCP comparten la misma validación tipada para canonical import; `RepoGPT code-units v6` se normaliza en el borde de transporte, no en el core del importador.
 * Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
 * `rag_status` devuelve un `runtime` estructurado con topología, seguridad, backends y rutas, además de `health` e `index` cuando aplican.
 
 ### RepoGPT contract
 
-`RepoGPT code-units v5` es el contrato soportado para la integración canónica de código:
+`RepoGPT code-units v6` es el contrato soportado para la integración canónica de código:
 
 * `kind = "code-units"`
-* `schema_version = "5"`
+* `schema_version = "6"`
 * `scope`, `snapshot_id`, `replace_scope`
 * `documents[]` con `external_id`, `content`, `metadata`
 
-El import canónico sigue siendo genérico. El borde valida todos los documentos v5 y omite los módulos estructurales sin contenido residual. Si no queda contenido indexable, `replace_scope=false` no muta datos; una exportación completa con `replace_scope=true` elimina los documentos obsoletos del scope. Las importaciones genéricas vacías siguen siendo inválidas.
+El import canónico sigue siendo genérico. El borde valida todos los documentos v6 y omite los módulos estructurales sin contenido residual. Si no queda contenido indexable, `replace_scope=false` no muta datos; una exportación completa con `replace_scope=true` elimina los documentos obsoletos del scope. Las importaciones genéricas vacías siguen siendo inválidas.
 
 ---
 
@@ -499,7 +499,7 @@ Reranker opcional (mejora de calidad medible con `rag-eval`):
 ### Optional external E2E fixtures
 
 El gate RepoGPT por defecto usa la fixture canónica versionada
-`tests/fixtures/repogpt_code_units_v5.json`: valida al consumidor RAG sin abrir ni
+`tests/fixtures/repogpt_code_units_v6.json`: valida al consumidor RAG sin abrir ni
 modificar otro checkout. Para ejecutar el productor real, configura explícitamente
 `REPOGPT_ROOT`; se usan su intérprete preparado, el código fuente versionado en
 `tests/fixtures/repogpt_eval_repo` y las flags

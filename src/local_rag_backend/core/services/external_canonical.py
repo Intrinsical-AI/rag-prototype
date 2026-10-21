@@ -1,4 +1,4 @@
-"""Validate RepoGPT's code-units v5 wire format before canonical adaptation."""
+"""Validate RepoGPT's code-units v6 wire format before canonical adaptation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 REPOGPT_CODE_UNITS_KIND = "code-units"
-REPOGPT_CODE_UNITS_SCHEMA_VERSION = "5"
+REPOGPT_CODE_UNITS_SCHEMA_VERSION = "6"
 _REPOGPT_TOP_LEVEL_MARKERS = frozenset({"kind", "schema_version", "repo_key"})
 _REPOGPT_UNIT_FIELDS = (
     "repo_key",
@@ -49,7 +49,6 @@ class _UnitMetadata(_ProducerModel):
     file: _FileDigest
     tags: list[str]
     attributes: dict[str, Any]
-    dependencies: list[Any]
 
     @model_validator(mode="before")
     @classmethod
@@ -119,7 +118,7 @@ class _Stats(_ProducerModel):
 
 class _Failure(_ProducerModel):
     record_type: Literal["failure"]
-    schema_version: Literal["5"]
+    schema_version: Literal["6"]
     path: str
     language: str
     error: str
@@ -127,7 +126,7 @@ class _Failure(_ProducerModel):
 
 
 class _CodeUnitsPayload(_ProducerModel):
-    schema_version: Literal["5"]
+    schema_version: Literal["6"]
     kind: Literal["code-units"]
     repo_key: _NonBlank
     scope: _NonBlank
@@ -160,7 +159,7 @@ def normalize_external_canonical_payload(payload: Mapping[str, Any]) -> dict[str
     if payload.get("kind") != REPOGPT_CODE_UNITS_KIND:
         raise ValueError("RepoGPT canonical payloads must declare kind='code-units'.")
     if payload.get("schema_version") != REPOGPT_CODE_UNITS_SCHEMA_VERSION:
-        raise ValueError("RepoGPT canonical payloads must use code-units schema_version='5'.")
+        raise ValueError("RepoGPT canonical payloads must use code-units schema_version='6'.")
     _CodeUnitsPayload.model_validate(payload)
     normalized["documents"] = [
         document

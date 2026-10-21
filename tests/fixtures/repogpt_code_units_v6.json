@@ -1,5 +1,5 @@
 {
-  "schema_version": "5",
+  "schema_version": "6",
   "kind": "code-units",
   "repo_key": "repogpt_eval_repo",
   "snapshot_id": "repogpt_eval_repo-fa06e30c48bb22b2",
@@ -36,14 +36,11 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
-          "size": 205
+          "size": 205,
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf"
         },
         "tags": [],
-        "attributes": {
-          "relative_path": "README.md"
-        },
-        "dependencies": []
+        "attributes": {}
       },
       "content_ranges": []
     },
@@ -72,14 +69,13 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
-          "size": 205
+          "size": 205,
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf"
         },
         "tags": [],
         "attributes": {
           "level": 1
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -108,14 +104,13 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
-          "size": 205
+          "size": 205,
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf"
         },
         "tags": [],
         "attributes": {
           "level": 2
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -145,14 +140,13 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf",
-          "size": 205
+          "size": 205,
+          "sha256": "380ac037d1f7a52a5e5f261e4bbee1150122d99d48f2a7768ba339a785893fcf"
         },
         "tags": [],
         "attributes": {
           "fence_language": "python"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -178,14 +172,11 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0",
-          "size": 519
+          "size": 519,
+          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0"
         },
         "tags": [],
-        "attributes": {
-          "relative_path": "auth.py"
-        },
-        "dependencies": []
+        "attributes": {}
       },
       "content_ranges": [
         {
@@ -219,8 +210,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0",
-          "size": 519
+          "size": 519,
+          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0"
         },
         "tags": [],
         "attributes": {
@@ -237,8 +228,7 @@
           "returns": "str | None",
           "visibility": "public",
           "signature": "extract_bearer_token(auth_header: str | None) -> str | None"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -266,8 +256,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0",
-          "size": 519
+          "size": 519,
+          "sha256": "a974cde578ccd0ee6fc543f87d40026b79175238652ee89da8b141ba5b7b31e0"
         },
         "tags": [],
         "attributes": {
@@ -284,8 +274,7 @@
           "returns": "bool",
           "visibility": "public",
           "signature": "validate_token(token: str) -> bool"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -311,14 +300,11 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
-          "size": 456
+          "size": 456,
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7"
         },
         "tags": [],
-        "attributes": {
-          "relative_path": "client.py"
-        },
-        "dependencies": []
+        "attributes": {}
       },
       "content_ranges": [
         {
@@ -352,15 +338,14 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
-          "size": 456
+          "size": 456,
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7"
         },
         "tags": [],
         "attributes": {
           "bases": [],
           "decorators": []
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -389,8 +374,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
-          "size": 456
+          "size": 456,
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7"
         },
         "tags": [],
         "attributes": {
@@ -411,10 +396,9 @@
             }
           ],
           "returns": null,
-          "visibility": "protected",
+          "visibility": "public",
           "signature": "__init__(self, base_url: str)"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -443,8 +427,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
-          "size": 456
+          "size": 456,
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7"
         },
         "tags": [],
         "attributes": {
@@ -467,8 +451,7 @@
           "returns": "str",
           "visibility": "public",
           "signature": "build_request(self, path: str) -> str"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -496,8 +479,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7",
-          "size": 456
+          "size": 456,
+          "sha256": "795553e3c7d8755e4925bb56e70c5c4a561726db996e078b6877c3d8c9e7a3f7"
         },
         "tags": [],
         "attributes": {
@@ -514,8 +497,7 @@
           "returns": "ApiClient",
           "visibility": "public",
           "signature": "build_api_client(base_url: str) -> ApiClient"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -541,14 +523,11 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03",
-          "size": 498
+          "size": 498,
+          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03"
         },
         "tags": [],
-        "attributes": {
-          "relative_path": "config.py"
-        },
-        "dependencies": []
+        "attributes": {}
       },
       "content_ranges": [
         {
@@ -586,8 +565,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03",
-          "size": 498
+          "size": 498,
+          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03"
         },
         "tags": [],
         "attributes": {
@@ -604,8 +583,7 @@
           "returns": "int",
           "visibility": "public",
           "signature": "parse_timeout(raw: str | None) -> int"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -633,8 +611,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03",
-          "size": 498
+          "size": 498,
+          "sha256": "5812e86638a34546823ec446f1093b685b8be564b7436f862c1f63cf5e134b03"
         },
         "tags": [],
         "attributes": {
@@ -651,8 +629,7 @@
           "returns": "dict[str, int | str]",
           "visibility": "public",
           "signature": "load_config(env: Mapping[str, str]) -> dict[str, int | str]"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -678,14 +655,11 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
-          "size": 290
+          "size": 290,
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647"
         },
         "tags": [],
-        "attributes": {
-          "relative_path": "sample.py"
-        },
-        "dependencies": []
+        "attributes": {}
       },
       "content_ranges": [
         {
@@ -719,15 +693,14 @@
       "has_children": true,
       "metadata": {
         "file": {
-          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
-          "size": 290
+          "size": 290,
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647"
         },
         "tags": [],
         "attributes": {
           "bases": [],
           "decorators": []
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -756,8 +729,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
-          "size": 290
+          "size": 290,
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647"
         },
         "tags": [],
         "attributes": {
@@ -780,8 +753,7 @@
           "returns": "int",
           "visibility": "public",
           "signature": "method(self, value: int) -> int"
-        },
-        "dependencies": []
+        }
       }
     },
     {
@@ -809,8 +781,8 @@
       "has_children": false,
       "metadata": {
         "file": {
-          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647",
-          "size": 290
+          "size": 290,
+          "sha256": "dab2c673f332831cf63aed47d4278c1b82d92ebe3e707dc7af33151a8db0a647"
         },
         "tags": [],
         "attributes": {
@@ -827,8 +799,7 @@
           "returns": "str",
           "visibility": "public",
           "signature": "helper(name: str='world') -> str"
-        },
-        "dependencies": []
+        }
       }
     }
   ]

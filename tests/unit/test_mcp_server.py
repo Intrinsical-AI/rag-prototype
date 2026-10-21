@@ -320,7 +320,7 @@ def test_mcp_import_canonical_rejects_repogpt_schema_v3(
     )
 
     assert response["result"]["isError"] is True
-    assert "schema_version='5'" in response["result"]["content"][0]["text"]
+    assert "schema_version='6'" in response["result"]["content"][0]["text"]
 
 
 def test_mcp_eval_supports_filters(in_memory_sqlite, tmp_path, monkeypatch) -> None:

@@ -98,10 +98,10 @@ smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embeddin
 		uv run --no-sync python scripts/smoke_embedding_api_wheel.py
 
 smoke-canonical-wheels: sync ## Validate three explicit producer/consumer wheels outside checkouts
-	@test -n "$(REPOGPT_WHEEL)" -a -n "$(ADAPTERS_WHEEL)" -a -n "$(RAG_WHEEL)" || \
-		{ echo "Set REPOGPT_WHEEL, ADAPTERS_WHEEL, and RAG_WHEEL to exact wheel paths" >&2; exit 1; }
+	@test -n "$(REPOGPT_WHEEL)" -a -n "$(CHAT_EXPORTS_WHEEL)" -a -n "$(RAG_WHEEL)" || \
+		{ echo "Set REPOGPT_WHEEL, CHAT_EXPORTS_WHEEL, and RAG_WHEEL to exact wheel paths" >&2; exit 1; }
 	$(UV) run --active --no-sync python scripts/smoke_canonical_wheels.py \
-		--repogpt-wheel "$(REPOGPT_WHEEL)" --adapters-wheel "$(ADAPTERS_WHEEL)" --rag-wheel "$(RAG_WHEEL)"
+		--repogpt-wheel "$(REPOGPT_WHEEL)" --chat-exports-wheel "$(CHAT_EXPORTS_WHEEL)" --rag-wheel "$(RAG_WHEEL)"
 
 smoke-frontend: sync ## Chromium regression and local HTTP/SQLite frontend smoke
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) node scripts/smoke_frontend.cjs

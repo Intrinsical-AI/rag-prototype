@@ -1,4 +1,4 @@
-"""Current RepoGPT v5 producer payloads for transport boundary tests."""
+"""Current RepoGPT v6 producer payloads for transport boundary tests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 def repogpt_failure(path: str = "broken.py") -> dict[str, Any]:
     return {
         "record_type": "failure",
-        "schema_version": "5",
+        "schema_version": "6",
         "path": path,
         "language": "py",
         "error": "parse failed",
@@ -28,7 +28,7 @@ def repogpt_payload(
     digest = hashlib.sha256(content.encode()).hexdigest()
     return {
         "kind": "code-units",
-        "schema_version": "5",
+        "schema_version": "6",
         "repo_key": "demo",
         "scope": "repogpt:demo",
         "snapshot_id": "new",
@@ -66,7 +66,6 @@ def repogpt_payload(
                     "file": {"sha256": digest, "size": len(content.encode())},
                     "tags": [],
                     "attributes": {},
-                    "dependencies": [],
                 },
             }
         ],

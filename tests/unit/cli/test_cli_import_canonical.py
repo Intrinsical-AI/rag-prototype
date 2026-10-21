@@ -95,7 +95,7 @@ def test_cli_import_rejects_repogpt_code_units_v3(tmp_path) -> None:
     result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
 
     assert result.exit_code == 1
-    assert "schema_version='5'" in result.output
+    assert "schema_version='6'" in result.output
 
 
 @pytest.mark.parametrize(

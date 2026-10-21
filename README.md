@@ -241,16 +241,16 @@ Use these entrypoints for the main workflows:
 See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
 for batch-spec examples and compare-mode usage.
 
-`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v5. The import flow stays generic, but the edge transport validates RepoGPT `kind="code-units"` and `schema_version="5"` when those producer markers are present.
+`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v6. The import flow stays generic, but the edge transport validates RepoGPT `kind="code-units"` and `schema_version="6"` when those producer markers are present.
 
 Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
 a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP
 `replace_scope: false`, or the MCP `replace_scope_override: false` option to import
 the available documents while preserving absent ones. Overrides are checked before
-any writes. RepoGPT needs its own environment: run `uv sync --frozen --extra dev`
+any writes. RepoGPT needs its own environment: run `uv sync --frozen --group dev`
 in its checkout before running the producer-to-RAG E2E; RAG's interpreter is not a fallback.
 
-RepoGPT v5 module documents with blank residual content are validated, then left out
+RepoGPT v6 module documents with blank residual content are validated, then left out
 of the index. The producer export must still contain at least one validated
 document; a raw `documents: []` payload cannot clear a scope. An export with no
 indexable documents is a no-op in upsert-only mode.
@@ -586,7 +586,7 @@ temporary SQLite data and a loopback Ollama response double. It needs permission
 to launch Chromium and bind loopback ports; it does not contact an external LLM
 service. Temporary evidence is printed under `/tmp`.
 
-The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v5.json`.
+The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v6.json`.
 It requires no sibling checkout. Live producer coverage is explicit: set `REPOGPT_ROOT`; the helper uses the
 versioned source fixture and passes `--replace-scope --include-tests --repo-key repogpt_eval_repo`.
 Invalid configured paths or producer failures fail the test.
