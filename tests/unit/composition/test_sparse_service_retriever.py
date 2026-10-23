@@ -3,9 +3,15 @@ from __future__ import annotations
 import rank_bm25
 
 from local_rag_backend.composition.adapters import build_retriever_from_settings
+from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.core.domain.types import DocId
+from local_rag_backend.core.use_cases.docs_mutation import (
+    MutationCoordinator,
+    MutationIntent,
+    MutationUpsertInput,
+)
 from local_rag_backend.settings import Settings
 
 
@@ -51,3 +57,55 @@ def test_sparse_bm25_is_built_once_for_unfiltered_service_queries(monkeypatch) -
         )
     )
     assert builds == 2  # Filtered queries still build a filtered BM25 index.
+
+
+def test_warmed_postings_are_rebuilt_after_document_mutation(tmp_path) -> None:
+    class Generator:
+        def generate(self, question, contexts):
+            raise AssertionError("Retrieval acceptance must not invoke a model")
+
+    container = AppContainer(
+        settings_obj=Settings(
+            sqlite_url=f"sqlite:///{tmp_path / 'corpus.sqlite3'}",
+            data_dir=tmp_path / "data",
+            retrieval_mode="sparse",
+            ollama_enabled=True,
+            openai_api_key=None,
+            disable_embedding_cache=True,
+        ),
+        ollama_generator_factory=lambda **_kwargs: Generator(),
+    )
+    try:
+        container.initialize()
+        coordinator = MutationCoordinator(
+            settings_obj=container.settings_obj, ports=container.docs_mutation_ports()
+        )
+        coordinator.execute(
+            MutationIntent(
+                op_id="bm25-acceptance-initial",
+                upserts=(
+                    MutationUpsertInput(external_id="one", content="alpha initial"),
+                    MutationUpsertInput(external_id="two", content="beta initial"),
+                ),
+            )
+        )
+        old = container.get_rag_service()
+        request = RetrievalRequest(query="alpha", top_k=1, mode="sparse")
+        assert old.retriever.retrieve(request).documents[0].content == "alpha initial"
+        coordinator.execute(
+            MutationIntent(
+                op_id="bm25-acceptance-update",
+                upserts=(MutationUpsertInput(external_id="one", content="omega updated"),),
+            )
+        )
+        current = container.get_rag_service()
+        assert current is not old
+        assert (
+            current.retriever.retrieve(RetrievalRequest(query="omega", top_k=1, mode="sparse"))
+            .documents[0]
+            .content
+            == "omega updated"
+        )
+        assert old.retriever.retrieve(request).documents[0].content == "alpha initial"
+    finally:
+        container.close()

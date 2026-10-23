@@ -116,9 +116,46 @@ def test_scores_match_rank_bm25_get_scores(seed: int) -> None:
 
 
 def test_negative_idf_corpus_matches_full_scan() -> None:
-    # Terms present in most documents get the epsilon idf floor, which can be negative.
-    documents = ["common rare", "common", "common", "common other", ""]
+    documents = ["common common", "common", "common", ""]
     retriever = _build(documents)
-    tokens = SparseBM25Retriever._tokenize("common rare other common")
+    assert retriever.bm25.idf["common"] < 0
+    tokens = SparseBM25Retriever._tokenize("common common")
     for top_k in range(1, len(documents) + 2):
         assert retriever._rank(tokens, top_k) == _legacy_ranking(retriever, tokens, top_k)
+    indices, scores = retriever._rank(tokens, len(documents))
+    assert indices[0] == 3 and scores[0] == 0
+
+
+@pytest.mark.parametrize("query", ["shared shared absent", "absent"])
+def test_complete_ties_keep_original_document_order(query: str) -> None:
+    retriever = _build(["shared", "shared", "shared"])
+    tokens = retriever._tokenize(query)
+    assert retriever._rank(tokens, 20) == _legacy_ranking(retriever, tokens, 20)
+    assert retriever._rank(tokens, 20)[0] == [0, 1, 2]
+
+
+def test_replaced_model_uses_public_scores_after_cache_warmup() -> None:
+    retriever = _build(["alpha", "alpha alpha", "beta"])
+    tokens = retriever._tokenize("alpha alpha")
+    retriever._rank(tokens, 3)
+
+    class Replacement:
+        def get_scores(self, _tokens: list[str]) -> np.ndarray:
+            return np.array([0.25, 1.0, 1.0])
+
+    retriever.bm25 = Replacement()
+    assert retriever._rank(tokens, 3) == _legacy_ranking(retriever, tokens, 3)
+    assert retriever._rank(tokens, 3)[0] == [1, 2, 0]
+
+
+def test_postings_stay_bounded_by_corpus_vocabulary_and_incidences() -> None:
+    retriever = _build(["alpha beta alpha", "beta gamma", "gamma"])
+    vocabulary = {term for document in retriever._tokenized_corpus for term in document}
+    for term in [*vocabulary, *(f"absent{i}" for i in range(1000))]:
+        retriever._rank([term], 3)
+    assert set(retriever._postings) == vocabulary
+    incidences = sum(len(set(document)) for document in retriever._tokenized_corpus)
+    assert (
+        sum(indices.nbytes + counts.nbytes for indices, counts in retriever._postings.values())
+        <= 16 * incidences
+    )

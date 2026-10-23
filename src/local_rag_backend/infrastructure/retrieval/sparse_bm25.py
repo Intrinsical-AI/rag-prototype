@@ -29,7 +29,11 @@ if TYPE_CHECKING:
 
 
 class SparseBM25Retriever(RetrieverPort):
-    """Sparse retriever using the BM25 algorithm."""
+    """BM25 over an immutable corpus/model snapshot; rebuild after document changes.
+
+    Cached posting arrays use at most 16 bytes per corpus term-document incidence.
+    Replacing ``bm25`` uses its public scoring API; in-place model mutation is unsupported.
+    """
 
     def __init__(
         self,
