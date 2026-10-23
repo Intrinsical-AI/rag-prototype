@@ -48,6 +48,7 @@ class CanonicalImportStats(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     failed_files: int = Field(default=0, ge=0, strict=True)
+    error_count: int = Field(default=0, ge=0, strict=True)
 
 
 class CanonicalImportPayload(BaseModel):
@@ -56,7 +57,7 @@ class CanonicalImportPayload(BaseModel):
 
     scope: str = Field(..., min_length=1, max_length=512)
     snapshot_id: str = Field(..., min_length=1, max_length=512)
-    replace_scope: StrictBool = True
+    replace_scope: StrictBool = False
     stats: CanonicalImportStats | None = None
     failures: list[dict[str, Any]] | None = None
     documents: list[CanonicalImportDocumentPayload] = Field(default_factory=list, max_length=5000)
@@ -112,9 +113,7 @@ def resolve_canonical_import_replace_scope(
     incomplete_tr3v0r = producer_fields.get("kind") == "tr3v0r-canonical-rag" and (
         not isinstance(completion, dict) or completion.get("complete") is not True
     )
-    chat_errors = (
-        payload.stats is not None and (payload.stats.model_extra or {}).get("error_count", 0) > 0
-    )
+    chat_errors = payload.stats is not None and payload.stats.error_count > 0
     if replace_scope and (
         incomplete_tr3v0r
         or chat_errors
