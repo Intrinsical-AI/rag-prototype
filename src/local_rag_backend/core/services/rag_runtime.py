@@ -28,7 +28,7 @@ class RagService:
         self,
         retriever: RetrieverPort,
         generator: GeneratorPort,
-        history_storage: QAHistoryPort,
+        history_storage: QAHistoryPort | None,
         no_docs_answer: str = NO_DOCS_ANSWER,
     ):
         self.retriever = retriever
@@ -45,6 +45,7 @@ class RagService:
         candidate_k: int | None = None,
         dual_candidate_k: int | None = None,
         retrieval_mode: str = "sparse",
+        persist_history: bool = True,
     ) -> dict[str, Any]:
         """Processes a question through the RAG pipeline.
 
@@ -55,6 +56,8 @@ class RagService:
         Returns:
             A dictionary containing the answer, source documents, and scores.
         """
+        if persist_history and self.history_storage is None:
+            raise ValueError("History persistence requires a history storage port")
         request = RetrievalRequest(
             query=question,
             top_k=top_k,
@@ -75,7 +78,8 @@ class RagService:
         if not docs:
             answer = self.no_docs_answer
             try:
-                self.history_storage.save(question, answer, [])
+                if persist_history and self.history_storage is not None:
+                    self.history_storage.save(question, answer, [])
             except Exception as e:  # pragma: no cover
                 logger.warning("History persistence failed (ignored): %s", e)
             return {"answer": answer, "docs": [], "scores": [], "retrieval": retrieval}
@@ -87,7 +91,8 @@ class RagService:
         # 4. Record the interaction in history
         source_ids = [doc.id for doc in docs]
         try:
-            self.history_storage.save(question, answer, source_ids)
+            if persist_history and self.history_storage is not None:
+                self.history_storage.save(question, answer, source_ids)
         except Exception as e:  # pragma: no cover
             logger.warning("History persistence failed (ignored): %s", e)
 

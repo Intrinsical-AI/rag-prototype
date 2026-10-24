@@ -19,6 +19,7 @@ from local_rag_backend.cli_commands import (
     server_cmd,
     status_cmd,
 )
+from local_rag_backend.cli_commands.snapshot import snapshot_cmd
 from local_rag_backend.composition.factory import reset_app_context
 
 
@@ -40,6 +41,7 @@ cli.add_command(eval_cmd)
 cli.add_command(eval_batch_cmd)
 cli.add_command(eval_compare_cmd)
 cli.add_command(ingest_cmd)
+cli.add_command(snapshot_cmd)
 
 
 def _dispatch_entrypoint(*, command: str, include_argv: bool) -> None:
@@ -62,6 +64,11 @@ def rag_bootstrap() -> None:
 def rag_status() -> None:
     """Entry point for rag-status command."""
     _dispatch_entrypoint(command="status", include_argv=True)
+
+
+def rag_snapshot() -> None:
+    """Entry point for explicit writer-only rag-snapshot preparation."""
+    _dispatch_entrypoint(command="snapshot", include_argv=True)
 
 
 def rag_eval() -> None:

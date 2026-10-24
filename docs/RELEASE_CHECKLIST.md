@@ -99,7 +99,7 @@ pass one exact wheel from each build, retaining its SHA-256 and source revision:
 ```bash
 make smoke-canonical-wheels \
   REPOGPT_WHEEL=/absolute/path/repogpt-0.11.0-py3-none-any.whl \
-  CHAT_EXPORTS_WHEEL=/absolute/path/chat_exports-0.4.0.dev0-py3-none-any.whl \
+  CHAT_EXPORTS_WHEEL=/absolute/path/chat_exports-0.4.0-py3-none-any.whl \
   TR3V0R_WHEEL=/absolute/path/tr3v0r-0.3.0-py3-none-any.whl \
   RAG_WHEEL=/absolute/path/rag_prototype-4.0.0-py3-none-any.whl
 ```

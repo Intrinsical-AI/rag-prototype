@@ -371,10 +371,10 @@ Notas:
 
 * El rebuild recompone el índice vectorial local desde SQLite.
 * El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
-* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI y HTTP ahora usan el mismo default: `true`.
+* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI, HTTP y MCP usan `false`; reemplazar exige una elección explícita y evidencia completa.
 * CLI, HTTP y MCP comparten la misma validación tipada para canonical import: RepoGPT code-units v6, chat-exports chat-units v4 y Tr3v0r canonical-rag v2. Los marcadores desconocidos o incompatibles se rechazan. Tr3v0r requiere evidencia verificable de ejecución completa para reemplazar un scope; ningún override permite saltarla. Las exportaciones incompletas solo permiten upsert explícito.
 * Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
-* `rag_status` devuelve un `runtime` estructurado con topología, seguridad, backends y rutas, además de `health` e `index` cuando aplican.
+* `rag_status` informa de la presencia del almacén vivo sin consultarlo y de la disponibilidad, identidad y conteo del snapshot congelado. No inicializa esquema ni declara frescura del almacén vivo. `rag_ask_ephemeral` consulta exclusivamente `ephemeral_snapshot_dir`, sin historia/cachés/escrituras RAG y sin reintentos; `rag-snapshot DESTINATION` prepara explícitamente un destino nuevo. Consulta los requisitos y límites en la sección MCP del README.
 
 ### RepoGPT contract
 

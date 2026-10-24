@@ -143,9 +143,9 @@ def create_sdk_server(
                         inputSchema=input_schemas[name],
                         outputSchema=schemas[name],
                         annotations=types.ToolAnnotations(
-                            readOnlyHint=False,
+                            readOnlyHint=spec.read_only,
                             destructiveHint=spec.destructive,
-                            idempotentHint=False,
+                            idempotentHint=spec.read_only and not spec.open_world,
                             openWorldHint=spec.open_world,
                         ),
                     )

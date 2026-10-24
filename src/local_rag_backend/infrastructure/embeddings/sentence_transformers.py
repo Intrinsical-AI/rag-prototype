@@ -6,9 +6,11 @@ SentenceTransformer embedder (CPU-friendly).
 from __future__ import annotations
 
 import hashlib
+import os
 import random
 import time
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
@@ -29,6 +31,7 @@ class SentenceTransformerEmbedder(EmbedderPort):
         model_name: str = "all-MiniLM-L6-v2",
         *,
         settings_obj: Settings,
+        local_only: bool = False,
     ):
         configured_settings = settings_obj
         self.model_name = model_name
@@ -59,6 +62,23 @@ class SentenceTransformerEmbedder(EmbedderPort):
             )
             return
 
+        if local_only:
+            model_path = Path(model_name)
+            if (
+                not model_path.is_absolute()
+                or not model_path.is_dir()
+                or not (model_path / "modules.json").is_file()
+            ):
+                raise RuntimeError(
+                    "Local-only embeddings require a complete installed model directory"
+                )
+            if (
+                os.environ.get("HF_HUB_OFFLINE") != "1"
+                or os.environ.get("TRANSFORMERS_OFFLINE") != "1"
+            ):
+                raise RuntimeError(
+                    "Local-only embeddings require HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 before startup"
+                )
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as e:  # pragma: no cover

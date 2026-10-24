@@ -143,6 +143,7 @@ def load_settings_from_yaml(config_path: str | Path | None = None) -> Settings:
         "eval_dataset_path",
         "perf_metrics_out_path",
         "lock_metrics_path",
+        "ephemeral_snapshot_dir",
     ):
         if key in data:
             data[key] = _resolve_relative_path_value(data.get(key), base_dir=base_dir)
@@ -258,6 +259,9 @@ class Settings(BaseModel):
 
     # --- File Paths --- #
     data_dir: Path = Field(Path("data"), description="Base directory for data files.")
+    ephemeral_snapshot_dir: Path | None = Field(
+        None, description="Explicit sealed documents-only snapshot for write-free MCP queries."
+    )
     index_path: str = Field("data/index.faiss", description="Path to the vector index file.")
     id_map_path: str = Field("data/id_map.json", description="Path to the vector index ID map.")
     sqlite_url: str = Field("sqlite:///./data/app.db", description="SQLite database URL.")

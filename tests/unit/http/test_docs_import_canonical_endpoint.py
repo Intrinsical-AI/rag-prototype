@@ -54,7 +54,7 @@ async def test_import_canonical_upsert_only_and_reimport_is_unchanged(
     }
 
 
-async def test_import_canonical_defaults_replace_scope_true(
+async def test_import_canonical_defaults_replace_scope_false(
     asgi_client, in_memory_sqlite, monkeypatch
 ):
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
@@ -78,11 +78,11 @@ async def test_import_canonical_defaults_replace_scope_true(
     r2 = await asgi_client.post("/api/docs/import-canonical", json=second)
     assert r2.status_code == 200
     body2 = r2.json()
-    assert body2["replace_scope"] is True
-    assert body2["deleted_sql"] == 1
+    assert body2["replace_scope"] is False
+    assert body2["deleted_sql"] == 0
     assert {
         doc.external_id for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
-    } == {"doc-2"}
+    } == {"doc-1", "doc-2"}
 
 
 async def test_failed_canonical_scope_deletion_is_journaled_and_compensated(
@@ -123,6 +123,7 @@ async def test_failed_canonical_scope_deletion_is_journaled_and_compensated(
     second = {
         "scope": "repogpt:demo",
         "snapshot_id": "second",
+        "replace_scope": True,
         "documents": [{"external_id": "keep", "content": "new keep"}],
     }
 

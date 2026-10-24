@@ -4,6 +4,7 @@
 .PHONY: type test test-architecture check pre-commit build
 .PHONY: contract-check
 .PHONY: smoke-embedding-api-wheel smoke-canonical-wheels smoke-frontend sec sec-run sec-hard sec-soft clean clean-all
+.PHONY: smoke-ephemeral-snapshot-wheel
 .PHONY: docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
@@ -97,6 +98,12 @@ build: sync ## Build wheel and source distributions
 smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embedding API outside checkout
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) UV_PROJECT_ENVIRONMENT=$(VENV_DIR) \
 		uv run --no-sync python scripts/smoke_embedding_api_wheel.py
+
+smoke-ephemeral-snapshot-wheel: sync ## Verify explicit installed wheel bytes and reject all writes during snapshot queries
+	@test -n "$(RAG_WHEEL)" -a -n "$(RAG_WHEEL_PYTHON)" -a -n "$(SNAPSHOT_SMOKE_DIR)" || \
+		{ echo "Set RAG_WHEEL, RAG_WHEEL_PYTHON, and a fresh SNAPSHOT_SMOKE_DIR" >&2; exit 1; }
+	$(UV) run --active --no-sync python scripts/smoke_ephemeral_snapshot_wheel.py \
+		--rag-wheel "$(RAG_WHEEL)" --python "$(RAG_WHEEL_PYTHON)" --work-dir "$(SNAPSHOT_SMOKE_DIR)"
 
 smoke-canonical-wheels: sync ## Validate explicit producer/consumer wheels outside checkouts
 	@test -n "$(REPOGPT_WHEEL)" -a -n "$(CHAT_EXPORTS_WHEEL)" -a -n "$(TR3V0R_WHEEL)" -a -n "$(RAG_WHEEL)" || \

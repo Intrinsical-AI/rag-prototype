@@ -5,18 +5,18 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from local_rag_backend import __version__
 from local_rag_backend.cli_commands.runtime import (
     build_dense_embedder,
-    ensure_sqlite_schema_for_cli,
     get_cli_container,
     get_cli_runtime_snapshot,
     run_cli_mutation,
 )
+from local_rag_backend.composition.ephemeral import build_ephemeral_service, snapshot_status
 from local_rag_backend.composition.factory import reset_app_context
 from local_rag_backend.core.domain.entities import Document
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
@@ -34,6 +34,8 @@ from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
 )
 from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
+from local_rag_backend.infrastructure.persistence.read_snapshot import SnapshotError
+from local_rag_backend.settings import get_settings
 
 if TYPE_CHECKING:
     from mcp.server.lowlevel import Server
@@ -86,7 +88,7 @@ class _ImportArguments(_Arguments):
 class _EvalArguments(_Arguments):
     dataset_path: str | None = None
     retrieval_mode: Literal["sparse", "dense", "dual", "hybrid"] | None = None
-    k: int = Field(default=3, ge=1)
+    k: int = Field(default=3, ge=1, le=100)
     filters: list[_FilterArguments] = Field(default_factory=list)
 
 
@@ -100,45 +102,40 @@ def _parse_filters(raw_filters: object | None) -> tuple[RetrievalFilter, ...]:
 
 
 def tool_status() -> dict[str, object]:
-    container = get_cli_container()
-    ensure_sqlite_schema_for_cli()
-    readiness_bundle = container.build_health_readiness_bundle()
-    diagnostics = readiness_bundle.diagnostics
-    runtime = get_cli_runtime_snapshot()
+    return {"version": __version__, **snapshot_status(get_settings())}
 
-    response: dict[str, object] = {
-        "version": __version__,
-        "runtime": runtime.to_dict(),
-        "health": {},
-    }
-    health = cast("dict[str, object]", response["health"])
 
+def tool_ask_ephemeral(
+    question: str, k: int = 3, filters: list[dict[str, Any]] | None = None
+) -> dict[str, object]:
+    arguments = _AskArguments.model_validate(
+        {"question": question, "k": k, "filters": filters or []}
+    )
+    settings = get_settings()
     try:
-        health["documents_count"] = diagnostics.get_documents_count()
-    except Exception as exc:
-        health["documents_error"] = str(exc)
-
-    try:
-        health["history_count"] = diagnostics.get_history_count()
-    except Exception as exc:
-        health["history_error"] = str(exc)
-
-    index: dict[str, object] | None = None
-    if runtime.retrieval_mode in {"dense", "dual", "hybrid"}:
-        try:
-            index = diagnostics.get_retrieval_index_stats(
-                index_path=runtime.index_path,
-                id_map_path=runtime.id_map_path,
-                vector_backend=runtime.vector_backend,
-                dim=None,
-                expected_manifest=readiness_bundle.expected_manifest,
+        with build_ephemeral_service(settings) as (service, snapshot_id):
+            result = service.ask(
+                arguments.question,
+                top_k=arguments.k,
+                filters=_parse_filters(arguments.model_dump()["filters"]),
+                retrieval_mode=str(settings.retrieval_mode),
+                persist_history=False,
             )
-        except Exception as exc:
-            response["index_error"] = str(exc)
-    if index is not None:
-        response["index"] = index
-
-    return response
+    except (SnapshotError, RagBaseError, OSError) as exc:
+        raise ToolOperationError(
+            "Ephemeral query refused; verify snapshot and configured provider availability"
+        ) from exc
+    docs, scores = list(result["docs"]), list(result["scores"])
+    if len(docs) != len(scores):
+        raise RuntimeError("Ephemeral retrieval result contract violated")
+    return {
+        "answer": str(result["answer"]),
+        "sources": [
+            {"document": _document_to_json(doc), "score": float(score)}
+            for doc, score in zip(docs, scores, strict=True)
+        ],
+        "snapshot_id": snapshot_id,
+    }
 
 
 def _document_to_json(document: Document) -> dict[str, object]:
@@ -267,6 +264,8 @@ def tool_eval(
     k: int | None = None,
     filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, object]:
+    if k is not None and (type(k) is not int or not 1 <= k <= 100):
+        raise ToolOperationError("k must be an integer between 1 and 100")
     runtime = get_cli_runtime_snapshot()
     try:
         dataset = load_eval_dataset(dataset_path or runtime.eval_dataset_path)
@@ -306,6 +305,7 @@ class Tool:
     success_schema: dict[str, Any]
     destructive: bool = False
     open_world: bool = False
+    read_only: bool = False
 
 
 def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -328,13 +328,34 @@ _DOCUMENT = _schema(
 
 TOOLS: dict[str, Tool] = {
     "rag_status": Tool(
-        "Initialize configured runtime storage and return status, counts and index diagnostics.",
+        "Inspect live store presence and verified frozen snapshot readiness without writing or querying live storage.",
         _Arguments,
         tool_status,
         _schema(
             {"version": _TEXT, "runtime": {"type": "object"}, "health": {"type": "object"}},
             ["version", "runtime", "health"],
         ),
+        read_only=True,
+    ),
+    "rag_ask_ephemeral": Tool(
+        "Query a verified frozen snapshot without history, cache or storage writes. Configured provider egress and cost may occur; calls are never retried automatically.",
+        _AskArguments,
+        tool_ask_ephemeral,
+        _schema(
+            {
+                "answer": _TEXT,
+                "snapshot_id": _TEXT,
+                "sources": {
+                    "type": "array",
+                    "items": _schema(
+                        {"document": _DOCUMENT, "score": {"type": "number"}}, ["document", "score"]
+                    ),
+                },
+            },
+            ["answer", "sources", "snapshot_id"],
+        ),
+        read_only=True,
+        open_world=True,
     ),
     "rag_ask": Tool(
         "Ask the configured RAG runtime and persist QA history; may call a configured LLM.",
@@ -427,8 +448,6 @@ TOOLS: dict[str, Tool] = {
         open_world=True,
     ),
 }
-
-PROTOCOL_VERSION = "2025-11-25"
 
 
 def create_server() -> Server[Any, Any]:

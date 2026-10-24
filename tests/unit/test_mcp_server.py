@@ -52,7 +52,9 @@ def test_sdk_discovery_declares_schemas_and_actual_effects() -> None:
         assert {tool.name for tool in response.root.tools} == set(mcp_server.TOOLS)
         for tool in response.root.tools:
             assert tool.inputSchema and tool.outputSchema and tool.annotations
-            assert tool.annotations.readOnlyHint is False
+            assert tool.annotations.readOnlyHint == (
+                tool.name in {"rag_status", "rag_ask_ephemeral"}
+            )
             assert tool.annotations.destructiveHint == (
                 tool.name in {"rag_import_canonical", "rag_rebuild_index", "rag_eval"}
             )
@@ -178,15 +180,15 @@ def test_import_and_status_use_native_mutation_flow(
     )
     assert not result.isError and result.structuredContent
     assert result.structuredContent["inserted"] == 1
-    assert result.structuredContent["replace_scope"] is True
+    assert result.structuredContent["replace_scope"] is False
     assert {
         doc.external_id for doc in SqlDocumentStorage(in_memory_sqlite).get_all_documents()
     } == {"doc-1"}
     status = _invoke("rag_status")
     assert not status.isError and status.structuredContent
-    assert status.structuredContent["runtime"]["backends"]["retrieval"] == "sparse"
-    assert status.structuredContent["health"]["documents_count"] == 1
-    assert status.structuredContent["health"]["history_count"] == 0
+    assert status.structuredContent["runtime"]["retrieval_mode"] == "sparse"
+    assert status.structuredContent["health"]["documents_count"] is None
+    assert status.structuredContent["health"]["snapshot_state"] == "not_configured"
 
 
 def test_invalid_canonical_envelope_is_expected_failure_before_mutation(monkeypatch) -> None:
@@ -503,7 +505,14 @@ def test_stdio_handshake_ping_notifications_and_recoverable_failures(tmp_path) -
             failed["result"]["content"][0]["text"]
         )
         send({"id": 4, "method": "tools/list"})
-        assert len(receive()["result"]["tools"]) == 5
+        assert {tool["name"] for tool in receive()["result"]["tools"]} == {
+            "rag_status",
+            "rag_ask",
+            "rag_ask_ephemeral",
+            "rag_import_canonical",
+            "rag_rebuild_index",
+            "rag_eval",
+        }
     finally:
         process.terminate()
         _, stderr = process.communicate(timeout=10)

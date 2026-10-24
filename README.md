@@ -336,12 +336,14 @@ rag-mcp
 Tools:
 
 * `rag_ask`
+* `rag_ask_ephemeral`
 * `rag_import_canonical`
 * `rag_rebuild_index`
 * `rag_eval`
 * `rag_status`
 
-The official SDK handles stdio framing and lifecycle, targeting MCP `2025-11-25`.
+The official SDK handles stdio framing, lifecycle and negotiation of its supported
+protocol versions. The internal runtime client requires MCP `2025-11-25`.
 Every tool declares input/output schemas and effect annotations. SDK diagnostics,
 including malformed notification diagnostics, omit request bodies and exception values.
 Tools sent as notifications never execute. Invalid arguments and unknown tools return
@@ -355,16 +357,49 @@ One blocking worker runs per process, and cancellation retains its capacity unti
 operation finishes. A client timeout does not prove rollback or cancellation of a mutation.
 Library and ordinary CLI imports do not load the optional SDK.
 
-Effect annotations reflect native behavior: `rag_ask` persists QA history and may call
-a configured LLM; `rag_status` may initialize configured storage; import, index rebuild
-and evaluation mutate their existing owned data. The native mutation locks remain in use.
+`rag_ask` persists QA history and may call a configured LLM; import, index rebuild
+and evaluation mutate their owned data. `rag_eval` bounds `k` to 1–100 (default 3).
+`rag_status` only reports live-store presence and frozen snapshot readiness/counts;
+it does not create a schema, query live SQL, load a model or claim live freshness.
 
-`rag_ask` is the narrow query/status integration surface used by the sibling
-`event-based-agent-runtime` repo. The runtime calls it over stdio MCP and keeps
-document mutation, index rebuild, and evaluation workflows owned by this repo.
+For queries without RAG storage writes, explicitly prepare a new frozen generation:
 
-`rag_status` now returns a structured runtime snapshot plus health/index diagnostics, so agents
-do not need to infer topology from raw config fields.
+```bash
+RAG_CONFIG_PATH=/absolute/config.yaml rag-snapshot /absolute/new-snapshot
+# Set ephemeral_snapshot_dir: /absolute/new-snapshot in the consumer configuration.
+```
+
+Preparation is a writer command: it reserves a fresh destination, holds the existing
+multi-store write lock and one SQL read transaction while exporting documents and
+required vector artifacts, refuses unresolved mutations/drift, then seals the bundle
+with a manifest last. Existing destinations are refused. Interrupted, unsealed bundles
+remain for explicit inspection; use another fresh destination after correcting the cause.
+Only the documents table enters a fresh database; history, tombstones, system state,
+configuration, deleted pages and credentials are excluded. Members are bounded to
+1 GiB each; the seal is bounded to 1 MiB. Sparse and dual need documents; dense and
+hybrid also include the index, ID map and native embedding manifest.
+
+`rag_ask_ephemeral` accepts the same question/k/filters as `rag_ask` and adds a
+`snapshot_id` to the answer/sources result. It verifies the seal, members, SHA-256,
+configuration and vector identity before use, rejects symlinks, unknown files and
+SQLite sidecars, and consumes verified SQLite bytes in a query-only memory image.
+It never opens live SQL, initializes schema/history/state, acquires storage locks,
+writes embedding/performance caches or falls back to live/WAL data. Generation
+freshness is exactly the returned snapshot identity; prepare a new generation to refresh.
+
+Configured embedding/LLM calls can incur cost and remote retention. New query clients
+have zero provider retries; the runtime authorizes each call through the dedicated
+`rag:query:ephemeral` scope and also disables automatic retries. Its command/result
+audit remains durable. Existing history-writing `rag_ask` retains its approval and
+idempotency requirements. Local SentenceTransformers require a complete installed
+absolute model directory plus `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at
+process startup; model provisioning is a separate writer operation. Synthetic mode
+remains available for deterministic acceptance without downloads.
+
+Version 5.0.0 intentionally rejects earlier RepoGPT v5/chat v3 producer payloads.
+Generic canonical payloads now default to `replace_scope=false` across CLI, HTTP
+and MCP. Set `replace_scope=true` explicitly only for verified complete exports;
+nonzero failure evidence still refuses replacement, including an override.
 
 
 

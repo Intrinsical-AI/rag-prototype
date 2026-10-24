@@ -47,6 +47,7 @@ def test_cli_import_canonical_syncs_scope(in_memory_sqlite, tmp_path, monkeypatc
             {
                 "scope": "repogpt:demo",
                 "snapshot_id": "snap-2",
+                "replace_scope": True,
                 "documents": [
                     {
                         "external_id": "doc-2",
