@@ -143,6 +143,12 @@ test -f config.yaml || cp config.example.yaml config.yaml
 # uv sync --frozen --group dev --group test --group lint --no-default-groups
 ```
 
+The runtime requires `anyio>=4.14.2,<5` to keep the HTTPX/OpenAI transport stack
+on a patched version. AnyIO 4.14.2 fixes
+[TLS hostname verification (CVE-2026-63374)](https://github.com/agronholm/anyio/security/advisories/GHSA-82r6-8w77-94w6)
+and [process-worker stderr handling (CVE-2026-64847)](https://github.com/agronholm/anyio/security/advisories/GHSA-5p39-cfhj-2xmp).
+Keep this minimum when updating the lockfile.
+
 Initialize sample data and start:
 
 ```bash

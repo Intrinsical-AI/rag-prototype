@@ -2980,6 +2980,7 @@ name = "rag-prototype"
 version = "5.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "click" },
     { name = "httpx" },
     { name = "ir-measures" },
@@ -3076,6 +3077,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", marker = "extra == 'mcp'", specifier = "==4.14.2" },
+    { name = "anyio", specifier = ">=4.14.2,<5" },
     { name = "click", specifier = ">=8.0,<9.0" },
     { name = "faiss-cpu", marker = "extra == 'dense'", specifier = ">=1.8.0,<2.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139,<0.140" },
