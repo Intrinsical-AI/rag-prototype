@@ -1,0 +1,157 @@
+{
+  "kind": "chat-units",
+  "schema_version": "4",
+  "scope": "chat:whatsapp:integration-chat:2026-09",
+  "snapshot_id": "integration-chat-7e4da1cd2eb47268",
+  "replace_scope": false,
+  "producer": {
+    "name": "chat-exports",
+    "version": "0.4.0.dev0",
+    "format": "chat-units",
+    "format_version": "4",
+    "options": {
+      "unit": "window",
+      "gap_min": 30,
+      "char_cap": 4000,
+      "include_system": false,
+      "format_version": "4"
+    },
+    "options_hash": "93489748fc6b2c76",
+    "assume_complete_history": false,
+    "archive_input_sha256": "e6c11ba584505b632032004e445f57e4fb51a0b1b2763b1be0a63b0e08f1bc6c"
+  },
+  "stats": {
+    "total_messages": 11,
+    "emitted_documents": 3,
+    "failed_files": 0,
+    "error_count": 0,
+    "archive_warnings": 0
+  },
+  "failures": [],
+  "documents": [
+    {
+      "external_id": "chat:whatsapp:integration-chat:window:80827eabda9163f3",
+      "source_id": "chat:whatsapp:integration-chat",
+      "content": "[2026-09-14 18:01] Luis Pérez: Hola Ana! Te paso el presupuesto de la cocina\n[2026-09-14 18:02] Luis Pérez: [image: IMG-20260914-WA0003.jpg; included]\nAsí quedaría la isla\n[2026-09-14 18:05] Ana García: Qué bien!! 😍\nUna duda: ¿incluye la encimera?\n[2026-09-14 18:06] Luis Pérez: Sí, cuarzo blanco (edited)",
+      "metadata": {
+        "source": "whatsapp",
+        "chat_key": "integration-chat",
+        "chat_title": "Luis Pérez",
+        "unit_type": "window",
+        "day": "2026-09-14",
+        "month": "2026-09",
+        "start_local": "2026-09-14T18:01:00",
+        "end_local": "2026-09-14T18:06:00",
+        "start_utc": "2026-09-14T16:01:00Z",
+        "end_utc": "2026-09-14T16:06:00Z",
+        "utc_unknown": false,
+        "authors": [
+          "Ana García",
+          "Luis Pérez"
+        ],
+        "message_ids": [
+          "80827eabda9163f3",
+          "b43e8508bd3f2df6",
+          "ca3e6e94e19ef010",
+          "1713c22e26db38aa"
+        ],
+        "media_ids": [
+          "m-ccef79e6753eb017"
+        ],
+        "modalities": [
+          "image"
+        ],
+        "links": [],
+        "locations": [],
+        "content_hash": "1d87b0b2fa58d44c6bd39707b91e4e11293a0e4a12cd45b90d1a4ae38d5f6a15"
+      }
+    },
+    {
+      "external_id": "chat:whatsapp:integration-chat:window:c3d3728f3f4cf661",
+      "source_id": "chat:whatsapp:integration-chat",
+      "content": "[2026-09-15 09:12] Ana García: [voice: PTT-20260915-WA0004.opus; included]\n[2026-09-15 09:30] Luis Pérez: [document: Presupuesto_reforma.pdf; included]\n[2026-09-15 09:31] Luis Pérez: [deleted message]\n[2026-09-15 09:33] Luis Pérez: [video: VID-20260915-WA0005.mp4; included]",
+      "metadata": {
+        "source": "whatsapp",
+        "chat_key": "integration-chat",
+        "chat_title": "Luis Pérez",
+        "unit_type": "window",
+        "day": "2026-09-15",
+        "month": "2026-09",
+        "start_local": "2026-09-15T09:12:00",
+        "end_local": "2026-09-15T09:33:00",
+        "start_utc": "2026-09-15T07:12:00Z",
+        "end_utc": "2026-09-15T07:33:00Z",
+        "utc_unknown": false,
+        "authors": [
+          "Ana García",
+          "Luis Pérez"
+        ],
+        "message_ids": [
+          "c3d3728f3f4cf661",
+          "8ac721facda413a0",
+          "d633eb40a3e9ebcf",
+          "dea32b0471887b4b"
+        ],
+        "media_ids": [
+          "m-14311dc87c4e3867",
+          "m-c227eaa4dc06dfef",
+          "m-1e8bce5028430f90"
+        ],
+        "modalities": [
+          "document",
+          "video",
+          "voice"
+        ],
+        "links": [],
+        "locations": [],
+        "content_hash": "4245d303c8258142d47dde4e780fbb09eff697e0319e91253054673412fe1329"
+      }
+    },
+    {
+      "external_id": "chat:whatsapp:integration-chat:window:4b790917a20a22c1",
+      "source_id": "chat:whatsapp:integration-chat",
+      "content": "[2026-09-16 20:45] Ana García: ubicación: https://maps.google.com/?q=40.416775,-3.703790\n\nlocation: 40.416775, -3.70379 (https://maps.google.com/?q=40.416775,-3.703790)\n[2026-09-16 20:47] Luis Pérez: Perfecto, nos vemos el lunes 👍",
+      "metadata": {
+        "source": "whatsapp",
+        "chat_key": "integration-chat",
+        "chat_title": "Luis Pérez",
+        "unit_type": "window",
+        "day": "2026-09-16",
+        "month": "2026-09",
+        "start_local": "2026-09-16T20:45:00",
+        "end_local": "2026-09-16T20:47:00",
+        "start_utc": "2026-09-16T18:45:00Z",
+        "end_utc": "2026-09-16T18:47:00Z",
+        "utc_unknown": false,
+        "authors": [
+          "Ana García",
+          "Luis Pérez"
+        ],
+        "message_ids": [
+          "4b790917a20a22c1",
+          "85fdd3611bd73d11"
+        ],
+        "media_ids": [],
+        "modalities": [
+          "location"
+        ],
+        "links": [
+          "https://maps.google.com/?q=40.416775,-3.703790"
+        ],
+        "locations": [
+          {
+            "source_type": "coordinates",
+            "latitude": 40.416775,
+            "longitude": -3.70379,
+            "access_hash": null,
+            "accuracy_radius": null,
+            "url": "https://maps.google.com/?q=40.416775,-3.703790",
+            "modality": "location",
+            "period_seconds": null
+          }
+        ],
+        "content_hash": "2e00976d64fcb55efc8d66575d2e8f05fd79b177de46c5158cf03300bc7497e7"
+      }
+    }
+  ]
+}

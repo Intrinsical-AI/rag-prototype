@@ -8,11 +8,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 from local_rag_backend.core.domain.embeddings import EmbeddingIdentity
 from local_rag_backend.core.ports import EmbedderPort
-from local_rag_backend.infrastructure.llms.openai_chat import create_openai_client
+from local_rag_backend.infrastructure.llms.openai_chat import (
+    create_openai_client,
+    translate_openai_error,
+)
 
 if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
@@ -34,6 +37,7 @@ class OpenAIEmbedder(EmbedderPort):
         model: str | None = None,
         *,
         settings_obj: Settings,
+        max_retries: int | None = None,
     ):
         configured_settings = settings_obj
         self.model = model or configured_settings.openai_embedding_model
@@ -46,6 +50,7 @@ class OpenAIEmbedder(EmbedderPort):
         self.client = create_openai_client(
             api_key=configured_settings.openai_api_key,
             timeout=configured_settings.openai_request_timeout,
+            max_retries=max_retries,
             client_factory=OpenAI,
         )
 
@@ -55,6 +60,8 @@ class OpenAIEmbedder(EmbedderPort):
             return []
         try:
             resp = self.client.embeddings.create(model=self.model, input=list(texts))
+        except OpenAIError as err:
+            raise translate_openai_error(err, provider_name="OpenAI embeddings") from err
         except Exception as err:
             # Robust to different SDK exception classes
             raise RuntimeError(

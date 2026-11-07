@@ -1,4 +1,4 @@
-"""Validate exact RepoGPT and chat-adapter wheels against an installed RAG wheel."""
+"""Validate exact native producer wheels against an isolated installed RAG wheel."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,14 @@ import tempfile
 from email.parser import BytesParser
 from pathlib import Path
 from zipfile import ZipFile
+
+TR3V0R_MODULES = {
+    "tr3v0r": "tr3v0r_app",
+    "tr3v0r-core": "tr3v0r_core",
+    "tr3v0r-parsers": "tr3v0r_parsers",
+    "tr3v0r-analytics": "tr3v0r_analytics",
+    "tr3v0r-sensors": "tr3v0r_sensors",
+}
 
 CONSUMER = r"""
 import importlib
@@ -30,23 +39,25 @@ from local_rag_backend.core.services.canonical_import_transport import (
 )
 from local_rag_backend.infrastructure.search_backends.local_split import LocalSplitSearchRetriever
 from local_rag_backend.settings import get_settings
-from rag_adapters.codec import load_archive, save_archive
-from rag_adapters.projectors import PROJECTORS, apply_projections
+from chat_exports.core.archive import load_archive, prepare_archive, save_archive
+from chat_exports.core.models import Diagnostic, DiagnosticLocation
+from chat_exports.projectors import PROJECTORS, apply_projections
 
 root = Path.cwd()
 venv = Path(sys.prefix).resolve()
 versions = json.loads(sys.argv[1])
 for distribution, module in (
-    ("repogpt", "repogpt"), ("rag-adapters", "rag_adapters"),
+    ("repogpt", "repogpt"), ("chat-exports", "chat_exports"),
     ("rag-prototype", "local_rag_backend"),
 ):
     origin = Path(importlib.import_module(module).__file__).resolve()
     assert origin.is_relative_to(venv), origin
     assert metadata.version(distribution) == versions[distribution]
 for module, schema in (
-    ("repogpt", "code-units-v5.schema.json"),
-    ("rag_adapters", "chat-archive-v2.schema.json"),
-    ("rag_adapters", "rag-import-chat-v2.schema.json"),
+    ("repogpt", "code-units-v6.schema.json"),
+    ("chat_exports", "chat-archive-v3.schema.json"),
+    ("chat_exports", "messages-v2.schema.json"),
+    ("chat_exports", "rag-import-chat-v4.schema.json"),
 ):
     assert resources.files(module).joinpath("schemas", schema).is_file()
 
@@ -65,7 +76,7 @@ payload_path = root / "repogpt.json"
 run([sys.executable, "-m", "repogpt.app.cli", "--emit", "code-units", "--repo-key",
      "wheel-fixture", "--replace-scope", "--include-tests", "-o", str(payload_path), str(fixture)])
 payload = json.loads(payload_path.read_text())
-assert payload["schema_version"] == "5" and payload["replace_scope"] is True
+assert payload["schema_version"] == "6" and payload["replace_scope"] is True
 validate_canonical_import_payload(payload)
 rag_cli = str(venv / "bin" / "rag-import-canonical")
 run([rag_cli, "--json", str(payload_path)])
@@ -79,28 +90,63 @@ chat.mkdir()
     "[1/10/26, 10:00:00] Synthetic: excluded\n", encoding="utf-8",
 )
 archive_path = root / "archive" / "chat_archive.json"
-run([sys.executable, "-m", "rag_adapters.cli", "ingest", str(chat), "-o",
-     str(archive_path.parent), "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-chat"])
-archive = load_archive(archive_path)
+chat_cli = str(venv / "bin" / "chatx")
+run([chat_cli, "convert", str(chat), "-o", str(archive_path.parent), "--to", "none",
+     "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-chat"])
+archive = load_archive(archive_path).mutable_copy()
 archive.messages[-1].role = "system"
-failure = {"code": "projection_failed", "message_id": archive.messages[-1].message_id}
-archive.failures.append(failure)
-save_archive(archive, archive_path)
+failure = Diagnostic("error", "source_record_invalid", "synthetic excluded-month failure",
+    DiagnosticLocation("_chat.txt", line_start=3, line_end=3),
+    message_id=archive.messages[-1].message_id)
+archive.diagnostics.append(failure)
+save_archive(prepare_archive(archive), archive_path)
 export = root / "exports"
-run([sys.executable, "-m", "rag_adapters.cli", "export-rag", str(archive_path), "-o", str(export)],
+run([chat_cli, "export", str(archive_path), "-o", str(export), "--to", "rag"],
     expected=2)
-chat_paths = sorted(export.glob("*.json"))
+chat_paths = sorted((export / "rag").glob("*.json"))
 assert len(chat_paths) == 2
 for path in chat_paths:
     chat_payload = json.loads(path.read_text())
-    assert chat_payload["failures"] == [failure] and chat_payload["stats"]["failed_files"] == 1
-    assert not any(key in chat_payload for key in ("kind", "schema_version", "repo_key"))
+    assert len(chat_payload["failures"]) == 1
+    assert chat_payload["failures"][0]["code"] == failure.code
+    assert chat_payload["stats"]["failed_files"] == chat_payload["stats"]["error_count"] == 1
+    assert chat_payload["producer"]["format_version"] == "4"
+    assert chat_payload["kind"] == "chat-units" and chat_payload["schema_version"] == "4"
     assert chat_payload["replace_scope"] is False
     validated = validate_canonical_import_payload(chat_payload)
     assert resolve_canonical_import_replace_scope(validated) is False
     run([rag_cli, "--json", str(path)])
     run([rag_cli, "--json", str(path)])
     run([rag_cli, "--json", str(path), "--replace-scope"], expected=1)
+
+telegram = root / "result.json"
+telegram.write_text(json.dumps({"name": "Wheel Telegram", "type": "personal_chat", "id": 42,
+    "messages": [
+        {"id": 1, "type": "message", "date": "2026-09-01T10:00:00",
+         "date_unixtime": "1788256800", "from": "Synthetic", "from_id": "user42",
+         "rich_message": {"rtl": False, "part": False, "blocks": [
+             {"type": "paragraph", "text": {"type": "plain", "text": "rich_needle"}},
+             {"type": "paragraph", "text": {"type": "text_link",
+                "text": {"type": "plain", "text": "docs_needle"},
+                "href": "https://example.org/installed_destination"}}
+         ]}},
+        {"id": 2, "type": "message", "date": "2026-09-01T10:01:00",
+         "date_unixtime": "1788256860", "from": "Synthetic", "from_id": "user42",
+         "text": "", "location_information": {"latitude": 40.416775, "longitude": -3.70379}}
+    ]}), encoding="utf-8")
+telegram_out = root / "telegram-output"
+run([chat_cli, "convert", str(telegram), "-o", str(telegram_out), "--tz", "UTC", "--to", "rag"])
+telegram_paths = sorted((telegram_out / "rag").glob("*.json"))
+assert len(telegram_paths) == 1
+telegram_payload = json.loads(telegram_paths[0].read_text())
+assert telegram_payload["scope"] == "chat:telegram:tg-42:2026-09"
+assert all(doc["source_id"] == "chat:telegram:tg-42" for doc in telegram_payload["documents"])
+telegram_contents = "\n".join(doc["content"] for doc in telegram_payload["documents"])
+for token in ("rich_needle", "docs_needle", "https://example.org/installed_destination",
+              "40.416775", "-3.70379"):
+    assert token in telegram_contents, (token, telegram_contents)
+run([rag_cli, "--json", str(telegram_paths[0])])
+run([rag_cli, "--json", str(telegram_paths[0])])
 
 media_chat = root / "media-chat"
 media_chat.mkdir()
@@ -111,20 +157,20 @@ media_chat.mkdir()
     "[1/9/26, 10:01:00] Synthetic: unused.txt (archivo adjunto)\n", encoding="utf-8",
 )
 bundle = root / "media-bundle"
-run([sys.executable, "-m", "rag_adapters.cli", "ingest", str(media_chat), "-o", str(bundle),
+run([chat_cli, "convert", str(media_chat), "-o", str(bundle), "--to", "none",
      "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-media", "--copy-media"])
-media_archive = load_archive(bundle / "chat_archive.json")
+media_archive = load_archive(bundle / "chat_archive.json").mutable_copy()
 selected = next(ref for ref in media_archive.media if ref.filename == "first.pdf")
 unused = next(ref for ref in media_archive.media if ref.filename == "unused.txt")
-PROJECTORS["pdf"] = replace(PROJECTORS["pdf"], package="rag-adapters", extract=lambda _p: "stub")
+PROJECTORS["pdf"] = replace(PROJECTORS["pdf"], package="chat-exports", extract=lambda _p: "stub")
 (bundle / unused.bundle_rel_path).write_bytes(b"changed unselected bytes")
 apply_projections(media_archive, bundle, requested=["pdf"], cache_dir=root / "cache",
-                  use_bundle=True, verify_all=False)
+                  mode="bundle", verification="selected")
 assert len(media_archive.projections) == 1
 (bundle / selected.bundle_rel_path).write_bytes(b"changed selected bytes")
 try:
     apply_projections(media_archive, bundle, requested=["pdf"], cache_dir=root / "cache",
-                      use_bundle=True, verify_all=False)
+                      mode="bundle", verification="selected")
 except ValueError as error:
     assert "hash mismatch" in str(error)
 else:
@@ -136,7 +182,7 @@ try:
     repo = container.doc_repo_factory()
     documents = list(repo.get_all_documents())
     expected_docs = [doc for doc in payload["documents"] if doc["content"].strip()]
-    assert len(documents) == len(expected_docs) + 2
+    assert len(documents) == len(expected_docs) + 2 + len(telegram_payload["documents"])
     retriever = LocalSplitSearchRetriever(doc_repo=repo)
     found = retriever.retrieve(RetrievalRequest(
         query="boundary_needle", top_k=1, mode="sparse",
@@ -144,6 +190,7 @@ try:
     ))
     assert found.items and found.items[0].document.metadata["repo_key"] == "wheel-fixture"
     assert retriever.retrieve(RetrievalRequest(query="september_needle", top_k=1, mode="sparse")).items
+    assert retriever.retrieve(RetrievalRequest(query="rich_needle", top_k=1, mode="sparse")).items
     overlong = json.loads(json.dumps(payload))
     overlong["documents"][0]["external_id"] = "x" * 513
     try:
@@ -156,7 +203,8 @@ try:
 finally:
     container.close()
 print(json.dumps({"versions": versions, "repo_documents": len(expected_docs),
-                  "chat_months": len(chat_paths), "stored_documents": len(documents),
+                  "chat_months": len(chat_paths), "telegram_documents": len(telegram_payload["documents"]),
+                  "stored_documents": len(documents), "rich_links_locations_preserved": True,
                   "replay_idempotent": True, "partial_replacement_refused": True,
                   "origins_in_fresh_venv": True, "consumer_limits_retained": True,
                   "selective_bundle_verified": True, "real_extractors": False}, sort_keys=True))
@@ -190,11 +238,299 @@ def _wheel(path: Path, name: str) -> dict[str, str]:
     }
 
 
+def _tr3v0r_wheels(app_wheel: Path, wheelhouse: Path) -> dict[str, dict[str, str]]:
+    """Admit the five co-versioned local distributions against their checksum receipt."""
+    checksums: dict[str, str] = {}
+    for line in (wheelhouse / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+        digest, filename = line.split(maxsplit=1)
+        filename = filename.removeprefix("*")
+        if not re.fullmatch(r"[0-9a-f]{64}", digest) or filename in checksums:
+            raise ValueError("Invalid or duplicate wheelhouse checksum entry")
+        checksums[filename] = digest
+    wheels: dict[str, dict[str, str]] = {}
+    for path in sorted(wheelhouse.glob("*.whl")):
+        name = path.name.split("-", 1)[0].lower().replace("_", "-")
+        if name not in TR3V0R_MODULES or name in wheels:
+            raise ValueError(f"Unexpected or duplicate Tr3v0r wheel: {path.name}")
+        artifact = _wheel(path.resolve(), name)
+        if checksums.get(path.name) != artifact["sha256"]:
+            raise ValueError(f"Wheelhouse checksum mismatch: {path.name}")
+        with ZipFile(path) as archive:
+            metadata_path = next(
+                member for member in archive.namelist() if member.endswith(".dist-info/METADATA")
+            )
+            metadata = BytesParser().parsebytes(archive.read(metadata_path))
+        for requirement in metadata.get_all("Requires-Dist", []):
+            dependency = re.split(r"[\s\[<>=!~;(]", requirement, maxsplit=1)[0]
+            dependency = re.sub(r"[-_.]+", "-", dependency).lower()
+            if dependency.startswith("tr3v0r") and dependency not in TR3V0R_MODULES:
+                raise ValueError(f"Unbound private producer dependency: {dependency}")
+        wheels[name] = artifact
+    if set(wheels) != set(TR3V0R_MODULES):
+        raise ValueError("Tr3v0r wheelhouse must contain exactly all five distributions")
+    app = _wheel(app_wheel.resolve(), "tr3v0r")
+    if app["sha256"] != wheels["tr3v0r"]["sha256"]:
+        raise ValueError("Explicit Tr3v0r app wheel does not match the wheelhouse receipt")
+    if any(artifact["version"] != app["version"] for artifact in wheels.values()):
+        raise ValueError("Tr3v0r wheelhouse distribution versions must match the app wheel")
+    wheels["tr3v0r"] = app
+    return wheels
+
+
+def _private_constraints(root: Path, wheels: dict[str, dict[str, str]]) -> Path:
+    """Bind every private producer name to its admitted file during dependency resolution."""
+    path = root / "private-producers.constraints"
+    path.write_text(
+        "".join(f"{name} @ {Path(wheels[name]['path']).as_uri()}\n" for name in TR3V0R_MODULES),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _consumer_source(env: dict[str, str]) -> dict[str, object]:
+    root = Path(__file__).resolve().parents[1]
+
+    def git(*arguments: str) -> str:
+        return _run(["git", "--no-optional-locks", *arguments], cwd=root, env=env)
+
+    paths = git(
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        "src",
+        "config.yaml",
+        "config.example.yaml",
+        "pyproject.toml",
+        "uv.lock",
+        "Makefile",
+        "scripts/smoke_canonical_wheels.py",
+        "tests/unit/scripts/test_canonical_wheelhouse.py",
+        "tests/unit/core/services/test_canonical_producers.py",
+        "tests/e2e/test_canonical_producer_gates.py",
+    ).split("\0")
+    return {
+        "revision": git("rev-parse", "HEAD").strip(),
+        "tree": git("rev-parse", "HEAD^{tree}").strip(),
+        "dirty": bool(git("status", "--porcelain", "--untracked-files=all").strip()),
+        "files": {
+            path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+            for path in sorted(set(paths))
+            if path
+        },
+    }
+
+
+def _verify_source_wheel(wheel: Path, source: dict[str, object]) -> None:
+    files = source["files"]
+    assert isinstance(files, dict)
+    expected = {
+        path.removeprefix("src/"): digest
+        for path, digest in files.items()
+        if path.startswith("src/local_rag_backend/")
+    }
+    with ZipFile(wheel) as archive:
+        actual = {
+            path: hashlib.sha256(archive.read(path)).hexdigest()
+            for path in archive.namelist()
+            if path.startswith("local_rag_backend/") and not path.endswith("/")
+        }
+    if actual != expected:
+        raise ValueError("RAG wheel package bytes do not match the invoking consumer source")
+
+
+VERIFY_INSTALLED = r"""
+import hashlib, importlib.metadata, importlib.util, json, sys, zipfile
+from pathlib import Path
+wheels=json.loads(sys.argv[1]);modules=json.loads(sys.argv[2]);receipt={}
+for name,expected in wheels.items():
+ wheel=Path(expected['path']);dist=importlib.metadata.distribution(name)
+ assert dist.version==expected['version'], name
+ assert hashlib.sha256(wheel.read_bytes()).hexdigest()==expected['sha256'], name
+ assert json.loads(dist.read_text('direct_url.json'))['url']==wheel.resolve().as_uri(), name
+ count=0
+ with zipfile.ZipFile(wheel) as archive:
+  for member in archive.namelist():
+   if member.endswith(('/','.dist-info/RECORD')):continue
+   path=Path(dist.locate_file(member)).resolve()
+   assert path.is_relative_to(Path(sys.prefix).resolve()), (name,member)
+   assert path.read_bytes()==archive.read(member), (name,member)
+   count+=1
+ module=importlib.util.find_spec(modules[name])
+ assert module is not None and module.origin is not None, name
+ origin=Path(module.origin).resolve()
+ assert origin.is_relative_to(Path(sys.prefix).resolve()), (name,origin)
+ receipt[name]={'version':dist.version,'origin':str(origin),
+  'wheel_sha256':expected['sha256'],'files_verified':count}
+print(json.dumps(receipt,sort_keys=True))
+"""
+
+
+ISOLATED_CONSUMER = r"""
+import hashlib, importlib.metadata, importlib.util, json, sys, zipfile
+from pathlib import Path
+from local_rag_backend.core.services.canonical_import_transport import build_canonical_import_request_input_from_raw
+from local_rag_backend.mcp_server import tool_import_canonical
+from local_rag_backend.cli_commands.runtime import get_cli_container
+from local_rag_backend.composition.factory import reset_app_context
+
+wheel=Path(sys.argv[1]); producer_root=Path(sys.argv[2]); rf=json.loads(sys.argv[3])
+dist=importlib.metadata.distribution('rag-prototype')
+assert json.loads(dist.read_text('direct_url.json'))['url']==wheel.resolve().as_uri()
+with zipfile.ZipFile(wheel) as archive:
+ for name in archive.namelist():
+  if name.endswith(('/', '.dist-info/RECORD')):continue
+  installed=Path(dist.locate_file(name)).resolve()
+  assert installed.is_relative_to(Path(sys.prefix).resolve())
+  assert installed.read_bytes()==archive.read(name)
+for module in ('repogpt','chat_exports','tr3v0r','tr3v0r_app','tr3v0r_core',
+               'tr3v0r_parsers','tr3v0r_analytics','tr3v0r_sensors'):
+ assert importlib.util.find_spec(module) is None, module
+paths=[producer_root/'repogpt.json', *sorted((producer_root/'exports'/'rag').glob('*.json')),
+       *sorted((producer_root/'telegram-output'/'rag').glob('*.json')), Path(rf['complete'])]
+assert len(paths)>=4
+reports=[]
+try:
+ for path in paths:
+  raw=json.loads(path.read_text())
+  first=tool_import_canonical(raw)
+  second=tool_import_canonical(raw)
+  assert second['inserted']==second['updated']==second['deleted_sql']==0
+  reports.append({'kind':raw['kind'],'documents':len(raw['documents'])})
+ partial=json.loads(Path(rf['upsert']).read_text())
+ assert partial['completion']['complete'] is False and partial['replace_scope'] is False
+ sentinel_metadata={'completion':{'complete':False,'description':'native document metadata'}}
+ tool_import_canonical({'scope':partial['scope'],'snapshot_id':'native-sentinel',
+  'documents':[{'external_id':'stripped-rf-sentinel','content':'preserve absent scope document',
+                'metadata':sentinel_metadata}]})
+ assert tool_import_canonical(partial)['deleted_sql']==0
+ before=list(get_cli_container().doc_repo_factory().get_all_documents())
+ sentinel=next(item for item in before if item.external_id=='stripped-rf-sentinel')
+ assert sentinel.metadata['completion']==sentinel_metadata['completion']
+ stripped={key:value for key,value in partial.items() if key not in {'kind','schema_version'}}
+ for candidate in (partial,stripped):
+  try:tool_import_canonical(candidate,replace_scope_override=True)
+  except ValueError:pass
+  else:raise AssertionError('Partial Tr3v0r replacement override bypassed evidence')
+  after=list(get_cli_container().doc_repo_factory().get_all_documents())
+  assert {str(item.id) for item in before}=={str(item.id) for item in after}
+ assert {item['kind'] for item in reports}=={'code-units','chat-units','tr3v0r-canonical-rag'}
+finally:reset_app_context()
+print(json.dumps({'producers':reports,'consumer_has_no_producer_packages':True,
+ 'replay_idempotent':True,'partial_rf_replacement_refused':True,
+ 'stripped_rf_identity_refused':True,'native_metadata_completion_preserved':True,
+ 'consumer_wheel_sha256':hashlib.sha256(wheel.read_bytes()).hexdigest()}))
+"""
+
+
+def _isolated_producer_boundary(
+    root: Path,
+    *,
+    uv: str,
+    env: dict[str, str],
+    wheels: dict[str, dict[str, str]],
+    example_script: Path,
+    constraints: Path,
+) -> dict[str, object]:
+    """Generate RF with its installed producer and consume all outputs separately."""
+    rf_env = root / "rf-venv"
+    consumer_env = root / "consumer-venv"
+    installed = {}
+    for environment, distributions in (
+        (rf_env, TR3V0R_MODULES),
+        (consumer_env, {"rag-prototype": "local_rag_backend"}),
+    ):
+        _run([uv, "venv", "--python", sys.executable, str(environment)], cwd=root, env=env)
+        python = environment / "bin/python"
+        _run(
+            [
+                uv,
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                "--constraint",
+                str(constraints),
+                *(wheels[name]["path"] for name in distributions),
+            ],
+            cwd=root,
+            env=env,
+        )
+        _run([uv, "pip", "check", "--python", str(python)], cwd=root, env=env)
+        verified = _run(
+            [
+                str(python),
+                "-I",
+                "-c",
+                VERIFY_INSTALLED,
+                json.dumps({name: wheels[name] for name in distributions}),
+                json.dumps(distributions),
+            ],
+            cwd=root,
+            env=env,
+        )
+        installed[environment.name] = json.loads(verified)
+    if not example_script.is_file():
+        raise ValueError("Pass the Tr3v0r installed-producer example script explicitly")
+    example_digest = hashlib.sha256(example_script.read_bytes()).hexdigest()
+    generated = _run(
+        [
+            str(rf_env / "bin/python"),
+            "-I",
+            str(example_script),
+            "--output-dir",
+            str(root / "rf-output"),
+        ],
+        cwd=root,
+        env=env,
+    )
+    # The generator emits only the synthetic artifact paths on stdout.
+    rf = json.loads(generated)
+    if hashlib.sha256(example_script.read_bytes()).hexdigest() != example_digest:
+        raise ValueError("Tr3v0r example script changed during acceptance")
+    consumer_config = json.loads((root / "config.json").read_text())
+    consumer_config.update(
+        sqlite_url=f"sqlite:///{root / 'isolated.sqlite3'}",
+        data_dir=str(root / "isolated-data"),
+        index_path=str(root / "isolated-index.npy"),
+        id_map_path=str(root / "isolated-ids.json"),
+    )
+    config_path = root / "isolated-config.json"
+    config_path.write_text(json.dumps(consumer_config), encoding="utf-8")
+    consumer_env_vars = {**env, "RAG_CONFIG_PATH": str(config_path)}
+    result = _run(
+        [
+            str(consumer_env / "bin/python"),
+            "-I",
+            "-c",
+            ISOLATED_CONSUMER,
+            wheels["rag-prototype"]["path"],
+            str(root),
+            json.dumps(rf),
+        ],
+        cwd=root,
+        env=consumer_env_vars,
+    )
+    for name, expected in wheels.items():
+        if hashlib.sha256(Path(expected["path"]).read_bytes()).hexdigest() != expected["sha256"]:
+            raise ValueError(f"Wheel changed during acceptance: {name}")
+    return {
+        "boundary": json.loads(result),
+        "installed": installed,
+        "example_script_sha256": example_digest,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repogpt-wheel", type=Path, required=True)
-    parser.add_argument("--adapters-wheel", type=Path, required=True)
+    parser.add_argument("--chat-exports-wheel", type=Path, required=True)
     parser.add_argument("--rag-wheel", type=Path, required=True)
+    parser.add_argument("--tr3v0r-wheel", type=Path, required=True)
+    parser.add_argument("--tr3v0r-wheelhouse", type=Path, required=True)
+    parser.add_argument("--tr3v0r-example-script", type=Path, required=True)
     parser.add_argument("--scratch-root", type=Path)
     args = parser.parse_args()
     uv = shutil.which("uv")
@@ -204,10 +540,11 @@ def main() -> None:
         name: _wheel(path.resolve(), name)
         for name, path in (
             ("repogpt", args.repogpt_wheel),
-            ("rag-adapters", args.adapters_wheel),
+            ("chat-exports", args.chat_exports_wheel),
             ("rag-prototype", args.rag_wheel),
         )
     }
+    wheels.update(_tr3v0r_wheels(args.tr3v0r_wheel, args.tr3v0r_wheelhouse))
     env = os.environ.copy()
     for key in (
         "PYTHONHOME",
@@ -219,8 +556,11 @@ def main() -> None:
         "OPENROUTER_API_KEY",
     ):
         env.pop(key, None)
+    consumer_source = _consumer_source(env)
+    _verify_source_wheel(args.rag_wheel, consumer_source)
     with tempfile.TemporaryDirectory(prefix="canonical-wheels-", dir=args.scratch_root) as temp:
         root = Path(temp)
+        constraints = _private_constraints(root, wheels)
         venv = root / "venv"
         _run([uv, "venv", "--python", sys.executable, str(venv)], cwd=root, env=env)
         python = venv / "bin/python"
@@ -231,12 +571,33 @@ def main() -> None:
                 "install",
                 "--python",
                 str(python),
-                *(item["path"] for item in wheels.values()),
+                "--constraint",
+                str(constraints),
+                *(item["path"] for name, item in wheels.items() if name not in TR3V0R_MODULES),
             ],
             cwd=root,
             env=env,
         )
         _run([uv, "pip", "check", "--python", str(python)], cwd=root, env=env)
+        combined_modules = {
+            "repogpt": "repogpt",
+            "chat-exports": "chat_exports",
+            "rag-prototype": "local_rag_backend",
+        }
+        combined_installed = json.loads(
+            _run(
+                [
+                    str(python),
+                    "-I",
+                    "-c",
+                    VERIFY_INSTALLED,
+                    json.dumps({name: wheels[name] for name in combined_modules}),
+                    json.dumps(combined_modules),
+                ],
+                cwd=root,
+                env=env,
+            )
+        )
         config = root / "config.json"
         config.write_text(
             json.dumps(
@@ -263,7 +624,29 @@ def main() -> None:
             cwd=root,
             env=env,
         )
-        print(json.dumps({"wheels": wheels, "boundary": json.loads(result)}, sort_keys=True))
+        isolated = _isolated_producer_boundary(
+            root,
+            uv=uv,
+            env=env,
+            wheels=wheels,
+            example_script=args.tr3v0r_example_script.resolve(),
+            constraints=constraints,
+        )
+        if _consumer_source(env) != consumer_source:
+            raise ValueError("Consumer source changed during canonical wheel acceptance")
+        print(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "consumer_source": consumer_source,
+                    "wheels": wheels,
+                    "combined_installed": combined_installed,
+                    "boundary": json.loads(result),
+                    "isolated": isolated,
+                },
+                sort_keys=True,
+            )
+        )
 
 
 if __name__ == "__main__":

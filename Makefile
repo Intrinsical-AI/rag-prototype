@@ -4,6 +4,7 @@
 .PHONY: type test test-architecture check pre-commit build
 .PHONY: contract-check
 .PHONY: smoke-embedding-api-wheel smoke-canonical-wheels smoke-frontend sec sec-run sec-hard sec-soft clean clean-all
+.PHONY: smoke-ephemeral-snapshot-wheel smoke-package
 .PHONY: docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
@@ -19,6 +20,9 @@ IMAGE_NAME ?= intrinsical/rag-prototype
 IMAGE_TAG ?= latest
 WORKSPACE_CONTROL_ROOT ?= $(abspath ../../../workspace-control)
 WORKSPACE_CONTROL_CACHE ?= /tmp/uv-cache
+DIST_DIR ?= dist
+PACKAGE_RECEIPTS ?= $(DIST_DIR)/package-evidence
+TR3V0R_EXAMPLE_SCRIPT ?= $(abspath ../tr3v0r/tr3v0r-core/scripts/tools/generate_canonical_example.py)
 
 $(VENV_PYTHON_STAMP):
 	@if [ -x "$(VENV_DIR)/bin/python" ] || [ -f "$(VENV_DIR)/Scripts/python.exe" ]; then \
@@ -35,15 +39,15 @@ $(VENV_PYTHON_STAMP):
 	@touch "$@"
 
 $(VENV_SYNC_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --extra server --no-default-groups
+	$(UV) sync --frozen --group test --group lint --extra server --extra mcp --no-default-groups
 	@touch "$@"
 
 $(VENV_DENSE_ST_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --extra server --extra dense-st --no-default-groups
+	$(UV) sync --frozen --group test --group lint --extra server --extra mcp --extra dense-st --no-default-groups
 	@touch "$@"
 
 $(VENV_SEC_STAMP): $(VENV_PYTHON_STAMP) pyproject.toml uv.lock
-	$(UV) sync --frozen --group test --group lint --group sec --extra server --no-default-groups
+	$(UV) sync --frozen --group test --group lint --group sec --extra server --extra mcp --no-default-groups
 	@touch "$@"
 
 help: ## Show available targets
@@ -91,17 +95,30 @@ pre-commit: sync ## Run all repository hooks
 	PRE_COMMIT_HOME=$(PRE_COMMIT_HOME) $(UV) run --active --no-sync pre-commit run --all-files
 
 build: sync ## Build wheel and source distributions
-	$(UV) build
+	$(UV) build --out-dir "$(DIST_DIR)"
+
+smoke-package: sync ## Accept the retained RAG wheel/sdist without sibling producers
+	$(UV) run --active --no-sync python scripts/smoke_package.py \
+		--dist-dir "$(abspath $(DIST_DIR))" --receipt-dir "$(abspath $(PACKAGE_RECEIPTS))"
 
 smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embedding API outside checkout
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) UV_PROJECT_ENVIRONMENT=$(VENV_DIR) \
 		uv run --no-sync python scripts/smoke_embedding_api_wheel.py
 
-smoke-canonical-wheels: sync ## Validate three explicit producer/consumer wheels outside checkouts
-	@test -n "$(REPOGPT_WHEEL)" -a -n "$(ADAPTERS_WHEEL)" -a -n "$(RAG_WHEEL)" || \
-		{ echo "Set REPOGPT_WHEEL, ADAPTERS_WHEEL, and RAG_WHEEL to exact wheel paths" >&2; exit 1; }
+smoke-ephemeral-snapshot-wheel: sync ## Verify explicit installed wheel bytes and reject all writes during snapshot queries
+	@test -n "$(RAG_WHEEL)" -a -n "$(RAG_WHEEL_PYTHON)" -a -n "$(SNAPSHOT_SMOKE_DIR)" || \
+		{ echo "Set RAG_WHEEL, RAG_WHEEL_PYTHON, and a fresh SNAPSHOT_SMOKE_DIR" >&2; exit 1; }
+	$(UV) run --active --no-sync python scripts/smoke_ephemeral_snapshot_wheel.py \
+		--rag-wheel "$(RAG_WHEEL)" --python "$(RAG_WHEEL_PYTHON)" --work-dir "$(SNAPSHOT_SMOKE_DIR)"
+
+smoke-canonical-wheels: sync ## Validate explicit producer/consumer wheels outside checkouts
+	@test -n "$(REPOGPT_WHEEL)" -a -n "$(CHAT_EXPORTS_WHEEL)" -a -n "$(TR3V0R_WHEEL)" -a -n "$(TR3V0R_WHEELHOUSE)" -a -n "$(RAG_WHEEL)" || \
+		{ echo "Set REPOGPT_WHEEL, CHAT_EXPORTS_WHEEL, TR3V0R_WHEEL, RAG_WHEEL, and TR3V0R_WHEELHOUSE with SHA256SUMS" >&2; exit 1; }
 	$(UV) run --active --no-sync python scripts/smoke_canonical_wheels.py \
-		--repogpt-wheel "$(REPOGPT_WHEEL)" --adapters-wheel "$(ADAPTERS_WHEEL)" --rag-wheel "$(RAG_WHEEL)"
+		--repogpt-wheel "$(REPOGPT_WHEEL)" --chat-exports-wheel "$(CHAT_EXPORTS_WHEEL)" \
+		--tr3v0r-wheel "$(TR3V0R_WHEEL)" --rag-wheel "$(RAG_WHEEL)" \
+		--tr3v0r-wheelhouse "$(TR3V0R_WHEELHOUSE)" \
+		--tr3v0r-example-script "$(TR3V0R_EXAMPLE_SCRIPT)"
 
 smoke-frontend: sync ## Chromium regression and local HTTP/SQLite frontend smoke
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) node scripts/smoke_frontend.cjs

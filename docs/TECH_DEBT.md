@@ -90,7 +90,7 @@ Recommended direction:
 
 Validated points:
 
-- CLI, HTTP and MCP share typed validation and default `replace_scope` to `True`.
+- CLI, HTTP and MCP share typed validation and default `replace_scope` to `False`.
 - Partial producer exports are rejected before writes unless effective upsert-only mode is explicit.
 - Local scope cleanup binds SQL lookup/deletion and vector delta to the existing SQL unit of work. Vector failure rolls SQL back; vector write or SQL commit failure requires an explicit index rebuild.
 - Scope replacement uses a journaled hard-delete intent for stale documents.

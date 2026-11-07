@@ -34,6 +34,7 @@ def create_openai_client(
     base_url: str | None = None,
     default_headers: dict[str, str] | None = None,
     timeout: int | float | None = None,
+    max_retries: int | None = None,
     client_factory: Callable[..., Any] = OpenAI,
 ) -> Any:
     """
@@ -46,6 +47,8 @@ def create_openai_client(
         kwargs["default_headers"] = default_headers
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if max_retries is not None:
+        kwargs["max_retries"] = max_retries
     return client_factory(**kwargs)
 
 
@@ -72,6 +75,7 @@ class OpenAIGenerator(GeneratorPort):
         api_key: str | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        max_retries: int | None = None,
     ):
         resolved_key = api_key or settings_obj.openai_api_key
         if not resolved_key:
@@ -90,6 +94,7 @@ class OpenAIGenerator(GeneratorPort):
             base_url=base_url,
             default_headers=extra_headers,
             timeout=settings_obj.openai_request_timeout,
+            max_retries=max_retries,
             client_factory=OpenAI,
         )
 

@@ -14,7 +14,7 @@ from local_rag_backend.core.services.canonical_import_transport import (
 )
 
 
-def test_validate_and_project_repogpt_v5_retains_unit_fields_and_extension_metadata():
+def test_validate_and_project_repogpt_v6_retains_unit_fields_and_extension_metadata():
     raw = repogpt_payload()
     raw["documents"][0]["metadata"]["attributes"] = {"returns": "int"}
     before = copy.deepcopy(raw)
@@ -86,7 +86,7 @@ def test_repo_gpt_document_identity_must_match_envelope(field):
 def test_validate_canonical_import_payload_rejects_repogpt_v3():
     raw = repogpt_payload()
     raw["schema_version"] = "3"
-    with pytest.raises(ValueError, match="schema_version='5'"):
+    with pytest.raises(ValueError, match="schema_version='6'"):
         validate_canonical_import_payload(raw)
 
 
@@ -102,7 +102,7 @@ def test_validate_canonical_import_payload_rejects_non_boolean_replace_scope():
         )
 
 
-def test_v5_filters_blank_structural_module_after_full_validation():
+def test_v6_filters_blank_structural_module_after_full_validation():
     raw = repogpt_payload()
     module = repogpt_empty_module_payload()["documents"][0]
     raw["documents"].insert(0, module)
@@ -118,7 +118,7 @@ def test_v5_filters_blank_structural_module_after_full_validation():
     assert raw == before
 
 
-def test_v5_only_blank_module_produces_empty_import_request():
+def test_v6_only_blank_module_produces_empty_import_request():
     raw = repogpt_empty_module_payload()
 
     request = build_canonical_import_request_input_from_raw(raw, source="test")
@@ -128,7 +128,7 @@ def test_v5_only_blank_module_produces_empty_import_request():
 
 
 @pytest.mark.parametrize("invalid", ["missing_ranges", "bad_hash", "blank_symbol"])
-def test_v5_rejects_invalid_document_before_filtering(invalid: str):
+def test_v6_rejects_invalid_document_before_filtering(invalid: str):
     raw = repogpt_empty_module_payload()
     module = raw["documents"][0]
     if invalid == "missing_ranges":
@@ -141,7 +141,7 @@ def test_v5_rejects_invalid_document_before_filtering(invalid: str):
         validate_canonical_import_payload(raw)
 
 
-def test_v5_rejects_raw_empty_documents_before_scope_sync():
+def test_v6_rejects_raw_empty_documents_before_scope_sync():
     raw = repogpt_payload()
     raw["documents"] = []
     raw["stats"]["emitted_documents"] = 0
@@ -149,14 +149,14 @@ def test_v5_rejects_raw_empty_documents_before_scope_sync():
         build_canonical_import_request_input_from_raw(raw, source="test")
 
 
-def test_v5_rejects_mismatched_emitted_document_count():
+def test_v6_rejects_mismatched_emitted_document_count():
     raw = repogpt_empty_module_payload()
     raw["stats"]["emitted_documents"] = 0
     with pytest.raises(ValueError, match="emitted_documents"):
         validate_canonical_import_payload(raw)
 
 
-def test_v5_overlong_recoverable_document_rejected_before_import():
+def test_v6_overlong_recoverable_document_rejected_before_import():
     raw = repogpt_payload(content="x" * 20_001)
     with pytest.raises(ValidationError, match="content"):
         build_canonical_import_request_input_from_raw(raw, source="test")
@@ -166,3 +166,17 @@ def test_generic_empty_import_remains_invalid():
     raw = {"scope": "generic", "snapshot_id": "one", "documents": []}
     with pytest.raises(ValueError, match="non-empty documents list"):
         validate_canonical_import_payload(raw)
+
+
+def test_v6_boundary_rejects_previous_producer_schema():
+    raw = repogpt_payload()
+    raw["schema_version"] = "5"
+    with pytest.raises(ValueError, match="schema_version"):
+        validate_canonical_import_payload(raw)
+
+
+def test_v6_metadata_does_not_require_removed_dependencies():
+    raw = repogpt_payload()
+    raw["documents"][0]["metadata"].pop("dependencies", None)
+    request = build_canonical_import_request_input_from_raw(raw, source="test")
+    assert "dependencies" not in request.documents[0].metadata

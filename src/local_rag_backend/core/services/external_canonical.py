@@ -1,4 +1,4 @@
-"""Validate RepoGPT's code-units v5 wire format before canonical adaptation."""
+"""Discriminate native canonical imports and explicitly identified producers."""
 
 from __future__ import annotations
 
@@ -8,8 +8,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from local_rag_backend.core.services.producer_payloads import (
+    ChatUnitsPayload,
+    Tr3v0rCanonicalPayload,
+)
+
 REPOGPT_CODE_UNITS_KIND = "code-units"
-REPOGPT_CODE_UNITS_SCHEMA_VERSION = "5"
+REPOGPT_CODE_UNITS_SCHEMA_VERSION = "6"
 _REPOGPT_TOP_LEVEL_MARKERS = frozenset({"kind", "schema_version", "repo_key"})
 _REPOGPT_UNIT_FIELDS = (
     "repo_key",
@@ -49,7 +54,6 @@ class _UnitMetadata(_ProducerModel):
     file: _FileDigest
     tags: list[str]
     attributes: dict[str, Any]
-    dependencies: list[Any]
 
     @model_validator(mode="before")
     @classmethod
@@ -119,7 +123,7 @@ class _Stats(_ProducerModel):
 
 class _Failure(_ProducerModel):
     record_type: Literal["failure"]
-    schema_version: Literal["5"]
+    schema_version: Literal["6"]
     path: str
     language: str
     error: str
@@ -127,7 +131,7 @@ class _Failure(_ProducerModel):
 
 
 class _CodeUnitsPayload(_ProducerModel):
-    schema_version: Literal["5"]
+    schema_version: Literal["6"]
     kind: Literal["code-units"]
     repo_key: _NonBlank
     scope: _NonBlank
@@ -153,14 +157,31 @@ class _CodeUnitsPayload(_ProducerModel):
 def normalize_external_canonical_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Keep generic documents unchanged; drop validated empty module containers."""
     normalized = dict(payload)
-    if not any(
-        marker in payload and payload[marker] is not None for marker in _REPOGPT_TOP_LEVEL_MARKERS
-    ):
+    kind = payload.get("kind")
+    if kind == "chat-units":
+        ChatUnitsPayload.model_validate(payload)
         return normalized
-    if payload.get("kind") != REPOGPT_CODE_UNITS_KIND:
-        raise ValueError("RepoGPT canonical payloads must declare kind='code-units'.")
+    if kind == "tr3v0r-canonical-rag":
+        Tr3v0rCanonicalPayload.model_validate(payload)
+        return normalized
+    if "completion" in payload:
+        raise ValueError(
+            "Top-level completion requires kind='tr3v0r-canonical-rag' and schema_version='2'. "
+            "Preserve the producer envelope; native document metadata may contain completion."
+        )
+    producer = payload.get("producer")
+    if isinstance(producer, Mapping) and producer.get("name") in {
+        "chat-exports",
+        "rag-adapters",
+        "tr3v0r",
+    }:
+        raise ValueError("Conflicting or obsolete canonical producer identity")
+    if not any(marker in payload for marker in _REPOGPT_TOP_LEVEL_MARKERS):
+        return normalized
+    if kind != REPOGPT_CODE_UNITS_KIND:
+        raise ValueError("Unknown canonical kind; RepoGPT payloads must declare kind='code-units'.")
     if payload.get("schema_version") != REPOGPT_CODE_UNITS_SCHEMA_VERSION:
-        raise ValueError("RepoGPT canonical payloads must use code-units schema_version='5'.")
+        raise ValueError("RepoGPT canonical payloads must use code-units schema_version='6'.")
     _CodeUnitsPayload.model_validate(payload)
     normalized["documents"] = [
         document

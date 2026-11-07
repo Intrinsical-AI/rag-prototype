@@ -19,7 +19,7 @@ repos:
     hooks:
       - id: import-linter
         name: "Enforce import boundaries (import-linter)"
-        entry: env PYTHONPATH=src uv run lint-imports
+        entry: env PYTHONPATH=src uv run --no-sync lint-imports
         language: system
         pass_filenames: false
 
@@ -30,7 +30,7 @@ repos:
       - id: mypy
         name: "Type check Python code (MyPy)"
         additional_dependencies:
-          [types-requests, types-setuptools, types-PyYAML, pydantic, pydantic-settings]
+          [types-requests, types-setuptools, types-PyYAML, pydantic, pydantic-settings, "mcp==1.28.1", "anyio==4.14.2", "jsonschema==4.26.0"]
         exclude: "^tests/"
 
   # Essential File Quality Checks

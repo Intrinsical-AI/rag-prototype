@@ -15,9 +15,9 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 ### Surfaces & Features
 
 - `retrieval-backend-matrix` — Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing. (`implemented`; `library`, `http`)
-- `canonical-import` — Validated canonical document import for external producers such as RepoGPT. (`implemented`; `cli`, `library`)
+- `canonical-import` — Explicitly discriminated RepoGPT v6, chat-units v4, and Tr3v0r v2 imports with complete-run replacement evidence. (`implemented`; `cli`, `library`)
 - `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
-- `mcp-server` — MCP server surface for exposing retrieval operations to tool clients. (`implemented`; `mcp`)
+- `mcp-server` — Optional official-SDK stdio MCP 2025-11-25 server exposes native retrieval, diagnostics, canonical import, rebuild and evaluation with validated structured results, effect annotations, sanitized errors and bounded single-worker execution. (`implemented`; `mcp`)
 
 ### Commands
 
@@ -247,16 +247,33 @@ Use these entrypoints for the main workflows:
 See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
 for batch-spec examples and compare-mode usage.
 
-`rag-import-canonical` is the canonical integration path for external producers such as RepoGPT `code-units` v5. The import flow stays generic, but the edge transport validates RepoGPT `kind="code-units"` and `schema_version="5"` when those producer markers are present.
+`rag-import-canonical` accepts RepoGPT `kind="code-units"` / schema `"6"`,
+chat-exports `kind="chat-units"` / schema `"4"`, and Tr3v0r
+`kind="tr3v0r-canonical-rag"` / schema `"2"`. Unknown, conflicting, and obsolete
+producer identities are rejected. Top-level `completion` is reserved for Tr3v0r
+and requires its explicit kind and schema version. Preserve that producer
+envelope when forwarding exports; native document `metadata.completion` remains
+arbitrary metadata. Marker-free native canonical imports remain
+supported; the former marker-free chat-exports compatibility envelope is removed.
+All CLI, HTTP, and MCP imports use the same validator and replacement gate.
+
+Tr3v0r scope replacement requires `completion.complete=true`, a complete-run
+manifest with its canonical SHA256, accounted parser records, artifact identities
+and counts, scope/snapshot binding, and a matching document-set digest. Incomplete
+exports carry failure evidence and can only upsert. CLI/MCP replacement overrides
+cannot bypass this gate. The receipt establishes processing of the declared local
+input snapshot; it does not prove historical coverage or authenticity. Chat
+replacement is also refused when `stats.error_count` is nonzero, even if the
+other failure fields are cleared.
 
 Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
 a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP
 `replace_scope: false`, or the MCP `replace_scope_override: false` option to import
 the available documents while preserving absent ones. Overrides are checked before
-any writes. RepoGPT needs its own environment: run `uv sync --frozen --extra dev`
+any writes. RepoGPT needs its own environment: run `uv sync --frozen --group dev`
 in its checkout before running the producer-to-RAG E2E; RAG's interpreter is not a fallback.
 
-RepoGPT v5 module documents with blank residual content are validated, then left out
+RepoGPT v6 module documents with blank residual content are validated, then left out
 of the index. The producer export must still contain at least one validated
 document; a raw `documents: []` payload cannot clear a scope. An export with no
 indexable documents is a no-op in upsert-only mode.
@@ -320,6 +337,7 @@ Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
 Optional: MCP server for agent-facing operational workflows:
 
 ```bash
+uv sync --frozen --extra mcp
 rag-mcp
 # or: python -m local_rag_backend.mcp_server
 ```
@@ -327,23 +345,70 @@ rag-mcp
 Tools:
 
 * `rag_ask`
+* `rag_ask_ephemeral`
 * `rag_import_canonical`
 * `rag_rebuild_index`
 * `rag_eval`
 * `rag_status`
 
-The stdio server announces MCP `2024-11-05`, accepts `ping`, and does not reply to
-notifications. Invalid JSON lines return a parse error and leave the next line
-processable; a broken input/output stream terminates the server. Invalid tool
-arguments return JSON-RPC `-32602`; execution failures return tool content with
-`isError: true`.
+The official SDK handles stdio framing, lifecycle and negotiation of its supported
+protocol versions. The internal runtime client requires MCP `2025-11-25`.
+Every tool declares input/output schemas and effect annotations. SDK diagnostics,
+including malformed notification diagnostics, omit request bodies and exception values.
+Tools sent as notifications never execute. Invalid arguments and unknown tools return
+sanitized JSON-RPC `-32602`; known operational refusals return `isError: true` with
+matching JSON text and structured content. Application bugs and invalid outputs return
+sanitized `-32603`. Incomplete status reports preserve successful diagnostics and mark
+the result as an error. The complete serialized tool result, including both text and
+structured content, is limited to 256 KiB; oversized results fail explicitly.
 
-`rag_ask` is the narrow query/status integration surface used by the sibling
-`event-based-agent-runtime` repo. The runtime calls it over stdio MCP and keeps
-document mutation, index rebuild, and evaluation workflows owned by this repo.
+One blocking worker runs per process, and cancellation retains its capacity until the
+operation finishes. A client timeout does not prove rollback or cancellation of a mutation.
+Library and ordinary CLI imports do not load the optional SDK.
 
-`rag_status` now returns a structured runtime snapshot plus health/index diagnostics, so agents
-do not need to infer topology from raw config fields.
+`rag_ask` persists QA history and may call a configured LLM; import, index rebuild
+and evaluation mutate their owned data. `rag_eval` bounds `k` to 1–100 (default 3).
+`rag_status` only reports live-store presence and frozen snapshot readiness/counts;
+it does not create a schema, query live SQL, load a model or claim live freshness.
+
+For queries without RAG storage writes, explicitly prepare a new frozen generation:
+
+```bash
+RAG_CONFIG_PATH=/absolute/config.yaml rag-snapshot /absolute/new-snapshot
+# Set ephemeral_snapshot_dir: /absolute/new-snapshot in the consumer configuration.
+```
+
+Preparation is a writer command: it reserves a fresh destination, holds the existing
+multi-store write lock and one SQL read transaction while exporting documents and
+required vector artifacts, refuses unresolved mutations/drift, then seals the bundle
+with a manifest last. Existing destinations are refused. Interrupted, unsealed bundles
+remain for explicit inspection; use another fresh destination after correcting the cause.
+Only the documents table enters a fresh database; history, tombstones, system state,
+configuration, deleted pages and credentials are excluded. Members are bounded to
+1 GiB each; the seal is bounded to 1 MiB. Sparse and dual need documents; dense and
+hybrid also include the index, ID map and native embedding manifest.
+
+`rag_ask_ephemeral` accepts the same question/k/filters as `rag_ask` and adds a
+`snapshot_id` to the answer/sources result. It verifies the seal, members, SHA-256,
+configuration and vector identity before use, rejects symlinks, unknown files and
+SQLite sidecars, and consumes verified SQLite bytes in a query-only memory image.
+It never opens live SQL, initializes schema/history/state, acquires storage locks,
+writes embedding/performance caches or falls back to live/WAL data. Generation
+freshness is exactly the returned snapshot identity; prepare a new generation to refresh.
+
+Configured embedding/LLM calls can incur cost and remote retention. New query clients
+have zero provider retries; the runtime authorizes each call through the dedicated
+`rag:query:ephemeral` scope and also disables automatic retries. Its command/result
+audit remains durable. Existing history-writing `rag_ask` retains its approval and
+idempotency requirements. Local SentenceTransformers require a complete installed
+absolute model directory plus `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at
+process startup; model provisioning is a separate writer operation. Synthetic mode
+remains available for deterministic acceptance without downloads.
+
+Version 5.0.0 intentionally rejects earlier RepoGPT v5/chat v3 producer payloads.
+Generic canonical payloads now default to `replace_scope=false` across CLI, HTTP
+and MCP. Set `replace_scope=true` explicitly only for verified complete exports;
+nonzero failure evidence still refuses replacement, including an override.
 
 
 
@@ -582,8 +647,21 @@ make sync
 make check
 make pre-commit
 make smoke-embedding-api-wheel
+make build
+make smoke-package
 make smoke-frontend
 ```
+
+The installed-package job retains RAG's exact wheel/sdist with source revision/tree,
+runtime/configuration/lockfile hashes, installed origins and JUnit receipts. Fresh
+`[server,mcp]` installations run the existing synthetic embedding API assertions and
+snapshot fixture, actual snapshot/status/help CLI entrypoints, and official SDK stdio
+status/query calls across sparse, dense, dual and hybrid snapshots. IPv4/IPv6 and DNS
+are denied; SDK query reads additionally deny file mutations and preserve all fixture
+hashes. Only the provider HTTP boundary is a deterministic response stub; this does
+not validate a model or provider. There is no query CLI. CLI status runs during the
+explicit setup writer phase. Public CI does not install or upload private producer
+wheels; the canonical producer gate remains a separate local acceptance.
 
 The frontend smoke reuses the workspace's installed Playwright and Chromium
 from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`
@@ -592,7 +670,7 @@ temporary SQLite data and a loopback Ollama response double. It needs permission
 to launch Chromium and bind loopback ports; it does not contact an external LLM
 service. Temporary evidence is printed under `/tmp`.
 
-The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v5.json`.
+The default RepoGPT consumer gate uses `tests/fixtures/repogpt_code_units_v6.json`.
 It requires no sibling checkout. Live producer coverage is explicit: set `REPOGPT_ROOT`; the helper uses the
 versioned source fixture and passes `--replace-scope --include-tests --repo-key repogpt_eval_repo`.
 Invalid configured paths or producer failures fail the test.
