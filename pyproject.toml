@@ -1,6 +1,6 @@
 [project]
 name = "rag-prototype"
-version = "4.0.0"
+version = "5.0.0"
 description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11,<3.13"
@@ -57,6 +57,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = ["mcp==1.28.1", "anyio==4.14.2", "jsonschema==4.26.0"]
 server = [
   "fastapi>=0.139,<0.140",
   "uvicorn[standard]>=0.29,<1.0",
@@ -81,7 +82,7 @@ monitoring = [
   "prometheus-client>=0.19,<1.0",
 ]
 all = [
-  "rag-prototype[server,dense,dense-st,loaders,magic,monitoring]",
+  "rag-prototype[server,mcp,dense,dense-st,loaders,magic,monitoring]",
 ]
 
 [dependency-groups]
@@ -138,6 +139,7 @@ rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
 rag-mutate-docs = "local_rag_backend.cli:rag_mutate_docs"
 rag-server      = "local_rag_backend.cli:rag_server"
 rag-status      = "local_rag_backend.cli:rag_status"
+rag-snapshot    = "local_rag_backend.cli:rag_snapshot"
 rag-eval        = "local_rag_backend.cli:rag_eval"
 rag-eval-batch  = "local_rag_backend.cli:rag_eval_batch"
 rag-eval-compare = "local_rag_backend.cli:rag_eval_compare"
@@ -211,6 +213,10 @@ warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
 module = ["faiss.*","rank_bm25.*","sentence_transformers.*","prometheus_client.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jsonschema"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

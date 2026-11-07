@@ -57,7 +57,7 @@ RUN set -eux; \
         EXTRA_FLAGS="${EXTRA_FLAGS} --extra ${extra}"; \
       done; \
     fi; \
-    uv sync --frozen --extra server --group dev --group test --group lint ${EXTRA_FLAGS}
+    uv sync --frozen --extra server --extra mcp --group dev --group test --group lint ${EXTRA_FLAGS}
 
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 USER appuser

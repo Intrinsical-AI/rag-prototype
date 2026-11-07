@@ -1,0 +1,170 @@
+{
+  "schema_version": "2",
+  "kind": "tr3v0r-canonical-rag",
+  "scope": "tr3v0r:example",
+  "snapshot_id": "example-a788892ddc478812",
+  "replace_scope": true,
+  "documents": [
+    {
+      "external_id": "tr3v0r:example:manifest:example-a788892ddc478812",
+      "source_id": "tr3v0r:example:artifact:manifest",
+      "content": "Dataset manifest for example\ndoc_type: dataset_manifest\ndataset_key: example\nscope: tr3v0r:example\nsnapshot_id: example-a788892ddc478812\nidentity_mode: mac\nartifact_count: 7\nartifacts: evidence_bundles, feature_windows, findings, graph_manifest, graph_snapshots, net_edges, net_nodes\nsensor_count: 1\nsensors: sensor\ntime_start_ns: 1700000000000000000\ntime_end_ns: 1700000001000000000\nfeature_window_count: 1\nnet_node_count: 1\nnet_edge_count: 0\ngraph_snapshot_count: 1\nfinding_count: 0\nevidence_bundle_count: 0\n",
+      "metadata": {
+        "doc_type": "dataset_manifest",
+        "schema_version": "tr3v0r_manifest_v1",
+        "dataset_key": "example",
+        "time_start_ns": 1700000000000000000,
+        "time_end_ns": 1700000001000000000
+      }
+    },
+    {
+      "external_id": "tr3v0r:example:window:16058c2790324c42:entity:aabbccddeeff",
+      "source_id": "tr3v0r:example:artifact:feature_windows",
+      "content": "Feature window for entity aabbccddeeff on sensor sensor\ndoc_type: feature_window\ndataset_key: example\nscope: tr3v0r:example\nsnapshot_id: example-a788892ddc478812\nsensor_id: sensor\nentity_id: aabbccddeeff\nphy: wifi\nwindow_id: 16058c2790324c42\nwindow_start_ns: 1700000000000000000\nwindow_end_ns: 1700000001000000000\nframe_count: 1\nunique_peer_count: 0\nmgmt_frame_count: 1\ndata_frame_count: 0\nmean_rssi_dbm: -50\nstd_rssi_dbm: 0\nrssi_sample_count: 1\nmean_interarrival_ns: 0\nburstiness: 0\nmgmt_to_data_ratio: 1\nie_entropy: 0\nadv_type_entropy: null\nseen_on_bands: 1\nssid_fingerprint: 6461103719268025916\ncapability_fingerprint: 0\nbehavior_fingerprint: 18251529799401663594\n",
+      "metadata": {
+        "doc_type": "feature_window",
+        "schema_version": "feat_window_v2",
+        "dataset_key": "example",
+        "sensor_id": "sensor",
+        "window_id": "16058c2790324c42",
+        "phy": "wifi",
+        "entity_id": "aabbccddeeff",
+        "time_start_ns": 1700000000000000000,
+        "time_end_ns": 1700000001000000000
+      }
+    },
+    {
+      "external_id": "tr3v0r:example:node:aabbccddeeff",
+      "source_id": "tr3v0r:example:artifact:net_nodes",
+      "content": "Network node aabbccddeeff of kind unknown\ndoc_type: net_node\ndataset_key: example\nscope: tr3v0r:example\nsnapshot_id: example-a788892ddc478812\nnode_id: aabbccddeeff\ndevice_id: null\nkind: unknown\nsensor_ids: sensor\nfirst_seen_ns: 1700000000000000000\nlast_seen_ns: 1700000001000000000\nseen_on_bands: 1\nmean_rssi_dbm: -50\nstd_rssi_dbm: 0\nrssi_sample_count: 1\ntotal_frames: 1\nssid_fingerprint: 14221047457516692417\ncapability_fingerprint: 0\nbehavior_fingerprint: 2524141553868071044\n",
+      "metadata": {
+        "doc_type": "net_node",
+        "schema_version": "net_node_v2",
+        "dataset_key": "example",
+        "kind": "unknown",
+        "node_id": "aabbccddeeff",
+        "sensor_ids": [
+          "sensor"
+        ],
+        "time_start_ns": 1700000000000000000,
+        "time_end_ns": 1700000001000000000
+      }
+    },
+    {
+      "external_id": "tr3v0r:example:snapshot:sensor:1700000000000000000",
+      "source_id": "tr3v0r:example:artifact:graph_snapshots",
+      "content": "Graph snapshot sensor:1700000000000000000 for sensor sensor\ndoc_type: graph_snapshot\ndataset_key: example\nscope: tr3v0r:example\nsnapshot_id: example-a788892ddc478812\ngraph_snapshot_id: sensor:1700000000000000000\nsensor_id: sensor\nwindow_start_ns: 1700000000000000000\nwindow_end_ns: 1700000001000000000\nnode_count: 1\nedge_count: 0\nmean_degree: 0\nmax_degree: 0\ncomponent_count: 1\n",
+      "metadata": {
+        "doc_type": "graph_snapshot",
+        "schema_version": "graph_snapshot_v2",
+        "dataset_key": "example",
+        "sensor_id": "sensor",
+        "graph_snapshot_id": "sensor:1700000000000000000",
+        "time_start_ns": 1700000000000000000,
+        "time_end_ns": 1700000001000000000
+      }
+    }
+  ],
+  "completion": {
+    "complete": true,
+    "failures": [],
+    "dataset_key": "example",
+    "expected_document_counts": {
+      "dataset_manifest": 1,
+      "feature_window": 1,
+      "net_node": 1,
+      "graph_snapshot": 1
+    },
+    "document_set_sha256": "1c4754391db046cde06b0eb60b4b9970c03bf996cc7c36b7485d9239bd5b0ca9",
+    "run_manifest": {
+      "kind": "tr3v0r-run",
+      "schema_version": "1",
+      "input": {
+        "format": "pcap",
+        "size_bytes": 113,
+        "sha256": "ce7dbb1839663fe1fb7f9f702fe1e0e717105564c98f8c982e7689a96633fd7c"
+      },
+      "producer_version": "0.3.0",
+      "config_version": "0.4.0",
+      "parameters_sha256": "acb53764363a04a45759781df15edf771d8ffcbbb9f4ffcfb7997e1a1a582efc",
+      "completed_stages": [
+        "parse",
+        "build",
+        "detect"
+      ],
+      "parser_counts": {
+        "read": 1,
+        "accepted": 1,
+        "out_of_domain": 0,
+        "rejected": 0,
+        "unknown": 0
+      },
+      "artifacts": {
+        "evidence_bundles": {
+          "path": "built/evidence_bundles.jsonl",
+          "schema_version": "evidence_bundle_v1",
+          "size_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "record_count": 0
+        },
+        "feature_windows": {
+          "path": "built/feature_windows.parquet",
+          "schema_version": "feat_window_v2",
+          "size_bytes": 7021,
+          "sha256": "4ef842462ef2edf506cf6a8858f7966c91addbcefb652c6174796f53db7c79a7",
+          "record_count": 1
+        },
+        "findings": {
+          "path": "built/findings.jsonl",
+          "schema_version": "finding_v1",
+          "size_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "record_count": 0
+        },
+        "graph_manifest": {
+          "path": "built/graph_manifest.json",
+          "schema_version": "graph_manifest_v1",
+          "size_bytes": 147,
+          "sha256": "e6625bae72d23e6d4a9af2cec040f6a4b1d4a2f00dc45d339af1424ebd2d71c8",
+          "record_count": 1
+        },
+        "graph_snapshots": {
+          "path": "built/graph_snapshots.parquet",
+          "schema_version": "graph_snapshot_v2",
+          "size_bytes": 3285,
+          "sha256": "5c8aa145d301703a4e56d19591595ca2a5a264bc0dc15b7f8e58144d6c0a6d9d",
+          "record_count": 1
+        },
+        "net_edges": {
+          "path": "built/net_edges.parquet",
+          "schema_version": "net_edge_v2",
+          "size_bytes": 2256,
+          "sha256": "6fb1ec65b51bda9f98b7bd06f66e5e7b1ae0ab1767fadd8b3e4436fdf7365b68",
+          "record_count": 0
+        },
+        "net_nodes": {
+          "path": "built/net_nodes.parquet",
+          "schema_version": "net_node_v2",
+          "size_bytes": 4805,
+          "sha256": "fe2d51942f05df90ba9d801e0cafb77881115935bd79310e498fbedc35dbdc3f",
+          "record_count": 1
+        },
+        "rf_meta": {
+          "path": "parsed/rf_meta.parquet",
+          "schema_version": "rf_meta_v2",
+          "size_bytes": 5137,
+          "sha256": "99ffd4e0e29859e919bdbc4277ad52409e3131e49da952557f7fa4f2db45b9ac",
+          "record_count": 1
+        },
+        "wifi_mac": {
+          "path": "parsed/wifi_mac.parquet",
+          "schema_version": "wifi_mac_v2",
+          "size_bytes": 8142,
+          "sha256": "1c0128b59bdf49fe072cc1b1fc001e484ee6521b74981819d6f5e3734cbbca66",
+          "record_count": 1
+        }
+      }
+    },
+    "run_manifest_sha256": "c8ebb127f422c66f0bb287277e87562111568fcf802c8a95061a947878d5efbd"
+  }
+}

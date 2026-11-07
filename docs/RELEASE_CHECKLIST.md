@@ -34,7 +34,7 @@
    - `pre-commit run --all-files`
    - `make smoke-embedding-api-wheel`
 
-## Candidate: 4.0.0
+## Candidate: 5.0.0
 
 The current package metadata identifies the next breaking candidate. This local
 stabilization does not publish a tag, release, or package, and does not execute
@@ -72,33 +72,64 @@ Breaking changes relative to `v3.0.0`:
 HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
 also recovers from JSON decoder `ValueError`, including integer literals beyond
 Python's configured digit limit, so the next MCP request remains processable.
-The canonical import contract accepts RepoGPT code-units v5 and
-the generic rag-adapters payload; installed-artifact receipts establish the
-specific tested producer combination.
+The native `rag-mcp` command now requires the optional `[mcp]` extra. The SDK is
+pinned to 1.28.1 with AnyIO 4.14.2 and targets protocol `2025-11-25`. Verify ping,
+output schemas/annotations, text/structured parity, idless-call nonexecution and
+payload-safe diagnostics through real stdio. Expected failures use `isError`;
+invalid arguments use `-32602` and unexpected/output failures use sanitized
+`-32603`. Inline results count both representations toward the 256 KiB limit;
+partial mutation results retain bounded receipts and mark omitted details.
+The base package and HTTP-only production image remain usable without the SDK.
 
-For the retained code-units v5 boundary, canonical import accepts at most 5,000
+The canonical import contract accepts RepoGPT code-units v6, explicit
+chat-exports chat-units v4, and Tr3v0r canonical-rag v2; installed-artifact receipts establish the
+specific tested producer combination.
+Top-level `completion` is a Tr3v0r producer discriminator, including when its
+`kind` or `schema_version` has been removed. Forward the complete producer
+envelope with `kind="tr3v0r-canonical-rag"` and `schema_version="2"`; incomplete
+exports require upsert-only mode. Generic native documents may retain arbitrary
+`metadata.completion` values without acquiring producer semantics.
+
+For the retained code-units v6 boundary, canonical import accepts at most 5,000
 nonblank documents per snapshot, 20,000 characters per document, 512 characters
-per external ID, and 1,024 characters per source ID. RepoGPT can emit a valid v5
+per external ID, and 1,024 characters per source ID. RepoGPT can emit a valid v6
 artifact beyond those consumer limits; RAG rejects it before importing. This
-stabilization preserves the v5 contract and does not adopt the deferred v6
-snapshot-policy migration. Validate the exact producer wheels before freezing
+boundary accepts only v6, removes redundant producer metadata fields, and
+preserves per-document identity and snapshot fields. Validate the exact producer wheels before freezing
 their candidate revisions.
 
 Build each candidate's wheel and sdist with `uv build --out-dir <separate-dir>`;
-pass one exact wheel from each build, retaining its SHA-256 and source revision:
+pass exact wheels, retaining their SHA-256 and source revisions. Tr3v0r 0.5.0
+requires its app, core, parsers, analytics, and sensors wheels for the selected
+Python/platform, together with their `SHA256SUMS` receipt in one wheelhouse:
 
 ```bash
 make smoke-canonical-wheels \
-  REPOGPT_WHEEL=/absolute/path/repogpt-0.10.0-py3-none-any.whl \
-  ADAPTERS_WHEEL=/absolute/path/rag_adapters-0.2.0-py3-none-any.whl \
-  RAG_WHEEL=/absolute/path/rag_prototype-4.0.0-py3-none-any.whl
+  REPOGPT_WHEEL=/absolute/path/repogpt-0.12.0-py3-none-any.whl \
+  CHAT_EXPORTS_WHEEL=/absolute/path/chat_exports-0.4.0-py3-none-any.whl \
+  TR3V0R_WHEEL=/absolute/path/wheelhouse/tr3v0r-0.5.0-py3-none-any.whl \
+  TR3V0R_WHEELHOUSE=/absolute/path/wheelhouse \
+  TR3V0R_EXAMPLE_SCRIPT=/absolute/path/tr3v0r-core/scripts/tools/generate_canonical_example.py \
+  RAG_WHEEL=/absolute/path/rag_prototype-5.0.0-py3-none-any.whl
 ```
 
 This gate creates a fresh environment outside checkouts, installs only the
-three selected wheels and their declared runtime dependencies, verifies import
+selected wheels and their declared runtime dependencies, verifies import
 origins and packaged schemas, and uses synthetic text with sparse local SQLite
-retrieval. It exercises CLI import, idempotent replay, adapter failure evidence,
-and refusal to replace a partial scope. It clears source injection and provider
+retrieval. Separate RF producer and RAG-only consumer environments exercise all three
+producer outputs without importing producer packages in the consumer. The explicit
+Tr3v0r example script generates synthetic run evidence and is hashed in the receipt.
+The Make default follows `../tr3v0r/tr3v0r-core`; isolated checkouts must pass the
+script explicitly. Its isolated interpreter imports the installed producer wheels.
+All five Tr3v0r distribution versions, installed bytes, module origins, direct
+wheel URLs, and input hashes are verified. Each private distribution is constrained
+to its admitted local wheel during dependency resolution, so a missing or
+incompatible private input cannot fall back to a public index. Public runtime
+dependencies may use the configured registry or cache. Keep private producer
+wheels and wheelhouse receipts outside public RAG CI artifacts.
+It exercises `chatx`, archive-v3/chat-units-v4 schemas, rich text, labeled links,
+locations, CLI import, idempotent replay, excluded-month failure evidence, and
+refusal to replace a partial scope. It clears source injection and provider
 credentials; it does not certify optional extractors, paid providers, or private
 data. Dependency installation may require registry access; `UV_OFFLINE=1` uses
 only cached dependencies. Freeze producer revisions together with
