@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import zipfile
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -88,17 +89,8 @@ def _fixture(root: Path, url: str) -> None:
         print(json.dumps({"fixture_prepared": mode}), flush=True)
 
 
-def _probe(root: Path) -> None:
-    from local_rag_backend import mcp_server
-    from local_rag_backend.settings import load_settings_from_yaml
-
-    if not Path(mcp_server.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()):
-        raise AssertionError("Probe requires a wheel installed inside the supplied environment")
-
-    settings = [
-        load_settings_from_yaml(root / mode / "config.json")
-        for mode in ("sparse", "dense", "dual", "hybrid")
-    ]
+def _read_audit() -> tuple[list[str], Callable[[], None]]:
+    """Reuse the existing denial audit for direct and SDK snapshot reads."""
     writes: list[str] = []
     denied = {
         "os.mkdir",
@@ -132,6 +124,26 @@ def _probe(root: Path) -> None:
             raise AssertionError(f"Read operation attempted {event}")
 
     sys.addaudithook(audit)
+
+    def stop() -> None:
+        nonlocal active
+        active = False
+
+    return writes, stop
+
+
+def _probe(root: Path) -> None:
+    from local_rag_backend import mcp_server
+    from local_rag_backend.settings import load_settings_from_yaml
+
+    if not Path(mcp_server.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()):
+        raise AssertionError("Probe requires a wheel installed inside the supplied environment")
+
+    settings = [
+        load_settings_from_yaml(root / mode / "config.json")
+        for mode in ("sparse", "dense", "dual", "hybrid")
+    ]
+    writes, stop = _read_audit()
     results = []
     try:
         for configured in settings:
@@ -167,7 +179,7 @@ def _probe(root: Path) -> None:
             raise AssertionError("Missing snapshot was accepted")
         assert not writes, writes
     finally:
-        active = False
+        stop()
     package_root = Path(mcp_server.__file__).resolve().parent
     package_files = {
         "local_rag_backend/" + str(path.relative_to(package_root)): hashlib.sha256(

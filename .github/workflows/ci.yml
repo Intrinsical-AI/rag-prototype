@@ -187,6 +187,42 @@ jobs:
       - name: Build and smoke installed embedding API
         run: make smoke-embedding-api-wheel
 
+  package:
+    name: Installed RAG wheel and sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
+        with:
+          version: '0.11.11'
+      - name: Build retained RAG distributions once
+        run: make build
+      - name: Accept the exact pair outside checkout
+        run: make smoke-package
+      - name: Retain only RAG distributions and package receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rag-package-${{ env.CI_SOURCE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/rag_prototype-*.whl
+            dist/rag_prototype-*.tar.gz
+            dist/package-evidence/SHA256SUMS
+            dist/package-evidence/receipt.json
+            dist/package-evidence/junit.xml
+            dist/package-evidence/commands.log
+
   coverage-critical:
     name: Coverage (critical modules)
     runs-on: ubuntu-latest

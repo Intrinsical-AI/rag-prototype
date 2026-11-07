@@ -647,8 +647,21 @@ make sync
 make check
 make pre-commit
 make smoke-embedding-api-wheel
+make build
+make smoke-package
 make smoke-frontend
 ```
+
+The installed-package job retains RAG's exact wheel/sdist with source revision/tree,
+runtime/configuration/lockfile hashes, installed origins and JUnit receipts. Fresh
+`[server,mcp]` installations run the existing synthetic embedding API assertions and
+snapshot fixture, actual snapshot/status/help CLI entrypoints, and official SDK stdio
+status/query calls across sparse, dense, dual and hybrid snapshots. IPv4/IPv6 and DNS
+are denied; SDK query reads additionally deny file mutations and preserve all fixture
+hashes. Only the provider HTTP boundary is a deterministic response stub; this does
+not validate a model or provider. There is no query CLI. CLI status runs during the
+explicit setup writer phase. Public CI does not install or upload private producer
+wheels; the canonical producer gate remains a separate local acceptance.
 
 The frontend smoke reuses the workspace's installed Playwright and Chromium
 from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`

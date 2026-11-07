@@ -4,7 +4,7 @@
 .PHONY: type test test-architecture check pre-commit build
 .PHONY: contract-check
 .PHONY: smoke-embedding-api-wheel smoke-canonical-wheels smoke-frontend sec sec-run sec-hard sec-soft clean clean-all
-.PHONY: smoke-ephemeral-snapshot-wheel
+.PHONY: smoke-ephemeral-snapshot-wheel smoke-package
 .PHONY: docker-build compose-up compose-down
 
 # Keep uv cache local to the repo so it's always writable (and it's already ignored).
@@ -20,6 +20,8 @@ IMAGE_NAME ?= intrinsical/rag-prototype
 IMAGE_TAG ?= latest
 WORKSPACE_CONTROL_ROOT ?= $(abspath ../../../workspace-control)
 WORKSPACE_CONTROL_CACHE ?= /tmp/uv-cache
+DIST_DIR ?= dist
+PACKAGE_RECEIPTS ?= $(DIST_DIR)/package-evidence
 TR3V0R_EXAMPLE_SCRIPT ?= $(abspath ../tr3v0r/tr3v0r-core/scripts/tools/generate_canonical_example.py)
 
 $(VENV_PYTHON_STAMP):
@@ -93,7 +95,11 @@ pre-commit: sync ## Run all repository hooks
 	PRE_COMMIT_HOME=$(PRE_COMMIT_HOME) $(UV) run --active --no-sync pre-commit run --all-files
 
 build: sync ## Build wheel and source distributions
-	$(UV) build
+	$(UV) build --out-dir "$(DIST_DIR)"
+
+smoke-package: sync ## Accept the retained RAG wheel/sdist without sibling producers
+	$(UV) run --active --no-sync python scripts/smoke_package.py \
+		--dist-dir "$(abspath $(DIST_DIR))" --receipt-dir "$(abspath $(PACKAGE_RECEIPTS))"
 
 smoke-embedding-api-wheel: sync ## Build/install wheel and smoke public embedding API outside checkout
 	UV_CACHE_DIR=$(abspath $(UV_CACHE_DIR)) UV_PROJECT_ENVIRONMENT=$(VENV_DIR) \
