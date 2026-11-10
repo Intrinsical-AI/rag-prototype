@@ -356,7 +356,7 @@ Fase B closure (2026-03-01):
 - Supply-chain:
   - pinned lockfile (`uv.lock`)
   - pinned CI actions
-  - `gitleaks`, `bandit`, `safety`, `pre-commit` gates.
+  - `gitleaks`, `bandit`, `pip-audit`, `pre-commit` gates.
 
 ---
 
@@ -409,7 +409,7 @@ Fase B closure (2026-03-01):
 | E2E | API behavior and retrieval smoke | `pytest` | pass |
 | Stress | mutation contention and cross-process lock behavior | `pytest` (integration profile) | pass |
 | Architecture | import boundaries/layer rules | `import-linter` + `pytest` (AST checks) | pass |
-| Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `safety`, `pre-commit` | CI jobs green (security includes report generation) |
+| Type/Lint/Sec | static quality | `mypy`, `ruff`, `bandit`, `pip-audit`, `pre-commit` | CI jobs green (security includes report generation) |
 
 Mandatory CI gate: total coverage >= 85% (`pytest` config in `pyproject.toml`).
 

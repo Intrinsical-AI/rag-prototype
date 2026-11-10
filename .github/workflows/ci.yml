@@ -91,10 +91,10 @@ jobs:
         run: uv sync --frozen --group lint --no-install-project --no-default-groups
 
       - name: Ruff
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests scripts/security_result.py
 
       - name: Ruff format (check)
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests scripts/security_result.py
 
   typing:
     name: Typing (mypy)
@@ -125,7 +125,7 @@ jobs:
         run: uv sync --frozen --group lint --extra server --extra mcp --no-install-project --no-default-groups
 
       - name: mypy
-        run: uv run --no-sync mypy src
+        run: uv run --no-sync mypy src scripts/security_result.py
 
   architecture:
     name: Architecture Guards
@@ -373,7 +373,7 @@ jobs:
 
 
   security:
-    name: Security Scan (bandit + safety)
+    name: Security Scan (bandit + pip-audit)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -396,8 +396,6 @@ jobs:
 
       - name: Run locked security gate
         run: make sec
-        env:
-          SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
 
   docker:
     name: Docker Build

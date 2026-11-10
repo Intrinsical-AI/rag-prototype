@@ -34,11 +34,19 @@
    - `pre-commit run --all-files`
    - `make smoke-embedding-api-wheel`
 
-## Candidate: 5.0.0
+## 5.0.1 security maintenance
 
-The current package metadata identifies the next breaking candidate. This local
-stabilization does not publish a tag, release, or package, and does not execute
-data migrations. Existing `v3.0.0` tags and artifacts remain immutable.
+The patch updates the optional SDK to 1.30.0 and the existing affected dependency
+closures. Keep AnyIO 4.14.2, JSON Schema 4.26.0 and the current Python/API bounds.
+Validate external output-schema reference refusal without network retrieval,
+then all existing source, native hook, installed and exact producer gates.
+Historical 5.0.0 results below describe that earlier candidate, not this patch.
+
+## Historical candidate: 5.0.0
+
+Version 5.0.0 introduced the breaking changes below relative to `v3.0.0`.
+The security maintenance patch retains those contracts and does not execute
+data migrations. Existing tags and artifacts remain immutable.
 
 Breaking changes relative to `v3.0.0`:
 

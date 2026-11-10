@@ -53,6 +53,14 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 
 <!-- repo-ledger:end -->
 
+## 5.0.1 security maintenance
+
+The MCP extra uses SDK 1.30.0 with protocol `2025-11-25`. Security dependency
+floors cover the existing runtime, optional and developer closures; Python
+3.11/3.12 and the public RAG contracts remain unchanged. Run the source, hook,
+installed-wheel and canonical-producer gates against the exact candidate bytes.
+
+
 [![Python 3.11-3.12](https://img.shields.io/badge/python-3.11--3.12-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.124+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -677,6 +685,25 @@ Invalid configured paths or producer failures fail the test.
 
 > Test suite includes unit, integration, and E2E (FastAPI TestClient). The vector layer defaults to `vector_backend: auto` (FAISS when available, NumPy fallback otherwise), and many tests use stubs/mocks for external providers. The suite enforces `--cov-fail-under=85` via `pyproject.toml`.
 
+### Security checks
+
+`make sec` and `make sec-hard` run Bandit and pip-audit from the selected locked
+security environment. The dependency input is a frozen, hashed export of runtime,
+server and MCP dependencies. Auditing uses PyPI's advisory service without installing audited
+packages or resolving dependencies. It does not audit every optional or hook
+environment, and does not establish blanket security clearance.
+
+The dependency backend is pip-audit 2.10.1; Safety's legacy `check` command and
+`SAFETY_API_KEY` are no longer used by these targets. Existing stored credentials
+are not changed. Output includes a JSON outcome and dependency report; Bandit
+locations omit source snippets and possible secret literals.
+
+`make sec-soft` softens only findings backed by complete valid reports. Export,
+collection, skipped dependencies, network/tool errors, partial reports and
+cleanup failures still fail both modes. This intentionally tightens the former
+soft target, which ignored every command failure. Temporary inputs/reports are
+removed on every exit; retain command logs when durable evidence is needed.
+
 ### CI gates
 
 Current CI gates include:
@@ -687,7 +714,7 @@ Current CI gates include:
 - architecture guardrails: `pytest -q -o addopts='' tests/architecture/test_*.py`
 - `lint-imports` (macro architecture contracts via `.importlinter`)
 - tests on Python `3.11` and `3.12` (Ubuntu) plus Windows smoke tests
-- strict, locked security gate (`bandit` + `safety` over runtime/server dependencies)
+- strict, locked security gate (`bandit` + `pip-audit` over runtime/server/MCP dependencies)
 - Docker build for `--target production` on `main/master`
 
 Workflow trigger note: documentation-only changes run CI because docs describe
