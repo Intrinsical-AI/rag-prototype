@@ -9,10 +9,10 @@ repos:
       - id: ruff
         name: "Lint Python code (Ruff)"
         args: ["--fix", "--exit-non-zero-on-fix"]
-        files: "^(src|tests)/"
+        files: "^(src/|tests/|scripts/security_result\\.py$)"
       - id: ruff-format
         name: "Format Python code (Ruff)"
-        files: "^(src|tests)/"
+        files: "^(src/|tests/|scripts/security_result\\.py$)"
 
   # Architecture Contracts
   - repo: local
@@ -30,7 +30,7 @@ repos:
       - id: mypy
         name: "Type check Python code (MyPy)"
         additional_dependencies:
-          [types-requests, types-setuptools, types-PyYAML, pydantic, pydantic-settings, "mcp==1.28.1", "anyio==4.14.2", "jsonschema==4.26.0"]
+          [types-requests, types-setuptools, types-PyYAML, pydantic, "pydantic-settings>=2.14.2", "mcp==1.30.0", "anyio==4.14.2", "jsonschema==4.26.0", "certifi>=2026.10.19", "urllib3>=2.8.0", "PyJWT==2.15.1", "cryptography>=50.0.0", "packaging==26.3"]
         exclude: "^tests/"
 
   # Essential File Quality Checks

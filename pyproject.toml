@@ -1,6 +1,6 @@
 [project]
 name = "rag-prototype"
-version = "5.0.0"
+version = "5.0.1"
 description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11,<3.13"
@@ -44,6 +44,7 @@ dependencies = [
   # LLM Integrations
   "openai>=1.24,<2.0",
   "httpx>=0.27,<0.28",
+  "certifi>=2026.10.19",
   # Keep the shared transport dependency above the CVE-2026-63374/64847 fixes.
   "anyio>=4.14.2,<5",
   # Database & ORM
@@ -57,7 +58,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp==1.28.1", "anyio==4.14.2", "jsonschema==4.26.0"]
+mcp = ["mcp==1.30.0", "anyio==4.14.2", "jsonschema==4.26.0", "PyJWT>=2.15.0", "cryptography>=50.0.0", "pydantic-settings>=2.14.2"]
 server = [
   "fastapi>=0.139,<0.140",
   "uvicorn[standard]>=0.29,<1.0",
@@ -68,11 +69,15 @@ dense = [
 ]
 dense-st = [
   # Heavy dependency chain (torch/transformers). Prefer OpenAI embeddings when possible.
-  "sentence-transformers>=2.7,<3.0"
+  "sentence-transformers>=2.7,<3.0",
+  "filelock>=4.2.1",
+  "urllib3>=2.8.0"
 ]
 loaders = [
   "langchain-community>=0.2,<1.0",
-  "trafilatura>=1.8,<2.0"
+  "trafilatura>=1.8,<2.0",
+  "pydantic-settings>=2.14.2",
+  "urllib3>=2.8.0"
 ]
 magic = [
   # Optional file type detection via libmagic. Requires system libmagic on many distros.
@@ -98,16 +103,22 @@ lint = [
   "types-PyYAML>=6.0.12",
   "import-linter>=2.0,<3.0",
   "pre-commit>=4.2.0,<5.0",
+  "filelock>=4.2.1",
+  "virtualenv>=21.14.13",
 ]
 dev = [
   { include-group = "test" },
   { include-group = "lint" },
   "ipython>=8.0,<9.0",
   "jupyter>=1.0,<2.0",
+  "urllib3>=2.8.0",
 ]
 sec = [
   "bandit[toml]>=1.7,<2.0",
-  "safety>=3.2,<4.0",
+  "pip-audit==2.10.1",
+  "packaging>=26.3",
+  "filelock>=4.2.1",
+  "urllib3>=2.8.0",
 ]
 docs = [
   "mkdocs>=1.5,<2.0",
@@ -115,6 +126,7 @@ docs = [
   "mkdocstrings[python]>=0.24,<1.0",
   "mkdocs-mermaid2-plugin>=1.1,<2.0",
   "mkdocs-include-markdown-plugin>=6.0,<7.0",
+  "urllib3>=2.8.0",
 ]
 
 [tool.uv]

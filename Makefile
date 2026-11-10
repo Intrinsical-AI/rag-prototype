@@ -63,20 +63,20 @@ sync-dense-st: $(VENV_DENSE_ST_STAMP) ## Sync test/lint plus heavy SentenceTrans
 sync-sec: $(VENV_SEC_STAMP) ## Sync locked security tooling dependencies
 
 format: sync ## Apply Ruff formatting and safe fixes
-	$(UV) run --active --no-sync ruff check --fix src tests
-	$(UV) run --active --no-sync ruff format src tests
+	$(UV) run --active --no-sync ruff check --fix src tests scripts/security_result.py
+	$(UV) run --active --no-sync ruff format src tests scripts/security_result.py
 
 format-check: sync ## Check Ruff formatting without modifying files
-	$(UV) run --active --no-sync ruff format --check src tests
+	$(UV) run --active --no-sync ruff format --check src tests scripts/security_result.py
 
 lint: sync ## Run Ruff without modifying files
-	$(UV) run --active --no-sync ruff check --no-fix src tests
+	$(UV) run --active --no-sync ruff check --no-fix src tests scripts/security_result.py
 
 lint-imports: sync ## Run import-linter architecture contracts
 	PYTHONPATH=src $(UV) run --active --no-sync lint-imports
 
 type: sync ## Run mypy type checking
-	DEBUG=false $(UV) run --no-sync mypy --python-executable $(VENV_DIR)/bin/python src/local_rag_backend
+	DEBUG=false $(UV) run --no-sync mypy --python-executable $(VENV_DIR)/bin/python src/local_rag_backend scripts/security_result.py
 
 test: sync ## Run test suite
 	$(UV) run --active --no-sync pytest -q
@@ -126,22 +126,35 @@ smoke-frontend: sync ## Chromium regression and local HTTP/SQLite frontend smoke
 sec: sec-hard ## Run strict security checks
 
 sec-run: sync-sec
-	$(SEC_IGNORE)$(UV) run bandit -r src/ -ll -ii
-	$(SEC_IGNORE)@requirements_file="$$(mktemp)"; \
-	trap 'rm -f "$$requirements_file"' EXIT; \
-	$(UV) export --frozen --no-default-groups --extra server --no-emit-project \
+	@set -eu; \
+	security_tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/rag-security.XXXXXXXX")"; \
+	cleanup() { result=$$?; trap - EXIT; \
+		if ! rm -rf -- "$$security_tmp"; then \
+			echo 'Security scratch cleanup failed' >&2; \
+			if [ "$$result" -eq 0 ]; then result=2; fi; \
+		fi; exit "$$result"; }; \
+	trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; \
+	requirements_file="$$security_tmp/requirements.txt"; \
+	$(UV) export --frozen --no-default-groups --extra server --extra mcp --no-emit-project \
 		--format requirements-txt --output-file "$$requirements_file" >/dev/null; \
-	if [ -n "$(SAFETY_API_KEY)" ]; then \
-		$(UV) run safety check --file "$$requirements_file" --full-report --key "$(SAFETY_API_KEY)"; \
-	else \
-		$(UV) run safety check --file "$$requirements_file" --full-report; \
-	fi
+	test -s "$$requirements_file"; \
+	$(UV) run --no-sync python scripts/security_result.py \
+		--requirements "$$requirements_file" --check-input >/dev/null; \
+	if $(UV) run --no-sync bandit -r src/ -ll -ii --format json \
+		--output "$$security_tmp/bandit.json"; then bandit_status=0; else bandit_status=$$?; fi; \
+	if $(UV) run --no-sync pip-audit --requirement "$$requirements_file" \
+		--require-hashes --no-deps --disable-pip --strict --vulnerability-service pypi \
+		--progress-spinner off --timeout 30 --format json --output "$$security_tmp/audit.json"; \
+		then audit_status=0; else audit_status=$$?; fi; \
+	$(UV) run --no-sync python scripts/security_result.py --requirements "$$requirements_file" \
+		--bandit-report "$$security_tmp/bandit.json" --bandit-returncode "$$bandit_status" \
+		--audit-report "$$security_tmp/audit.json" --audit-returncode "$$audit_status" $(SEC_SOFT_FINDINGS)
 
-sec-hard: SEC_IGNORE=
+sec-hard: SEC_SOFT_FINDINGS=
 sec-hard: sec-run ## Run security checks and fail on findings
 
-sec-soft: SEC_IGNORE=-
-sec-soft: sec-run ## Run security checks without failing the target
+sec-soft: SEC_SOFT_FINDINGS=--soft-findings
+sec-soft: sec-run ## Soften findings only; operational and incomplete-scan failures still fail
 
 clean: ## Remove cache, coverage, and Python build artifacts
 	rm -rf \
