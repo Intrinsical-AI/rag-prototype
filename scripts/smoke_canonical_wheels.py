@@ -1,4 +1,13 @@
-"""Validate exact native producer wheels against an isolated installed RAG wheel."""
+"""Validate exact native producer wheels against an isolated installed RAG wheel.
+
+Each generated CLI operation retains its 60-second limit and expected exit code.
+Only their combined consumer receives 15 * 60 + 120 seconds; other subprocesses
+retain a 120-second default. Stateless, flushed JSON events use monotonic elapsed
+time on stderr. Child output tails are at most 4096 UTF-8 bytes after replacement;
+the parent forwards at most 16384 UTF-8 bytes in total, including newlines and JSON
+escaping, retaining partial stdout, stderr and the last step identity. Domain
+checks and the JSON report on stdout are unchanged.
+"""
 
 from __future__ import annotations
 
@@ -11,9 +20,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from email.parser import BytesParser
 from pathlib import Path
 from zipfile import ZipFile
+
+COMBINED_CONSUMER_TIMEOUT = 15 * 60 + 120
+OUTPUT_TAIL_BYTES = 4096
+FORWARDED_DIAGNOSTIC_BYTES = 16384
 
 TR3V0R_MODULES = {
     "tr3v0r": "tr3v0r_app",
@@ -28,10 +42,46 @@ import importlib
 import json
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from importlib import metadata, resources
 from pathlib import Path
 
+CLI_TIMEOUT_SECONDS = 60
+OUTPUT_TAIL_BYTES = 4096
+
+def output_tail(value, limit=OUTPUT_TAIL_BYTES):
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return (value or "").encode("utf-8", errors="replace")[-limit:].decode(
+        "utf-8", errors="ignore"
+    )
+
+def event(name, label, started, **fields):
+    print(json.dumps({"event": name, "label": label,
+        "elapsed_seconds": time.monotonic() - started, **fields},
+        sort_keys=True, ensure_ascii=False), file=sys.stderr, flush=True)
+
+def run(command, expected=0, label=None):
+    label = label or Path(command[0]).name
+    started = time.monotonic()
+    event("start", label, started)
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True,
+            timeout=CLI_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        event("timeout", label, started, stdout_tail=output_tail(error.stdout),
+            stderr_tail=output_tail(error.stderr))
+        raise
+    event("end", label, started, returncode=completed.returncode,
+        stdout_tail=output_tail(completed.stdout), stderr_tail=output_tail(completed.stderr))
+    assert completed.returncode == expected, (
+        command, completed.returncode, output_tail(completed.stderr)
+    )
+    return completed
+
+imports_started = time.monotonic()
+event("start", "imports", imports_started)
 from local_rag_backend.composition.container import AppContainer
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, RetrievalRequest
 from local_rag_backend.core.services.canonical_import_transport import (
@@ -60,11 +110,7 @@ for module, schema in (
     ("chat_exports", "rag-import-chat-v4.schema.json"),
 ):
     assert resources.files(module).joinpath("schemas", schema).is_file()
-
-def run(command, expected=0):
-    completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=60)
-    assert completed.returncode == expected, (command, completed.returncode, completed.stderr)
-    return completed
+event("end", "imports", imports_started)
 
 fixture = root / "repo"
 fixture.mkdir()
@@ -74,13 +120,14 @@ fixture.mkdir()
 )
 payload_path = root / "repogpt.json"
 run([sys.executable, "-m", "repogpt.app.cli", "--emit", "code-units", "--repo-key",
-     "wheel-fixture", "--replace-scope", "--include-tests", "-o", str(payload_path), str(fixture)])
+     "wheel-fixture", "--replace-scope", "--include-tests", "-o", str(payload_path), str(fixture)],
+    label="repogpt.emit")
 payload = json.loads(payload_path.read_text())
 assert payload["schema_version"] == "6" and payload["replace_scope"] is True
 validate_canonical_import_payload(payload)
 rag_cli = str(venv / "bin" / "rag-import-canonical")
-run([rag_cli, "--json", str(payload_path)])
-run([rag_cli, "--json", str(payload_path)])
+run([rag_cli, "--json", str(payload_path)], label="rag.repo.import")
+run([rag_cli, "--json", str(payload_path)], label="rag.repo.replay")
 
 chat = root / "chat"
 chat.mkdir()
@@ -92,7 +139,8 @@ chat.mkdir()
 archive_path = root / "archive" / "chat_archive.json"
 chat_cli = str(venv / "bin" / "chatx")
 run([chat_cli, "convert", str(chat), "-o", str(archive_path.parent), "--to", "none",
-     "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-chat"])
+     "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-chat"],
+    label="chat.whatsapp.convert")
 archive = load_archive(archive_path).mutable_copy()
 archive.messages[-1].role = "system"
 failure = Diagnostic("error", "source_record_invalid", "synthetic excluded-month failure",
@@ -102,7 +150,7 @@ archive.diagnostics.append(failure)
 save_archive(prepare_archive(archive), archive_path)
 export = root / "exports"
 run([chat_cli, "export", str(archive_path), "-o", str(export), "--to", "rag"],
-    expected=2)
+    expected=2, label="chat.partial.export")
 chat_paths = sorted((export / "rag").glob("*.json"))
 assert len(chat_paths) == 2
 for path in chat_paths:
@@ -115,9 +163,10 @@ for path in chat_paths:
     assert chat_payload["replace_scope"] is False
     validated = validate_canonical_import_payload(chat_payload)
     assert resolve_canonical_import_replace_scope(validated) is False
-    run([rag_cli, "--json", str(path)])
-    run([rag_cli, "--json", str(path)])
-    run([rag_cli, "--json", str(path), "--replace-scope"], expected=1)
+    run([rag_cli, "--json", str(path)], label=f"rag.chat.{path.stem}.import")
+    run([rag_cli, "--json", str(path)], label=f"rag.chat.{path.stem}.replay")
+    run([rag_cli, "--json", str(path), "--replace-scope"], expected=1,
+        label=f"rag.chat.{path.stem}.refuse-replace")
 
 telegram = root / "result.json"
 telegram.write_text(json.dumps({"name": "Wheel Telegram", "type": "personal_chat", "id": 42,
@@ -135,7 +184,8 @@ telegram.write_text(json.dumps({"name": "Wheel Telegram", "type": "personal_chat
          "text": "", "location_information": {"latitude": 40.416775, "longitude": -3.70379}}
     ]}), encoding="utf-8")
 telegram_out = root / "telegram-output"
-run([chat_cli, "convert", str(telegram), "-o", str(telegram_out), "--tz", "UTC", "--to", "rag"])
+run([chat_cli, "convert", str(telegram), "-o", str(telegram_out), "--tz", "UTC", "--to", "rag"],
+    label="chat.telegram.convert")
 telegram_paths = sorted((telegram_out / "rag").glob("*.json"))
 assert len(telegram_paths) == 1
 telegram_payload = json.loads(telegram_paths[0].read_text())
@@ -145,8 +195,8 @@ telegram_contents = "\n".join(doc["content"] for doc in telegram_payload["docume
 for token in ("rich_needle", "docs_needle", "https://example.org/installed_destination",
               "40.416775", "-3.70379"):
     assert token in telegram_contents, (token, telegram_contents)
-run([rag_cli, "--json", str(telegram_paths[0])])
-run([rag_cli, "--json", str(telegram_paths[0])])
+run([rag_cli, "--json", str(telegram_paths[0])], label="rag.telegram.import")
+run([rag_cli, "--json", str(telegram_paths[0])], label="rag.telegram.replay")
 
 media_chat = root / "media-chat"
 media_chat.mkdir()
@@ -158,7 +208,8 @@ media_chat.mkdir()
 )
 bundle = root / "media-bundle"
 run([chat_cli, "convert", str(media_chat), "-o", str(bundle), "--to", "none",
-     "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-media", "--copy-media"])
+     "--tz", "UTC", "--date-order", "dmy", "--chat-key", "wheel-media", "--copy-media"],
+    label="chat.media.convert")
 media_archive = load_archive(bundle / "chat_archive.json").mutable_copy()
 selected = next(ref for ref in media_archive.media if ref.filename == "first.pdf")
 unused = next(ref for ref in media_archive.media if ref.filename == "unused.txt")
@@ -176,6 +227,8 @@ except ValueError as error:
 else:
     raise AssertionError("selected bytes were not checked before projection reuse")
 
+final_checks_started = time.monotonic()
+event("start", "final-checks", final_checks_started)
 container = AppContainer.from_settings(get_settings())
 container.initialize()
 try:
@@ -202,6 +255,7 @@ try:
     assert len(repo.get_all_documents()) == len(documents)
 finally:
     container.close()
+event("end", "final-checks", final_checks_started)
 print(json.dumps({"versions": versions, "repo_documents": len(expected_docs),
                   "chat_months": len(chat_paths), "telegram_documents": len(telegram_payload["documents"]),
                   "stored_documents": len(documents), "rich_links_locations_preserved": True,
@@ -211,11 +265,118 @@ print(json.dumps({"versions": versions, "repo_documents": len(expected_docs),
 """
 
 
-def _run(command: list[str], *, cwd: Path, env: dict[str, str]) -> str:
-    result = subprocess.run(
-        command, cwd=cwd, env=env, check=False, capture_output=True, text=True, timeout=120
-    )
+def _output_tail(value: str | bytes | None, limit: int = OUTPUT_TAIL_BYTES) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return (value or "").encode("utf-8", errors="replace")[-limit:].decode("utf-8", errors="ignore")
+
+
+def _last_step(stderr: str | bytes | None) -> dict[str, object] | None:
+    # One generated JSON event is bounded by two 4096-byte tails plus escaping.
+    for line in reversed(_output_tail(stderr, 131072).splitlines()):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict) or record.get("event") not in ("start", "end", "timeout"):
+            continue
+        label = record.get("label")
+        elapsed = record.get("elapsed_seconds")
+        if not isinstance(label, str) or not isinstance(elapsed, (int, float)):
+            continue
+        result: dict[str, object] = {
+            "event": record["event"],
+            "label": _output_tail(label, 256),
+            "elapsed_seconds": elapsed,
+        }
+        if isinstance(record.get("returncode"), int):
+            result["returncode"] = record["returncode"]
+        return result
+    return None
+
+
+def _combined_diagnostic(
+    event: str,
+    started: float,
+    *,
+    budget: int,
+    stdout: str | bytes | None = None,
+    stderr: str | bytes | None = None,
+    returncode: int | None = None,
+) -> str:
+    record: dict[str, object] = {
+        "event": event,
+        "label": "combined-consumer",
+        "elapsed_seconds": time.monotonic() - started,
+    }
+    if returncode is not None:
+        record["returncode"] = returncode
+    if event != "start":
+        record["last_step"] = _last_step(stderr)
+    tail_limit = OUTPUT_TAIL_BYTES
+    while True:
+        if event != "start":
+            record["stdout_tail"] = _output_tail(stdout, tail_limit)
+            record["stderr_tail"] = _output_tail(stderr, tail_limit)
+        line = json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n"
+        if len(line.encode("utf-8")) <= budget:
+            return line
+        if tail_limit == 1:
+            raise ValueError("Combined diagnostic metadata exceeds its byte budget")
+        tail_limit = max(1, tail_limit // 2)
+
+
+def _run(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout: int = 120,
+    forward_diagnostics: bool = False,
+) -> str:
+    started = time.monotonic()
+    remaining = FORWARDED_DIAGNOSTIC_BYTES
+    if forward_diagnostics:
+        line = _combined_diagnostic("start", started, budget=remaining)
+        sys.stderr.write(line)
+        sys.stderr.flush()
+        remaining -= len(line.encode("utf-8"))
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        if forward_diagnostics:
+            sys.stderr.write(
+                _combined_diagnostic(
+                    "timeout", started, budget=remaining, stdout=error.stdout, stderr=error.stderr
+                )
+            )
+            sys.stderr.flush()
+        raise
+    if forward_diagnostics:
+        sys.stderr.write(
+            _combined_diagnostic(
+                "end",
+                started,
+                budget=remaining,
+                stdout=result.stdout if result.returncode else None,
+                stderr=result.stderr,
+                returncode=result.returncode,
+            )
+        )
+        sys.stderr.flush()
     if result.returncode:
+        if forward_diagnostics:
+            raise RuntimeError(
+                f"Command exited {result.returncode}; see bounded stderr diagnostics"
+            )
         raise RuntimeError(f"Command exited {result.returncode}: {result.stderr.strip()}")
     return result.stdout
 
@@ -623,6 +784,8 @@ def main() -> None:
             [str(python), str(consumer), json.dumps({k: v["version"] for k, v in wheels.items()})],
             cwd=root,
             env=env,
+            timeout=COMBINED_CONSUMER_TIMEOUT,
+            forward_diagnostics=True,
         )
         isolated = _isolated_producer_boundary(
             root,
