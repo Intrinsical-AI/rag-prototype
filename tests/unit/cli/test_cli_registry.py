@@ -1,65 +1,34 @@
 from __future__ import annotations
 
-import pytest
+import tomllib
+from pathlib import Path
+
+from click.testing import CliRunner
 
 from local_rag_backend import cli as cli_module
 
 
-def test_cli_registers_all_expected_commands() -> None:
+def test_canonical_command_tree_has_one_owner() -> None:
     expected = {
-        "server",
-        "rebuild-index",
-        "mutate-docs",
-        "import-canonical",
-        "bootstrap",
-        "status",
-        "eval",
-        "eval-batch",
-        "ingest",
+        "docs": {"bootstrap", "ingest", "import", "mutate"},
+        "index": {"rebuild"},
+        "query": {"search", "ask"},
+        "serve": {"http", "mcp"},
+        "eval": {"run", "batch", "compare"},
     }
-    assert expected <= set(cli_module.cli.commands.keys())
-    assert "upsert-docs" not in cli_module.cli.commands
-    assert "delete-docs" not in cli_module.cli.commands
-    assert "delete-external-ids" not in cli_module.cli.commands
+    assert set(cli_module.cli.commands) == set(expected) | {"status", "snapshot"}
+    for group, commands in expected.items():
+        assert set(cli_module.cli.commands[group].commands) == commands
 
 
-def test_cli_does_not_register_removed_mutation_commands() -> None:
-    removed_commands = {
-        "upsert-docs",
-        "delete-docs",
-        "delete-external-ids",
-    }
-    assert removed_commands.isdisjoint(cli_module.cli.commands.keys())
+def test_installed_console_surface_is_only_rag() -> None:
+    root = Path(__file__).resolve().parents[3]
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    assert project["project"]["scripts"] == {"rag": "local_rag_backend.cli:cli"}
 
 
-@pytest.mark.parametrize(
-    ("wrapper_name", "expected_args"),
-    [
-        ("rag_server", ["server", "--flag"]),
-        ("rag_bootstrap", ["bootstrap", "--flag"]),
-        ("rag_status", ["status", "--flag"]),
-        ("rag_eval", ["eval", "--flag"]),
-        ("rag_eval_batch", ["eval-batch", "--flag"]),
-        ("rag_rebuild_index", ["rebuild-index", "--flag"]),
-        ("rag_mutate_docs", ["mutate-docs", "--flag"]),
-        ("rag_import_canonical", ["import-canonical", "--flag"]),
-        ("rag_ingest", ["ingest", "--flag"]),
-    ],
-)
-def test_entrypoint_wrappers_delegate_to_click_main(
-    monkeypatch: pytest.MonkeyPatch,
-    wrapper_name: str,
-    expected_args: list[str],
-) -> None:
-    calls: list[tuple[list[str], bool]] = []
-
-    def _fake_main(*, args: list[str], standalone_mode: bool) -> None:
-        calls.append((list(args), standalone_mode))
-
-    monkeypatch.setattr(cli_module.cli, "main", _fake_main, raising=True)
-    monkeypatch.setattr(cli_module.sys, "argv", ["prog", "--flag"], raising=True)
-
-    wrapper = getattr(cli_module, wrapper_name)
-    wrapper()
-
-    assert calls == [(expected_args, False)]
+def test_removed_top_level_commands_are_rejected() -> None:
+    for name in ("server", "bootstrap", "mutate-docs", "import-canonical", "eval-batch", "ingest"):
+        result = CliRunner().invoke(cli_module.cli, [name])
+        assert result.exit_code == 2
+        assert "No such command" in result.output

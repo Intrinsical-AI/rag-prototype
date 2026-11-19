@@ -398,16 +398,18 @@ jobs:
         run: make sec
 
   docker:
-    name: Docker Build
+    name: Production image smoke
     needs: [pre-commit, lint, typing, architecture, test, security]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      SMOKE_IMAGE: rag-prototype:ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Set up Docker Buildx
@@ -419,6 +421,27 @@ jobs:
           context: .
           target: production
           push: false
-          tags: intrinsical/rag-prototype:latest
+          load: true
+          tags: ${{ env.SMOKE_IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Start the production command and wait for health
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          export API_KEY
+          container=$(docker run --detach --network none --health-interval 2s \
+            --health-timeout 3s --health-start-period 15s --env API_KEY "$SMOKE_IMAGE")
+          trap 'docker rm --force "$container" >/dev/null' EXIT
+          for attempt in {1..30}; do
+            state=$(docker inspect --format '{{.State.Status}} {{.State.Health.Status}}' "$container")
+            case "$state" in
+              "running healthy") exit 0 ;;
+              "running starting") sleep 2 ;;
+              *) break ;;
+            esac
+          done
+          docker logs --tail 80 "$container"
+          exit 1

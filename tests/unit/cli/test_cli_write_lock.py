@@ -34,7 +34,7 @@ def test_cli_mutate_docs_runs_under_multi_store_lock(in_memory_sqlite, tmp_path,
         json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
         encoding="utf-8",
     )
-    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert lock_entries == 0
 
@@ -59,7 +59,7 @@ def test_cli_mutate_delete_ids_runs_under_multi_store_lock(in_memory_sqlite, tmp
     payload = tmp_path / "mutate_delete_ids_lock.json"
     payload.write_text(json.dumps({"delete_ids": [str(doc_id)]}), encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert lock_entries == 0
 
@@ -87,7 +87,7 @@ def test_cli_ingest_runs_mutation_batches_under_multi_store_lock(
     (root / "a.txt").write_text("hello world", encoding="utf-8")
     (root / "b.txt").write_text("hello world 2", encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    result = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert result.exit_code == 0, result.output
     assert lock_entries == 0
 
@@ -121,7 +121,7 @@ def test_cli_mutate_delete_ids_dense_does_not_require_embedder_when_no_upserts(
     )[0]
     payload = tmp_path / "mutate_delete_dense_ids.json"
     payload.write_text(json.dumps({"delete_ids": [str(doc_id)]}), encoding="utf-8")
-    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert embedder_calls == 0
 
@@ -157,6 +157,6 @@ def test_cli_mutate_delete_external_ids_dense_does_not_require_embedder_when_no_
 
     payload = tmp_path / "mutate_delete_dense_external_ids.json"
     payload.write_text(json.dumps({"delete_external_ids": ["doc-ext-ok"]}), encoding="utf-8")
-    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert embedder_calls == 0

@@ -10,10 +10,10 @@ from local_rag_backend.cli_commands.docs._ingestion_planner import (
     execute_ingest_batches,
     resolve_loader_options,
 )
-from local_rag_backend.cli_commands.runtime import (
+from local_rag_backend.composition.commands import (
     build_dense_embedder,
-    get_cli_container,
-    run_cli_mutation,
+    execute_mutation_command,
+    get_container,
 )
 from local_rag_backend.core.use_cases.docs_mutation import MutationCoordinator
 from local_rag_backend.settings import get_settings
@@ -80,7 +80,7 @@ def ingest_cmd(
             click.echo("[WARN] No files found under limits. Nothing to ingest.")
             return
 
-        container = get_cli_container()
+        container = get_container()
         mutation_bundle = container.build_docs_mutation_bundle(
             build_embedder=build_dense_embedder,
         )
@@ -115,8 +115,8 @@ def ingest_cmd(
                 settings_obj=get_settings(),
             )
 
-        total_inserted, total_updated, total_unchanged, total_chunks = run_cli_mutation(
-            _ingest_sync, use_lock=False, invalidate_shared=False
+        total_inserted, total_updated, total_unchanged, total_chunks = execute_mutation_command(
+            _ingest_sync, use_lock=False
         )
         click.echo(
             f"[OK] Ingest completed. files={total_files} chunks={total_chunks} "

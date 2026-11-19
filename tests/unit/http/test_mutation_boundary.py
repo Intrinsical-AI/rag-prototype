@@ -3,9 +3,9 @@ from __future__ import annotations
 import io
 import json
 
+from local_rag_backend.composition import operations
 from local_rag_backend.core.use_cases import docs_ingest
 from local_rag_backend.core.use_cases.results import MutationSummary, UpsertDocResult
-from local_rag_backend.http.routers import docs as docs_router
 from local_rag_backend.settings import get_settings
 
 settings = get_settings()
@@ -37,7 +37,7 @@ async def test_docs_mutate_endpoint_calls_coordinator_execute_once(
             )
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(docs_router, "MutationCoordinator", FakeCoordinator, raising=True)
+    monkeypatch.setattr(operations, "MutationCoordinator", FakeCoordinator, raising=True)
 
     resp = await asgi_client.post(
         "/api/docs/mutate",

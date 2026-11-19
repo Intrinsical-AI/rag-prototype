@@ -6,7 +6,7 @@ from typing import Any
 
 import click
 
-from local_rag_backend.cli_commands.runtime import get_cli_container, run_cli_mutation
+from local_rag_backend.composition.commands import execute_mutation_command, get_container
 from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input_from_raw,
 )
@@ -24,7 +24,7 @@ def _read_payload(payload_json: Path) -> dict[str, Any]:
     return payload
 
 
-@click.command("import-canonical")
+@click.command("import")
 @click.option(
     "--json",
     "payload_json",
@@ -54,7 +54,7 @@ def import_canonical_cmd(payload_json: Path, replace_scope_override: bool | None
             source="cli:docs:import-canonical",
             replace_scope_override=replace_scope_override,
         )
-        container = get_cli_container()
+        container = get_container()
         mutation_bundle = container.build_docs_mutation_bundle()
 
         def _run_sync() -> CanonicalImportSummary:
@@ -64,7 +64,7 @@ def import_canonical_cmd(payload_json: Path, replace_scope_override: bool | None
                 ports=mutation_bundle.ports,
             )
 
-        summary = run_cli_mutation(_run_sync, use_lock=True, invalidate_shared=False)
+        summary = execute_mutation_command(_run_sync, use_lock=True)
         click.echo(
             "[OK] Canonical import committed. "
             f"scope={summary.scope} snapshot_id={summary.snapshot_id} "

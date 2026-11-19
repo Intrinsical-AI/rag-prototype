@@ -61,7 +61,7 @@ RUN set -eux; \
 
 RUN mkdir -p data logs && chown -R appuser:appuser /app
 USER appuser
-CMD ["rag-server", "--reload"]
+CMD ["rag", "serve", "http", "--reload"]
 
 # --- Stage 4: Production runtime (minimal) ---
 FROM ${PYTHON_IMAGE} as production
@@ -92,7 +92,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 USER appuser
 EXPOSE 8000
-CMD ["rag-server", "--workers", "4", "--no-reload"]
+CMD ["rag", "serve", "http", "--workers", "4", "--no-reload"]
 
 # --- Stage 5: Testing Environment ---
 FROM development as testing

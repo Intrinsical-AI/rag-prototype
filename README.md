@@ -14,17 +14,15 @@ Stateful RAG service with sparse, dense, and hybrid retrieval behind CLI, HTTP, 
 
 ### Surfaces & Features
 
-- `retrieval-backend-matrix` — Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing. (`implemented`; `library`, `http`)
+- `retrieval-backend-matrix` — Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing. (`implemented`; `cli`, `library`, `http`, `mcp`)
 - `canonical-import` — Explicitly discriminated RepoGPT v6, chat-units v4, and Tr3v0r v2 imports with complete-run replacement evidence. (`implemented`; `cli`, `library`)
 - `http-api` — FastAPI health, readiness, ask, import, and index-management endpoints. (`implemented`; `http`)
-- `mcp-server` — Optional official-SDK stdio MCP 2025-11-25 server exposes native retrieval, diagnostics, canonical import, rebuild and evaluation with validated structured results, effect annotations, sanitized errors and bounded single-worker execution. (`implemented`; `mcp`)
+- `mcp-server` — Optional official-SDK stdio MCP server exposes pure search, generation, diagnostics, embeddings, document mutations, canonical import, rebuild and evaluation with native schemas and explicit effects. (`implemented`; `mcp`)
 
 ### Commands
 
 - `make check` — Run format, lint, architecture, type, and test gates. (`make`)
-- `rag-import-canonical` — Import a canonical external document export. (`console-script`)
-- `rag-server` — Start the FastAPI service. (`console-script`)
-- `rag-mcp` — Start the MCP server. (`mcp`)
+- `rag` — Manage documents, retrieval, generation, evaluation, snapshots and native servers through explicit subcommands. (`console-script`)
 - `make contract-check` — Validate the workspace contract and generated README block. (`make`)
 - `make smoke-embedding-api-wheel` — Build and install a wheel outside the checkout and exercise the typed embedding API. (`make`)
 
@@ -74,10 +72,11 @@ installed-wheel and canonical-producer gates against the exact candidate bytes.
 > Stateful RAG platform with a hexagonal architecture (Ports & Adapters), FastAPI, canonical mutation flows, and offline evaluation gates. It supports four retrieval modes (BM25, dense vector, dual, hybrid) plus swappable LLM connectors (OpenAI, OpenRouter, Ollama).
 > Default runtime mode is `sparse` on SQLite. Dense/dual/hybrid add a local FAISS or NumPy vector index. Canonical mutations, rebuilds, and recovery are first-class.
 
-The working tree is the **4.0.0 candidate**, with breaking changes from `v3.0.0`
-described in the [compatibility notes](docs/RELEASE_CHECKLIST.md#candidate-400).
-Changing package metadata does not publish a tag, release, or package. Existing
-tags and artifacts remain unchanged.
+Version **6.0.0** uses one installed command, `rag`. Its command families are
+`docs`, `index`, `query`, `serve`, and `eval`, plus `status` and `snapshot`.
+Update 5.x scripts that call `rag-import-canonical` or `rag-mcp` to use
+`rag docs import` and `rag serve mcp`. The [command and tool reference](docs/USAGE.md#canonical-command-and-tool-surface)
+also covers mutation receipts and the supported journal format.
 
 ---
 
@@ -161,11 +160,11 @@ Initialize sample data and start:
 
 ```bash
 # Load sample CSV into the configured backend and, if applicable, build/rebuild retrieval state
-rag-bootstrap
+rag docs bootstrap
 
 
 # FastAPI server
-rag-server
+rag serve http
 # UI: http://localhost:8000/
 # Health: http://localhost:8000/healthz
 # Readiness: http://localhost:8000/readyz
@@ -176,12 +175,12 @@ rag-server
 > `/healthz` confirms the HTTP app is alive. `/readyz` and `/api/ask` require a configured
 > LLM provider and may return `503` until `config.yaml` enables OpenAI, OpenRouter, or Ollama.
 
-> `rag-server` accepts `--workers` (default 1) and `--reload`/`--no-reload`.
+> `rag serve http` accepts `--workers` (default 1) and `--reload`/`--no-reload`.
 > Host and port come from settings: `APP_HOST`, `APP_PORT`, `API_KEY`,
 > `OLLAMA_BASE_URL` and `OLLAMA_ENABLED` override their YAML fields. Other fields
 > remain controlled by `config.yaml`. Reload requires one worker.
 
-> Alternative startup (without `rag-server` wrapper):
+> Alternative startup (without `rag serve http` wrapper):
 > `uvicorn local_rag_backend.http.main:app --reload`.
 
 ---
@@ -195,7 +194,7 @@ When `debug: false`, `cors_allow_origins` accepts only explicit origins such as
 list empty to disable cross-origin access. Debug mode keeps the permissive
 wildcard policy for local development.
 Set `RAG_CONFIG_PATH=/absolute/path/to/runtime.yaml` when an installed console script, including
-`rag-mcp`, runs outside the checkout. The selected YAML remains the single runtime source of truth,
+`rag serve mcp`, runs outside the checkout. The selected YAML remains the single runtime source of truth,
 and relative paths, including omitted path defaults, resolve against that file's directory. An explicit path passed to
 `load_settings_from_yaml(...)` takes precedence over the environment variable. The process fails
 fast if the selected file is missing or invalid.
@@ -221,8 +220,8 @@ SQLite holds canonical documents, history, tombstones, and the runtime version. 
 When `retrieval_mode=dense|dual|hybrid`, the system writes an `index_manifest.json` next to `index_path`.
 It records stable identifiers for the index build (embedding backend/model, dimension, chunker strategy/version).
 
-If you change any of these settings, `/readyz` and `rag-status` will report drift and instruct you to rebuild:
-`rag-rebuild-index` (or `POST /api/index/rebuild`).
+If you change any of these settings, `/readyz` and `rag status` will report drift and instruct you to rebuild:
+`rag index rebuild` (or `POST /api/index/rebuild`).
 
 **Note:**  **fresh-install only** storage contract.
 * canonical document IDs are opaque strings (`doc:<uuid7>`)
@@ -246,16 +245,16 @@ The detailed ingestion, canonical mutation, and evaluation flows are documented 
 
 Use these entrypoints for the main workflows:
 
-* `rag-ingest` for file/directory ingestion.
-* `rag-mutate-docs` for canonical writes via `MutationCoordinator`.
-* `rag-import-canonical` for scope/snapshot import and sync.
-* `rag-rebuild-index` for explicit repair of dense/dual/hybrid state.
-* `rag-eval`, `rag-eval-batch`, and `rag-eval-compare` for offline evaluation gates.
+* `rag docs ingest` for file/directory ingestion.
+* `rag docs mutate` for canonical writes via `MutationCoordinator`.
+* `rag docs import` for scope/snapshot import and sync.
+* `rag index rebuild` for explicit repair of dense/dual/hybrid state.
+* `rag eval run`, `rag eval batch`, and `rag eval compare` for offline evaluation gates.
 
 See the evaluation section in [`docs/USAGE.md`](./docs/USAGE.md#operabilidad-metricas-evaluacion-y-reranker)
 for batch-spec examples and compare-mode usage.
 
-`rag-import-canonical` accepts RepoGPT `kind="code-units"` / schema `"6"`,
+`rag docs import` accepts RepoGPT `kind="code-units"` / schema `"6"`,
 chat-exports `kind="chat-units"` / schema `"4"`, and Tr3v0r
 `kind="tr3v0r-canonical-rag"` / schema `"2"`. Unknown, conflicting, and obsolete
 producer identities are rejected. Top-level `completion` is reserved for Tr3v0r
@@ -275,7 +274,7 @@ replacement is also refused when `stats.error_count` is nonzero, even if the
 other failure fields are cleared.
 
 Partial exports (`stats.failed_files > 0` or a nonempty `failures` list) cannot replace
-a scope. Use `rag-import-canonical --json export.json --upsert-only`, HTTP
+a scope. Use `rag docs import --json export.json --upsert-only`, HTTP
 `replace_scope: false`, or the MCP `replace_scope_override: false` option to import
 the available documents while preserving absent ones. Overrides are checked before
 any writes. RepoGPT needs its own environment: run `uv sync --frozen --group dev`
@@ -291,7 +290,7 @@ at least one non-blank document. Recoverable documents above 20,000 characters a
 rejected before any mutation.
 
 Explicit deletion is available through `POST /api/docs/mutate` and
-`rag-mutate-docs --json ...`, using `delete_ids` or `delete_external_ids` (at most
+`rag docs mutate --json ...`, using `delete_ids` or `delete_external_ids` (at most
 2,048 of each per request). These mutations create tombstones, so they are not
 equivalent to an empty canonical replacement. Enumerate documents with filtered,
 paginated `/api/docs/query` requests (`limit` at most 1,000, plus `offset`); the
@@ -323,7 +322,7 @@ uv sync --frozen --extra magic
 # or: pip install rag-prototype[magic]
 ```
 
-`rag-ingest` detection is Unicode-aware (UTF-8 text with non-ASCII characters is accepted) and
+`rag docs ingest` detection is Unicode-aware (UTF-8 text with non-ASCII characters is accepted) and
 handles unreadable files as best-effort skips instead of aborting the full ingestion run.
 
 Optional: Prometheus metrics (`/metrics`) and structured-ish domain metrics:
@@ -331,10 +330,10 @@ Optional: Prometheus metrics (`/metrics`) and structured-ish domain metrics:
 ```bash
 uv sync --frozen --extra monitoring
 # then set `enable_monitoring: true` in config.yaml
-rag-server
+rag serve http
 ```
 
-Optional: reranker (retrieval quality knob, measurable via `rag-eval`):
+Optional: reranker (retrieval quality knob, measurable via `rag eval run`):
 
 ```bash
 # set these in config.yaml:
@@ -346,7 +345,7 @@ Optional: MCP server for agent-facing operational workflows:
 
 ```bash
 uv sync --frozen --extra mcp
-rag-mcp
+rag serve mcp
 # or: python -m local_rag_backend.mcp_server
 ```
 
@@ -382,7 +381,7 @@ it does not create a schema, query live SQL, load a model or claim live freshnes
 For queries without RAG storage writes, explicitly prepare a new frozen generation:
 
 ```bash
-RAG_CONFIG_PATH=/absolute/config.yaml rag-snapshot /absolute/new-snapshot
+RAG_CONFIG_PATH=/absolute/config.yaml rag snapshot /absolute/new-snapshot
 # Set ephemeral_snapshot_dir: /absolute/new-snapshot in the consumer configuration.
 ```
 
@@ -516,16 +515,16 @@ Notes:
 * For `/api/ask`, default provider selection is `ollama` -> `openai` -> `openrouter` depending on active
   configuration. OpenRouter is only considered available when `openrouter_enabled=true` and
   `openrouter_api_key` is set.
-* In dense/dual/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag-mutate-docs`, or `rag-import-canonical` rather than mutating stores independently.
+* In dense/dual/hybrid mode, write via `/api/docs/mutate`, `/api/docs/import-canonical`, `rag docs mutate`, or `rag docs import` rather than mutating stores independently.
 * `MutationCoordinator` uses a durable saga: SQL commit + vector delta (`apply_delta_atomic`) + journaled compensation/recovery.
-* Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag-rebuild-index`), not a normal write fallback.
+* Full rebuild is an explicit repair operation only (`/api/index/rebuild` or `rag index rebuild`), not a normal write fallback.
 * `/readyz` is stricter than `/healthz`: it returns `503` when no LLM provider is configured, even if the HTTP app and database are otherwise healthy.
 * In dense/dual/hybrid mode, `/readyz` returns `503` when it detects missing/corrupt index files or drift between SQLite documents and the vector index.
 * For public/proxy deployments, set `api_key` in `config.yaml` and sanitize `X-Forwarded-For` / `Forwarded` at the edge proxy. The UI's optional **API access** field sends this key with all API calls and keeps it only until the page reloads.
 * Filter `values` must be a nonempty array of nonblank strings. Values are trimmed; strings, numbers, and blank items are rejected (`422` in HTTP, `-32602` in MCP).
 * Document/history reads and readiness I/O run through the container's worker executor. Document pagination does not provide a stable snapshot across separate requests.
 * Conversation uploads exceeding 50 MiB return `413` before parsing or mutation.
-* The local mutation journal keeps active records in `active/` and terminal receipts in `done/`. Committed receipts omit before-images. Terminal receipts are retained for up to 30 days or 256 MiB, with maintenance under the write lock; exact `op_id` replay is bounded by that retention window. Older flat receipts remain read-only and replayable. A terminal receipt that shadows an incomplete flat record is retained until the flat record is resolved. Incomplete or corrupt records make `/readyz` return `503`; unresolved active records block writes, while a corrupt terminal receipt blocks replay of its `op_id`. Rebuilding the vector index does not repair the journal.
+* The local mutation journal keeps active records in `active/` and terminal receipts in `done/`. Committed receipts omit before-images. Terminal receipts are retained for up to 30 days or 256 MiB, with maintenance under the write lock; exact `op_id` replay is bounded by that retention window. Only schema-v2 records in `active/` or `done/` are accepted. Flat/unversioned layouts and former outcome aliases are refused and preserved; no conversion runs. Incomplete or corrupt records make `/readyz` return `503`; unresolved active records block writes, while a corrupt terminal receipt blocks replay of its `op_id`. Rebuilding the vector index does not repair the journal.
 
 Example:
 
@@ -663,13 +662,14 @@ make smoke-frontend
 The installed-package job retains RAG's exact wheel/sdist with source revision/tree,
 runtime/configuration/lockfile hashes, installed origins and JUnit receipts. Fresh
 `[server,mcp]` installations run the existing synthetic embedding API assertions and
-snapshot fixture, actual snapshot/status/help CLI entrypoints, and official SDK stdio
-status/query calls across sparse, dense, dual and hybrid snapshots. IPv4/IPv6 and DNS
-are denied; SDK query reads additionally deny file mutations and preserve all fixture
-hashes. Only the provider HTTP boundary is a deterministic response stub; this does
-not validate a model or provider. There is no query CLI. CLI status runs during the
-explicit setup writer phase. Public CI does not install or upload private producer
-wheels; the canonical producer gate remains a separate local acceptance.
+snapshot fixture, and snapshot/status/help CLI entrypoints. The installed CLI also
+runs `rag query search` with matching and nonmatching filters against the live sparse
+SQLite fixture. Official SDK stdio status and query calls cover sparse, dense, dual
+and hybrid snapshots. IPv4/IPv6 and DNS are denied. CLI search and SDK reads deny
+file mutations and preserve all fixture hashes. The search CLI makes zero provider
+calls. The SDK snapshot query uses a deterministic HTTP stub for the provider. CLI
+status runs during the explicit setup writer phase. Public CI keeps the canonical
+producer gate separate so private producer wheels stay local.
 
 The frontend smoke reuses the workspace's installed Playwright and Chromium
 from Python Lair; set `PLAYWRIGHT_MODULE` to another installed `@playwright/test`

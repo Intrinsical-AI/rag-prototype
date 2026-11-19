@@ -32,7 +32,7 @@ def test_mcp_invalid_failure_count_is_a_refusal_before_mutation(value, monkeypat
     def forbidden():
         pytest.fail("Malformed import reached mutable container")
 
-    monkeypatch.setattr(mcp_server, "get_cli_container", forbidden)
+    monkeypatch.setattr(mcp_server, "get_container", forbidden)
     result = invoke(
         "rag_import_canonical",
         {
@@ -71,7 +71,7 @@ def test_eval_bounds_reject_before_runtime_loading(k, monkeypatch):
     def forbidden():
         pytest.fail("Invalid eval bound loaded runtime")
 
-    monkeypatch.setattr(mcp_server, "get_cli_runtime_snapshot", forbidden)
+    monkeypatch.setattr(mcp_server, "get_runtime_snapshot", forbidden)
     with pytest.raises(McpError) as caught:
         invoke("rag_eval", {"k": k})
     assert caught.value.error.code == -32602

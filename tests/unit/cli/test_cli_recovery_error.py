@@ -10,15 +10,14 @@ def test_mutation_recovery_error_is_actionable_without_traceback(tmp_path, monke
     payload = tmp_path / "mutation.json"
     payload.write_text('{"upserts":[{"external_id":"one","content":"text"}]}')
     container = SimpleNamespace(build_docs_mutation_bundle=lambda **kw: SimpleNamespace(ports=None))
-    monkeypatch.setattr(docs_mutate, "get_cli_container", lambda: container)
-    monkeypatch.setattr(docs_mutate, "MutationCoordinator", lambda **kw: None)
+    monkeypatch.setattr(docs_mutate, "get_container", lambda: container)
 
-    def fail(operation, **kwargs):
+    def fail(**kwargs):
         raise MutationRecoveryRequiredError(
             "journal.jsonl op_id=op-1 state=pending requires recovery"
         )
 
-    monkeypatch.setattr(docs_mutate, "run_cli_mutation", fail)
+    monkeypatch.setattr(docs_mutate, "mutate_documents", fail)
     result = CliRunner().invoke(docs_mutate.mutate_docs_cmd, ["--json", str(payload)])
     assert result.exit_code == 1
     assert "requires recovery" in result.output

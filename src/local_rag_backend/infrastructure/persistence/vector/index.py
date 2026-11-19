@@ -67,6 +67,26 @@ class VectorIndex:
             self.dim = self._infer_dim_with_fallback()
         self._load_or_initialize()
 
+    @classmethod
+    def open_existing(
+        cls, index_path: str | Path, id_map_path: str | Path, *, dim: int, backend: str
+    ) -> VectorIndex:
+        """Open the manifest-selected existing generation without creating files or locks."""
+        if backend not in {"numpy", "faiss"} or dim < 1:
+            raise ValueError("Existing indexes require an explicit backend and dimension")
+        index_file, ids_file = Path(index_path), Path(id_map_path)
+        if not index_file.is_file() or not ids_file.is_file():
+            raise FileNotFoundError("Existing vector index and ID map are required")
+        instance = cls.__new__(cls)
+        instance.index_path, instance.id_map_path = index_file, ids_file
+        instance.dim = dim
+        instance._backend_name = backend
+        instance.engine = build_vector_engine(backend=backend)
+        instance._state_lock = threading.RLock()
+        instance._lock_path = index_file.with_name(index_file.name + ".lock")
+        instance._load_or_initialize_locked()
+        return instance
+
     @property
     def backend(self) -> str:
         return self.engine.backend

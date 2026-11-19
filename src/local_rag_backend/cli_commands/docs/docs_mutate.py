@@ -6,19 +6,9 @@ from typing import Any, cast
 
 import click
 
-from local_rag_backend.cli_commands.runtime import (
-    build_dense_embedder,
-    get_cli_container,
-    run_cli_mutation,
-)
+from local_rag_backend.composition.commands import get_container
+from local_rag_backend.composition.operations import mutate_documents
 from local_rag_backend.core.errors import MutationRecoveryRequiredError
-from local_rag_backend.core.use_cases.docs_mutation import (
-    MutationCoordinator,
-    MutationIntent,
-    MutationUpsertInput,
-)
-from local_rag_backend.core.use_cases.results import MutationSummary
-from local_rag_backend.settings import get_settings
 
 
 def _read_payload(payload_json: Path) -> dict[str, Any]:
@@ -28,48 +18,7 @@ def _read_payload(payload_json: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", payload)
 
 
-def _build_intent(payload: dict[str, Any]) -> MutationIntent:
-    upserts_raw = payload.get("upserts") or []
-    delete_ids_raw = payload.get("delete_ids") or []
-    delete_external_ids_raw = payload.get("delete_external_ids") or []
-
-    if not isinstance(upserts_raw, list):
-        raise ValueError("payload.upserts must be a list")
-    if not isinstance(delete_ids_raw, list):
-        raise ValueError("payload.delete_ids must be a list")
-    if not isinstance(delete_external_ids_raw, list):
-        raise ValueError("payload.delete_external_ids must be a list")
-
-    upserts: list[MutationUpsertInput] = []
-    for item in upserts_raw:
-        if not isinstance(item, dict):
-            raise ValueError("each payload.upserts item must be an object")
-        md = item.get("metadata")
-        upserts.append(
-            MutationUpsertInput(
-                external_id=str(item.get("external_id") or "").strip(),
-                content=str(item.get("content") or ""),
-                source_id=(
-                    str(item.get("source_id")) if item.get("source_id") is not None else None
-                ),
-                scope=(str(item.get("scope")) if item.get("scope") is not None else None),
-                snapshot_id=(
-                    str(item.get("snapshot_id")) if item.get("snapshot_id") is not None else None
-                ),
-                metadata=(cast("dict[str, Any]", md) if isinstance(md, dict) else None),
-            )
-        )
-
-    return MutationIntent(
-        op_id=str(payload.get("op_id") or "").strip(),
-        upserts=tuple(upserts),
-        delete_ids=tuple(str(v) for v in delete_ids_raw),
-        delete_external_ids=tuple(str(v) for v in delete_external_ids_raw),
-        source="cli:docs:mutate",
-    )
-
-
-@click.command("mutate-docs")
+@click.command("mutate")
 @click.option(
     "--json",
     "payload_json",
@@ -81,17 +30,9 @@ def mutate_docs_cmd(payload_json: Path) -> None:
     """Run one unified docs mutation request through the durable coordinator."""
     try:
         payload = _read_payload(payload_json)
-        intent = _build_intent(payload)
-        container = get_cli_container()
-        mutation_bundle = container.build_docs_mutation_bundle(
-            build_embedder=build_dense_embedder,
+        summary = mutate_documents(
+            container=get_container(), payload=payload, source="cli:docs:mutate"
         )
-        coordinator = MutationCoordinator(settings_obj=get_settings(), ports=mutation_bundle.ports)
-
-        def _run_sync() -> MutationSummary:
-            return coordinator.execute(intent)
-
-        summary = run_cli_mutation(_run_sync, use_lock=False, invalidate_shared=False)
         click.echo(
             "[OK] Mutation committed. "
             f"op_id={summary.op_id} inserted={summary.inserted} updated={summary.updated} "

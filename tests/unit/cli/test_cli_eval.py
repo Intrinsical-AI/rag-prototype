@@ -52,6 +52,7 @@ def test_rag_eval_fails_below_threshold(tmp_path: Path) -> None:
         cli,
         [
             "eval",
+            "run",
             "--dataset",
             str(ds),
             "--retrieval-mode",
@@ -83,7 +84,7 @@ def test_rag_eval_without_thresholds_reports_low_scores_without_failing(tmp_path
         encoding="utf-8",
     )
 
-    result = CliRunner().invoke(cli, ["eval", "--dataset", str(dataset), "--k", "1"])
+    result = CliRunner().invoke(cli, ["eval", "run", "--dataset", str(dataset), "--k", "1"])
 
     assert result.exit_code == 0, result.output
     assert "dataset=low mode=sparse" in result.output
@@ -93,7 +94,7 @@ def test_rag_eval_reports_invalid_jsonl_cleanly(tmp_path: Path) -> None:
     ds = tmp_path / "bad.jsonl"
     ds.write_text('{"not":"valid"\n', encoding="utf-8")
 
-    r = CliRunner().invoke(cli, ["eval", "--dataset", str(ds)])
+    r = CliRunner().invoke(cli, ["eval", "run", "--dataset", str(ds)])
     assert r.exit_code == 1
     assert "[ERROR] Error evaluating dataset:" in r.output
 
@@ -102,7 +103,7 @@ def test_rag_eval_reports_empty_dataset_cleanly(tmp_path: Path) -> None:
     ds = tmp_path / "empty.jsonl"
     ds.write_text("", encoding="utf-8")
 
-    r = CliRunner().invoke(cli, ["eval", "--dataset", str(ds)])
+    r = CliRunner().invoke(cli, ["eval", "run", "--dataset", str(ds)])
     assert r.exit_code == 1
     assert "[ERROR] Error evaluating dataset:" in r.output
 
@@ -124,7 +125,7 @@ def test_rag_eval_json_out_uses_metrics_only_shape(tmp_path: Path) -> None:
 
     r = CliRunner().invoke(
         cli,
-        ["eval", "--dataset", str(ds), "--k", "1", "--json-out", str(json_out)],
+        ["eval", "run", "--dataset", str(ds), "--k", "1", "--json-out", str(json_out)],
     )
 
     assert r.exit_code == 0, r.output
@@ -160,6 +161,7 @@ def test_rag_eval_writes_detailed_report_and_anomalies(tmp_path: Path) -> None:
         cli,
         [
             "eval",
+            "run",
             "--dataset",
             str(ds),
             "--k",
@@ -205,6 +207,7 @@ def test_rag_eval_dense_mode_uses_isolated_runtime_and_json_out(
         cli,
         [
             "eval",
+            "run",
             "--dataset",
             str(ds),
             "--retrieval-mode",
@@ -250,7 +253,7 @@ def test_rag_eval_dense_mode_reports_missing_embeddings_backend_cleanly(
 
     r = CliRunner().invoke(
         cli,
-        ["eval", "--dataset", str(ds), "--retrieval-mode", "dense", "--k", "1"],
+        ["eval", "run", "--dataset", str(ds), "--retrieval-mode", "dense", "--k", "1"],
     )
 
     assert r.exit_code == 1
@@ -276,6 +279,7 @@ def test_rag_eval_rejects_incompatible_mode_specific_flags(tmp_path: Path) -> No
         cli,
         [
             "eval",
+            "run",
             "--dataset",
             str(ds),
             "--retrieval-mode",
@@ -331,7 +335,8 @@ def test_rag_eval_compare_passes_and_writes_json(tmp_path: Path, monkeypatch) ->
     r = CliRunner().invoke(
         cli,
         [
-            "eval-compare",
+            "eval",
+            "compare",
             "--dataset",
             str(ds),
             "--spec",
@@ -382,7 +387,8 @@ def test_rag_eval_compare_fails_gate_with_exit_code_one(tmp_path: Path) -> None:
     r = CliRunner().invoke(
         cli,
         [
-            "eval-compare",
+            "eval",
+            "compare",
             "--dataset",
             str(ds),
             "--spec",
@@ -424,7 +430,8 @@ def test_rag_eval_compare_reports_invalid_candidate_mode_config_with_exit_code_t
     r = CliRunner().invoke(
         cli,
         [
-            "eval-compare",
+            "eval",
+            "compare",
             "--dataset",
             str(ds),
             "--spec",
@@ -485,7 +492,7 @@ def test_rag_eval_batch_runs_multiple_specs_and_writes_json(tmp_path: Path, monk
 
     r = CliRunner().invoke(
         cli,
-        ["eval-batch", "--dataset", str(ds), "--specs", str(specs)],
+        ["eval", "batch", "--dataset", str(ds), "--specs", str(specs)],
     )
 
     assert r.exit_code == 0, r.output
@@ -514,7 +521,7 @@ def test_rag_eval_batch_rejects_invalid_specs_shape(tmp_path: Path) -> None:
     )
     specs.write_text(json.dumps({"name": "bad"}), encoding="utf-8")
 
-    r = CliRunner().invoke(cli, ["eval-batch", "--dataset", str(ds), "--specs", str(specs)])
+    r = CliRunner().invoke(cli, ["eval", "batch", "--dataset", str(ds), "--specs", str(specs)])
 
     assert r.exit_code == 1
     assert "Batch specs file must be a JSON array of objects" in r.output

@@ -119,15 +119,15 @@ fixture.mkdir()
     encoding="utf-8",
 )
 payload_path = root / "repogpt.json"
-run([sys.executable, "-m", "repogpt.app.cli", "--emit", "code-units", "--repo-key",
-     "wheel-fixture", "--replace-scope", "--include-tests", "-o", str(payload_path), str(fixture)],
+run([sys.executable, "-m", "repogpt.app.cli", "export", "--projection", "code-units", "--repo-key",
+     "wheel-fixture", "--replace-scope", "--include-tests", "--output", str(payload_path), str(fixture)],
     label="repogpt.emit")
 payload = json.loads(payload_path.read_text())
 assert payload["schema_version"] == "6" and payload["replace_scope"] is True
 validate_canonical_import_payload(payload)
-rag_cli = str(venv / "bin" / "rag-import-canonical")
-run([rag_cli, "--json", str(payload_path)], label="rag.repo.import")
-run([rag_cli, "--json", str(payload_path)], label="rag.repo.replay")
+rag_cli = str(venv / "bin" / "rag")
+run([rag_cli, "docs", "import", "--json", str(payload_path)], label="rag.repo.import")
+run([rag_cli, "docs", "import", "--json", str(payload_path)], label="rag.repo.replay")
 
 chat = root / "chat"
 chat.mkdir()
@@ -163,9 +163,9 @@ for path in chat_paths:
     assert chat_payload["replace_scope"] is False
     validated = validate_canonical_import_payload(chat_payload)
     assert resolve_canonical_import_replace_scope(validated) is False
-    run([rag_cli, "--json", str(path)], label=f"rag.chat.{path.stem}.import")
-    run([rag_cli, "--json", str(path)], label=f"rag.chat.{path.stem}.replay")
-    run([rag_cli, "--json", str(path), "--replace-scope"], expected=1,
+    run([rag_cli, "docs", "import", "--json", str(path)], label=f"rag.chat.{path.stem}.import")
+    run([rag_cli, "docs", "import", "--json", str(path)], label=f"rag.chat.{path.stem}.replay")
+    run([rag_cli, "docs", "import", "--json", str(path), "--replace-scope"], expected=1,
         label=f"rag.chat.{path.stem}.refuse-replace")
 
 telegram = root / "result.json"
@@ -195,8 +195,8 @@ telegram_contents = "\n".join(doc["content"] for doc in telegram_payload["docume
 for token in ("rich_needle", "docs_needle", "https://example.org/installed_destination",
               "40.416775", "-3.70379"):
     assert token in telegram_contents, (token, telegram_contents)
-run([rag_cli, "--json", str(telegram_paths[0])], label="rag.telegram.import")
-run([rag_cli, "--json", str(telegram_paths[0])], label="rag.telegram.replay")
+run([rag_cli, "docs", "import", "--json", str(telegram_paths[0])], label="rag.telegram.import")
+run([rag_cli, "docs", "import", "--json", str(telegram_paths[0])], label="rag.telegram.replay")
 
 media_chat = root / "media-chat"
 media_chat.mkdir()
@@ -534,7 +534,7 @@ import hashlib, importlib.metadata, importlib.util, json, sys, zipfile
 from pathlib import Path
 from local_rag_backend.core.services.canonical_import_transport import build_canonical_import_request_input_from_raw
 from local_rag_backend.mcp_server import tool_import_canonical
-from local_rag_backend.cli_commands.runtime import get_cli_container
+from local_rag_backend.composition.commands import get_container
 from local_rag_backend.composition.factory import reset_app_context
 
 wheel=Path(sys.argv[1]); producer_root=Path(sys.argv[2]); rf=json.loads(sys.argv[3])
@@ -567,7 +567,7 @@ try:
   'documents':[{'external_id':'stripped-rf-sentinel','content':'preserve absent scope document',
                 'metadata':sentinel_metadata}]})
  assert tool_import_canonical(partial)['deleted_sql']==0
- before=list(get_cli_container().doc_repo_factory().get_all_documents())
+ before=list(get_container().doc_repo_factory().get_all_documents())
  sentinel=next(item for item in before if item.external_id=='stripped-rf-sentinel')
  assert sentinel.metadata['completion']==sentinel_metadata['completion']
  stripped={key:value for key,value in partial.items() if key not in {'kind','schema_version'}}
@@ -575,7 +575,7 @@ try:
   try:tool_import_canonical(candidate,replace_scope_override=True)
   except ValueError:pass
   else:raise AssertionError('Partial Tr3v0r replacement override bypassed evidence')
-  after=list(get_cli_container().doc_repo_factory().get_all_documents())
+  after=list(get_container().doc_repo_factory().get_all_documents())
   assert {str(item.id) for item in before}=={str(item.id) for item in after}
  assert {item['kind'] for item in reports}=={'code-units','chat-units','tr3v0r-canonical-rag'}
 finally:reset_app_context()

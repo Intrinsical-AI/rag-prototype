@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,15 +11,15 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from local_rag_backend import __version__
-from local_rag_backend.cli_commands.runtime import (
+from local_rag_backend.composition.commands import (
     build_dense_embedder,
-    get_cli_container,
-    get_cli_runtime_snapshot,
-    run_cli_mutation,
+    execute_mutation_command,
+    get_container,
+    get_runtime_snapshot,
 )
 from local_rag_backend.composition.ephemeral import build_ephemeral_service, snapshot_status
 from local_rag_backend.composition.factory import reset_app_context
-from local_rag_backend.core.domain.entities import Document
+from local_rag_backend.composition.operations import document_to_payload, mutate_documents, search
 from local_rag_backend.core.domain.retrieval import RetrievalFilter, normalize_filter_field
 from local_rag_backend.core.errors import RagBaseError
 from local_rag_backend.core.services.canonical_import_transport import (
@@ -32,6 +33,10 @@ from local_rag_backend.core.services.evaluation import (
 from local_rag_backend.core.services.retrieval_filters import validate_filter_values
 from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
+)
+from local_rag_backend.core.use_cases.docs_mutation_contracts import (
+    mutation_intent_from_payload,
+    summary_to_payload,
 )
 from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 from local_rag_backend.infrastructure.persistence.read_snapshot import SnapshotError
@@ -85,6 +90,40 @@ class _ImportArguments(_Arguments):
     replace_scope_override: bool | None = None
 
 
+class _MutationArguments(_Arguments):
+    payload: dict[str, Any] = Field(
+        json_schema_extra={
+            "required": ["op_id"],
+            "properties": {"op_id": {"type": "string", "minLength": 1}},
+        }
+    )
+
+    @field_validator("payload")
+    @classmethod
+    def _valid_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        mutation_intent_from_payload(value, source="mcp:rag_mutate_docs", require_op_id=True)
+        return value
+
+
+class _EmbeddingArguments(_Arguments):
+    texts: list[str] = Field(max_length=32)
+    model: str | None = None
+    normalize: bool = False
+
+    @field_validator("texts")
+    @classmethod
+    def _bounded_texts(cls, value: list[str]) -> list[str]:
+        from local_rag_backend.integrations.embeddings import DEFAULT_EMBEDDING_LIMITS
+
+        if any(not text.strip() for text in value):
+            raise ValueError("texts must not contain blank strings")
+        if any(len(text) > DEFAULT_EMBEDDING_LIMITS.max_text_chars for text in value):
+            raise ValueError("text exceeds embedding character limit")
+        if sum(map(len, value)) > DEFAULT_EMBEDDING_LIMITS.max_total_chars:
+            raise ValueError("texts exceed total embedding character limit")
+        return value
+
+
 class _EvalArguments(_Arguments):
     dataset_path: str | None = None
     retrieval_mode: Literal["sparse", "dense", "dual", "hybrid"] | None = None
@@ -103,6 +142,69 @@ def _parse_filters(raw_filters: object | None) -> tuple[RetrievalFilter, ...]:
 
 def tool_status() -> dict[str, object]:
     return {"version": __version__, **snapshot_status(get_settings())}
+
+
+def tool_search(
+    question: str, k: int = 3, filters: list[dict[str, Any]] | None = None
+) -> dict[str, object]:
+    arguments = _AskArguments.model_validate(
+        {"question": question, "k": k, "filters": filters or []}
+    )
+    return search(
+        settings=get_settings(),
+        question=arguments.question,
+        k=arguments.k,
+        filters=_parse_filters(arguments.model_dump()["filters"]),
+    )
+
+
+def tool_mutate_docs(payload: dict[str, Any]) -> dict[str, object]:
+    arguments = _MutationArguments.model_validate({"payload": payload})
+    try:
+        return summary_to_payload(
+            mutate_documents(
+                container=get_container(),
+                payload=arguments.payload,
+                source="mcp:rag_mutate_docs",
+                require_op_id=True,
+            )
+        )
+    except ValueError as exc:
+        raise ToolOperationError(str(exc)) from exc
+
+
+def tool_embedding_status() -> dict[str, object]:
+    from local_rag_backend.integrations.embeddings import create_embedding_service
+
+    return dict(create_embedding_service().status())
+
+
+def tool_embed_texts(
+    texts: list[str], model: str | None = None, normalize: bool = False
+) -> dict[str, object]:
+    from local_rag_backend.integrations.embeddings import create_embedding_service
+
+    arguments = _EmbeddingArguments.model_validate(
+        {"texts": texts, "model": model, "normalize": normalize}
+    )
+    service = create_embedding_service()
+    status = service.status()
+    if arguments.model is not None and arguments.model != status["model"]:
+        raise ToolOperationError("Requested embedding model differs from configured model")
+    vectors = service.embed(arguments.texts)
+    if arguments.normalize:
+        vectors = [
+            [value / norm for value in vector]
+            if (norm := math.sqrt(sum(value * value for value in vector)))
+            else vector
+            for vector in vectors
+        ]
+    return {
+        "vectors": vectors,
+        "dimension": status["dimension"],
+        "provider": status["provider"],
+        "model": status["model"],
+    }
 
 
 def tool_ask_ephemeral(
@@ -131,30 +233,10 @@ def tool_ask_ephemeral(
     return {
         "answer": str(result["answer"]),
         "sources": [
-            {"document": _document_to_json(doc), "score": float(score)}
+            {"document": document_to_payload(doc), "score": float(score)}
             for doc, score in zip(docs, scores, strict=True)
         ],
         "snapshot_id": snapshot_id,
-    }
-
-
-def _document_to_json(document: Document) -> dict[str, object]:
-    return {
-        "id": str(document.id),
-        "content": str(document.content),
-        "external_id": (
-            str(document.external_id)
-            if getattr(document, "external_id", None) is not None
-            else None
-        ),
-        "source_id": (
-            str(document.source_id) if getattr(document, "source_id", None) is not None else None
-        ),
-        "metadata": (
-            dict(document.metadata or {})
-            if getattr(document, "metadata", None) is not None
-            else None
-        ),
     }
 
 
@@ -176,7 +258,7 @@ def tool_ask(
         raise ValueError("k must be between 1 and 10")
 
     parsed_filters = _parse_filters(filters)
-    container = get_cli_container()
+    container = get_container()
     service = container.build_rag_service()
     result = service.ask(
         rendered_question,
@@ -193,7 +275,7 @@ def tool_ask(
     return {
         "answer": str(result["answer"]),
         "sources": [
-            {"document": _document_to_json(doc), "score": float(score)}
+            {"document": document_to_payload(doc), "score": float(score)}
             for doc, score in zip(docs, scores, strict=True)
         ],
     }
@@ -214,7 +296,7 @@ def tool_import_canonical(
     except (ValidationError, ValueError) as exc:
         raise ToolOperationError(str(exc)) from exc
 
-    container = get_cli_container()
+    container = get_container()
     mutation_bundle = container.build_docs_mutation_bundle()
 
     def _run_sync() -> dict[str, object]:
@@ -235,18 +317,18 @@ def tool_import_canonical(
             "deleted_external_ids": list(summary.deleted_external_ids or []),
         }
 
-    result: dict[str, object] = run_cli_mutation(_run_sync, use_lock=True)
+    result: dict[str, object] = execute_mutation_command(_run_sync, use_lock=True)
     return result
 
 
 def tool_rebuild_index() -> dict[str, object]:
-    runtime = get_cli_runtime_snapshot()
+    runtime = get_runtime_snapshot()
     if runtime.retrieval_mode not in {"dense", "dual", "hybrid"}:
         raise ToolOperationError("rag_rebuild_index requires retrieval_mode=dense|dual|hybrid.")
 
     from local_rag_backend.core.use_cases import index as index_service
 
-    container = get_cli_container()
+    container = get_container()
     ports = container.index_mutation_ports(build_embedder=build_dense_embedder)
 
     def _rebuild_sync() -> int:
@@ -254,7 +336,7 @@ def tool_rebuild_index() -> dict[str, object]:
             index_service.rebuild_index_sync(settings_obj=container.settings_obj, ports=ports)
         )
 
-    rebuilt = run_cli_mutation(_rebuild_sync)
+    rebuilt = execute_mutation_command(_rebuild_sync)
     return {"vectors": rebuilt, "retrieval_mode": runtime.retrieval_mode}
 
 
@@ -266,7 +348,7 @@ def tool_eval(
 ) -> dict[str, object]:
     if k is not None and (type(k) is not int or not 1 <= k <= 100):
         raise ToolOperationError("k must be an integer between 1 and 100")
-    runtime = get_cli_runtime_snapshot()
+    runtime = get_runtime_snapshot()
     try:
         dataset = load_eval_dataset(dataset_path or runtime.eval_dataset_path)
     except (OSError, ValueError) as exc:
@@ -277,7 +359,7 @@ def tool_eval(
         k=(3 if k is None else k),
     )
 
-    container = get_cli_container()
+    container = get_container()
     eval_bundle = container.build_eval_execution_bundle()
     result = run_retrieval_eval(
         dataset=dataset,
@@ -327,6 +409,103 @@ _DOCUMENT = _schema(
 )
 
 TOOLS: dict[str, Tool] = {
+    "rag_search": Tool(
+        "Search the current private store without generation, history or schema initialization; dense modes use configured query embeddings.",
+        _AskArguments,
+        tool_search,
+        _schema(
+            {
+                "sources": {
+                    "type": "array",
+                    "items": _schema(
+                        {"document": _DOCUMENT, "score": {"type": "number"}}, ["document", "score"]
+                    ),
+                },
+                "retrieval_mode": {"enum": ["sparse", "dense", "dual", "hybrid"]},
+                "backend": _TEXT,
+            },
+            ["sources", "retrieval_mode", "backend"],
+        ),
+        read_only=True,
+        open_world=True,
+    ),
+    "rag_mutate_docs": Tool(
+        "Upsert or delete private documents through the durable coordinator; payload.op_id is required.",
+        _MutationArguments,
+        tool_mutate_docs,
+        _schema(
+            {
+                "op_id": _TEXT,
+                **dict.fromkeys(
+                    ("inserted", "updated", "unchanged", "deleted_sql", "tombstoned"), _COUNT
+                ),
+                "deleted_index": {"type": ["integer", "null"]},
+                "missing_external_ids": {"type": "array", "items": _TEXT},
+                "results": {"type": "array", "items": {"type": "object"}},
+            },
+            [
+                "op_id",
+                "inserted",
+                "updated",
+                "unchanged",
+                "deleted_sql",
+                "deleted_index",
+                "tombstoned",
+                "missing_external_ids",
+                "results",
+            ],
+        ),
+        destructive=True,
+        open_world=True,
+    ),
+    "rag_embedding_status": Tool(
+        "Initialize the configured embedding service and report model, cache and limits; may create provider cache state.",
+        _Arguments,
+        tool_embedding_status,
+        _schema(
+            {
+                "provider": _TEXT,
+                "model": _TEXT,
+                "model_key": _TEXT,
+                "dimension": _COUNT,
+                "synthetic": {"type": "boolean"},
+                "implementation_version": _TEXT,
+                "cache_enabled": {"type": "boolean"},
+                "cache_db_path": _TEXT,
+                "limits": {"type": "object"},
+            },
+            [
+                "provider",
+                "model",
+                "model_key",
+                "dimension",
+                "synthetic",
+                "implementation_version",
+                "cache_enabled",
+                "cache_db_path",
+                "limits",
+            ],
+        ),
+        open_world=True,
+    ),
+    "rag_embed_texts": Tool(
+        "Embed bounded texts using the configured provider and cache.",
+        _EmbeddingArguments,
+        tool_embed_texts,
+        _schema(
+            {
+                "vectors": {
+                    "type": "array",
+                    "items": {"type": "array", "items": {"type": "number"}},
+                },
+                "dimension": _COUNT,
+                "provider": _TEXT,
+                "model": _TEXT,
+            },
+            ["vectors", "dimension", "provider", "model"],
+        ),
+        open_world=True,
+    ),
     "rag_status": Tool(
         "Inspect live store presence and verified frozen snapshot readiness without writing or querying live storage.",
         _Arguments,
@@ -462,7 +641,7 @@ def main() -> None:
         from local_rag_backend.mcp_transport import run_stdio
     except ModuleNotFoundError as exc:
         if exc.name in {"mcp", "anyio", "jsonschema"}:
-            sys.stderr.write("rag-mcp requires the optional mcp extra: uv sync --extra mcp\n")
+            sys.stderr.write("rag serve mcp requires the optional mcp extra: uv sync --extra mcp\n")
             raise SystemExit(2) from None
         raise
     try:

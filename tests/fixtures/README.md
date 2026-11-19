@@ -6,7 +6,7 @@ it does not execute the current producer.
 
 To exercise the live producer, explicitly set `REPOGPT_ROOT` to its prepared
 checkout. The helper runs that checkout's interpreter over the versioned source
-fixture with `--emit code-units --replace-scope --include-tests --repo-key
+fixture with `export --projection code-units --replace-scope --include-tests --repo-key
 repogpt_eval_repo`; configured paths or producer failures fail the test instead
 of skipping it.
 

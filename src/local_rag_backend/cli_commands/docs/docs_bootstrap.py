@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 from click._termui_impl import ProgressBar
 
-from local_rag_backend.cli_commands.runtime import run_cli_mutation
+from local_rag_backend.composition.commands import execute_mutation_command
 
 
 @click.command("bootstrap")
@@ -15,11 +15,10 @@ def bootstrap_cmd() -> None:
         click.echo("[INFO] Bootstrapping database with sample data...")
         bar: ProgressBar[int]
         with click.progressbar(length=1, label="Bootstrapping") as bar:
-            run_cli_mutation(
+            execute_mutation_command(
                 run_sample_data_ingestion,
                 use_lock=False,
                 ensure_schema=False,
-                invalidate_shared=False,
             )
             bar.update(1)
         click.echo("[OK] Bootstrap completed successfully!")

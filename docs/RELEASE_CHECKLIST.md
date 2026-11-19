@@ -16,8 +16,8 @@
    - GitHub Release target points at the same commit that was tested
 3. Validate runtime bootstrap:
    - `config.yaml` exists or is created from `config.example.yaml`
-   - `rag-bootstrap` succeeds from a fresh checkout/copy
-   - repeated `rag-bootstrap` is idempotent for sample data
+   - `rag docs bootstrap` succeeds from a fresh checkout/copy
+   - repeated `rag docs bootstrap` is idempotent for sample data
 4. Validate server smoke:
    - `/healthz` returns 200
    - `/` returns 200
@@ -33,6 +33,7 @@
    - `lint-imports`
    - `pre-commit run --all-files`
    - `make smoke-embedding-api-wheel`
+   - `make build` and `make smoke-package` for the retained wheel and sdist
 
 ## 5.0.1 security maintenance
 
@@ -73,15 +74,15 @@ Breaking changes relative to `v3.0.0`:
   leave duplicate IDs and mixed content. This candidate does not delete data.
 - The mutation journal stores active records in `active/` and terminal receipts
   in `done/`. Terminal receipts are retained for up to 30 days or 256 MiB, so
-  exact `op_id` replay is bounded by that retention window. Old flat receipts
-  remain read-only and replayable. Incomplete or corrupt records block writes
+  exact `op_id` replay is bounded by that retention window. Only versioned active/done records are accepted; flat or unversioned layouts
+  and old outcome aliases are refused without conversion. Incomplete or corrupt records block writes
   and make `/readyz` return `503`; rebuilding an index does not repair them.
 
 HTTP/MCP filter values must be nonempty arrays of nonblank strings. The transport
 also recovers from JSON decoder `ValueError`, including integer literals beyond
 Python's configured digit limit, so the next MCP request remains processable.
-The native `rag-mcp` command now requires the optional `[mcp]` extra. The SDK is
-pinned to 1.28.1 with AnyIO 4.14.2 and targets protocol `2025-11-25`. Verify ping,
+The native `rag serve mcp` command now requires the optional `[mcp]` extra. The SDK is
+pinned to 1.30.0 with AnyIO 4.14.2 and targets protocol `2025-11-25`. Verify ping,
 output schemas/annotations, text/structured parity, idless-call nonexecution and
 payload-safe diagnostics through real stdio. Expected failures use `isError`;
 invalid arguments use `-32602` and unexpected/output failures use sanitized
@@ -213,10 +214,10 @@ Validated local happy path:
 
 - `uv venv .venv` used CPython 3.12.12.
 - `uv sync --frozen --extra server` succeeded.
-- `rag-bootstrap` succeeded.
+- `rag docs bootstrap` succeeded.
 - Resulting database contained 30 documents and 0 history entries.
-- Re-running `rag-bootstrap` kept 30 documents.
-- `rag-server` exposed `/healthz`, `/`, and `/openapi.json` successfully.
+- Re-running `rag docs bootstrap` kept 30 documents.
+- `rag serve http` exposed `/healthz`, `/`, and `/openapi.json` successfully.
 - `/readyz` returned 503 when no LLM provider was configured, with an actionable message.
 
 Validated gates:

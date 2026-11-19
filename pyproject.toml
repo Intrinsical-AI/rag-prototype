@@ -1,6 +1,6 @@
 [project]
 name = "rag-prototype"
-version = "5.0.1"
+version = "6.0.0"
 description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11,<3.13"
@@ -144,18 +144,7 @@ Issues = "https://github.com/Intrinsical-AI/rag-prototype/issues"
 Changelog = "https://github.com/Intrinsical-AI/rag-prototype/releases"
 
 [project.scripts]
-rag-bootstrap   = "local_rag_backend.cli:rag_bootstrap"
-rag-ingest      = "local_rag_backend.cli:rag_ingest"
-rag-import-canonical = "local_rag_backend.cli:rag_import_canonical"
-rag-rebuild-index = "local_rag_backend.cli:rag_rebuild_index"
-rag-mutate-docs = "local_rag_backend.cli:rag_mutate_docs"
-rag-server      = "local_rag_backend.cli:rag_server"
-rag-status      = "local_rag_backend.cli:rag_status"
-rag-snapshot    = "local_rag_backend.cli:rag_snapshot"
-rag-eval        = "local_rag_backend.cli:rag_eval"
-rag-eval-batch  = "local_rag_backend.cli:rag_eval_batch"
-rag-eval-compare = "local_rag_backend.cli:rag_eval_compare"
-rag-mcp         = "local_rag_backend.mcp_server:main"
+rag = "local_rag_backend.cli:cli"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

@@ -4,12 +4,12 @@ from pathlib import Path
 
 import click
 
-from local_rag_backend.cli_commands.runtime import (
+from local_rag_backend.composition.commands import (
     build_dense_embedder,
-    ensure_sqlite_schema_for_cli,
-    get_cli_container,
-    get_cli_runtime_snapshot,
-    run_cli_mutation,
+    ensure_store,
+    execute_mutation_command,
+    get_container,
+    get_runtime_snapshot,
 )
 
 
@@ -33,14 +33,14 @@ def _require_rebuild_runtime(retrieval_mode: str) -> None:
         raise RuntimeError("rebuild-index requires retrieval_mode=dense|dual|hybrid")
 
 
-@click.command("rebuild-index")
+@click.command("rebuild")
 def rebuild_index_cmd() -> None:
     """Rebuild retrieval index from the current document store (idempotent)."""
     try:
         from local_rag_backend.core.use_cases import index as index_service
 
-        container = get_cli_container()
-        runtime = get_cli_runtime_snapshot()
+        container = get_container()
+        runtime = get_runtime_snapshot()
         _require_rebuild_runtime(runtime.retrieval_mode)
         ports = container.index_mutation_ports(
             build_embedder=build_dense_embedder,
@@ -52,7 +52,7 @@ def rebuild_index_cmd() -> None:
                 ports=ports,
             )
 
-        n = run_cli_mutation(_rebuild_sync)
+        n = execute_mutation_command(_rebuild_sync)
         click.echo(f"[OK] Rebuilt index with {n} vectors.")
     except Exception as e:
         click.echo(f"[ERROR] Error rebuilding index: {e}", err=True)
@@ -62,9 +62,9 @@ def rebuild_index_cmd() -> None:
 @click.command("status")
 def status_cmd() -> None:
     """Display system status and configuration."""
-    container = get_cli_container()
-    runtime = get_cli_runtime_snapshot()
-    ensure_sqlite_schema_for_cli()
+    container = get_container()
+    runtime = get_runtime_snapshot()
+    ensure_store()
     readiness_bundle = container.build_health_readiness_bundle()
     diagnostics = readiness_bundle.diagnostics
 
@@ -182,7 +182,7 @@ def status_cmd() -> None:
                 click.echo(
                     f"  {click.style('Index drift:', fg=key_fg, bold=True)} "
                     f"[ERROR] documents={docs_count} id_map={stats.get('id_map_len')} "
-                    "(hint: run `rag-rebuild-index`)"
+                    "(hint: run `rag index rebuild`)"
                 )
             else:
                 click.echo(f"  {click.style('Index drift:', fg=key_fg, bold=True)} OK")

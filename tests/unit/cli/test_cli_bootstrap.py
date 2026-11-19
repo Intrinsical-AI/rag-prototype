@@ -14,7 +14,7 @@ settings = get_settings()
 def test_bootstrap_cli_runs_sample_data_ingestion(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    def _fake_run_cli_mutation(operation, **kwargs):
+    def _fake_execute_mutation_command(operation, **kwargs):
         calls["mutation_kwargs"] = kwargs
         return operation()
 
@@ -25,8 +25,8 @@ def test_bootstrap_cli_runs_sample_data_ingestion(monkeypatch) -> None:
 
     monkeypatch.setattr(
         bootstrap_cmd_module,
-        "run_cli_mutation",
-        _fake_run_cli_mutation,
+        "execute_mutation_command",
+        _fake_execute_mutation_command,
         raising=True,
     )
     monkeypatch.setattr(
@@ -43,7 +43,6 @@ def test_bootstrap_cli_runs_sample_data_ingestion(monkeypatch) -> None:
     assert calls["mutation_kwargs"] == {
         "use_lock": False,
         "ensure_schema": False,
-        "invalidate_shared": False,
     }
 
 
@@ -52,7 +51,7 @@ def test_bootstrap_cli_reports_ingestion_failure(monkeypatch) -> None:
         _ = (operation, kwargs)
         raise RuntimeError("sample ingestion failed")
 
-    monkeypatch.setattr(bootstrap_cmd_module, "run_cli_mutation", _boom, raising=True)
+    monkeypatch.setattr(bootstrap_cmd_module, "execute_mutation_command", _boom, raising=True)
 
     result = CliRunner().invoke(bootstrap_cmd_module.bootstrap_cmd)
 

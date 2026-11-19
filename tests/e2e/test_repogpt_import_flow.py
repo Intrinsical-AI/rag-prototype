@@ -38,7 +38,7 @@ def test_repogpt_emit_code_units_imports_and_retrieves_by_queryable_metadata(
     assert payload["schema_version"] == "6"
     assert payload["replace_scope"] is True
 
-    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload_path)])
+    result = CliRunner().invoke(cli, ["docs", "import", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
     repo = SqlDocumentStorage(in_memory_sqlite)

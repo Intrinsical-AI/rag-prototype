@@ -91,9 +91,9 @@
 | Context | Responsibility | Owns data? | External deps | Public APIs |
 | ------- | -------------- | ---------: | ------------- | ----------- |
 | Retrieval Query | Retrieve docs + generate answer | No | LLM adapters, retrievers | `/api/ask`, `/api/ask_eval`, `RagService.ask` |
-| Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs/ingest`, `/api/docs/import-conversations`, `/api/docs/mutate`, `rag-mutate-docs`, `rag-ingest` |
-| Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag-rebuild-index` |
-| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, journal | `/healthz`, `/readyz`, `rag-status` |
+| Document Mutation | Canonical write orchestration SQL + vector | Yes | SQL repo, vector repo, embedder | `/api/docs/ingest`, `/api/docs/import-conversations`, `/api/docs/mutate`, `rag docs mutate`, `rag docs ingest` |
+| Index Maintenance | Rebuild/repair retrieval state | Yes | embedder + persistence/vector adapters | `/api/index/rebuild`, `rag index rebuild` |
+| Health/Diagnostics | Readiness/consistency diagnostics | No | persistence diagnostics adapters, manifest/index files, journal | `/healthz`, `/readyz`, `rag status` |
 | Transport (HTTP/CLI) | Input/output mapping + auth + error translation | No | FastAPI/Click | REST + CLI commands |
 | Composition Runtime | Settings-bound SQL runtime, executor, locks, providers, cache invalidation | No | settings + adapters | DI factory/container |
 
@@ -206,7 +206,7 @@
 
 ### 4.3 Failure semantics
 - Validation errors: mapped to `AppError` hierarchy (`400/401/404/409/413/422/5xx`).
-- Idempotency: the local journal stores terminal outcomes for exact `op_id` replay while receipts are retained. Terminal `done/` receipts are kept for up to 30 days or 256 MiB, except receipts shadowing incomplete flat records; old flat receipts remain read-only and replayable.
+- Idempotency: the local journal stores terminal outcomes for exact `op_id` replay while receipts are retained. Terminal `done/` receipts are kept for up to 30 days or 256 MiB, only the current versioned `active/` and `done/` layout is accepted. Flat/unversioned records and old outcome aliases are refused without conversion.
 - Retry safety: incomplete records in `active/` and older flat records are recovered under the write lock. Unresolved active records block new writes; corrupt records make `/readyz` return `503`, and a corrupt terminal receipt blocks replay of its `op_id`. SQL compensation is followed by one rebuild only when a persisted vector attempt requires it; rebuild alone never repairs a journal.
 - Embedding failures are pre-lock failures: they must not leave partial SQL/vector state.
 - Batch mutation failures preserve per-item safety: item-level replay remains safe through idempotent `op_id` within receipt retention.
@@ -305,7 +305,7 @@ Fase B closure (2026-03-01):
 
 #### Flow: `Canonical mutation`
 - Trigger: `/api/docs/mutate`, `/api/docs/ingest`,
-  `/api/docs/import-conversations`, `rag-mutate-docs`, `rag-ingest`
+  `/api/docs/import-conversations`, `rag docs mutate`, `rag docs ingest`
 - Steps:
   - normalize intent;
   - phase A (outside lock): precompute embeddings/vector payloads;
@@ -317,7 +317,7 @@ Fase B closure (2026-03-01):
 - Failure modes: embedding precompute failure, compensation failure, rollback failure, lock timeout.
 
 #### Flow: `Index rebuild/repair`
-- Trigger: `/api/index/rebuild` or `rag-rebuild-index`
+- Trigger: `/api/index/rebuild` or `rag index rebuild`
 - Steps: purge artifacts -> embed all canonical docs from SQLite -> rebuild local vector index -> emit diagnostics
 - Side effects: full index rewrite
 - Failure modes: embedder unavailable, manifest/drift mismatch, index persistence failure
@@ -481,8 +481,8 @@ Active ADR set for D1:
 - How to run locally:
   - `uv venv .venv && source .venv/bin/activate`
   - `uv sync --frozen --extra server --group test --group lint --no-default-groups`
-  - `rag-bootstrap`
-  - `rag-server`
+  - `rag docs bootstrap`
+  - `rag serve http`
 - How to run tests:
   - full: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q`
   - architecture smoke: `UV_CACHE_DIR=.uv_cache DEBUG=false uv run pytest -q -o addopts='' tests/architecture/test_*.py`

@@ -89,8 +89,12 @@ def _fixture(root: Path, url: str) -> None:
         print(json.dumps({"fixture_prepared": mode}), flush=True)
 
 
-def _read_audit() -> tuple[list[str], Callable[[], None]]:
-    """Reuse the existing denial audit for direct and SDK snapshot reads."""
+def _read_audit(*, live_database: Path | None = None) -> tuple[list[str], Callable[[], None]]:
+    """Deny writes and file-backed SQLite except an explicit read-only fixture."""
+    allowed_databases = {":memory:"}
+    if live_database is not None:
+        assert live_database.is_absolute() and live_database.is_file()
+        allowed_databases.add(f"file:{live_database}?mode=ro")
     writes: list[str] = []
     denied = {
         "os.mkdir",
@@ -118,7 +122,7 @@ def _read_audit() -> tuple[list[str], Callable[[], None]]:
                 flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND)
             )
         if event == "sqlite3.connect":
-            forbidden = arguments[0] != ":memory:"
+            forbidden = arguments[0] not in allowed_databases
         if forbidden:
             writes.append(event)
             raise AssertionError(f"Read operation attempted {event}")

@@ -36,6 +36,70 @@ class MutationIntent:
     source: str = "unknown"
 
 
+def mutation_intent_from_payload(
+    payload: Mapping[str, Any], *, source: str, require_op_id: bool = False
+) -> MutationIntent:
+    """Decode the one document-mutation contract used by CLI, HTTP and MCP.
+
+    Unknown keys and coercion of non-string document values are rejected before I/O.
+    MCP callers require an explicit operation identity for uncertain-result recovery.
+    """
+    allowed = {"op_id", "upserts", "delete_ids", "delete_external_ids", "hard_delete_external_ids"}
+    if set(payload) - allowed:
+        raise ValueError("Unknown document mutation fields")
+    op_id = payload.get("op_id", "")
+    if op_id is None and not require_op_id:
+        op_id = ""
+    if not isinstance(op_id, str) or (require_op_id and not op_id.strip()):
+        raise ValueError("op_id must be a nonempty string")
+    upserts_raw = payload.get("upserts", [])
+    if not isinstance(upserts_raw, list):
+        raise ValueError("upserts must be a list")
+    upserts: list[MutationUpsertInput] = []
+    upsert_fields = {"external_id", "content", "source_id", "scope", "snapshot_id", "metadata"}
+    for item in upserts_raw:
+        if not isinstance(item, dict) or set(item) - upsert_fields:
+            raise ValueError("Each upsert must contain only document fields")
+        external_id, content = item.get("external_id"), item.get("content")
+        if not isinstance(external_id, str) or not external_id.strip():
+            raise ValueError("upserts.external_id must be a nonempty string")
+        if not isinstance(content, str):
+            raise ValueError("upserts.content must be a string")
+        if not content.strip():
+            raise ValueError("upserts.content must not be blank")
+        for key in ("source_id", "scope", "snapshot_id"):
+            if item.get(key) is not None and not isinstance(item[key], str):
+                raise ValueError(f"upserts.{key} must be a string or null")
+        metadata = item.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("upserts.metadata must be an object or null")
+        upserts.append(
+            MutationUpsertInput(
+                external_id=external_id,
+                content=content,
+                source_id=item.get("source_id"),
+                scope=item.get("scope"),
+                snapshot_id=item.get("snapshot_id"),
+                metadata=metadata,
+            )
+        )
+
+    def identifiers(key: str) -> tuple[str, ...]:
+        values = payload.get(key, [])
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError(f"{key} must be a list of strings")
+        return tuple(values)
+
+    return MutationIntent(
+        op_id=op_id.strip(),
+        upserts=tuple(upserts),
+        delete_ids=identifiers("delete_ids"),
+        delete_external_ids=identifiers("delete_external_ids"),
+        hard_delete_external_ids=identifiers("hard_delete_external_ids"),
+        source=source,
+    )
+
+
 def normalize_intent(
     *,
     intent: MutationIntent,

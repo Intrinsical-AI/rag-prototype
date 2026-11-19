@@ -76,9 +76,9 @@ Estas reglas están cubiertas por tests de arquitectura.
 - API identificada: `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
 - Ingesta de texto: `POST /api/docs/ingest`
 - Import de conversaciones: `POST /api/docs/import-conversations`
-- CLI: `rag-mutate-docs`
+- CLI: `rag docs mutate`
 - CLI ingest: internamente transforma a `MutationIntent`
-- CLI bootstrap: `rag-bootstrap` usa `run_sample_data_ingestion` y delega en `MutationCoordinator`
+- CLI bootstrap: `rag docs bootstrap` usa `run_sample_data_ingestion` y delega en `MutationCoordinator`
 
 ### Ejecución
 
@@ -119,7 +119,7 @@ La superficie de mutación habilitada por operación incluye estos endpoints HTT
 
 - HTTP: `POST /api/docs/ingest`, `POST /api/docs/import-conversations`,
   `POST /api/docs/mutate`, `POST /api/docs/import-canonical`
-- CLI: `rag-mutate-docs`, `rag-import-canonical`
+- CLI: `rag docs mutate`, `rag docs import`
 
 Cada ruta representa un contrato distinto: ingestión de texto sin identidad externa,
 importación de conversaciones, mutación identificada e importación canónica.

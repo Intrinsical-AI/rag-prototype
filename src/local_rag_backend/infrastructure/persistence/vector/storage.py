@@ -80,7 +80,7 @@ class VectorStorage(VectorRepoPort):
             if self.vector_index.ntotal > 0 or self.vector_index.id_map:
                 raise RuntimeError(
                     "Index manifest missing for a non-empty index; rebuild is required "
-                    "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
+                    "(hint: run `rag index rebuild` or POST /api/index/rebuild)."
                 )
 
             if not create:
@@ -103,7 +103,7 @@ class VectorStorage(VectorRepoPort):
         if errors or mismatches:
             raise RuntimeError(
                 "Index manifest drift detected; rebuild is required "
-                "(hint: run `rag-rebuild-index` or POST /api/index/rebuild)."
+                "(hint: run `rag index rebuild` or POST /api/index/rebuild)."
             )
 
     @property

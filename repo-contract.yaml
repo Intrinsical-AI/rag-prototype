@@ -8,7 +8,7 @@ features:
   - id: retrieval-backend-matrix
     status: implemented
     summary: Sparse BM25, dense, and hybrid retrieval with SQLite document/history storage and optional FAISS or NumPy local vector indexing.
-    surfaces: [library, http]
+    surfaces: [cli, library, http, mcp]
     entrypoints:
       - src/local_rag_backend/composition/factory.py
       - src/local_rag_backend/core
@@ -32,7 +32,7 @@ features:
     evidence: [README.md]
   - id: mcp-server
     status: implemented
-    summary: Optional official-SDK stdio MCP 2025-11-25 server exposes native retrieval, diagnostics, canonical import, rebuild and evaluation with validated structured results, effect annotations, sanitized errors and bounded single-worker execution.
+    summary: Optional official-SDK stdio MCP server exposes pure search, generation, diagnostics, embeddings, document mutations, canonical import, rebuild and evaluation with native schemas and explicit effects.
     surfaces: [mcp]
     entrypoints: [src/local_rag_backend/mcp_server.py, src/local_rag_backend/mcp_transport.py]
     tests: [tests/unit/test_mcp_server.py]
@@ -43,20 +43,10 @@ commands:
     invocation: make check
     purpose: Run format, lint, architecture, type, and test gates.
     evidence: [Makefile]
-  - id: rag-import-canonical
+  - id: rag
     kind: console-script
-    invocation: rag-import-canonical
-    purpose: Import a canonical external document export.
-    evidence: [pyproject.toml, README.md]
-  - id: rag-server
-    kind: console-script
-    invocation: rag-server
-    purpose: Start the FastAPI service.
-    evidence: [pyproject.toml, README.md]
-  - id: rag-mcp
-    kind: mcp
-    invocation: rag-mcp
-    purpose: Start the MCP server.
+    invocation: rag
+    purpose: Manage documents, retrieval, generation, evaluation, snapshots and native servers through explicit subcommands.
     evidence: [pyproject.toml, README.md]
   - id: contract-check
     kind: make

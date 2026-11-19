@@ -20,7 +20,7 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
             calls["ports_kwargs"] = kwargs
             return "PORTS"
 
-    def _fake_run_cli_mutation(operation, **kwargs):
+    def _fake_execute_mutation_command(operation, **kwargs):
         calls["mutation_kwargs"] = kwargs
         return operation()
 
@@ -31,11 +31,13 @@ def test_rebuild_index_cli_delegates_to_app_service(monkeypatch) -> None:
 
     monkeypatch.setattr(
         index_cmd_module,
-        "get_cli_container",
+        "get_container",
         lambda: _FakeContainer(),
         raising=True,
     )
-    monkeypatch.setattr(index_cmd_module, "run_cli_mutation", _fake_run_cli_mutation, raising=True)
+    monkeypatch.setattr(
+        index_cmd_module, "execute_mutation_command", _fake_execute_mutation_command, raising=True
+    )
     monkeypatch.setattr(
         "local_rag_backend.core.use_cases.index.rebuild_index_sync",
         _fake_rebuild_index_sync,
@@ -59,9 +61,7 @@ def test_rebuild_index_cli_rejects_non_dense_modes(monkeypatch) -> None:
     class _FakeContainer:
         settings_obj = settings
 
-    monkeypatch.setattr(
-        index_cmd_module, "get_cli_container", lambda: _FakeContainer(), raising=True
-    )
+    monkeypatch.setattr(index_cmd_module, "get_container", lambda: _FakeContainer(), raising=True)
 
     result = CliRunner().invoke(index_cmd_module.rebuild_index_cmd)
 

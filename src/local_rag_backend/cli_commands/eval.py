@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from local_rag_backend.cli_commands.runtime import get_cli_container
+from local_rag_backend.composition.commands import get_container
 from local_rag_backend.core.services.evaluation_models import EvalResult
 from local_rag_backend.settings import get_settings
 
@@ -157,7 +157,7 @@ def eval_cmd(
         )
         from local_rag_backend.core.use_cases.evaluation import run_retrieval_eval
 
-        container = get_cli_container()
+        container = get_container()
         eval_bundle = container.build_eval_execution_bundle()
         ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
         res = run_retrieval_eval(
@@ -214,7 +214,7 @@ def eval_cmd(
         _raise_cli_error(prefix="Error evaluating dataset", exc=e, exit_code=1)
 
 
-@click.command("eval-batch")
+@click.command("batch")
 @click.option(
     "--dataset",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -259,7 +259,7 @@ def eval_batch_cmd(
             parse_eval_batch_spec(item, index=index) for index, item in enumerate(raw_specs)
         )
 
-        container = get_cli_container()
+        container = get_container()
         eval_bundle = container.build_eval_execution_bundle()
         ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
         results = run_retrieval_eval_batch(
@@ -293,7 +293,7 @@ def eval_batch_cmd(
         _raise_cli_error(prefix="Error evaluating batch dataset", exc=e, exit_code=1)
 
 
-@click.command("eval-compare")
+@click.command("compare")
 @click.option(
     "--dataset",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -339,7 +339,7 @@ def eval_compare_cmd(
         from local_rag_backend.core.use_cases.evaluation import compare_retrieval_eval
 
         compare_spec = parse_eval_compare_spec(_load_compare_spec(spec))
-        container = get_cli_container()
+        container = get_container()
         eval_bundle = container.build_eval_execution_bundle()
         ds = load_eval_dataset(_resolve_eval_dataset_path(dataset))
         result = compare_retrieval_eval(

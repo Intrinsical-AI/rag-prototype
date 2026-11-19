@@ -64,7 +64,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     assert dataset_external_ids <= emitted_external_ids
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["import-canonical", "--json", str(payload_path)])
+    result = runner.invoke(cli, ["docs", "import", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
     repo = SqlDocumentStorage(in_memory_sqlite)
@@ -125,7 +125,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
     assert helper_metadata["repo_key"] == repo_key
     assert str(helper_metadata["content_hash"]).strip()
 
-    second_result = runner.invoke(cli, ["import-canonical", "--json", str(payload_path)])
+    second_result = runner.invoke(cli, ["docs", "import", "--json", str(payload_path)])
     assert second_result.exit_code == 0, second_result.output
     assert len(list(repo.get_all_documents())) == len(docs)
 
@@ -146,7 +146,7 @@ def test_repogpt_fixture_import_search_eval_and_scope_sync(
         encoding="utf-8",
     )
 
-    reduced_result = runner.invoke(cli, ["import-canonical", "--json", str(reduced_payload_path)])
+    reduced_result = runner.invoke(cli, ["docs", "import", "--json", str(reduced_payload_path)])
     assert reduced_result.exit_code == 0, reduced_result.output
 
     reduced_docs = list(repo.get_all_documents())

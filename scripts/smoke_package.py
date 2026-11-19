@@ -208,7 +208,9 @@ def check_pair(wheel: Path, sdist: Path, package: dict[str, str], inputs: dict[s
     return wheel_headers
 
 
-def launch(console: Path, output: Path, readonly: bool, arguments: list[str]) -> None:
+def launch(console: Path, output: Path, phase: str, arguments: list[str]) -> None:
+    if phase not in {"writer", "readonly", "readonly-live"}:
+        raise ValueError(f"Unknown package smoke phase: {phase}")
     audit = guard()
     assert console.parent == Path(sys.executable).parent and console.is_file()
     import httpx
@@ -218,8 +220,8 @@ def launch(console: Path, output: Path, readonly: bool, arguments: list[str]) ->
     calls: list[str] = []
 
     def provider(url: str, **kwargs: Any) -> httpx.Response:
-        assert url == "http://provider.invalid/api/generate" and kwargs["json"]["stream"] is False
         calls.append(url)
+        assert url == "http://provider.invalid/api/generate" and kwargs["json"]["stream"] is False
         return httpx.Response(
             200, request=httpx.Request("POST", url), json={"response": "synthetic answer"}
         )
@@ -231,11 +233,16 @@ def launch(console: Path, output: Path, readonly: bool, arguments: list[str]) ->
     def stop() -> None:
         pass
 
-    if readonly:
+    if phase == "readonly":
         from local_rag_backend import mcp_server
 
         assert Path(mcp_server.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
         writes, stop = helper("smoke_ephemeral_snapshot_wheel.py")["_read_audit"]()
+    elif phase == "readonly-live":
+        database = Path(os.environ["RAG_CONFIG_PATH"]).with_name("live.sqlite3")
+        writes, stop = helper("smoke_ephemeral_snapshot_wheel.py")["_read_audit"](
+            live_database=database
+        )
     try:
         sys.argv = [str(console), *arguments]
         runpy.run_path(str(console), run_name="__main__")
@@ -330,9 +337,11 @@ async def sdk(work: Path, env: dict[str, str]) -> dict[str, Any]:
             "-B",
             str(Path(__file__).resolve()),
             "--launch",
-            str(Path(sys.executable).with_name("rag-mcp")),
+            str(Path(sys.executable).with_name("rag")),
             str(audit_file),
             "readonly",
+            "serve",
+            "mcp",
         ],
     )
     async with (
@@ -409,6 +418,48 @@ def embedding_probe(consumer: Path, arguments: list[str]) -> None:
     )
 
 
+def cli_query(work: Path, config: Path, env: dict[str, str]) -> dict[str, Any]:
+    receipts: dict[str, Any] = {}
+    for label, scope, expected_ids in (
+        ("matching_filter", "public", ["one"]),
+        ("nonmatching_filter", "unmatched", []),
+    ):
+        audit_file = work / f"cli-query-{label}.json"
+        stdout = run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(Path(__file__).resolve()),
+                "--launch",
+                str(Path(sys.executable).with_name("rag")),
+                str(audit_file),
+                "readonly-live",
+                "query",
+                "search",
+                "alpha",
+                "-k",
+                "1",
+                "--filters-json",
+                json.dumps([{"field": "scope", "values": [scope]}]),
+            ],
+            cwd=work,
+            env={**env, "RAG_CONFIG_PATH": str(config)},
+            log=work / "console.log",
+        )
+        result = json.loads(stdout)
+        assert result["retrieval_mode"] == "sparse" and result["backend"] == "local_split"
+        assert [source["document"]["id"] for source in result["sources"]] == expected_ids
+        if expected_ids:
+            document = result["sources"][0]["document"]
+            assert document["external_id"] == "one" and document["content"] == "alpha beta"
+        audit = json.loads(audit_file.read_text())
+        assert audit["completed"] and not audit["provider_calls"]
+        assert not audit["write_attempts"] and not audit["network"]["denied_operations"]
+        receipts[label] = {"result": result, "audit": audit}
+    return receipts
+
+
 def probe(wheel: Path, artifact: Path, output: Path) -> None:
     audit = guard()
     receipt = installed(wheel, artifact)
@@ -470,9 +521,9 @@ def probe(wheel: Path, artifact: Path, output: Path) -> None:
         case = fixture / mode
         selected = {**env, "RAG_CONFIG_PATH": str(case / "config.json")}
         for console, arguments in (
-            ("rag-status", []),
-            ("rag-snapshot", [str(case / "frozen")]),
-            ("rag-status", ["--help"]),
+            ("rag", ["status"]),
+            ("rag", ["snapshot", str(case / "frozen")]),
+            ("rag", ["status", "--help"]),
         ):
             destination = work / f"{mode}-{console}-{len(cli_receipts)}.json"
             run(
@@ -494,6 +545,8 @@ def probe(wheel: Path, artifact: Path, output: Path) -> None:
             cli_receipts.append(json.loads(destination.read_text()))
         assert b"PRIVATE-HISTORY-SYNTHETIC" not in (case / "frozen/documents.sqlite3").read_bytes()
     before = snapshot["_digests"](fixture)
+    query_receipts = cli_query(work, fixture / "sparse" / "config.json", env)
+    assert snapshot["_digests"](fixture) == before
     import anyio
 
     receipt["sdk"] = {}
@@ -510,7 +563,7 @@ def probe(wheel: Path, artifact: Path, output: Path) -> None:
         snapshot_inputs=before,
         snapshot_inputs_unchanged=True,
         embedding_selection=selections,
-        cli_query="not_applicable; no query CLI exists",
+        cli_query=query_receipts,
         cli_status_phase="explicit writer setup",
     )
     output.write_text(json.dumps(receipt, indent=2) + "\n")
@@ -684,7 +737,7 @@ def main() -> None:
         embedding_probe(Path(sys.argv[2]), sys.argv[3:])
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--launch":
-        launch(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4] == "readonly", sys.argv[5:])
+        launch(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5:])
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--probe":
         probe(*(Path(value) for value in sys.argv[2:]))

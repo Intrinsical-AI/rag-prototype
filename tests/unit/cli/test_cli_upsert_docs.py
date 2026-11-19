@@ -27,7 +27,7 @@ def test_cli_mutate_docs_from_json_file(in_memory_sqlite, tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
+    r = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(p)])
     assert r.exit_code == 0, r.output
     assert "inserted=2" in r.output
 
@@ -53,7 +53,7 @@ def test_cli_mutate_rejects_blank_upsert_before_deleting(in_memory_sqlite, tmp_p
         encoding="utf-8",
     )
 
-    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(payload)])
 
     assert result.exit_code == 1
     assert "content must not be blank" in result.output
@@ -79,7 +79,7 @@ def test_cli_mutate_docs_dense_embed_failure_does_not_persist_sql(
         json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
         encoding="utf-8",
     )
-    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
+    r = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(p)])
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []
@@ -116,7 +116,7 @@ def test_cli_mutate_docs_failure_still_invalidates_cached_rag_service(
         json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
         encoding="utf-8",
     )
-    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
+    r = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(p)])
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert reset_calls >= 1
@@ -154,7 +154,7 @@ def test_cli_mutate_docs_rejects_duplicate_external_id_before_embedding(
         encoding="utf-8",
     )
 
-    r = CliRunner().invoke(cli, ["mutate-docs", "--json", str(p)])
+    r = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(p)])
     assert r.exit_code == 1
     assert "external_id values in upserts must be unique" in r.output
     assert embedder.calls == 0
