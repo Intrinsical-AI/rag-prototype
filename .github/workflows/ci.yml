@@ -430,8 +430,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          API_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          export API_KEY
           container=$(docker run --detach --network none --health-interval 2s \
-            --health-timeout 3s --health-start-period 15s "$SMOKE_IMAGE")
+            --health-timeout 3s --health-start-period 15s --env API_KEY "$SMOKE_IMAGE")
           trap 'docker rm --force "$container" >/dev/null' EXIT
           for attempt in {1..30}; do
             state=$(docker inspect --format '{{.State.Status}} {{.State.Health.Status}}' "$container")
