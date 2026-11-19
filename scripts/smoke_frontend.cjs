@@ -125,7 +125,7 @@ test('real HTTP and SQLite add/list/query, status and history lifecycle', async 
       mutation_recovery_enabled: false, api_key: null, public_bind_requires_api_key: true,
       enable_monitoring: false,
     }));
-    rag = spawn('uv', ['run', '--project', repo, '--frozen', '--no-sync', 'rag-server'], {
+    rag = spawn('uv', ['run', '--project', repo, '--frozen', '--no-sync', 'rag', 'serve', 'http'], {
       cwd: root, env: { ...process.env, RAG_CONFIG_PATH: configPath, UV_CACHE_DIR: '/tmp/uv-cache' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

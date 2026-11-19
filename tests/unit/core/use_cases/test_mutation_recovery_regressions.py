@@ -125,7 +125,7 @@ def test_committed_replay_preserves_later_content_and_original_response(runtime)
     assert runtime.rebuilds == []
 
 
-def test_legacy_incomplete_mutation_recovers_once_without_changing_flat_record(runtime):
+def test_unsupported_flat_journal_refuses_recovery_without_changing_data(runtime):
     runtime.coordinator.execute(_upsert("initial"))
     before_docs = runtime.repo.snapshot_by_external_ids(["doc"])
     runtime.repo.upsert_documents_by_external_id(
@@ -152,19 +152,9 @@ def test_legacy_incomplete_mutation_recovers_once_without_changing_flat_record(r
         settings_obj=runtime.settings,
         ports=replace(runtime.ports, mutation_journal_factory=lambda: reopened),
     )
-    assert coordinator.recover_incomplete() == 1
-    assert runtime.repo.get_all_documents()[0].content == "v1"
-    assert reopened.get(intent.op_id).state == "ROLLED_BACK"
-    assert flat.read_bytes() == old_bytes
-
-    after_restart = FileMutationJournal(runtime.journal.root)
-    coordinator = MutationCoordinator(
-        settings_obj=runtime.settings,
-        ports=replace(runtime.ports, mutation_journal_factory=lambda: after_restart),
-    )
-    assert coordinator.recover_incomplete() == 0
-    assert runtime.repo.get_all_documents()[0].content == "v1"
-    assert after_restart.get(intent.op_id).state == "ROLLED_BACK"
+    with pytest.raises(MutationRecoveryRequiredError, match="Unsupported mutation journal layout"):
+        coordinator.recover_incomplete()
+    assert runtime.repo.get_all_documents()[0].content == "v2"
     assert flat.read_bytes() == old_bytes
 
 

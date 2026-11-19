@@ -51,7 +51,7 @@ async def run_api_mutation(
         reset_after()
 
 
-def run_cli_mutation(
+def execute_mutation_command(
     *,
     operation: Callable[[], T],
     ensure_schema: Callable[[], None],

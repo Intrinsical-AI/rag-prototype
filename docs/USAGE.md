@@ -9,8 +9,8 @@ Este proyecto no está optimizado para "subir documentos y preguntar". Está dis
 Por eso existen tres piezas que no conviene saltarse:
 
 * `MutationCoordinator`: garantiza que toda mutación pase por el write-path canónico con saga durable.
-* `rag-rebuild-index` / `POST /api/index/rebuild`: el índice de lectura es reparable y derivado; el rebuild explícito evita que el estado corrupto se oculte como si fuera normal.
-* `rag-eval` y `rag-eval-compare`: cualquier cambio de chunking, retrieval o reranking debe pasar por un gate reproducible para evitar regresiones silenciosas.
+* `rag index rebuild` / `POST /api/index/rebuild`: el índice de lectura es reparable y derivado; el rebuild explícito evita que el estado corrupto se oculte como si fuera normal.
+* `rag eval run` y `rag eval compare`: cualquier cambio de chunking, retrieval o reranking debe pasar por un gate reproducible para evitar regresiones silenciosas.
 
 Si tu caso de uso no necesita este nivel de control, probablemente te baste una topología más simple. Si sí lo necesitas, esta complejidad es intencional.
 
@@ -234,10 +234,10 @@ Para un flujo rápido sin escribir código, puedes ingestar desde rutas locales:
 
 ```bash
 # Ingesta desde un fichero o un directorio (recursivo por defecto)
-rag-ingest ./docs ./notas.md ./data/faq.csv
+rag docs ingest ./docs ./notas.md ./data/faq.csv
 
 # Ver qué se procesaría sin escribir en SQLite/índice vectorial
-rag-ingest --dry-run ./docs
+rag docs ingest --dry-run ./docs
 ```
 
 Notas:
@@ -259,19 +259,19 @@ Notas:
 cat > /tmp/mutate_upsert.json <<'JSON'
 {"op_id":"op-upsert-1","upserts":[{"external_id":"doc-1","content":"hola"}]}
 JSON
-rag-mutate-docs --json /tmp/mutate_upsert.json
+rag docs mutate --json /tmp/mutate_upsert.json
 
 # Delete por IDs SQL
 cat > /tmp/mutate_delete_ids.json <<'JSON'
 {"op_id":"op-del-ids-1","delete_ids":["doc:...","doc:..."]}
 JSON
-rag-mutate-docs --json /tmp/mutate_delete_ids.json
+rag docs mutate --json /tmp/mutate_delete_ids.json
 
 # Delete por external_id (crea tombstones)
 cat > /tmp/mutate_delete_ext.json <<'JSON'
 {"op_id":"op-del-ext-1","delete_external_ids":["chunk:<sha256>","file:/abs/path:part=file:chunk=0"]}
 JSON
-rag-mutate-docs --json /tmp/mutate_delete_ext.json
+rag docs mutate --json /tmp/mutate_delete_ext.json
 
 # Import/sync canónico para productores externos (p.ej. RepoGPT)
 cat > /tmp/canonical_import.json <<'JSON'
@@ -289,10 +289,10 @@ cat > /tmp/canonical_import.json <<'JSON'
   ]
 }
 JSON
-rag-import-canonical --json /tmp/canonical_import.json
+rag docs import --json /tmp/canonical_import.json
 
 # Repair explícito del estado de retrieval
-rag-rebuild-index
+rag index rebuild
 ```
 
 ### 2) API (FastAPI)
@@ -300,7 +300,7 @@ rag-rebuild-index
 Levanta el servidor antes de llamar a la API:
 
 ```bash
-rag-server
+rag serve http
 ```
 
 Probes operacionales (públicas):
@@ -370,11 +370,11 @@ print(summary)
 Notas:
 
 * El rebuild recompone el índice vectorial local desde SQLite.
-* El rebuild completo queda para reparación explícita (`rag-rebuild-index` / `POST /api/index/rebuild`), no como fallback normal de mutación.
-* `rag-import-canonical` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI, HTTP y MCP usan `false`; reemplazar exige una elección explícita y evidencia completa.
+* El rebuild completo queda para reparación explícita (`rag index rebuild` / `POST /api/index/rebuild`), no como fallback normal de mutación.
+* `rag docs import` / `POST /api/docs/import-canonical` hacen sync por `scope + snapshot_id`; con `replace_scope=true` eliminan documentos obsoletos sin crear tombstones. Si omites `replace_scope`, CLI, HTTP y MCP usan `false`; reemplazar exige una elección explícita y evidencia completa.
 * CLI, HTTP y MCP comparten la misma validación tipada para canonical import: RepoGPT code-units v6, chat-exports chat-units v4 y Tr3v0r canonical-rag v2. Los marcadores desconocidos o incompatibles se rechazan. Tr3v0r requiere evidencia verificable de ejecución completa para reemplazar un scope; ningún override permite saltarla. Las exportaciones incompletas solo permiten upsert explícito.
 * Los filtros públicos soportados son sólo `scope`, `snapshot_id`, `source_id` y `metadata.<key>`.
-* `rag_status` informa de la presencia del almacén vivo sin consultarlo y de la disponibilidad, identidad y conteo del snapshot congelado. No inicializa esquema ni declara frescura del almacén vivo. `rag_ask_ephemeral` consulta exclusivamente `ephemeral_snapshot_dir`, sin historia/cachés/escrituras RAG y sin reintentos; `rag-snapshot DESTINATION` prepara explícitamente un destino nuevo. Consulta los requisitos y límites en la sección MCP del README.
+* `rag_status` informa de la presencia del almacén vivo sin consultarlo y de la disponibilidad, identidad y conteo del snapshot congelado. No inicializa esquema ni declara frescura del almacén vivo. `rag_ask_ephemeral` consulta exclusivamente `ephemeral_snapshot_dir`, sin historia/cachés/escrituras RAG y sin reintentos; `rag snapshot DESTINATION` prepara explícitamente un destino nuevo. Consulta los requisitos y límites en la sección MCP del README.
 
 ### RepoGPT contract
 
@@ -392,7 +392,7 @@ El import canónico sigue siendo genérico. El borde valida todos los documentos
 ## Operabilidad: métricas, evaluación y reranker
 
 Monitoring mínimo (Prometheus):
-Si activas `enable_monitoring: true` en `config.yaml`, `rag-server` expone `/metrics` cuando la
+Si activas `enable_monitoring: true` en `config.yaml`, `rag serve http` expone `/metrics` cuando la
 dependencia opcional está instalada.
 
 Si tienes `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"` al `curl`.
@@ -400,13 +400,13 @@ Si tienes `api_key` en `config.yaml`, añade `-H "X-API-Key: <api_key>"` al `cur
 Evaluación offline reproducible (gate):
 
 ```bash
-rag-eval --retrieval-mode sparse
-rag-eval --retrieval-mode dense --candidate-k 20
-rag-eval --retrieval-mode dual --dual-candidate-k 50
-rag-eval --retrieval-mode hybrid --hybrid-alpha 0.5
-rag-eval --retrieval-mode sparse --run-out /tmp/run.jsonl --report-out /tmp/report.json
-rag-eval-compare --spec /tmp/rag-eval-compare-spec.json
-rag-eval-batch --specs /tmp/rag-eval-batch-specs.json
+rag eval run --retrieval-mode sparse
+rag eval run --retrieval-mode dense --candidate-k 20
+rag eval run --retrieval-mode dual --dual-candidate-k 50
+rag eval run --retrieval-mode hybrid --hybrid-alpha 0.5
+rag eval run --retrieval-mode sparse --run-out /tmp/run.jsonl --report-out /tmp/report.json
+rag eval compare --spec /tmp/rag-eval-compare-spec.json
+rag eval batch --specs /tmp/rag-eval-batch-specs.json
 ```
 
 Dataset por defecto: `datasets/rag_eval_v1.jsonl` (o `eval_dataset_path` en `config.yaml`).
@@ -438,7 +438,7 @@ Los overrides de modo son explícitos:
 Override útil para wrappers/benchmarks:
 
 ```bash
-RAG_PERF_METRICS_OUT=/tmp/rag-perf.json rag-eval --retrieval-mode dense
+RAG_PERF_METRICS_OUT=/tmp/rag-perf.json rag eval run --retrieval-mode dense
 ```
 
 Ese env var sobrescribe `perf_metrics_out_path` en tiempo de carga de settings sin editar `config.yaml`.
@@ -461,7 +461,7 @@ cat > /tmp/rag-eval-compare-spec.json <<'JSON'
 }
 JSON
 
-rag-eval-compare \
+rag eval compare \
   --spec /tmp/rag-eval-compare-spec.json \
   --json-out /tmp/rag-eval-compare.json \
   --report-out /tmp/rag-eval-compare-report.json
@@ -488,7 +488,7 @@ Smoke e2e reproducible:
 bash scripts/test_rag_eval_compare_e2e.sh
 ```
 
-Reranker opcional (mejora de calidad medible con `rag-eval`):
+Reranker opcional (mejora de calidad medible con `rag eval run`):
 
 ```bash
 # set these in config.yaml:
@@ -503,9 +503,59 @@ El gate RepoGPT por defecto usa la fixture canónica versionada
 modificar otro checkout. Para ejecutar el productor real, configura explícitamente
 `REPOGPT_ROOT`; se usan su intérprete preparado, el código fuente versionado en
 `tests/fixtures/repogpt_eval_repo` y las flags
-`--emit code-units --replace-scope --include-tests --repo-key repogpt_eval_repo`. Los errores configurados fallan,
+`export --projection code-units --replace-scope --include-tests --repo-key repogpt_eval_repo`. Los errores configurados fallan,
 no se convierten en skips.
 
 La integración opcional del vulnerability pilot usa `VULN_PILOT_PREPARED` y
 `VULNS_INGEST_SCRIPT`; sin esas entradas se omite. Una ruta configurada vacía o
 inexistente produce un error explícito.
+
+
+## Canonical command and tool surface
+
+Install the optional `server` and `mcp` extras for the corresponding transports.
+Every installed operation uses one command:
+
+| Family | Operations |
+|---|---|
+| Documents | `rag docs bootstrap`, `rag docs ingest PATH...`, `rag docs import --json FILE`, `rag docs mutate --json FILE` |
+| Retrieval | `rag query search QUESTION -k 3 --filters-json '[]'`, `rag query ask QUESTION -k 3` |
+| Index | `rag index rebuild` |
+| Transport | `rag serve http`, `rag serve mcp` |
+| Evaluation | `rag eval run`, `rag eval batch`, `rag eval compare` |
+| Inspection/export | `rag status`, `rag snapshot OUTPUT_DIRECTORY` |
+
+There are no `rag-*` console aliases or former top-level command spellings.
+The native MCP catalog additionally exposes `rag_search`, `rag_mutate_docs`,
+`rag_embedding_status`, and `rag_embed_texts`. Existing native ask, ephemeral ask,
+canonical import, index rebuild, evaluation and status capabilities remain.
+
+`rag_search(question, k=3, filters=[])`, `rag query search`, and `POST /api/search`
+share the live search operation. It returns `sources` (document plus score),
+`retrieval_mode`, and `backend`. Search reads an existing SQLite document store
+and, for dense modes, an existing manifest-selected vector generation. Missing
+stores, missing indexes or pending mutation recovery cause a refusal; search
+never creates them. It constructs no generator and saves no QA history. Sparse
+search uses no embedding provider. Dense, dual and hybrid searches retain the
+configured query embedder, so provider network access and cost can occur; the
+query embedding cache is disabled on this read path. Filters and configured
+reranking retain their current semantics.
+The CLI allows `-k` from 1 to 100. The HTTP and MCP interfaces accept `k`
+from 1 to 10.
+
+`rag_mutate_docs(payload)` requires an explicit, nonblank `payload.op_id`.
+The common payload supports `upserts`, `delete_ids`, `delete_external_ids`, and
+`hard_delete_external_ids`; its returned summary is the coordinator's durable
+receipt. Repeating the same operation identity and intent returns the original
+outcome while the receipt is retained. Conflicting intent under the same identity
+is refused. HTTP and CLI use the same decoder/coordinator but may generate an
+operation identity when omitted.
+
+Embedding tools use the typed embedding integration, its configured model and
+limits. Status may initialize provider state; embedding may call a provider and
+write its cache. Both advertise those effects. `rag_embed_texts` optionally L2
+normalizes results and rejects a requested model that differs from configuration.
+
+Only schema-v2 journal records in `active/` and `done/` are supported. Unsupported
+flat/unversioned records and former outcome aliases are preserved and refused.
+No data conversion, alias dispatch or migration is provided.

@@ -5,7 +5,8 @@ import json
 from click.testing import CliRunner
 
 from local_rag_backend.cli import cli
-from local_rag_backend.cli_commands.docs import docs_ingest, docs_mutate
+from local_rag_backend.cli_commands.docs import docs_ingest
+from local_rag_backend.composition import operations
 from local_rag_backend.core.use_cases.results import MutationSummary
 from local_rag_backend.settings import get_settings
 
@@ -28,14 +29,14 @@ def test_cli_mutate_docs_calls_coordinator_execute_once(in_memory_sqlite, tmp_pa
             )
 
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
-    monkeypatch.setattr(docs_mutate, "MutationCoordinator", FakeCoordinator, raising=True)
+    monkeypatch.setattr(operations, "MutationCoordinator", FakeCoordinator, raising=True)
 
     payload = tmp_path / "mutate.json"
     payload.write_text(
         json.dumps({"upserts": [{"external_id": "doc-1", "content": "hello"}]}),
         encoding="utf-8",
     )
-    result = CliRunner().invoke(cli, ["mutate-docs", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "mutate", "--json", str(payload)])
     assert result.exit_code == 0, result.output
     assert calls == 1
 
@@ -63,6 +64,6 @@ def test_cli_ingest_calls_coordinator_execute_once(in_memory_sqlite, tmp_path, m
     root.mkdir()
     (root / "a.txt").write_text("hello ingest", encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    result = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert result.exit_code == 0, result.output
     assert calls == 1

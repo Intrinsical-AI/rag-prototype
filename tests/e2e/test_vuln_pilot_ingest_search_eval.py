@@ -84,7 +84,7 @@ def test_vuln_pilot_import_search_eval_and_scope_sync(
     payload_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["import-canonical", "--json", str(payload_path)])
+    result = runner.invoke(cli, ["docs", "import", "--json", str(payload_path)])
     assert result.exit_code == 0, result.output
 
     repo = SqlDocumentStorage(session_factory=in_memory_sqlite)
@@ -147,7 +147,7 @@ def test_vuln_pilot_import_search_eval_and_scope_sync(
     assert cwe78_metadata["severity"] == "CRITICAL"
     assert cwe78_metadata["repo"] == "CherryHQ/cherry-studio"
 
-    second_result = runner.invoke(cli, ["import-canonical", "--json", str(payload_path)])
+    second_result = runner.invoke(cli, ["docs", "import", "--json", str(payload_path)])
     assert second_result.exit_code == 0, second_result.output
     assert len(list(repo.get_all_documents())) == len(docs)
 
@@ -164,7 +164,7 @@ def test_vuln_pilot_import_search_eval_and_scope_sync(
         encoding="utf-8",
     )
 
-    reduced_result = runner.invoke(cli, ["import-canonical", "--json", str(reduced_payload_path)])
+    reduced_result = runner.invoke(cli, ["docs", "import", "--json", str(reduced_payload_path)])
     assert reduced_result.exit_code == 0, reduced_result.output
 
     reduced_docs = list(repo.get_all_documents())

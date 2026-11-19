@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,17 +26,6 @@ _DONE_MAX_AGE_S = 30 * 24 * 60 * 60
 _DONE_MAX_BYTES = 256 * 1024 * 1024
 _DONE_SWEEP_INTERVAL_S = 60 * 60
 _TERMINAL_STATES = {"COMMITTED", "ROLLED_BACK"}
-_UNVERSIONED_TERMINAL_KEYS = {
-    "op_id",
-    "state",
-    "intent",
-    "before_image",
-    "outcome",
-    "error",
-    "attempts",
-    "created_at",
-    "updated_at",
-}
 _MUTATION_STATES = {
     "PREPARED",
     "SQL_COMMITTED",
@@ -57,21 +45,11 @@ def _record_path(root: Path, op_id: str) -> Path:
     return root / f"{digest}.json"
 
 
-def _record_from_dict(
-    obj: dict[str, Any], *, allow_unversioned_terminal: bool = False
-) -> MutationRecord:
+def _record_from_dict(obj: dict[str, Any]) -> MutationRecord:
     state = obj.get("state")
     if not isinstance(state, str) or state not in _MUTATION_STATES:
         raise ValueError(f"Invalid mutation journal state {state!r}.")
-    unversioned = "schema_version" not in obj
-    if unversioned:
-        if (
-            not allow_unversioned_terminal
-            or state not in _TERMINAL_STATES
-            or set(obj) != _UNVERSIONED_TERMINAL_KEYS
-        ):
-            raise ValueError("Unsupported unversioned mutation journal record.")
-    elif obj["schema_version"] != _JOURNAL_VERSION:
+    if obj.get("schema_version") != _JOURNAL_VERSION:
         raise ValueError("Unsupported mutation journal schema_version; expected 2.")
     op_id = obj.get("op_id")
     if not isinstance(op_id, str) or not op_id.strip():
@@ -81,7 +59,7 @@ def _record_from_dict(
     for field in ("before_image", "outcome"):
         if obj.get(field) is not None and not isinstance(obj[field], dict):
             raise ValueError(f"Mutation journal {field} must be an object or null.")
-    if not unversioned and type(obj.get("vector_attempted")) is not bool:
+    if type(obj.get("vector_attempted")) is not bool:
         raise ValueError("Mutation journal vector_attempted must be a boolean.")
     record = MutationRecord(
         op_id=op_id,
@@ -93,7 +71,7 @@ def _record_from_dict(
         attempts=int(obj.get("attempts") or 0),
         created_at=float(obj.get("created_at") or 0.0),
         updated_at=float(obj.get("updated_at") or 0.0),
-        vector_attempted=False if unversioned else obj["vector_attempted"],
+        vector_attempted=obj["vector_attempted"],
     )
     if state in {"COMMITTED", "VECTOR_COMMITTED"}:
         record.validate_outcome()
@@ -118,13 +96,13 @@ def _record_to_dict(record: MutationRecord) -> dict[str, Any]:
     }
 
 
-def _read_record(path: Path, *, allow_unversioned_terminal: bool = False) -> MutationRecord:
+def _read_record(path: Path) -> MutationRecord:
     data: Any = None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("Record payload is not a JSON object.")
-        record = _record_from_dict(data, allow_unversioned_terminal=allow_unversioned_terminal)
+        record = _record_from_dict(data)
         if _record_path(path.parent, record.op_id) != path:
             raise ValueError("Mutation journal filename does not match op_id.")
         return record
@@ -170,37 +148,14 @@ class FileMutationJournal(MutationJournalPort):
         self.root = Path(root)
         self.active_dir = self.root / "active"
         self.done_dir = self.root / "done"
-        self._legacy_checked = False
-        self._legacy_incomplete_op_ids: tuple[str, ...] = ()
-        self._legacy_overlay_paths: frozenset[Path] = frozenset()
         self._last_sweep_monotonic = float("-inf")
         self._validated_done: dict[Path, tuple[int, int, int, int]] = {}
 
-    def _check_legacy_once(self) -> None:
-        if self._legacy_checked:
-            return
-        incomplete_op_ids: list[str] = []
-        for path in _json_paths(self.root):
-            record = _read_record(path, allow_unversioned_terminal=True)
-            if record.state not in _TERMINAL_STATES:
-                incomplete_op_ids.append(record.op_id)
-        self._legacy_incomplete_op_ids = tuple(incomplete_op_ids)
-        self._legacy_overlay_paths = frozenset(
-            _record_path(self.done_dir, op_id) for op_id in incomplete_op_ids
-        )
-        self._legacy_checked = True
-
-    def _unresolved_legacy_records(self, *, seen_op_ids: set[str]) -> Iterator[MutationRecord]:
-        for op_id in self._legacy_incomplete_op_ids:
-            if op_id in seen_op_ids:
-                continue
-            record = self.get(op_id)
-            if record is None:
-                raise MutationRecoveryRequiredError(
-                    f"Legacy mutation journal record for op_id={op_id!r} vanished without a receipt."
-                )
-            if record.state not in _TERMINAL_STATES:
-                yield record
+    def _validate_layout(self) -> None:
+        if _json_paths(self.root):
+            raise MutationRecoveryRequiredError(
+                f"Unsupported mutation journal layout at {self.root}; root records were preserved"
+            )
 
     def _done_files(self) -> list[tuple[Path, os.stat_result]]:
         files: list[tuple[Path, os.stat_result]] = []
@@ -240,7 +195,7 @@ class FileMutationJournal(MutationJournalPort):
         retained: list[tuple[Path, os.stat_result]] = []
         removed = False
         for path, info in self._done_files():
-            if path not in self._legacy_overlay_paths and info.st_mtime < cutoff:
+            if info.st_mtime < cutoff:
                 path.unlink()
                 removed = True
                 self._validated_done.pop(path, None)
@@ -250,8 +205,6 @@ class FileMutationJournal(MutationJournalPort):
         for path, info in sorted(retained, key=lambda item: (item[1].st_mtime_ns, item[0].name)):
             if total_bytes <= _DONE_MAX_BYTES:
                 break
-            if path in self._legacy_overlay_paths:
-                continue
             path.unlink()
             removed = True
             self._validated_done.pop(path, None)
@@ -284,9 +237,10 @@ class FileMutationJournal(MutationJournalPort):
             ) from exc
 
     def get(self, op_id: str) -> MutationRecord | None:
+        self._validate_layout()
         observed_active_vanish = False
         for attempt in range(2):
-            for directory in (self.active_dir, self.done_dir, self.root):
+            for directory in (self.active_dir, self.done_dir):
                 path = _record_path(directory, op_id)
                 if path.is_symlink():
                     raise MutationRecoveryRequiredError(
@@ -294,7 +248,7 @@ class FileMutationJournal(MutationJournalPort):
                     )
                 if path.is_file():
                     try:
-                        return _read_record(path, allow_unversioned_terminal=directory == self.root)
+                        return _read_record(path)
                     except MutationRecoveryRequiredError as exc:
                         if not _disappeared_during_read(exc):
                             raise
@@ -313,7 +267,7 @@ class FileMutationJournal(MutationJournalPort):
         )
 
     def upsert(self, record: MutationRecord) -> None:
-        self._check_legacy_once()
+        self._validate_layout()
         now = time.time()
         existing = self.get(record.op_id)
         normalized = MutationRecord(
@@ -355,29 +309,22 @@ class FileMutationJournal(MutationJournalPort):
     def list_incomplete(self, *, limit: int = 100) -> list[MutationRecord]:
         if limit <= 0:
             raise ValueError("Mutation recovery limit must be positive.")
-        self._check_legacy_once()
+        self._validate_layout()
         self._maybe_sweep_done()
         out: list[MutationRecord] = []
-        seen_op_ids: set[str] = set()
         for path in _json_paths(self.active_dir):
             record = _read_record(path)
             if record.state in _TERMINAL_STATES:
                 self._move_to_done(path, record.op_id)
                 continue
             out.append(record)
-            seen_op_ids.add(record.op_id)
             if len(out) >= limit:
                 break
-        if len(out) < limit:
-            for record in self._unresolved_legacy_records(seen_op_ids=seen_op_ids):
-                out.append(record)
-                if len(out) >= limit:
-                    break
         return out
 
     def count_incomplete(self) -> int:
         """Inspect readiness without changing journal files or running retention."""
-        self._check_legacy_once()
+        self._validate_layout()
         self._done_files()
         active_op_ids: set[str] = set()
         for path in _json_paths(self.active_dir):
@@ -392,9 +339,7 @@ class FileMutationJournal(MutationJournalPort):
                 raise
             if record.state not in _TERMINAL_STATES:
                 active_op_ids.add(record.op_id)
-        return len(active_op_ids) + sum(
-            1 for _ in self._unresolved_legacy_records(seen_op_ids=active_op_ids)
-        )
+        return len(active_op_ids)
 
 
 __all__ = ["FileMutationJournal"]

@@ -53,10 +53,11 @@ def test_sdk_discovery_declares_schemas_and_actual_effects() -> None:
         for tool in response.root.tools:
             assert tool.inputSchema and tool.outputSchema and tool.annotations
             assert tool.annotations.readOnlyHint == (
-                tool.name in {"rag_status", "rag_ask_ephemeral"}
+                tool.name in {"rag_status", "rag_ask_ephemeral", "rag_search"}
             )
             assert tool.annotations.destructiveHint == (
-                tool.name in {"rag_import_canonical", "rag_rebuild_index", "rag_eval"}
+                tool.name
+                in {"rag_import_canonical", "rag_rebuild_index", "rag_eval", "rag_mutate_docs"}
             )
 
     anyio.run(check)
@@ -88,7 +89,7 @@ def test_ask_preserves_native_projection_and_semantic_validation(monkeypatch) ->
         def build_rag_service(self):
             return Service()
 
-    monkeypatch.setattr(mcp_server, "get_cli_container", Container)
+    monkeypatch.setattr(mcp_server, "get_container", Container)
     result = _invoke(
         "rag_ask",
         {
@@ -195,7 +196,7 @@ def test_invalid_canonical_envelope_is_expected_failure_before_mutation(monkeypa
     def forbidden():
         pytest.fail("invalid canonical payload reached runtime initialization")
 
-    monkeypatch.setattr(mcp_server, "get_cli_container", forbidden)
+    monkeypatch.setattr(mcp_server, "get_container", forbidden)
     result = _invoke(
         "rag_import_canonical",
         {"payload": {"kind": "code-units", "schema_version": "3", "documents": []}},
@@ -209,7 +210,7 @@ def test_rebuild_wrong_mode_and_missing_dataset_are_expected_failures(
 ) -> None:
     monkeypatch.setattr(
         mcp_server,
-        "get_cli_runtime_snapshot",
+        "get_runtime_snapshot",
         lambda: SimpleNamespace(
             retrieval_mode="sparse", eval_dataset_path=str(tmp_path / "absent.jsonl")
         ),
@@ -320,7 +321,7 @@ def test_malformed_rag_service_contract_is_internal_error(monkeypatch) -> None:
         def build_rag_service(self):
             return Service()
 
-    monkeypatch.setattr(mcp_server, "get_cli_container", Container)
+    monkeypatch.setattr(mcp_server, "get_container", Container)
     with pytest.raises(McpError) as caught:
         _invoke("rag_ask", {"question": "query"})
     assert caught.value.error.code == -32603
@@ -505,14 +506,7 @@ def test_stdio_handshake_ping_notifications_and_recoverable_failures(tmp_path) -
             failed["result"]["content"][0]["text"]
         )
         send({"id": 4, "method": "tools/list"})
-        assert {tool["name"] for tool in receive()["result"]["tools"]} == {
-            "rag_status",
-            "rag_ask",
-            "rag_ask_ephemeral",
-            "rag_import_canonical",
-            "rag_rebuild_index",
-            "rag_eval",
-        }
+        assert {tool["name"] for tool in receive()["result"]["tools"]} == set(mcp_server.TOOLS)
     finally:
         process.terminate()
         _, stderr = process.communicate(timeout=10)

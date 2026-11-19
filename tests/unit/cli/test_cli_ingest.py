@@ -30,7 +30,7 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     (root / "c.csv").write_text("title;body\nT1;B1\nT2;B2\n", encoding="utf-8")  # 2 rows -> 2 docs
     (root / "bin.dat").write_bytes(b"\x00\x01\x02\x03")  # binary -> skipped
 
-    r1 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    r1 = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert r1.exit_code == 0, r1.output
 
     docs1 = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
@@ -44,7 +44,7 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
     assert all((d.metadata or {}).get("chunk_start_char") is not None for d in a_chunks)
     assert all((d.metadata or {}).get("chunk_end_char") is not None for d in a_chunks)
 
-    r2 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    r2 = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert r2.exit_code == 0, r2.output
     assert "inserted=0" in r2.output
     assert "updated=0" in r2.output
@@ -55,7 +55,7 @@ def test_cli_ingest_dir_mixed_is_idempotent_and_deletes_stale_chunks(
 
     # Shrink file so it now produces only 1 chunk; old chunks should be deleted.
     (root / "a.txt").write_text("short", encoding="utf-8")
-    r3 = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    r3 = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert r3.exit_code == 0, r3.output
 
     docs3 = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
@@ -95,7 +95,7 @@ def test_cli_ingest_dense_embed_failure_does_not_persist_sql(
     root.mkdir()
     (root / "a.txt").write_text("hello", encoding="utf-8")
 
-    r = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    r = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert r.exit_code == 1
     assert "embed fail" in r.output
     assert SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents() == []
@@ -111,7 +111,7 @@ def test_cli_ingest_accepts_utf8_non_ascii_text(in_memory_sqlite, tmp_path, monk
     text_file = root / "es.txt"
     text_file.write_text("¿Cómo está? Información útil para RAG.", encoding="utf-8")
 
-    r = CliRunner().invoke(cli, ["ingest", str(root), "--no-magic"])
+    r = CliRunner().invoke(cli, ["docs", "ingest", str(root), "--no-magic"])
     assert r.exit_code == 0, r.output
 
     docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
@@ -128,7 +128,7 @@ def test_cli_ingest_txt_preserves_first_line_case_and_spacing(
     raw = "First, line\nSecond line  \n"
     text_file.write_text(raw, encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    result = CliRunner().invoke(cli, ["docs", "ingest", str(text_file), "--no-magic"])
     assert result.exit_code == 0, result.output
     docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
     assert [doc.content for doc in docs] == [raw]
@@ -141,7 +141,7 @@ def test_cli_ingest_skips_blank_chunks_without_renumbering(in_memory_sqlite, tmp
     text_file = tmp_path / "notes.txt"
     text_file.write_text(" " * 8 + " Exact \n", encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    result = CliRunner().invoke(cli, ["docs", "ingest", str(text_file), "--no-magic"])
 
     assert result.exit_code == 0, result.output
     docs = SqlDocumentStorage(session_factory=in_memory_sqlite).get_all_documents()
@@ -157,13 +157,13 @@ def test_cli_ingest_all_blank_csv_rows_removes_stale_docs(in_memory_sqlite, tmp_
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     csv_file = tmp_path / "notes.csv"
     csv_file.write_text("title;body\nQ;A\n", encoding="utf-8")
-    first = CliRunner().invoke(cli, ["ingest", str(csv_file), "--no-magic"])
+    first = CliRunner().invoke(cli, ["docs", "ingest", str(csv_file), "--no-magic"])
     assert first.exit_code == 0, first.output
     store = SqlDocumentStorage(session_factory=in_memory_sqlite)
     assert len(store.get_all_documents()) == 1
 
     csv_file.write_text("title;body\n;\n", encoding="utf-8")
-    second = CliRunner().invoke(cli, ["ingest", str(csv_file), "--no-magic"])
+    second = CliRunner().invoke(cli, ["docs", "ingest", str(csv_file), "--no-magic"])
 
     assert second.exit_code == 0, second.output
     assert store.get_all_documents() == []
@@ -173,13 +173,13 @@ def test_cli_ingest_blank_text_file_removes_stale_docs(in_memory_sqlite, tmp_pat
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
     text_file = tmp_path / "notes.txt"
     text_file.write_text("Original document", encoding="utf-8")
-    first = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    first = CliRunner().invoke(cli, ["docs", "ingest", str(text_file), "--no-magic"])
     assert first.exit_code == 0, first.output
     store = SqlDocumentStorage(session_factory=in_memory_sqlite)
     assert len(store.get_all_documents()) == 1
 
     text_file.write_text(" " * 16, encoding="utf-8")
-    second = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    second = CliRunner().invoke(cli, ["docs", "ingest", str(text_file), "--no-magic"])
 
     assert second.exit_code == 0, second.output
     assert store.get_all_documents() == []
@@ -190,7 +190,7 @@ def test_cli_ingest_all_tombstoned_chunks_is_noop(in_memory_sqlite, tmp_path, mo
     text_file = tmp_path / "notes.txt"
     text_file.write_text("Do not restore me", encoding="utf-8")
 
-    first = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    first = CliRunner().invoke(cli, ["docs", "ingest", str(text_file), "--no-magic"])
     assert first.exit_code == 0, first.output
     store = SqlDocumentStorage(session_factory=in_memory_sqlite)
     docs = store.get_all_documents()
@@ -198,7 +198,7 @@ def test_cli_ingest_all_tombstoned_chunks_is_noop(in_memory_sqlite, tmp_path, mo
     assert docs[0].external_id is not None
     store.delete_by_external_ids([docs[0].external_id])
 
-    second = CliRunner().invoke(cli, ["ingest", str(text_file), "--no-magic"])
+    second = CliRunner().invoke(cli, ["docs", "ingest", str(text_file), "--no-magic"])
     assert second.exit_code == 0, second.output
     assert "inserted=0" in second.output
     assert store.get_all_documents() == []

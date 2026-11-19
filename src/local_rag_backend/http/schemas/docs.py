@@ -99,6 +99,9 @@ class DocsMutateRequest(BaseModel):
         default_factory=list,
         max_length=2048,
     )
+    hard_delete_external_ids: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list, max_length=2048
+    )
 
     @field_validator("delete_ids")
     @classmethod
@@ -128,12 +131,19 @@ class DocsMutateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_payload(self) -> DocsMutateRequest:
-        if not self.upserts and not self.delete_ids and not self.delete_external_ids:
+        if not (
+            self.upserts
+            or self.delete_ids
+            or self.delete_external_ids
+            or self.hard_delete_external_ids
+        ):
             raise ValueError(
                 "docs/mutate requires at least one operation: upserts, delete_ids, or delete_external_ids"
             )
         upsert_ext_ids = {str(doc.external_id).strip() for doc in self.upserts}
-        conflict = upsert_ext_ids & set(self.delete_external_ids)
+        conflict = upsert_ext_ids & (
+            set(self.delete_external_ids) | set(self.hard_delete_external_ids)
+        )
         if conflict:
             raise ValueError(
                 "upserts and delete_external_ids cannot target the same external_id values"

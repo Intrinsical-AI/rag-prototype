@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import logging
-from threading import Lock
 
 from local_rag_backend.composition.container import AppContainer
-from local_rag_backend.composition.context import AppContext
+from local_rag_backend.composition.context import AppContext, ApplicationRuntime
 from local_rag_backend.composition.runtime import RuntimeSnapshot, build_runtime_snapshot
 from local_rag_backend.core.services.rag_runtime import RagService
 from local_rag_backend.settings import get_settings
 
 logger = logging.getLogger(__name__)
-
-_APP_CONTEXT: AppContext | None = None
-_APP_CONTEXT_LOCK = Lock()
 
 
 def _build_app_context() -> AppContext:
@@ -23,17 +19,11 @@ def _build_app_context() -> AppContext:
     return AppContext(settings_obj=settings_obj, container=container)
 
 
+_PROCESS_RUNTIME = ApplicationRuntime(lambda: _build_app_context())
+
+
 def get_app_context() -> AppContext:
-    global _APP_CONTEXT
-    if _APP_CONTEXT is not None:
-        return _APP_CONTEXT
-    with _APP_CONTEXT_LOCK:
-        if _APP_CONTEXT is None:
-            _APP_CONTEXT = _build_app_context()
-        ctx = _APP_CONTEXT
-    if ctx is None:
-        raise RuntimeError("AppContext failed to initialize")
-    return ctx
+    return _PROCESS_RUNTIME.context()
 
 
 def get_runtime_snapshot() -> RuntimeSnapshot:
@@ -42,11 +32,7 @@ def get_runtime_snapshot() -> RuntimeSnapshot:
 
 
 def reset_app_context() -> None:
-    global _APP_CONTEXT
-    with _APP_CONTEXT_LOCK:
-        if _APP_CONTEXT is not None:
-            _APP_CONTEXT.container.close()
-        _APP_CONTEXT = None
+    _PROCESS_RUNTIME.close()
 
 
 def build_rag_service() -> RagService:

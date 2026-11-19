@@ -12,6 +12,7 @@ from local_rag_backend.core.domain.retrieval import (
     RetrievalFilter,
     RetrievalRequest,
 )
+from local_rag_backend.core.use_cases.search import execute_search
 
 if TYPE_CHECKING:
     from local_rag_backend.core.ports import GeneratorPort, QAHistoryPort, RetrieverPort
@@ -66,7 +67,7 @@ class RagService:
             candidate_k=candidate_k,
             dual_candidate_k=dual_candidate_k,
         )
-        retrieval = self.retriever.retrieve(request)
+        retrieval = execute_search(retriever=self.retriever, request=request)
         docs = list(retrieval.documents)
         scores = list(retrieval.scores)
         if len(docs) != len(scores):

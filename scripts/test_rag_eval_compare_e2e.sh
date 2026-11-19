@@ -46,7 +46,7 @@ EOF
 cd "$ROOT_DIR"
 
 echo "[1/2] Expect PASS with identical sparse baseline/candidate and zero delta thresholds"
-env DEBUG=false UV_CACHE_DIR="${UV_CACHE_DIR:-.uv_cache}" uv run rag-eval-compare \
+env DEBUG=false UV_CACHE_DIR="${UV_CACHE_DIR:-.uv_cache}" uv run rag eval compare \
   --dataset "$DATASET_PATH" \
   --spec "$PASS_SPEC" \
   --json-out "$PASS_JSON"
@@ -64,7 +64,7 @@ PY
 
 echo "[2/2] Expect FAIL when requiring an impossible positive delta from an identical candidate"
 set +e
-env DEBUG=false UV_CACHE_DIR="${UV_CACHE_DIR:-.uv_cache}" uv run rag-eval-compare \
+env DEBUG=false UV_CACHE_DIR="${UV_CACHE_DIR:-.uv_cache}" uv run rag eval compare \
   --dataset "$DATASET_PATH" \
   --spec "$FAIL_SPEC" \
   --json-out "$FAIL_JSON"
@@ -87,4 +87,4 @@ assert payload["gate"]["reasons"]
 print("FAIL json validated")
 PY
 
-echo "rag-eval-compare e2e smoke passed"
+echo "rag eval compare e2e smoke passed"

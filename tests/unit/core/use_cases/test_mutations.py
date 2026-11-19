@@ -4,7 +4,7 @@ import pytest
 
 from local_rag_backend.core.errors import LLMTimeoutError
 from local_rag_backend.core.use_cases.errors import BadRequestError, GatewayTimeoutError
-from local_rag_backend.core.use_cases.mutations import run_api_mutation, run_cli_mutation
+from local_rag_backend.core.use_cases.mutations import execute_mutation_command, run_api_mutation
 
 
 async def test_run_api_mutation_executes_locked_and_resets() -> None:
@@ -72,7 +72,7 @@ async def test_run_api_mutation_maps_custom_error_and_resets() -> None:
     assert reset_calls == 1
 
 
-def test_run_cli_mutation_ensures_schema_then_locks_then_resets() -> None:
+def test_execute_mutation_command_ensures_schema_then_locks_then_resets() -> None:
     calls: list[str] = []
 
     def _ensure() -> None:
@@ -89,7 +89,7 @@ def test_run_cli_mutation_ensures_schema_then_locks_then_resets() -> None:
     def _reset() -> None:
         calls.append("reset")
 
-    out = run_cli_mutation(
+    out = execute_mutation_command(
         operation=_operation,
         ensure_schema=_ensure,
         run_locked=_run_locked,
@@ -99,7 +99,7 @@ def test_run_cli_mutation_ensures_schema_then_locks_then_resets() -> None:
     assert calls == ["ensure", "lock", "operation", "reset"]
 
 
-def test_run_cli_mutation_maps_runtime_error() -> None:
+def test_execute_mutation_command_maps_runtime_error() -> None:
     def _ensure() -> None:
         return None
 
@@ -113,7 +113,7 @@ def test_run_cli_mutation_maps_runtime_error() -> None:
         return None
 
     with pytest.raises(GatewayTimeoutError, match="provider timeout"):
-        run_cli_mutation(
+        execute_mutation_command(
             operation=_operation,
             ensure_schema=_ensure,
             run_locked=_run_locked,

@@ -9,16 +9,16 @@ This roadmap isolates the UX / DX work so it can move independently from mutatio
 ## P0
 
 - Unify CLI payload validation with DTOs / use cases for:
-  - `rag-mutate-docs`
-  - `rag-import-canonical`
-  - `rag-eval-batch`
+  - `rag docs mutate`
+  - `rag docs import`
+  - `rag eval batch`
 - Align visible defaults between CLI and HTTP:
   - especially `replace_scope`
   - avoid one transport being destructive-by-default while the other is not
 
 ## P1
 
-- [x] Reduce `rag-eval-compare` complexity:
+- [x] Reduce `rag eval compare` complexity:
   - use a canonical `--spec` file with baseline, candidate, and thresholds
   - remove expanded baseline/candidate flag matrices
 - Homogenize CLI exit codes and success/error output:

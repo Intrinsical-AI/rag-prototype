@@ -78,7 +78,7 @@ def _check_retrieval_index_id_set_drift(
         }
         checks["retrieval_index"] = (
             "failed: drift detected (ID set mismatch). "
-            "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
+            "Hint: rebuild the index (`rag index rebuild` or POST /api/index/rebuild)."
         )
         return False
     except Exception:
@@ -87,7 +87,7 @@ def _check_retrieval_index_id_set_drift(
         checks["retrieval_index"] = (
             "failed: unable to verify retrieval index drift. "
             "Hint: inspect the index/id_map and rebuild if needed "
-            "(`rag-rebuild-index` or POST /api/index/rebuild)."
+            "(`rag index rebuild` or POST /api/index/rebuild)."
         )
         return False
 
@@ -116,7 +116,7 @@ def check_retrieval_index(
         checks["retrieval_index"] = (
             f"failed: {stats.get('status')} "
             "Hint: inspect the retrieval index and rebuild it if needed "
-            "(`rag-rebuild-index` or POST /api/index/rebuild)."
+            "(`rag index rebuild` or POST /api/index/rebuild)."
         )
         return False
 
@@ -129,7 +129,7 @@ def check_retrieval_index(
     if docs_count != id_map_len:
         checks["retrieval_index"] = (
             f"failed: drift detected (documents={docs_count}, vectors={vectors}). "
-            "Hint: rebuild the index (`rag-rebuild-index` or POST /api/index/rebuild)."
+            "Hint: rebuild the index (`rag index rebuild` or POST /api/index/rebuild)."
         )
         return False
 

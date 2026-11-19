@@ -139,8 +139,8 @@ Validated points:
 
 - Canonical import reads JSON and delegates validation/assembly to the shared typed path; other CLI payloads still have command-specific validation.
 - `replace_scope` semantics are aligned and the typed validation path is now shared across CLI, HTTP, and MCP.
-- `rag-eval-compare` now uses a canonical `--spec` file instead of expanded baseline/candidate flag matrices.
-  `rag-eval` and `rag-eval-batch` still need continued payload-validation cleanup.
+- `rag eval compare` now uses a canonical `--spec` file instead of expanded baseline/candidate flag matrices.
+  `rag eval run` and `rag eval batch` still need continued payload-validation cleanup.
 - `_ingestion_planner.py` still emits terminal output directly, which keeps planning logic coupled to CLI behavior.
 
 Why this matters:

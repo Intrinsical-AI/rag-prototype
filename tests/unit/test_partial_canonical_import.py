@@ -64,7 +64,7 @@ async def test_partial_rejected_without_writes_and_explicit_upsert_preserves_abs
         if transport == "cli":
             path = tmp_path / "partial.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            args = ["import-canonical", "--json", str(path)]
+            args = ["docs", "import", "--json", str(path)]
             if upsert_only:
                 args.append("--upsert-only")
             result = CliRunner().invoke(cli, args)
@@ -109,7 +109,7 @@ async def test_empty_v5_snapshot_sync_or_no_op_by_effective_replace_scope(
     elif transport == "cli":
         path = tmp_path / "empty.json"
         path.write_text(json.dumps(payload), encoding="utf-8")
-        args = ["import-canonical", "--json", str(path)]
+        args = ["docs", "import", "--json", str(path)]
         if upsert_only:
             args.append("--upsert-only")
         result = CliRunner().invoke(cli, args)

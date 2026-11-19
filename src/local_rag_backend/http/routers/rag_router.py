@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Query
 
+from local_rag_backend.composition.operations import search
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.core.use_cases.errors import (
     BadRequestError,
     InternalServerError,
+    NotFoundError,
     ServiceUnavailableError,
+    map_runtime_error,
 )
 from local_rag_backend.core.use_cases.rag_query import (
     execute_ask_eval_sync,
@@ -45,6 +48,32 @@ if TYPE_CHECKING:
     from local_rag_backend.settings import Settings
 
 router = APIRouter()
+
+
+@router.post("/search", tags=["RAG"], summary="Search sources without generation")
+async def search_documents(
+    request: AskRequest,
+    container: AppContainer = Depends(get_app_container_dependency),
+    settings_obj: Settings = Depends(get_settings_dependency),
+) -> dict[str, Any]:
+    try:
+        return await container.blocking_executor().run_blocking(
+            lambda: search(
+                settings=settings_obj,
+                question=request.question,
+                k=int(request.k),
+                filters=tuple(item.to_domain() for item in request.filters),
+            )
+        )
+    except FileNotFoundError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+    except Exception as exc:
+        mapped = map_runtime_error(exc)
+        if mapped is not None:
+            raise mapped from exc
+        raise
 
 
 @router.post("/ask", response_model=AskResponse, tags=["RAG"], summary="Ask a question using RAG")

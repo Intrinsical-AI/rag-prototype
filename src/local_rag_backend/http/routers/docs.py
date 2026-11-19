@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from local_rag_backend.composition.adapters import DEFAULT_DENSE_BACKEND_MESSAGE
+from local_rag_backend.composition.operations import mutate_documents
 from local_rag_backend.core.errors import EmbeddingsBackendUnavailableError
 from local_rag_backend.core.services.canonical_import_transport import (
     build_canonical_import_request_input,
@@ -29,11 +30,7 @@ from local_rag_backend.core.use_cases.docs_import_canonical import (
     execute_import_canonical_sync,
 )
 from local_rag_backend.core.use_cases.docs_ingest import ingest_docs_sync
-from local_rag_backend.core.use_cases.docs_mutation import (
-    MutationCoordinator,
-    MutationIntent,
-    MutationUpsertInput,
-)
+from local_rag_backend.core.use_cases.docs_mutation_contracts import summary_to_payload
 from local_rag_backend.core.use_cases.errors import (
     BadRequestError,
     PayloadTooLargeError,
@@ -159,32 +156,10 @@ async def _read_upload_with_limit(
 async def mutate_docs(
     payload: Annotated[DocsMutateRequest, Body(...)],
     container: AppContainer = Depends(get_app_container_dependency),
-    settings_obj: Settings = Depends(get_settings_dependency),
 ) -> DocsMutateResponse:
-    mutation_bundle = container.build_docs_mutation_bundle(
-        missing_backend_message=DEFAULT_DENSE_BACKEND_MESSAGE
-    )
-
     def _mutate_operation() -> MutationSummary:
-        coordinator = MutationCoordinator(settings_obj=settings_obj, ports=mutation_bundle.ports)
-        return coordinator.execute(
-            MutationIntent(
-                op_id=str(payload.op_id or "").strip(),
-                upserts=tuple(
-                    MutationUpsertInput(
-                        external_id=item.external_id,
-                        content=item.content,
-                        source_id=item.source_id,
-                        scope=item.scope,
-                        snapshot_id=item.snapshot_id,
-                        metadata=item.metadata,
-                    )
-                    for item in payload.upserts
-                ),
-                delete_ids=tuple(payload.delete_ids),
-                delete_external_ids=tuple(payload.delete_external_ids),
-                source="api:/docs/mutate",
-            )
+        return mutate_documents(
+            container=container, payload=payload.model_dump(), source="api:/docs/mutate"
         )
 
     summary = cast(
@@ -195,25 +170,7 @@ async def mutate_docs(
             map_error=lambda exc: _map_docs_error(exc, operation="mutate"),
         ),
     )
-    return DocsMutateResponse(
-        op_id=summary.op_id,
-        inserted=summary.inserted,
-        updated=summary.updated,
-        unchanged=summary.unchanged,
-        deleted_sql=summary.deleted_sql,
-        deleted_index=summary.deleted_index,
-        tombstoned=summary.tombstoned,
-        missing_external_ids=list(summary.missing_external_ids or []),
-        results=[
-            UpsertDocResult(
-                external_id=r.external_id,
-                id=r.id,
-                action=r.action,
-                content_changed=r.content_changed,
-            )
-            for r in list(summary.results or [])
-        ],
-    )
+    return DocsMutateResponse.model_validate(summary_to_payload(summary))
 
 
 @router.post("/docs/import-canonical", response_model=CanonicalImportResponse)

@@ -64,10 +64,8 @@ def test_status_keeps_exit_code_zero_when_diagnostics_counts_fail(monkeypatch) -
         def build_health_readiness_bundle(self):
             return SimpleNamespace(diagnostics=_Diagnostics(), expected_manifest=None)
 
-    monkeypatch.setattr(
-        index_cmd_module, "ensure_sqlite_schema_for_cli", lambda: None, raising=True
-    )
-    monkeypatch.setattr(index_cmd_module, "get_cli_container", lambda: _Container(), raising=True)
+    monkeypatch.setattr(index_cmd_module, "ensure_store", lambda: None, raising=True)
+    monkeypatch.setattr(index_cmd_module, "get_container", lambda: _Container(), raising=True)
     monkeypatch.setattr(settings, "retrieval_mode", "sparse", raising=False)
 
     result = CliRunner().invoke(index_cmd_module.status_cmd)
@@ -95,10 +93,8 @@ def test_status_keeps_exit_code_zero_when_retrieval_stats_fail(monkeypatch) -> N
         def build_health_readiness_bundle(self):
             return SimpleNamespace(diagnostics=_Diagnostics(), expected_manifest=None)
 
-    monkeypatch.setattr(
-        index_cmd_module, "ensure_sqlite_schema_for_cli", lambda: None, raising=True
-    )
-    monkeypatch.setattr(index_cmd_module, "get_cli_container", lambda: _Container(), raising=True)
+    monkeypatch.setattr(index_cmd_module, "ensure_store", lambda: None, raising=True)
+    monkeypatch.setattr(index_cmd_module, "get_container", lambda: _Container(), raising=True)
     monkeypatch.setattr(settings, "retrieval_mode", "dense", raising=False)
 
     result = CliRunner().invoke(index_cmd_module.status_cmd)

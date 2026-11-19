@@ -16,9 +16,9 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - [x] `eval`: stop silently filtering unknown retrieved IDs
   - either keep them as non-relevant results or emit explicit evaluator anomalies
 - `ux/dx`: unify CLI payload validation with DTOs / use cases for:
-  - `rag-mutate-docs`
-  - `rag-import-canonical`
-  - `rag-eval-batch`
+  - `rag docs mutate`
+  - `rag docs import`
+  - `rag eval batch`
 
 ## P1
 
@@ -27,7 +27,7 @@ This roadmap is execution-oriented and intentionally atomic. Each item should be
 - `mutation`: split `_mutation_saga_executor.py` into explicit phases without changing behavior
 - [x] `eval`: emit per-query outputs for compare mode
   - this is the prerequisite for stronger statistical comparison later
-- [x] `ux/dx`: reduce `rag-eval-compare` complexity with spec-file support
+- [x] `ux/dx`: reduce `rag eval compare` complexity with spec-file support
 
 ## P2
 

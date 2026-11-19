@@ -23,9 +23,9 @@ def test_tr3v0r_v2_import_preserves_sensor_ids_and_retrieves_by_membership(
     path = tmp_path / "tr3v0r.json"
     path.write_text(json.dumps(raw))
     runner = CliRunner()
-    first = runner.invoke(cli, ["import-canonical", "--json", str(path)])
+    first = runner.invoke(cli, ["docs", "import", "--json", str(path)])
     assert first.exit_code == 0, first.output
-    second = runner.invoke(cli, ["import-canonical", "--json", str(path)])
+    second = runner.invoke(cli, ["docs", "import", "--json", str(path)])
     assert second.exit_code == 0, second.output
     assert "unchanged=4" in second.output
     repo = SqlDocumentStorage(session_factory=in_memory_sqlite)

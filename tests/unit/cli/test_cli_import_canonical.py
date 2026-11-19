@@ -61,11 +61,11 @@ def test_cli_import_canonical_syncs_scope(in_memory_sqlite, tmp_path, monkeypatc
         encoding="utf-8",
     )
 
-    r1 = CliRunner().invoke(cli, ["import-canonical", "--json", str(first)])
+    r1 = CliRunner().invoke(cli, ["docs", "import", "--json", str(first)])
     assert r1.exit_code == 0, r1.output
     assert "inserted=2" in r1.output
 
-    r2 = CliRunner().invoke(cli, ["import-canonical", "--json", str(second)])
+    r2 = CliRunner().invoke(cli, ["docs", "import", "--json", str(second)])
     assert r2.exit_code == 0, r2.output
     assert "updated=1" in r2.output
     assert "deleted_sql=1" in r2.output
@@ -93,7 +93,7 @@ def test_cli_import_rejects_repogpt_code_units_v3(tmp_path) -> None:
     invalid["schema_version"] = "3"
     payload.write_text(json.dumps(invalid), encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "import", "--json", str(payload)])
 
     assert result.exit_code == 1
     assert "schema_version='6'" in result.output
@@ -117,7 +117,7 @@ def test_cli_import_rejects_invalid_payload(tmp_path, invalid_fields, error_fiel
     raw.update(invalid_fields)
     payload.write_text(json.dumps(raw), encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "import", "--json", str(payload)])
 
     assert result.exit_code == 1
     assert error_field in result.output
@@ -158,10 +158,10 @@ def test_cli_import_canonical_honors_payload_replace_scope_false(
         encoding="utf-8",
     )
 
-    r1 = CliRunner().invoke(cli, ["import-canonical", "--json", str(first)])
+    r1 = CliRunner().invoke(cli, ["docs", "import", "--json", str(first)])
     assert r1.exit_code == 0, r1.output
 
-    r2 = CliRunner().invoke(cli, ["import-canonical", "--json", str(second)])
+    r2 = CliRunner().invoke(cli, ["docs", "import", "--json", str(second)])
     assert r2.exit_code == 0, r2.output
     assert "deleted_sql=0" in r2.output
     assert {
@@ -208,12 +208,12 @@ def test_cli_import_canonical_upsert_only_overrides_payload_replace_scope_true(
         encoding="utf-8",
     )
 
-    r1 = CliRunner().invoke(cli, ["import-canonical", "--json", str(first)])
+    r1 = CliRunner().invoke(cli, ["docs", "import", "--json", str(first)])
     assert r1.exit_code == 0, r1.output
 
     r2 = CliRunner().invoke(
         cli,
-        ["import-canonical", "--upsert-only", "--json", str(second)],
+        ["docs", "import", "--upsert-only", "--json", str(second)],
     )
     assert r2.exit_code == 0, r2.output
     assert "deleted_sql=0" in r2.output
@@ -261,12 +261,12 @@ def test_cli_import_canonical_replace_scope_overrides_payload_replace_scope_fals
         encoding="utf-8",
     )
 
-    r1 = CliRunner().invoke(cli, ["import-canonical", "--json", str(first)])
+    r1 = CliRunner().invoke(cli, ["docs", "import", "--json", str(first)])
     assert r1.exit_code == 0, r1.output
 
     r2 = CliRunner().invoke(
         cli,
-        ["import-canonical", "--replace-scope", "--json", str(second)],
+        ["docs", "import", "--replace-scope", "--json", str(second)],
     )
     assert r2.exit_code == 0, r2.output
     assert "deleted_sql=1" in r2.output
@@ -280,7 +280,7 @@ def test_cli_import_canonical_reports_invalid_json(tmp_path) -> None:
     payload = tmp_path / "invalid.json"
     payload.write_text("{not-json", encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["import-canonical", "--json", str(payload)])
+    result = CliRunner().invoke(cli, ["docs", "import", "--json", str(payload)])
 
     assert result.exit_code == 1
     assert "[ERROR] Error importing canonical documents:" in result.output
@@ -320,10 +320,10 @@ def test_cli_import_canonical_rejects_blank_document_without_deleting_scope(
         encoding="utf-8",
     )
 
-    r1 = CliRunner().invoke(cli, ["import-canonical", "--json", str(first)])
+    r1 = CliRunner().invoke(cli, ["docs", "import", "--json", str(first)])
     assert r1.exit_code == 0, r1.output
 
-    r2 = CliRunner().invoke(cli, ["import-canonical", "--json", str(invalid)])
+    r2 = CliRunner().invoke(cli, ["docs", "import", "--json", str(invalid)])
     assert r2.exit_code == 1
     assert "content must not be blank" in r2.output
     assert {

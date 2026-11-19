@@ -106,23 +106,16 @@ class MutationRecord:
         counters = {"inserted", "updated", "unchanged", "deleted_sql", "tombstoned"}
         nullable_counters = {"deleted_index"}
         keys = counters | nullable_counters | {"op_id", "missing_external_ids", "results"}
-        legacy_keys = keys | {"index_doc_count", "index_rebuilt"}
-        if not isinstance(payload, dict) or set(payload) not in (keys, legacy_keys):
+        if not isinstance(payload, dict) or set(payload) != keys:
             raise ValueError("outcome is missing or incomplete")
         if payload["op_id"] != self.op_id:
             raise ValueError("outcome does not match op_id")
-        for key in (
-            counters
-            | nullable_counters
-            | ({"index_doc_count"} if set(payload) == legacy_keys else set())
-        ):
+        for key in counters | nullable_counters:
             value = payload[key]
-            if value is None and key in nullable_counters | {"index_doc_count"}:
+            if value is None and key in nullable_counters:
                 continue
             if type(value) is not int or value < 0:
                 raise ValueError(f"invalid outcome counter {key}")
-        if "index_rebuilt" in payload and type(payload["index_rebuilt"]) is not bool:
-            raise ValueError("invalid outcome index_rebuilt")
         missing = payload["missing_external_ids"]
         if not isinstance(missing, list) or any(not isinstance(v, str) for v in missing):
             raise ValueError("invalid outcome missing_external_ids")

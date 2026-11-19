@@ -15,6 +15,7 @@ def test_rag_eval_repogpt_dataset_sparse_smoke() -> None:
         cli,
         [
             "eval",
+            "run",
             "--dataset",
             str(DATASET_PATH),
             "--retrieval-mode",
@@ -57,7 +58,8 @@ def test_rag_eval_compare_repogpt_dataset_sparse_smoke(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         cli,
         [
-            "eval-compare",
+            "eval",
+            "compare",
             "--dataset",
             str(DATASET_PATH),
             "--spec",

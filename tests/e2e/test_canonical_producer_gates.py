@@ -51,9 +51,7 @@ async def test_partial_rf_replacement_is_refused_before_mutation(
     if transport == "cli":
         path = tmp_path / "partial.json"
         path.write_text(json.dumps(payload))
-        result = CliRunner().invoke(
-            cli, ["import-canonical", "--replace-scope", "--json", str(path)]
-        )
+        result = CliRunner().invoke(cli, ["docs", "import", "--replace-scope", "--json", str(path)])
     elif transport == "mcp":
         try:
             tool_import_canonical(payload, replace_scope_override=True)
