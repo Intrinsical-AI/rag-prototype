@@ -72,7 +72,9 @@ installed-wheel and canonical-producer gates against the exact candidate bytes.
 > Stateful RAG platform with a hexagonal architecture (Ports & Adapters), FastAPI, canonical mutation flows, and offline evaluation gates. It supports four retrieval modes (BM25, dense vector, dual, hybrid) plus swappable LLM connectors (OpenAI, OpenRouter, Ollama).
 > Default runtime mode is `sparse` on SQLite. Dense/dual/hybrid add a local FAISS or NumPy vector index. Canonical mutations, rebuilds, and recovery are first-class.
 
-Version **6.0.0** uses one installed command, `rag`. Its command families are
+Version **6.0.1** raises the `filelock` minimum to 4.2.12 for the
+`dense-st` extra and the lint and security groups (GHSA-386w-3w6q-9c53).
+The installed `rag` command provides
 `docs`, `index`, `query`, `serve`, and `eval`, plus `status` and `snapshot`.
 Update 5.x scripts that call `rag-import-canonical` or `rag-mcp` to use
 `rag docs import` and `rag serve mcp`. The [command and tool reference](docs/USAGE.md#canonical-command-and-tool-surface)

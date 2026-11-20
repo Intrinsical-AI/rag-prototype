@@ -1,6 +1,6 @@
 [project]
 name = "rag-prototype"
-version = "6.0.0"
+version = "6.0.1"
 description = "Experimental-grade RAG prototype with FastAPI, FAISS, and clean hexagonal architecture"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11,<3.13"
@@ -70,7 +70,7 @@ dense = [
 dense-st = [
   # Heavy dependency chain (torch/transformers). Prefer OpenAI embeddings when possible.
   "sentence-transformers>=2.7,<3.0",
-  "filelock>=4.2.1",
+  "filelock>=4.2.12",
   "urllib3>=2.8.0"
 ]
 loaders = [
@@ -103,7 +103,7 @@ lint = [
   "types-PyYAML>=6.0.12",
   "import-linter>=2.0,<3.0",
   "pre-commit>=4.2.0,<5.0",
-  "filelock>=4.2.1",
+  "filelock>=4.2.12",
   "virtualenv>=21.14.13",
 ]
 dev = [
@@ -117,7 +117,7 @@ sec = [
   "bandit[toml]>=1.7,<2.0",
   "pip-audit==2.10.1",
   "packaging>=26.3",
-  "filelock>=4.2.1",
+  "filelock>=4.2.12",
   "urllib3>=2.8.0",
 ]
 docs = [
